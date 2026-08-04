@@ -193,7 +193,7 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             oracle.canonical(
                 {
                     "baseline_fingerprint_sha256": "6" * 64,
-                    "clone_database": "clone_a",
+                    "clone_database": "ab_clone_a",
                     "clone_label": "A",
                     "import_receipt_sha256": "4" * 64,
                     "run_id": self.run_id,
@@ -208,22 +208,27 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             )
         )
 
-    def write_snapshot_verdict(self) -> None:
+    def write_snapshot_verdict(self, *, schema_version: int = 1) -> None:
+        unsigned = {
+            "baseline_fingerprint_sha256": "6" * 64,
+            "run_id": self.run_id,
+            "schema_version": schema_version,
+            "snapshot_sha256": self.source_snapshot_sha256,
+            "source_attestation_sha256": (
+                self.clone_a_attestation_sha256
+            ),
+            "status": "PASS",
+            "target_attestation_sha256": "5" * 64,
+            "violation_count": 0,
+            "violations": [],
+        }
         self.snapshot_verdict.write_bytes(
             oracle.canonical(
                 {
-                    "baseline_fingerprint_sha256": "6" * 64,
-                    "evidence_sha256": "3" * 64,
-                    "run_id": self.run_id,
-                    "schema_version": 1,
-                    "snapshot_sha256": self.source_snapshot_sha256,
-                    "source_attestation_sha256": (
-                        self.clone_a_attestation_sha256
+                    **unsigned,
+                    "evidence_sha256": oracle.sha256(
+                        oracle.canonical(unsigned) + b"\n"
                     ),
-                    "status": "PASS",
-                    "target_attestation_sha256": "5" * 64,
-                    "violation_count": 0,
-                    "violations": [],
                 }
             )
         )
@@ -292,13 +297,48 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def write_snapshot_package(self) -> None:
+    def write_snapshot_package(self, *, database: str = "ab_clone_a") -> None:
         _, files = frozen_export.build_evidence(
-            "clone_a", self.metadata, self.schemas, self.snapshot_rows
+            database, self.metadata, self.schemas, self.snapshot_rows
         )
         self.snapshot_dir.mkdir(exist_ok=True)
         for filename, content in files.items():
             (self.snapshot_dir / filename).write_bytes(content)
+
+    def write_physical_clone_a_attestation(self) -> None:
+        self.clone_a_attestation.write_bytes(
+            oracle.canonical(
+                {
+                    "baseline_fingerprint_sha256": "6" * 64,
+                    "clone_database": "jst_erp",
+                    "clone_label": "A",
+                    "import_receipt_sha256": "4" * 64,
+                    "run_id": self.run_id,
+                    "schema_version": 2,
+                    "snapshot_sha256": self.source_snapshot_sha256,
+                    "source_coordinates": {
+                        "binlog_file": "binlog.000001",
+                        "binlog_position": 42,
+                        "snapshot_sha256": self.source_snapshot_sha256,
+                    },
+                    "clone_side": "A",
+                    "isolation_kind": (
+                        "docker_published_port_v1"
+                    ),
+                    "database_host": "127.0.0.1",
+                    "database_port": 3332,
+                    "container_port": 3306,
+                    "container_name": "yongbo-clone-a-mysql",
+                    "container_id": "a" * 64,
+                    "container_image_digest": "sha256:" + "c" * 64,
+                    "container_inspect_sha256": "d" * 64,
+                    "source_compound_snapshot_sha256": (
+                        self.source_snapshot_sha256
+                    ),
+                    "production_write_performed": False,
+                }
+            )
+        )
 
     def rewrite_manifest_revision_scope(
         self,
@@ -815,6 +855,13 @@ class BuildAPIOracleV3Test(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "snapshot verdict evidence"):
             self.build(expected_attestation_sha256="e" * 64)
 
+    def test_snapshot_verdict_self_hash_is_mandatory(self) -> None:
+        verdict = json.loads(self.snapshot_verdict.read_bytes())
+        verdict["evidence_sha256"] = "3" * 64
+        self.snapshot_verdict.write_bytes(oracle.canonical(verdict))
+        with self.assertRaisesRegex(ValueError, "snapshot verdict evidence"):
+            self.build()
+
     def test_verdict_and_attestation_must_point_to_same_source_snapshot(
         self,
     ) -> None:
@@ -822,6 +869,45 @@ class BuildAPIOracleV3Test(unittest.TestCase):
         self.write_snapshot_verdict()
         self.write_manifest()
         with self.assertRaisesRegex(ValueError, "attestation evidence differs"):
+            self.build()
+
+    def test_physical_clone_a_requires_bound_schema2_pass_verdict(self) -> None:
+        self.write_physical_clone_a_attestation()
+        self.write_snapshot_verdict(schema_version=2)
+        self.write_manifest()
+        self.write_snapshot_package(database="jst_erp")
+        result = self.build()
+        self.assertEqual("jst_erp", result["inputs"]["clone_a_database"])
+
+    def test_schema1_cannot_authorize_arbitrary_jst_erp_clone_a(self) -> None:
+        value = json.loads(self.clone_a_attestation.read_bytes())
+        value["clone_database"] = "jst_erp"
+        self.clone_a_attestation.write_bytes(oracle.canonical(value))
+        self.write_snapshot_verdict(schema_version=1)
+        self.write_manifest()
+        self.write_snapshot_package(database="jst_erp")
+        with self.assertRaisesRegex(
+            ValueError, "Clone A attestation evidence differs"
+        ):
+            self.build()
+
+    def test_schema2_attestation_is_rejected_under_schema1_verdict(self) -> None:
+        self.write_physical_clone_a_attestation()
+        self.write_snapshot_verdict(schema_version=1)
+        self.write_manifest()
+        self.write_snapshot_package(database="jst_erp")
+        with self.assertRaisesRegex(
+            ValueError, "Clone A attestation field contract differs"
+        ):
+            self.build()
+
+    def test_frozen_export_database_must_match_attested_clone_a(self) -> None:
+        self.write_physical_clone_a_attestation()
+        self.write_snapshot_verdict(schema_version=2)
+        self.write_manifest()
+        with self.assertRaisesRegex(
+            ValueError, "exporter database differs"
+        ):
             self.build()
 
     def test_approved_pointer_follows_replayed_finalized_revision(self) -> None:

@@ -13,7 +13,13 @@ from typing import Any
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 RUN_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
-ATTESTATION_FIELDS = {
+LOGICAL_DATABASE = re.compile(r"^ab_[A-Za-z0-9_]+$")
+PHYSICAL_DATABASE = "jst_erp"
+PHYSICAL_ISOLATION_KIND = "docker_published_port_v1"
+CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+CONTAINER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+ATTESTATION_FIELDS_V1 = {
     "schema_version",
     "run_id",
     "clone_label",
@@ -23,6 +29,20 @@ ATTESTATION_FIELDS = {
     "baseline_fingerprint_sha256",
     "import_receipt_sha256",
 }
+PHYSICAL_ISOLATION_FIELDS = {
+    "clone_side",
+    "isolation_kind",
+    "database_host",
+    "database_port",
+    "container_port",
+    "container_name",
+    "container_id",
+    "container_image_digest",
+    "container_inspect_sha256",
+    "source_compound_snapshot_sha256",
+    "production_write_performed",
+}
+ATTESTATION_FIELDS_V2 = ATTESTATION_FIELDS_V1 | PHYSICAL_ISOLATION_FIELDS
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -62,16 +82,53 @@ def create(args: argparse.Namespace) -> int:
     coordinates = read_object(args.source_coordinates, "source coordinates")
     if not coordinates:
         raise ValueError("source coordinates must be non-empty")
-    payload = {
-        "schema_version": 1,
+    physical = bool(getattr(args, "physical_docker_isolation", False))
+    snapshot_sha256 = sha(args.snapshot_file)
+    payload: dict[str, Any] = {
+        "schema_version": 2 if physical else 1,
         "run_id": run_id,
         "clone_label": args.clone_label,
         "clone_database": args.clone_database,
-        "snapshot_sha256": sha(args.snapshot_file),
+        "snapshot_sha256": snapshot_sha256,
         "source_coordinates": coordinates,
         "baseline_fingerprint_sha256": sha(args.baseline_fingerprint),
         "import_receipt_sha256": sha(args.import_receipt),
     }
+    if physical:
+        inspect_file = getattr(args, "container_inspect_file", None)
+        if (
+            not isinstance(inspect_file, pathlib.Path)
+            or inspect_file.is_symlink()
+            or not inspect_file.is_file()
+        ):
+            raise ValueError(
+                "physical clone attestation requires container inspect file"
+            )
+        payload.update(
+            {
+                "clone_side": args.clone_label,
+                "isolation_kind": PHYSICAL_ISOLATION_KIND,
+                "database_host": getattr(args, "database_host", None),
+                "database_port": getattr(args, "database_port", None),
+                "container_port": getattr(args, "container_port", None),
+                "container_name": getattr(args, "container_name", None),
+                "container_id": getattr(args, "container_id", None),
+                "container_image_digest": getattr(
+                    args, "container_image_digest", None
+                ),
+                "container_inspect_sha256": sha(inspect_file),
+                "source_compound_snapshot_sha256": snapshot_sha256,
+                "production_write_performed": False,
+            }
+        )
+    violations = validate_attestation(
+        payload,
+        label=args.clone_label,
+        expected_run_id=run_id,
+        expected_clone_label=args.clone_label,
+    )
+    if violations:
+        raise ValueError(violations[0]["detail"])
     args.output.write_bytes(canonical_bytes(payload))
     return 0
 
@@ -90,20 +147,80 @@ def validate_attestation(
             {"violation_code": code, "entity_key": label, "detail": detail}
         )
 
-    if set(item) != ATTESTATION_FIELDS:
+    schema_version = item.get("schema_version")
+    expected_fields = (
+        ATTESTATION_FIELDS_V1
+        if not isinstance(schema_version, bool) and schema_version == 1
+        else ATTESTATION_FIELDS_V2
+        if not isinstance(schema_version, bool) and schema_version == 2
+        else set()
+    )
+    if not expected_fields or set(item) != expected_fields:
         add("snapshot.attestation_field_contract", "exact field set mismatch")
         return violations
-    if item.get("schema_version") != 1:
-        add("snapshot.attestation_version", "schema_version must be 1")
     if item.get("run_id") != expected_run_id:
         add("snapshot.attestation_run_id", "run_id mismatch")
     if item.get("clone_label") != expected_clone_label:
         add("snapshot.attestation_clone_label", "clone label mismatch")
     database = item.get("clone_database")
-    if not isinstance(database, str) or not re.fullmatch(
-        r"ab_[A-Za-z0-9_]+", database
+    if schema_version == 1 and (
+        not isinstance(database, str)
+        or not LOGICAL_DATABASE.fullmatch(database)
     ):
         add("snapshot.attestation_database", "clone database is invalid")
+    if schema_version == 2:
+        side = item.get("clone_side")
+        port = item.get("database_port")
+        container_name = str(item.get("container_name") or "")
+        expected_marker = re.compile(
+            rf"(?:^|[-_])clone[-_]?{expected_clone_label.lower()}(?:[-_.]|$)"
+        )
+        if database != PHYSICAL_DATABASE:
+            add(
+                "snapshot.attestation_database",
+                "physical clone database must be jst_erp",
+            )
+        if (
+            side != expected_clone_label
+            or item.get("isolation_kind") != PHYSICAL_ISOLATION_KIND
+            or item.get("database_host") != "127.0.0.1"
+            or isinstance(port, bool)
+            or not isinstance(port, int)
+            or port < 1024
+            or port > 65535
+            or port == 3306
+            or item.get("container_port") != 3306
+            or item.get("production_write_performed") is not False
+        ):
+            add(
+                "snapshot.attestation_physical_isolation",
+                "physical clone network/side/write boundary is invalid",
+            )
+        if (
+            not CONTAINER_NAME.fullmatch(container_name)
+            or not expected_marker.search(container_name.lower())
+            or not CONTAINER_ID.fullmatch(
+                str(item.get("container_id") or "")
+            )
+            or not IMAGE_DIGEST.fullmatch(
+                str(item.get("container_image_digest") or "")
+            )
+            or not SHA256.fullmatch(
+                str(item.get("container_inspect_sha256") or "")
+            )
+        ):
+            add(
+                "snapshot.attestation_container",
+                "physical clone container identity is invalid",
+            )
+        if (
+            item.get("source_compound_snapshot_sha256")
+            != item.get("snapshot_sha256")
+        ):
+            add(
+                "snapshot.attestation_compound_snapshot",
+                "source compound snapshot hash differs",
+            )
     for field in (
         "snapshot_sha256",
         "baseline_fingerprint_sha256",
@@ -114,6 +231,19 @@ def validate_attestation(
     coordinates = item.get("source_coordinates")
     if not isinstance(coordinates, dict) or not coordinates:
         add("snapshot.attestation_coordinates", "source coordinates are empty")
+    elif schema_version == 2 and (
+        not isinstance(coordinates.get("binlog_file"), str)
+        or not coordinates.get("binlog_file")
+        or isinstance(coordinates.get("binlog_position"), bool)
+        or not isinstance(coordinates.get("binlog_position"), int)
+        or coordinates["binlog_position"] < 0
+        or coordinates.get("snapshot_sha256")
+        != item.get("source_compound_snapshot_sha256")
+    ):
+        add(
+            "snapshot.attestation_coordinates",
+            "physical clone source coordinates are invalid",
+        )
     return violations
 
 
@@ -135,7 +265,20 @@ def verify(args: argparse.Namespace) -> int:
             expected_clone_label="B",
         )
     )
-    if source.get("clone_database") == target.get("clone_database"):
+    source_version = source.get("schema_version")
+    target_version = target.get("schema_version")
+    if source_version != target_version:
+        violations.append(
+            {
+                "violation_code": "snapshot.attestation_version_mismatch",
+                "entity_key": "schema_version",
+                "detail": "A and B attestation versions differ",
+            }
+        )
+    if (
+        source.get("clone_database") == target.get("clone_database")
+        and not (source_version == target_version == 2)
+    ):
         violations.append(
             {
                 "violation_code": "snapshot.clone_not_distinct",
@@ -147,7 +290,10 @@ def verify(args: argparse.Namespace) -> int:
         "snapshot_sha256",
         "source_coordinates",
         "baseline_fingerprint_sha256",
+        "source_compound_snapshot_sha256",
     ):
+        if field not in source and field not in target:
+            continue
         if source.get(field) != target.get(field):
             violations.append(
                 {
@@ -156,6 +302,21 @@ def verify(args: argparse.Namespace) -> int:
                     "detail": "A and B attestations differ",
                 }
             )
+    if source_version == target_version == 2:
+        for field in (
+            "database_port",
+            "container_name",
+            "container_id",
+            "container_inspect_sha256",
+        ):
+            if source.get(field) == target.get(field):
+                violations.append(
+                    {
+                        "violation_code": "snapshot.clone_not_distinct",
+                        "entity_key": field,
+                        "detail": "physical Clone A and B identities are equal",
+                    }
+                )
     if (
         args.expected_snapshot_sha256
         and source.get("snapshot_sha256") != args.expected_snapshot_sha256
@@ -168,7 +329,9 @@ def verify(args: argparse.Namespace) -> int:
             }
         )
     result: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": (
+            2 if source_version == target_version == 2 else 1
+        ),
         "run_id": run_id,
         "status": "PASS" if not violations else "FAIL",
         "violation_count": len(violations),
@@ -214,6 +377,16 @@ def main() -> None:
     make.add_argument("--source-coordinates", required=True, type=pathlib.Path)
     make.add_argument("--baseline-fingerprint", required=True, type=pathlib.Path)
     make.add_argument("--import-receipt", required=True, type=pathlib.Path)
+    make.add_argument(
+        "--physical-docker-isolation", action="store_true"
+    )
+    make.add_argument("--database-host", default="")
+    make.add_argument("--database-port", type=int)
+    make.add_argument("--container-port", type=int)
+    make.add_argument("--container-name", default="")
+    make.add_argument("--container-id", default="")
+    make.add_argument("--container-image-digest", default="")
+    make.add_argument("--container-inspect-file", type=pathlib.Path)
     make.add_argument("--output", required=True, type=pathlib.Path)
     check = sub.add_parser("verify")
     check.add_argument("--run-id", required=True)

@@ -17,8 +17,10 @@ from typing import Any
 
 if __package__:
     from scripts.ab import export_frozen_a_oracle as frozen_export
+    from scripts.ab import snapshot_attestation as snapshot_contract
 else:
     import export_frozen_a_oracle as frozen_export
+    import snapshot_attestation as snapshot_contract
 
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -271,6 +273,7 @@ def load_a_snapshot_package(
     if set(by_name) != {spec.name for spec in frozen_export.DATASETS}:
         raise ValueError("frozen A exporter dataset names differ")
     return output, {
+        "database": manifest["database"],
         "manifest_sha256": sha256(manifest_bytes),
         "evidence_sha256": manifest["evidence_sha256"],
     }
@@ -282,7 +285,7 @@ def load_snapshot_verdict(
     run_id: str,
     expected_snapshot_verdict_sha256: str,
     expected_clone_a_attestation_sha256: str,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     actual_file_sha256 = sha256(path.read_bytes())
     if actual_file_sha256 != expected_snapshot_verdict_sha256:
         raise ValueError("snapshot verdict file hash differs")
@@ -300,14 +303,22 @@ def load_snapshot_verdict(
         "violations",
     }:
         raise ValueError("snapshot verdict field contract differs")
+    unsigned = {
+        key: value
+        for key, value in document.items()
+        if key != "evidence_sha256"
+    }
     if (
-        document["schema_version"] != 1
+        isinstance(document["schema_version"], bool)
+        or document["schema_version"] not in {1, 2}
         or document["run_id"] != run_id
         or document["status"] != "PASS"
         or document["source_attestation_sha256"]
         != expected_clone_a_attestation_sha256
         or document["violation_count"] != 0
         or document["violations"] != []
+        or document["evidence_sha256"]
+        != sha256(canonical(unsigned) + b"\n")
     ):
         raise ValueError("snapshot verdict evidence differs")
     for field in (
@@ -319,6 +330,10 @@ def load_snapshot_verdict(
     ):
         require_sha256(document[field], f"snapshot verdict {field}")
     return {
+        "baseline_fingerprint_sha256": document[
+            "baseline_fingerprint_sha256"
+        ],
+        "schema_version": document["schema_version"],
         "snapshot_sha256": document["snapshot_sha256"],
         "source_attestation_sha256": document["source_attestation_sha256"],
     }
@@ -330,34 +345,44 @@ def load_clone_a_attestation(
     run_id: str,
     expected_clone_a_attestation_sha256: str,
     expected_source_snapshot_sha256: str,
-) -> dict[str, str]:
+    expected_baseline_fingerprint_sha256: str,
+    expected_schema_version: int,
+) -> dict[str, Any]:
     actual_file_sha256 = sha256(path.read_bytes())
     if actual_file_sha256 != expected_clone_a_attestation_sha256:
         raise ValueError("Clone A attestation file hash differs")
     document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or set(document) != {
-        "baseline_fingerprint_sha256",
-        "clone_database",
-        "clone_label",
-        "import_receipt_sha256",
-        "run_id",
-        "schema_version",
-        "snapshot_sha256",
-        "source_coordinates",
-    }:
+    expected_fields = (
+        snapshot_contract.ATTESTATION_FIELDS_V1
+        if expected_schema_version == 1
+        else snapshot_contract.ATTESTATION_FIELDS_V2
+        if expected_schema_version == 2
+        else set()
+    )
+    if not isinstance(document, dict) or set(document) != expected_fields:
         raise ValueError("Clone A attestation field contract differs")
+    violations = snapshot_contract.validate_attestation(
+        document,
+        label="A",
+        expected_run_id=run_id,
+        expected_clone_label="A",
+    )
     coordinates = document["source_coordinates"]
     if (
-        document["schema_version"] != 1
+        violations
+        or document["schema_version"] != expected_schema_version
         or document["run_id"] != run_id
         or document["clone_label"] != "A"
         or not isinstance(document["clone_database"], str)
         or not document["clone_database"]
         or document["snapshot_sha256"] != expected_source_snapshot_sha256
+        or document["baseline_fingerprint_sha256"]
+        != expected_baseline_fingerprint_sha256
         or not isinstance(coordinates, dict)
         or coordinates.get("snapshot_sha256") != expected_source_snapshot_sha256
         or not isinstance(coordinates.get("binlog_file"), str)
         or not coordinates.get("binlog_file")
+        or isinstance(coordinates.get("binlog_position"), bool)
         or not isinstance(coordinates.get("binlog_position"), int)
         or coordinates["binlog_position"] < 0
     ):
@@ -370,6 +395,7 @@ def load_clone_a_attestation(
         require_sha256(document[field], f"Clone A attestation {field}")
     return {
         "clone_database": document["clone_database"],
+        "schema_version": document["schema_version"],
         "snapshot_sha256": document["snapshot_sha256"],
     }
 
@@ -856,6 +882,10 @@ def build(
             expected_clone_a_attestation_sha256
         ),
         expected_source_snapshot_sha256=snapshot_verdict["snapshot_sha256"],
+        expected_baseline_fingerprint_sha256=(
+            snapshot_verdict["baseline_fingerprint_sha256"]
+        ),
+        expected_schema_version=snapshot_verdict["schema_version"],
     )
     manifest_tasks, manifest_sources, expected_revisions = load_manifest(
         manifest_path,
@@ -901,6 +931,10 @@ def build(
     snapshot, snapshot_package = load_a_snapshot_package(
         a_snapshot_manifest_path
     )
+    if snapshot_package["database"] != clone_a_attestation["clone_database"]:
+        raise ValueError(
+            "frozen A exporter database differs from Clone A attestation"
+        )
     task_rows = snapshot["tasks"]
     root_rows = snapshot["roots"]
     asset_rows = snapshot["task_assets"]
