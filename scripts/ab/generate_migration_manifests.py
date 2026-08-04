@@ -623,6 +623,7 @@ def prune_inherited_reopen_snapshot(
     assets: Iterable[dict[str, Any]],
     event: dict[str, Any],
     scope_kind: str,
+    protected_member_ids: Iterable[int] = (),
 ) -> None:
     """Drop lifecycle-invalid inherited members from an explicit reopen snapshot.
 
@@ -641,9 +642,18 @@ def prune_inherited_reopen_snapshot(
             parse_utc_timestamp(boundary) + dt.timedelta(seconds=60)
         ).isoformat().replace("+00:00", "Z")
     asset_by_id = {int(asset["id"]): asset for asset in assets}
+    protected = {int(member_id) for member_id in protected_member_ids}
+    exact_boundary = str(event.get("created_at") or "")
 
     def eligible(member_id: Any) -> bool:
-        asset = asset_by_id.get(int(member_id or 0))
+        parsed_member_id = int(member_id or 0)
+        asset = asset_by_id.get(parsed_member_id)
+        if parsed_member_id in protected:
+            allowed_at_event, _ = revision_asset_eligible(
+                asset or {}, set(), exact_boundary
+            )
+            if allowed_at_event:
+                return True
         allowed, _ = revision_asset_eligible(asset or {}, set(), boundary)
         return allowed
 
@@ -1949,9 +1959,16 @@ def replay_post_close_replacements(
     scope, events, assets, references, revisions, working, finalized
 ):
     asset_by_id = {int(asset["id"]): asset for asset in assets}
-    for completion, predecessor, successor in direct_post_close_replacements(
-        scope, events, assets
+    replacements = direct_post_close_replacements(scope, events, assets)
+    for replacement_index, (completion, predecessor, successor) in enumerate(
+        replacements
     ):
+        later_predecessor_ids = {
+            int(later_predecessor["id"])
+            for _, later_predecessor, _ in replacements[
+                replacement_index + 1 :
+            ]
+        }
         try:
             completion_time = parse_utc_timestamp(completion["created_at"])
             latest_revision_time = max(
@@ -2029,6 +2046,7 @@ def replay_post_close_replacements(
                         assets,
                         completion,
                         str(scope.get("scope_kind") or ""),
+                        later_predecessor_ids,
                     )
                     revision["status"] = "superseded"
                     evidence_ids = event_evidence_ids(completion)
@@ -2139,6 +2157,7 @@ def replay_post_close_replacements(
                 assets,
                 completion,
                 str(scope.get("scope_kind") or ""),
+                later_predecessor_ids,
             )
             revisions[finalized - 1]["status"] = "superseded"
             recompute_revision_hash(revisions[finalized - 1])
@@ -4663,6 +4682,20 @@ def generate(rows):
             stable_event_id(event): event
             for event in events_by_task[task_id]
         }
+        post_close_replacements = direct_post_close_replacements(
+            scope,
+            events_by_task[task_id],
+            assets_by_task[task_id],
+        )
+
+        def cleanup_event_order(event: dict[str, Any]) -> tuple[Any, ...]:
+            return (
+                str(event.get("created_at") or ""),
+                event.get("namespace") == "task_module_event",
+                int(event.get("sequence") or 0),
+                str(event.get("id") or ""),
+            )
+
         for revision in revisions:
             cleanup_event = next(
                 (
@@ -4694,11 +4727,18 @@ def generate(rows):
                 None,
             )
             if cleanup_event is not None:
+                protected_member_ids = {
+                    int(predecessor["id"])
+                    for completion, predecessor, _ in post_close_replacements
+                    if cleanup_event_order(completion)
+                    > cleanup_event_order(cleanup_event)
+                }
                 prune_inherited_reopen_snapshot(
                     revision,
                     assets_by_task[task_id],
                     cleanup_event,
                     str(scope.get("scope_kind") or ""),
+                    protected_member_ids,
                 )
                 if (
                     revision.get("status") == "finalized"
@@ -4846,7 +4886,8 @@ def generate(rows):
             "evidence_event_ids": evidence_event_ids,
             "confidence": "proposed_review",
             "review_policy_ids": [
-                CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY
+                CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY,
+                HISTORICAL_ASSET_UNAVAILABLE_POLICY,
             ],
             "confirmed_by": 0,
             "confirmed_at": ZERO_TIME,
@@ -4863,7 +4904,8 @@ def generate(rows):
                 "confidence": "proposed_review",
                 "reason": (
                     f"policy review required: "
-                    f"{CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}; map "
+                    f"{CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY} + "
+                    f"{HISTORICAL_ASSET_UNAVAILABLE_POLICY}; map "
                     "legacy Completed to InProgress because the only approved "
                     "final object is no longer available"
                 ),

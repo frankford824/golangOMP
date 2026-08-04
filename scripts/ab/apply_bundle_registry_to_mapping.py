@@ -26,6 +26,7 @@ ZERO_TIME = "0001-01-01T00:00:00Z"
 MULTI_SOURCE_BLOCKERS = {
     "multiple source assets require a reviewed deterministic ZIP bundle",
     "design revision has no uniquely evidenced source asset",
+    "design revision has no lifecycle-valid source asset",
 }
 ALLOWED_SCOPE_KINDS = {"task", "sku", "retouch_requirement"}
 # Historical compatibility contract used only by

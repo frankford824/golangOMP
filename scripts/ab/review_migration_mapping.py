@@ -581,13 +581,25 @@ def validate_candidate(candidate: dict[str, Any]) -> None:
             and "legacy_warehouse_reopen_state_v1" in policies
         )
         customization_terminal_decision = (
-            task_id in {449, 450, 451, 452, 756, 757}
-            and item.get("from_status") == "PendingWarehouseReceive"
-            and item.get("target_status") == "InProgress"
-            and policies
-            == [
-                "legacy_customization_terminal_without_assets_to_inprogress_v1"
-            ]
+            (
+                task_id in {449, 450, 451, 452, 756, 757}
+                and item.get("from_status") == "PendingWarehouseReceive"
+                and item.get("target_status") == "InProgress"
+                and policies
+                == [
+                    "legacy_customization_terminal_without_assets_to_inprogress_v1"
+                ]
+            )
+            or (
+                task_id == 3091
+                and item.get("from_status") == "Completed"
+                and item.get("target_status") == "InProgress"
+                and policies
+                == [
+                    "legacy_customization_terminal_without_assets_to_inprogress_v1",
+                    "legacy_historical_asset_unavailable_v1",
+                ]
+            )
         )
         if (
             not retouch_decision

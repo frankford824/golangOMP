@@ -2255,6 +2255,109 @@ class GeneratorTest(unittest.TestCase):
             for revision in resource["history"][1:]
         ))
 
+    def test_distinct_post_close_sessions_do_not_prune_later_predecessor(self):
+        rows = self.sample()
+        rows["events"].append({
+            "namespace": "task_event_log",
+            "id": "close",
+            "task_id": 7,
+            "sequence": 4,
+            "event_type": "task.closed",
+            "actor_id": 4,
+            "payload": {},
+            "created_at": "2026-01-04T00:00:00Z",
+        })
+        rows["assets"][0].update({
+            "flow_review_status": "superseded",
+            "superseded_by_version_id": 14,
+            "superseded_at": "2026-01-05T00:00:42Z",
+        })
+        rows["assets"][1].update({
+            "flow_review_status": "superseded",
+            "superseded_by_version_id": 13,
+            "superseded_at": "2026-01-05T00:00:00Z",
+        })
+        rows["assets"].extend([
+            {
+                **rows["assets"][1],
+                "id": 13,
+                "asset_id": 101,
+                "flow_review_status": "approved",
+                "superseded_by_version_id": None,
+                "superseded_at": "",
+                "upload_request_id": "replace-final",
+                "created_at": "2026-01-05T00:00:00Z",
+            },
+            {
+                **rows["assets"][0],
+                "id": 14,
+                "asset_id": 100,
+                "flow_review_status": "approved",
+                "superseded_by_version_id": None,
+                "superseded_at": "",
+                "upload_request_id": "replace-source",
+                "created_at": "2026-01-05T00:00:42Z",
+            },
+        ])
+        rows["events"].extend([
+            {
+                "namespace": "task_event_log",
+                "id": "replace-final",
+                "task_id": 7,
+                "sequence": 5,
+                "event_type": "task.asset.upload_session.completed",
+                "actor_id": 4,
+                "payload": {
+                    "upload_session_id": "replace-final",
+                    "asset_version_id": 13,
+                    "post_close_replacement": True,
+                },
+                "created_at": "2026-01-05T00:00:00Z",
+            },
+            {
+                "namespace": "task_event_log",
+                "id": "replace-source",
+                "task_id": 7,
+                "sequence": 6,
+                "event_type": "task.asset.upload_session.completed",
+                "actor_id": 4,
+                "payload": {
+                    "upload_session_id": "replace-source",
+                    "asset_version_id": 14,
+                    "post_close_replacement": True,
+                },
+                "created_at": "2026-01-05T00:00:42Z",
+            },
+        ])
+
+        mapping, _, _ = MODULE.generate(rows)
+        resource = mapping["resources"][0]
+        self.assertEqual(
+            [revision["status"] for revision in resource["history"]],
+            ["superseded", "superseded", "finalized"],
+        )
+        self.assertEqual(
+            [
+                revision.get("source_task_asset_id")
+                or revision.get("source_alias_from_task_asset_id")
+                for revision in resource["history"]
+            ],
+            [10, 10, 14],
+        )
+        self.assertEqual(
+            [
+                revision["final_task_asset_ids"]
+                for revision in resource["history"]
+            ],
+            [[11], [13], [13]],
+        )
+        self.assertFalse(
+            any(
+                revision["confidence"] == "hard_blocked"
+                for revision in resource["history"]
+            )
+        )
+
     def test_post_close_replacement_is_inserted_before_later_supplements(self):
         rows = self.sample()
         rows["events"].append({

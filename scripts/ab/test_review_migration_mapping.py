@@ -921,6 +921,48 @@ class ReviewMigrationMappingTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported policy-bound"):
             self.prepare()
 
+    def test_missing_completed_customization_object_is_exactly_allowlisted(self):
+        candidate = task_state(task_id=3091)
+        candidate.update(
+            {
+                "from_status": "Completed",
+                "target_status": "InProgress",
+                "evidence_event_ids": [
+                    "task_event_log:customization-approved",
+                    "object_probe:missing-final",
+                ],
+                "review_policy_ids": [
+                    "legacy_customization_terminal_without_assets_to_inprogress_v1",
+                    "legacy_historical_asset_unavailable_v1",
+                ],
+            }
+        )
+        candidate["manifest_row_hash"] = review.canonical_mapping_row_hash(
+            candidate
+        )
+        self.write_candidate(
+            mapping(resources=[], task_state_decisions=[candidate])
+        )
+        self.prepare()
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        self.assertEqual(
+            ledger["rows"][0]["required_policies"],
+            [
+                "legacy_customization_terminal_without_assets_to_inprogress_v1",
+                "legacy_historical_asset_unavailable_v1",
+            ],
+        )
+
+        candidate["task_id"] = 3092
+        candidate["manifest_row_hash"] = review.canonical_mapping_row_hash(
+            candidate
+        )
+        self.write_candidate(
+            mapping(resources=[], task_state_decisions=[candidate])
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported policy-bound"):
+            self.prepare()
+
     def test_invalid_candidate_manifest_hash_fails_closed(self):
         candidate = mapping()
         candidate["resources"][0]["history"][0]["manifest_row_hash"] = "0" * 64

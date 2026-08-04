@@ -86,7 +86,9 @@ class ApplyBundleRegistryTests(unittest.TestCase):
             }
             if index <= 3:
                 revision["blockers"].append(
-                    "design revision has no uniquely evidenced source asset"
+                    "design revision has no lifecycle-valid source asset"
+                    if index == 0
+                    else "design revision has no uniquely evidenced source asset"
                 )
             if revision_no == 2:
                 revision["source_alias_from_task_asset_id"] = 80000 + index

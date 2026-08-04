@@ -24,6 +24,10 @@ from typing import Any
 
 
 BUNDLE_BLOCKER = "multiple source assets require a reviewed deterministic ZIP bundle"
+BUNDLE_RESOLVABLE_BLOCKERS = {
+    BUNDLE_BLOCKER,
+    "design revision has no lifecycle-valid source asset",
+}
 STORAGE_REF_NAMESPACE = uuid.UUID("07212a18-6e57-54aa-bad2-f7e79673ffdc")
 UPLOAD_COMPLETED = "task.asset.upload_session.completed"
 
@@ -142,7 +146,14 @@ def bundle_rows(mapping: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             blockers = revision.get("blockers")
             candidate = revision.get("source_bundle_candidate")
-            if blockers != [BUNDLE_BLOCKER]:
+            if (
+                not isinstance(blockers, list)
+                or BUNDLE_BLOCKER not in blockers
+                or any(
+                    blocker not in BUNDLE_RESOLVABLE_BLOCKERS
+                    for blocker in blockers
+                )
+            ):
                 raise ValueError(
                     "automatic bundle preparation found a non-bundle hard blocker"
                 )

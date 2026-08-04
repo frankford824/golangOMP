@@ -134,6 +134,42 @@ class PrepareAutoSourceBundleManifestTest(unittest.TestCase):
             [101, 103, 109],
         )
 
+    def test_bundle_resolves_lifecycle_source_absence_only_with_bundle_blocker(self):
+        mapping, objects, assets, events = self.fixture()
+        mapping["resources"][0]["history"][0]["blockers"].append(
+            "design revision has no lifecycle-valid source asset"
+        )
+        manifest = MODULE.build_manifest(
+            mapping=mapping,
+            mapping_sha256="a" * 64,
+            object_rows=objects,
+            task_asset_rows=assets,
+            completion_events=events,
+            max_task_asset_id=25000,
+            max_asset_id=18000,
+            run_id="v1295-auto-bundles",
+            confirmed_by=1,
+            confirmed_at="2026-08-04T11:15:30Z",
+        )
+        self.assertEqual(manifest["bundle_count"], 1)
+
+        mapping["resources"][0]["history"][0]["blockers"] = [
+            "design revision has no lifecycle-valid source asset"
+        ]
+        with self.assertRaisesRegex(ValueError, "non-bundle hard blocker"):
+            MODULE.build_manifest(
+                mapping=mapping,
+                mapping_sha256="a" * 64,
+                object_rows=objects,
+                task_asset_rows=assets,
+                completion_events=events,
+                max_task_asset_id=25000,
+                max_asset_id=18000,
+                run_id="v1295-auto-bundles",
+                confirmed_by=1,
+                confirmed_at="2026-08-04T11:15:30Z",
+            )
+
     def test_rejects_missing_hash_event_and_cross_task_member(self):
         mapping, objects, assets, events = self.fixture()
         objects[101]["sha256"] = ""
