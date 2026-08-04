@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -130,6 +131,44 @@ func TestValidatePlanBytesChecksPythonCompatibleSelfHash(t *testing.T) {
 
 type memoryObjectStore struct {
 	objects map[string][]byte
+}
+
+type closeIfPossibleUploader struct {
+	content []byte
+}
+
+func (s *closeIfPossibleUploader) UploadObjectFromReader(
+	_ context.Context,
+	_ string,
+	_ string,
+	body io.Reader,
+) error {
+	value, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	s.content = value
+	if closer, ok := body.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
+func TestUploadObjectFromFileRetainsFileOwnership(t *testing.T) {
+	sourceFile := filepath.Join(t.TempDir(), "source.bin")
+	want := []byte("recovery-source")
+	if err := os.WriteFile(sourceFile, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	uploader := &closeIfPossibleUploader{}
+	if err := uploadObjectFromFile(
+		context.Background(), uploader, "target.bin", "application/octet-stream", sourceFile,
+	); err != nil {
+		t.Fatalf("uploadObjectFromFile returned error: %v", err)
+	}
+	if !bytes.Equal(uploader.content, want) {
+		t.Fatalf("uploaded content = %q, want %q", uploader.content, want)
+	}
 }
 
 func (s *memoryObjectStore) UploadObjectFromReader(

@@ -125,6 +125,14 @@ type objectStore interface {
 	DeleteObject(context.Context, string) error
 }
 
+type objectUploader interface {
+	UploadObjectFromReader(context.Context, string, string, io.Reader) error
+}
+
+type nonClosingReader struct {
+	io.Reader
+}
+
 type transaction interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -312,20 +320,11 @@ func execute(
 			if err := verifyLocalSource(sourceFile, entry); err != nil {
 				return 0, 0, false, false, err
 			}
-			source, openErr := os.Open(sourceFile)
-			if openErr != nil {
-				return 0, 0, false, false, openErr
-			}
 			mimeType := fmt.Sprint(entry.DBApplyPlan.InsertStorageRef["mime_type"])
-			uploadErr := objects.UploadObjectFromReader(
-				ctx, entry.TargetObjectKey, mimeType, source,
-			)
-			closeErr := source.Close()
-			if uploadErr != nil {
-				return 0, 0, false, false, uploadErr
-			}
-			if closeErr != nil {
-				return 0, 0, false, false, closeErr
+			if err := uploadObjectFromFile(
+				ctx, objects, entry.TargetObjectKey, mimeType, sourceFile,
+			); err != nil {
+				return 0, 0, false, false, err
 			}
 			created = append(created, entry)
 			if err := verifyRemoteObject(ctx, objects, entry); err != nil {
@@ -406,6 +405,29 @@ func execute(
 		return len(plan.Entries), 0, false, objectDeletes, nil
 	}
 	return 0, len(plan.Entries), false, objectDeletes, nil
+}
+
+func uploadObjectFromFile(
+	ctx context.Context,
+	objects objectUploader,
+	objectKey string,
+	mimeType string,
+	sourceFile string,
+) error {
+	source, err := os.Open(sourceFile)
+	if err != nil {
+		return err
+	}
+	// net/http closes request bodies that implement io.ReadCloser. Hide Close
+	// from the transport so this function remains the sole file owner.
+	uploadErr := objects.UploadObjectFromReader(
+		ctx, objectKey, mimeType, nonClosingReader{Reader: source},
+	)
+	closeErr := source.Close()
+	if uploadErr != nil {
+		return uploadErr
+	}
+	return closeErr
 }
 
 func validateOptions(o options) (*mysql.Config, string, error) {
