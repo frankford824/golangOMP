@@ -376,7 +376,7 @@ func validateTaskStateDecisionPreflight(ctx context.Context, q snapshotQueryer, 
 	}
 	if customizationTerminalDecision {
 		expectedTaskType := "original_product_development"
-		if decision.TaskID == 756 || decision.TaskID == 757 {
+		if decision.TaskID == 756 || decision.TaskID == 757 || decision.TaskID == 3091 {
 			expectedTaskType = "new_product_development"
 		}
 		if taskType != expectedTaskType {
@@ -397,7 +397,9 @@ func validateTaskStateDecisionPreflight(ctx context.Context, q snapshotQueryer, 
 	policyEvidence := false
 	for _, event := range metadata {
 		combined := strings.ToLower(event.EventType + " " + event.Payload)
-		if (customizationTerminalDecision && isCustomizationTerminalEvidence(event)) ||
+		completedMissingFinalEvidence := decision.TaskID == 3091 &&
+			strings.EqualFold(event.EventType, "task.asset.upload_session.completed")
+		if (customizationTerminalDecision && (isCustomizationTerminalEvidence(event) || completedMissingFinalEvidence)) ||
 			(!retouchDecision && !customizationTerminalDecision && (strings.Contains(combined, "warehouse") || strings.Contains(combined, "rejectedbywarehouse"))) ||
 			(retouchDecision && (strings.Contains(combined, "upload_session.completed") || strings.Contains(combined, "design.submitted"))) {
 			policyEvidence = true
@@ -551,7 +553,9 @@ func validateRevisionLifecycleState(mapping resourceMapping, revision resourceRe
 
 	flowStatus := strings.ToLower(strings.TrimSpace(state.FlowReviewStatus))
 	if flowStatus == "cleaned" {
-		return fmt.Errorf("task asset %d lifecycle is cleaned", state.ID)
+		if !state.CleanedAt.Valid {
+			return fmt.Errorf("task asset %d cleaned lifecycle lacks a timestamp", state.ID)
+		}
 	}
 	if state.SupersededBy.Valid || flowStatus == "superseded" {
 		if currentPointer && !inheritsRejectedSnapshotIntoReopenDraft(mapping, revision, state.ID) {
@@ -573,6 +577,33 @@ func validateRevisionLifecycleState(mapping resourceMapping, revision resourceRe
 		}
 		if state.RejectedAt.Time.Before(boundary) {
 			return fmt.Errorf("task asset %d was rejected before the revision boundary", state.ID)
+		}
+	}
+	for _, transition := range []struct {
+		name string
+		at   sql.NullTime
+	}{
+		{name: "deleted", at: state.DeletedAt},
+		{name: "cleaned", at: state.CleanedAt},
+		{name: "access revoked", at: state.AccessRevokedAt},
+		{name: "object deleted", at: state.ObjectDeletedAt},
+	} {
+		if !transition.at.Valid {
+			continue
+		}
+		if currentPointer {
+			return fmt.Errorf(
+				"task asset %d is %s but remains on a current revision pointer",
+				state.ID,
+				transition.name,
+			)
+		}
+		if !transition.at.Time.After(boundary) {
+			return fmt.Errorf(
+				"task asset %d was %s before the revision boundary",
+				state.ID,
+				transition.name,
+			)
 		}
 	}
 	return nil
@@ -615,7 +646,7 @@ func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourc
 	if (role == "source" && !assetType.IsSource()) || (role == "final" && !assetType.IsDelivery()) {
 		return fmt.Errorf("task asset %d asset_type=%s cannot bind as %s", assetID, state.AssetType, role)
 	}
-	if state.UploadStatus != "uploaded" || state.DeletedAt.Valid || state.CleanedAt.Valid || state.AccessRevokedAt.Valid || state.ObjectDeletedAt.Valid {
+	if state.UploadStatus != "uploaded" {
 		return fmt.Errorf("task asset %d lifecycle is not active/uploaded", assetID)
 	}
 	if expectedHash != "" && !strings.EqualFold(state.WholeHash, expectedHash) {
@@ -634,7 +665,8 @@ func loadMappedAssetState(ctx context.Context, q snapshotQueryer, assetID int64)
 		       COALESCE(mime_type,''),COALESCE(whole_hash,''),COALESCE(upload_status,''),
 		       COALESCE(flow_review_status,''),DATE_SUB(rejected_at,INTERVAL 8 HOUR),
 		       superseded_by_version_id,DATE_SUB(superseded_at,INTERVAL 8 HOUR),
-		       deleted_at,cleaned_at,access_revoked_at,object_deleted_at
+		       DATE_SUB(deleted_at,INTERVAL 8 HOUR),DATE_SUB(cleaned_at,INTERVAL 8 HOUR),
+		       DATE_SUB(access_revoked_at,INTERVAL 8 HOUR),DATE_SUB(object_deleted_at,INTERVAL 8 HOUR)
 		FROM task_assets WHERE id=?`, assetID).
 		Scan(&state.ID, &state.TaskID, &state.AssetType, &state.ScopeSKUCode, &state.RetouchRequirementID,
 			&state.MimeType, &state.WholeHash, &state.UploadStatus,

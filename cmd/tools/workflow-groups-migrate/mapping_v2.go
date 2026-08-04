@@ -114,7 +114,7 @@ func legacyRetouchVisualExpected(taskID int64, scopeKind string, scopeRefID int6
 func legacyCustomizationTerminalExpectedSource(taskID int64, scopeKind string, scopeRefID int64) (*int64, bool) {
 	key := fmt.Sprintf("%d/%s/%d", taskID, scopeKind, scopeRefID)
 	switch key {
-	case "449/task/0", "450/task/0", "451/task/0", "756/sku/578", "757/sku/579", "757/sku/580":
+	case "449/task/0", "450/task/0", "451/task/0", "756/sku/578", "757/sku/579", "757/sku/580", "3091/sku/3311":
 		return nil, true
 	case "452/task/0":
 		sourceID := int64(207)
@@ -125,7 +125,72 @@ func legacyCustomizationTerminalExpectedSource(taskID int64, scopeKind string, s
 }
 
 func isLegacyCustomizationTerminalTask(taskID int64) bool {
-	return containsInt64([]int64{449, 450, 451, 452, 756, 757}, taskID)
+	return containsInt64([]int64{449, 450, 451, 452, 756, 757, 3091}, taskID)
+}
+
+func isLegacyCompletedCustomizationMissingFinalResource(r resourceMapping) bool {
+	if r.TaskID != 3091 ||
+		r.ScopeKind != "sku" ||
+		r.ScopeRefID != 3311 ||
+		len(r.History) != 4 ||
+		r.WorkingRevisionNo == nil ||
+		*r.WorkingRevisionNo != 4 ||
+		r.FinalizedRevisionNo != nil {
+		return false
+	}
+	expectedFinals := []int64{28966, 29023, 29144}
+	expectedStages := []string{"design", "audit", "reopen"}
+	for index := 0; index < 3; index++ {
+		revision := r.History[index]
+		expectedID := expectedFinals[index]
+		if revision.RevisionNo != index+1 ||
+			revision.Status != "superseded" ||
+			revision.SourceStage != expectedStages[index] ||
+			revision.SourceAssetID != nil ||
+			revision.SourceAliasFrom == nil ||
+			*revision.SourceAliasFrom != expectedID ||
+			revision.SourceBundle != nil ||
+			!equalInt64Slices(revision.FinalAssetIDs, []int64{expectedID}) ||
+			!equalInt64Slices(revision.ReferenceIDs, []int64{4009}) {
+			return false
+		}
+	}
+	historical := r.History[2]
+	if !equalStringSlices(
+		historical.ReviewPolicyIDs,
+		[]string{
+			reviewPolicyExplicitEventReplay,
+			reviewPolicyDeliverySourceAlias,
+			reviewPolicyReopen,
+			reviewPolicyLegacyHistoricalAssetUnavailable,
+		},
+	) || !strings.HasPrefix(
+		historical.Reason,
+		"policy "+reviewPolicyLegacyHistoricalAssetUnavailable+":",
+	) {
+		return false
+	}
+	draft := r.History[3]
+	return draft.RevisionNo == 4 &&
+		draft.Status == "draft" &&
+		draft.SourceStage == "reopen" &&
+		draft.SourceAssetID == nil &&
+		draft.SourceAliasFrom == nil &&
+		draft.SourceBundle == nil &&
+		len(draft.FinalAssetIDs) == 0 &&
+		equalInt64Slices(draft.ReferenceIDs, []int64{4009}) &&
+		equalStringSlices(
+			draft.ReviewPolicyIDs,
+			[]string{
+				reviewPolicyExplicitEventReplay,
+				reviewPolicyReopen,
+				reviewPolicyLegacyCustomizationTerminalNoAssets,
+			},
+		) &&
+		strings.HasPrefix(
+			draft.Reason,
+			"policy "+reviewPolicyLegacyCustomizationTerminalNoAssets+":",
+		)
 }
 
 func isIncompleteUATPlanningTombstone(planning planningMapping) bool {
@@ -438,25 +503,31 @@ func validateResourceMappingV2Mode(index int, r resourceMapping, allowCandidateC
 			containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyCustomizationTerminalNoAssets)
 	}
 	if customizationTerminalPolicy {
-		expectedSource, allowed := legacyCustomizationTerminalExpectedSource(r.TaskID, r.ScopeKind, r.ScopeRefID)
-		if !allowed || len(r.History) != 1 || r.WorkingRevisionNo == nil || *r.WorkingRevisionNo != 1 || r.FinalizedRevisionNo != nil {
-			return fmt.Errorf("resources[%d]: customization terminal policy requires one exact allowlisted working draft and no finalized pointer", index)
-		}
-		revision := r.History[0]
-		expectedPolicies := []string{
-			reviewPolicyExplicitEventReplay,
-			reviewPolicyReopen,
-			reviewPolicyLegacyCustomizationTerminalNoAssets,
-		}
-		if revision.Status != "draft" ||
-			revision.SourceStage != "reopen" ||
-			!equalInt64Pointers(revision.SourceAssetID, expectedSource) ||
-			revision.SourceAliasFrom != nil ||
-			revision.SourceBundle != nil ||
-			len(revision.FinalAssetIDs) != 0 ||
-			!equalStringSlices(revision.ReviewPolicyIDs, expectedPolicies) ||
-			!strings.HasPrefix(revision.Reason, "policy "+reviewPolicyLegacyCustomizationTerminalNoAssets+":") {
-			return fmt.Errorf("resources[%d]: customization terminal policy draft does not match the frozen source/final contract", index)
+		if r.TaskID == 3091 {
+			if !isLegacyCompletedCustomizationMissingFinalResource(r) {
+				return fmt.Errorf("resources[%d]: completed customization missing-final policy does not match the frozen four-revision contract", index)
+			}
+		} else {
+			expectedSource, allowed := legacyCustomizationTerminalExpectedSource(r.TaskID, r.ScopeKind, r.ScopeRefID)
+			if !allowed || len(r.History) != 1 || r.WorkingRevisionNo == nil || *r.WorkingRevisionNo != 1 || r.FinalizedRevisionNo != nil {
+				return fmt.Errorf("resources[%d]: customization terminal policy requires one exact allowlisted working draft and no finalized pointer", index)
+			}
+			revision := r.History[0]
+			expectedPolicies := []string{
+				reviewPolicyExplicitEventReplay,
+				reviewPolicyReopen,
+				reviewPolicyLegacyCustomizationTerminalNoAssets,
+			}
+			if revision.Status != "draft" ||
+				revision.SourceStage != "reopen" ||
+				!equalInt64Pointers(revision.SourceAssetID, expectedSource) ||
+				revision.SourceAliasFrom != nil ||
+				revision.SourceBundle != nil ||
+				len(revision.FinalAssetIDs) != 0 ||
+				!equalStringSlices(revision.ReviewPolicyIDs, expectedPolicies) ||
+				!strings.HasPrefix(revision.Reason, "policy "+reviewPolicyLegacyCustomizationTerminalNoAssets+":") {
+				return fmt.Errorf("resources[%d]: customization terminal policy draft does not match the frozen source/final contract", index)
+			}
 		}
 	}
 	retouchVisualPolicy := false
@@ -821,7 +892,9 @@ func validateTaskStateDecisions(m mappingFile, allowCandidateConfidence bool) er
 			(decision.TargetStatus == "InProgress" || decision.TargetStatus == "Completed") &&
 			containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyWarehouseReopenState)
 		retouchDecision := isReviewedRetouchReopenDecision(decision)
-		customizationTerminalDecision := decision.FromStatus == "PendingWarehouseReceive" &&
+		customizationTerminalFromStatus := decision.FromStatus == "PendingWarehouseReceive" ||
+			(decision.TaskID == 3091 && decision.FromStatus == "Completed")
+		customizationTerminalDecision := customizationTerminalFromStatus &&
 			decision.TargetStatus == "InProgress" &&
 			isLegacyCustomizationTerminalTask(decision.TaskID) &&
 			equalStringSlices(

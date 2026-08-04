@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import datetime as dt
 import hashlib
@@ -202,6 +203,20 @@ LEGACY_CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS = {
     452: {("task", 0): [207]},
     756: {("sku", 578): []},
     757: {("sku", 579): [], ("sku", 580): []},
+}
+
+# This frozen Completed customization row lost its only approved final object.
+# The immutable object probe is a 404, so the migration must preserve the
+# approval-time revision as unavailable history and reopen an empty draft.
+LEGACY_COMPLETED_CUSTOMIZATION_MISSING_FINAL = {
+    3091: {
+        "scope_kind": "sku",
+        "scope_ref_id": 3311,
+        "final_task_asset_id": 29144,
+        "source_alias_candidates": [28966, 29023, 29144],
+        "deleted_at": "2026-07-28T03:30:26Z",
+        "storage_ref_id": "a40e151c-7fb0-4dfa-a8a2-624992c2832c",
+    }
 }
 
 # These are evidence contracts, not permission to copy bytes.  The three
@@ -598,6 +613,57 @@ def clear_rejected_members_from_reopen_draft(
         for member_id in revision.get("final_task_asset_ids") or []
         if not rejected(member_id)
     ]
+    revision["mode"] = (
+        "set" if len(revision["final_task_asset_ids"]) > 1 else "single"
+    )
+
+
+def prune_inherited_reopen_snapshot(
+    revision: dict[str, Any],
+    assets: Iterable[dict[str, Any]],
+    event: dict[str, Any],
+    scope_kind: str,
+) -> None:
+    """Drop lifecycle-invalid inherited members from an explicit reopen snapshot.
+
+    Upload completion and audit-supplement handlers may persist their asset
+    lifecycle cleanup a few seconds after the immutable event row. Treat that
+    bounded cleanup as part of the same operation; other reopen boundaries use
+    the exact event timestamp.
+    """
+
+    if revision.get("source_stage") != "reopen":
+        return
+    boundary = str(event.get("created_at") or "")
+    event_type = str(event.get("event_type") or "").lower()
+    if event_type in UPLOAD_SESSION_COMPLETED_EVENTS or event_type == "task.audit.supplement_uploaded":
+        boundary = (
+            parse_utc_timestamp(boundary) + dt.timedelta(seconds=60)
+        ).isoformat().replace("+00:00", "Z")
+    asset_by_id = {int(asset["id"]): asset for asset in assets}
+
+    def eligible(member_id: Any) -> bool:
+        asset = asset_by_id.get(int(member_id or 0))
+        allowed, _ = revision_asset_eligible(asset or {}, set(), boundary)
+        return allowed
+
+    for field in ("source_task_asset_id", "source_alias_from_task_asset_id"):
+        if revision.get(field) is not None and not eligible(revision[field]):
+            revision.pop(field, None)
+    revision["final_task_asset_ids"] = [
+        int(member_id)
+        for member_id in revision.get("final_task_asset_ids") or []
+        if eligible(member_id)
+    ]
+    if (
+        scope_kind != "retouch_requirement"
+        and not revision.get("source_task_asset_id")
+        and not revision.get("source_alias_from_task_asset_id")
+        and revision["final_task_asset_ids"]
+    ):
+        revision["source_alias_from_task_asset_id"] = revision[
+            "final_task_asset_ids"
+        ][0]
     revision["mode"] = (
         "set" if len(revision["final_task_asset_ids"]) > 1 else "single"
     )
@@ -1281,6 +1347,28 @@ def apply_proven_successor_audit_change(scope, event, events, assets, revision):
     return True
 
 
+def apply_proven_successor_audit_change_if_possible(
+    scope, event, events, assets, revision
+):
+    """Apply optional current-snapshot repair without leaking failed blockers.
+
+    The approval replay path is fail-closed and must retain exact successor
+    errors.  The later current-snapshot pass is only an opportunistic repair:
+    lifecycle pruning can still produce the correct active snapshot when an
+    old member has no successor.  Run that pass on a deep copy so a failed
+    probe cannot poison an otherwise valid pruned revision.
+    """
+
+    probe = copy.deepcopy(revision)
+    if not apply_proven_successor_audit_change(
+        scope, event, events, assets, probe
+    ):
+        return False
+    revision.clear()
+    revision.update(probe)
+    return True
+
+
 def parse_utc_timestamp(value: str) -> dt.datetime:
     return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
@@ -1936,6 +2024,12 @@ def replay_post_close_replacements(
                         "is absent from the inherited snapshot",
                     )
                 else:
+                    prune_inherited_reopen_snapshot(
+                        revision,
+                        assets,
+                        completion,
+                        str(scope.get("scope_kind") or ""),
+                    )
                     revision["status"] = "superseded"
                     evidence_ids = event_evidence_ids(completion)
                     for later in revisions[anchor_index + 1 :]:
@@ -2040,6 +2134,12 @@ def replay_post_close_replacements(
                     "absent from the inherited snapshot"
                 )
         if not blocker:
+            prune_inherited_reopen_snapshot(
+                revision,
+                assets,
+                completion,
+                str(scope.get("scope_kind") or ""),
+            )
             revisions[finalized - 1]["status"] = "superseded"
             recompute_revision_hash(revisions[finalized - 1])
         if blocker:
@@ -3149,6 +3249,109 @@ def build_customization_terminal_without_assets_resource(
     }
 
 
+def reopen_completed_customization_missing_final(
+    scope: dict[str, Any],
+    before_cleanup: dict[str, Any] | None,
+    after_cleanup: dict[str, Any],
+    assets: Iterable[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Reopen one frozen Completed customization row whose object is gone."""
+
+    contract = LEGACY_COMPLETED_CUSTOMIZATION_MISSING_FINAL.get(
+        int(scope["task_id"])
+    )
+    if (
+        contract is None
+        or before_cleanup is None
+        or str(scope.get("task_status") or "") != "Completed"
+        or str(scope.get("scope_kind") or "") != contract["scope_kind"]
+        or int(scope.get("scope_ref_id") or 0) != contract["scope_ref_id"]
+        or before_cleanup.get("status") != "finalized"
+        or before_cleanup.get("final_task_asset_ids")
+        not in ([], [contract["final_task_asset_id"]])
+        or before_cleanup.get("source_task_asset_id") is not None
+        or before_cleanup.get("source_alias_from_task_asset_id")
+        not in (None, *contract["source_alias_candidates"])
+        or after_cleanup.get("final_task_asset_ids")
+        or after_cleanup.get("source_task_asset_id")
+        or after_cleanup.get("source_alias_from_task_asset_id")
+    ):
+        return None
+    asset = next(
+        (
+            candidate
+            for candidate in assets
+            if int(candidate.get("id") or 0)
+            == contract["final_task_asset_id"]
+        ),
+        None,
+    )
+    if (
+        asset is None
+        or str(asset.get("asset_type") or "") != "delivery"
+        or str(asset.get("deleted_at") or "") != contract["deleted_at"]
+        or str(asset.get("storage_ref_id") or "")
+        != contract["storage_ref_id"]
+        or str(asset.get("approved_at") or "")
+        != str(before_cleanup.get("created_at") or "")
+        or str(asset.get("source_module_key") or "") != "customization"
+        or asset.get("superseded_by_version_id")
+    ):
+        return None
+
+    historical = copy.deepcopy(before_cleanup)
+    historical["status"] = "superseded"
+    historical["mode"] = "single"
+    historical["final_task_asset_ids"] = [contract["final_task_asset_id"]]
+    historical.pop("source_task_asset_id", None)
+    historical["source_alias_from_task_asset_id"] = contract[
+        "final_task_asset_id"
+    ]
+    historical["reason"] = (
+        f"policy {HISTORICAL_ASSET_UNAVAILABLE_POLICY}: the approved final "
+        "was valid at this revision boundary but its immutable object is no "
+        "longer available; preserve the revision as read-only history"
+    )
+    historical.setdefault("_review_policy_ids", []).append(
+        HISTORICAL_ASSET_UNAVAILABLE_POLICY
+    )
+    historical.pop("_blockers", None)
+    historical.pop("blockers", None)
+    recompute_revision_hash(historical)
+
+    draft = copy.deepcopy(historical)
+    draft["revision_no"] = int(historical["revision_no"]) + 1
+    draft["status"] = "draft"
+    draft["source_stage"] = "reopen"
+    draft.pop("source_task_asset_id", None)
+    draft.pop("source_alias_from_task_asset_id", None)
+    draft["final_task_asset_ids"] = []
+    draft["created_at"] = contract["deleted_at"]
+    draft.pop("submitted_at", None)
+    draft.pop("finalized_at", None)
+    draft["reason"] = (
+        f"policy {CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}: the legacy "
+        "Completed customization lost its only final object; reopen an "
+        "editable draft without inventing a replacement"
+    )
+    draft["_review_policy_ids"] = ordered_review_policy_ids(
+        [
+            EXPLICIT_EVENT_REPLAY_POLICY,
+            REOPEN_POLICY,
+            CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY,
+        ]
+    )
+    draft["confidence"] = "proposed_review"
+    recompute_revision_hash(draft)
+    return {
+        "historical": historical,
+        "draft": draft,
+        "evidence_event_ids": list(
+            dict.fromkeys(historical.get("evidence_event_ids") or [])
+        ),
+    }
+
+
 def build_premature_retouch_resource(scope, candidate, assets, references):
     membership = candidate["_retouch_scope_memberships"][
         str(scope["scope_ref_id"])
@@ -3990,6 +4193,7 @@ def generate(rows):
         is not None
     }
     manual, resources = [], []
+    completed_customization_missing_final_by_task = {}
     for scope in sorted(rows["scopes"], key=lambda x: (int(x["task_id"]), x["scope_kind"], int(x["scope_ref_id"]))):
         scope = dict(scope)
         task_id = int(scope["task_id"])
@@ -4416,6 +4620,124 @@ def generate(rows):
             working,
             finalized,
         )
+        current_pointer = working or finalized
+        current_snapshot_before_cleanup = (
+            copy.deepcopy(revisions[current_pointer - 1])
+            if current_pointer
+            else None
+        )
+        if current_pointer:
+            current_revision = revisions[current_pointer - 1]
+            completion_events = [
+                event
+                for event in events_by_task[task_id]
+                if str(event.get("event_type") or "").lower()
+                in UPLOAD_SESSION_COMPLETED_EVENTS
+            ]
+            if completion_events:
+                latest_completion = max(
+                    completion_events,
+                    key=lambda event: (
+                        str(event.get("created_at") or ""),
+                        int(event.get("sequence") or 0),
+                    ),
+                )
+                if apply_proven_successor_audit_change_if_possible(
+                    scope,
+                    latest_completion,
+                    events_by_task[task_id],
+                    assets_by_task[task_id],
+                    current_revision,
+                ):
+                    current_revision["reason"] = (
+                        f"policy {AUDIT_STAGE_FINAL_SNAPSHOT_POLICY}: "
+                        "the current submitted/finalized snapshot follows the "
+                        "complete same-root successor chain proven by exact "
+                        "upload-completion events"
+                    )
+                    current_revision.setdefault(
+                        "_review_policy_ids", []
+                    ).append(AUDIT_STAGE_FINAL_SNAPSHOT_POLICY)
+                    recompute_revision_hash(current_revision)
+        event_by_evidence_id = {
+            stable_event_id(event): event
+            for event in events_by_task[task_id]
+        }
+        for revision in revisions:
+            cleanup_event = next(
+                (
+                    event_by_evidence_id[evidence_id]
+                    for evidence_id in revision.get("evidence_event_ids") or []
+                    if evidence_id in event_by_evidence_id
+                    and str(
+                        event_by_evidence_id[evidence_id].get("created_at")
+                        or ""
+                    )
+                    == str(revision.get("created_at") or "")
+                    and (
+                        str(
+                            event_by_evidence_id[evidence_id].get(
+                                "event_type"
+                            )
+                            or ""
+                        ).lower()
+                        in UPLOAD_SESSION_COMPLETED_EVENTS
+                        or str(
+                            event_by_evidence_id[evidence_id].get(
+                                "event_type"
+                            )
+                            or ""
+                        ).lower()
+                        == "task.audit.supplement_uploaded"
+                    )
+                ),
+                None,
+            )
+            if cleanup_event is not None:
+                prune_inherited_reopen_snapshot(
+                    revision,
+                    assets_by_task[task_id],
+                    cleanup_event,
+                    str(scope.get("scope_kind") or ""),
+                )
+                if (
+                    revision.get("status") == "finalized"
+                    and not revision.get("final_task_asset_ids")
+                ):
+                    add_blocker(
+                        revision,
+                        "finalized revision has no lifecycle-valid delivery asset",
+                    )
+                if (
+                    revision.get("status") in {"submitted", "finalized"}
+                    and str(scope.get("scope_kind") or "")
+                    != "retouch_requirement"
+                    and not revision.get("source_task_asset_id")
+                    and not revision.get("source_alias_from_task_asset_id")
+                ):
+                    add_blocker(
+                        revision,
+                        "design revision has no lifecycle-valid source asset",
+                    )
+                recompute_revision_hash(revision)
+        current_pointer = working or finalized
+        if current_pointer:
+            reopened_missing_final = reopen_completed_customization_missing_final(
+                scope,
+                current_snapshot_before_cleanup,
+                revisions[current_pointer - 1],
+                assets_by_task[task_id],
+            )
+            if reopened_missing_final is not None:
+                revisions[current_pointer - 1] = reopened_missing_final[
+                    "historical"
+                ]
+                revisions.append(reopened_missing_final["draft"])
+                working = len(revisions)
+                finalized = None
+                completed_customization_missing_final_by_task[task_id] = (
+                    reopened_missing_final
+                )
         ambiguous_completed_retouch = (
             scope["scope_kind"] == "retouch_requirement"
             and str(scope.get("task_status") or "") == "Completed"
@@ -4503,6 +4825,47 @@ def generate(rows):
                     f"{CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}; map "
                     "the retired incomplete customization terminal to "
                     "InProgress without inventing a final asset"
+                ),
+                "evidence_event_ids": "|".join(evidence_event_ids),
+                "candidate_source_ids": "",
+                "candidate_final_ids": "",
+                "reviewer_id": "",
+                "reviewed_at": "",
+                "decision": "",
+                "review_note": "",
+            }
+        )
+    for task_id, candidate in sorted(
+        completed_customization_missing_final_by_task.items()
+    ):
+        evidence_event_ids = candidate["evidence_event_ids"]
+        decision = {
+            "task_id": task_id,
+            "from_status": "Completed",
+            "target_status": "InProgress",
+            "evidence_event_ids": evidence_event_ids,
+            "confidence": "proposed_review",
+            "review_policy_ids": [
+                CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY
+            ],
+            "confirmed_by": 0,
+            "confirmed_at": ZERO_TIME,
+            "confirmation_note": "",
+        }
+        recompute_mapping_row_hash(decision)
+        task_state_decisions.append(decision)
+        manual.append(
+            {
+                "task_id": task_id,
+                "scope_kind": "task_state_decision",
+                "scope_ref_id": 0,
+                "revision_no": "",
+                "confidence": "proposed_review",
+                "reason": (
+                    f"policy review required: "
+                    f"{CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}; map "
+                    "legacy Completed to InProgress because the only approved "
+                    "final object is no longer available"
                 ),
                 "evidence_event_ids": "|".join(evidence_event_ids),
                 "candidate_source_ids": "",

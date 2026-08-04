@@ -598,6 +598,112 @@ class GeneratorTest(unittest.TestCase):
         self.assertEqual(revision["final_task_asset_ids"], [12])
         self.assertEqual(revision["mode"], "single")
 
+    def test_optional_successor_probe_does_not_leak_failure_blocker(self):
+        scope = self.sample()["scopes"][0]
+        old = {
+            **self.sample()["assets"][1],
+            "id": 11,
+            "asset_id": 101,
+            "flow_review_status": "approved",
+            "deleted_at": "2026-01-02T00:00:00Z",
+            "superseded_by_version_id": None,
+        }
+        completion = {
+            "namespace": "task_event_log",
+            "id": "cleanup",
+            "task_id": 7,
+            "sequence": 4,
+            "event_type": "task.asset.upload_session.completed",
+            "actor_id": 3,
+            "module_key": "design",
+            "payload": {"asset_version_ids": [11]},
+            "created_at": "2026-01-02T00:00:00Z",
+        }
+        revision = {
+            "revision_no": 2,
+            "status": "finalized",
+            "source_stage": "reopen",
+            "source_alias_from_task_asset_id": 11,
+            "final_task_asset_ids": [11],
+            "reference_file_ref_ids": [],
+            "evidence_event_ids": [],
+            "mode": "single",
+            "manifest_row_hash": "",
+            "_blockers": [],
+        }
+        original = dict(revision)
+
+        changed = MODULE.apply_proven_successor_audit_change_if_possible(
+            scope,
+            completion,
+            [completion],
+            [old],
+            revision,
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(revision, original)
+
+    def test_completed_customization_missing_final_reopens_empty_draft(self):
+        scope = {
+            "task_id": 3091,
+            "task_status": "Completed",
+            "scope_kind": "sku",
+            "scope_ref_id": 3311,
+            "sku_code": "SKU-3091",
+        }
+        before = {
+            "revision_no": 3,
+            "status": "finalized",
+            "mode": "single",
+            "source_stage": "reopen",
+            "source_alias_from_task_asset_id": 29144,
+            "final_task_asset_ids": [29144],
+            "reference_file_ref_ids": [1],
+            "evidence_event_ids": ["task_event_log:upload"],
+            "confidence": "proposed_review",
+            "created_by": 7,
+            "created_at": "2026-07-28T03:29:46Z",
+            "finalized_at": "2026-07-28T03:29:46Z",
+            "manifest_row_hash": "",
+        }
+        after = {
+            **before,
+            "source_alias_from_task_asset_id": None,
+            "final_task_asset_ids": [],
+            "_blockers": [
+                "finalized revision has no lifecycle-valid delivery asset"
+            ],
+        }
+        after.pop("source_alias_from_task_asset_id")
+        assets = [
+            {
+                "id": 29144,
+                "task_id": 3091,
+                "asset_type": "delivery",
+                "deleted_at": "2026-07-28T03:30:26Z",
+                "storage_ref_id": "a40e151c-7fb0-4dfa-a8a2-624992c2832c",
+                "approved_at": "2026-07-28T03:29:46Z",
+                "source_module_key": "customization",
+                "superseded_by_version_id": None,
+            }
+        ]
+
+        result = MODULE.reopen_completed_customization_missing_final(
+            scope, before, after, assets
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["historical"]["status"], "superseded")
+        self.assertEqual(
+            result["historical"]["final_task_asset_ids"], [29144]
+        )
+        self.assertEqual(result["draft"]["revision_no"], 4)
+        self.assertEqual(result["draft"]["status"], "draft")
+        self.assertEqual(result["draft"]["source_stage"], "reopen")
+        self.assertNotIn("source_alias_from_task_asset_id", result["draft"])
+        self.assertEqual(result["draft"]["final_task_asset_ids"], [])
+
     def test_rejection_clones_draft_and_resubmit_mutates_that_draft(self):
         rows = self.sample()
         rows["events"] = [rows["events"][0],
@@ -2564,6 +2670,67 @@ class GeneratorTest(unittest.TestCase):
         self.assertNotIn("source_alias_from_task_asset_id", revision)
         self.assertEqual(revision["final_task_asset_ids"], [12])
         self.assertEqual(revision["mode"], "single")
+
+    def test_upload_reopen_prunes_bounded_lifecycle_cleanup(self):
+        revision = {
+            "status": "finalized",
+            "source_stage": "reopen",
+            "created_at": "2026-07-27T09:33:17Z",
+            "source_alias_from_task_asset_id": 28735,
+            "final_task_asset_ids": [28735, 28756],
+            "mode": "set",
+        }
+        assets = [
+            {
+                "id": 28735,
+                "asset_type": "delivery",
+                "upload_status": "uploaded",
+                "deleted_at": "2026-07-27T09:33:34Z",
+            },
+            {
+                "id": 28756,
+                "asset_type": "delivery",
+                "upload_status": "uploaded",
+                "deleted_at": None,
+            },
+        ]
+        event = {
+            "event_type": "task.asset.upload_session.completed",
+            "created_at": "2026-07-27T09:33:17Z",
+        }
+        MODULE.prune_inherited_reopen_snapshot(
+            revision, assets, event, "sku"
+        )
+        self.assertEqual(revision["final_task_asset_ids"], [28756])
+        self.assertEqual(revision["source_alias_from_task_asset_id"], 28756)
+        self.assertEqual(revision["mode"], "single")
+
+    def test_non_upload_reopen_does_not_prune_future_lifecycle(self):
+        revision = {
+            "status": "draft",
+            "source_stage": "reopen",
+            "created_at": "2026-07-27T09:33:17Z",
+            "source_alias_from_task_asset_id": 28735,
+            "final_task_asset_ids": [28735],
+            "mode": "single",
+        }
+        assets = [
+            {
+                "id": 28735,
+                "asset_type": "delivery",
+                "upload_status": "uploaded",
+                "deleted_at": "2026-07-27T09:33:34Z",
+            }
+        ]
+        event = {
+            "event_type": "task.reopened",
+            "created_at": "2026-07-27T09:33:17Z",
+        }
+        MODULE.prune_inherited_reopen_snapshot(
+            revision, assets, event, "sku"
+        )
+        self.assertEqual(revision["final_task_asset_ids"], [28735])
+        self.assertEqual(revision["source_alias_from_task_asset_id"], 28735)
 
     def test_completed_retouch_without_boundary_remains_hard_blocked(self):
         rows = self.terminal_retouch_sample()

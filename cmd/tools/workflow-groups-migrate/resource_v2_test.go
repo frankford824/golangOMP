@@ -317,6 +317,35 @@ func TestValidateRevisionLifecycleStateAllowsOnlyHistoricalLaterTransition(t *te
 	}
 }
 
+func TestValidateRevisionLifecycleStateUsesDeletionBoundary(t *testing.T) {
+	created := time.Date(2026, 7, 27, 9, 22, 25, 0, time.UTC)
+	deleted := created.Add(9 * time.Minute)
+	revision := resourceRevisionMapping{
+		RevisionNo: 1,
+		Status:     "superseded",
+		CreatedAt:  created,
+	}
+	state := mappedAssetState{
+		ID:           28735,
+		UploadStatus: "uploaded",
+		DeletedAt:    sql.NullTime{Time: deleted, Valid: true},
+	}
+	if err := validateRevisionLifecycleState(resourceMapping{}, revision, state); err != nil {
+		t.Fatalf("historical later deletion: %v", err)
+	}
+
+	currentRevisionNo := 1
+	current := resourceMapping{FinalizedRevisionNo: &currentRevisionNo}
+	if err := validateRevisionLifecycleState(current, revision, state); err == nil {
+		t.Fatal("expected current pointer to deleted asset to fail")
+	}
+
+	state.DeletedAt.Time = created
+	if err := validateRevisionLifecycleState(resourceMapping{}, revision, state); err == nil {
+		t.Fatal("expected deletion at the revision boundary to fail")
+	}
+}
+
 func TestValidateRevisionLifecycleStateAllowsRejectedSnapshotInheritanceIntoReopenDraft(t *testing.T) {
 	created := time.Date(2026, 7, 22, 5, 39, 38, 0, time.UTC)
 	assetID := int64(23916)

@@ -696,6 +696,125 @@ func TestCustomizationTerminalWithoutAssetsPolicyIsExactAndEvidenceBound(t *test
 	}
 }
 
+func TestCompletedCustomizationMissingFinalDecisionIsExactAndEvidenceBound(t *testing.T) {
+	working := 4
+	finalIDs := []int64{28966, 29023, 29144}
+	stages := []string{"design", "audit", "reopen"}
+	history := make([]resourceRevisionMapping, 0, 4)
+	for index, finalID := range finalIDs {
+		aliasID := finalID
+		policies := []string{
+			reviewPolicyExplicitEventReplay,
+			reviewPolicyDeliverySourceAlias,
+		}
+		reason := "candidate"
+		if index == 2 {
+			policies = []string{
+				reviewPolicyExplicitEventReplay,
+				reviewPolicyDeliverySourceAlias,
+				reviewPolicyReopen,
+				reviewPolicyLegacyHistoricalAssetUnavailable,
+			}
+			reason = "policy " + reviewPolicyLegacyHistoricalAssetUnavailable + ": unavailable history"
+		}
+		history = append(history, resourceRevisionMapping{
+			RevisionNo:      index + 1,
+			Status:          "superseded",
+			Mode:            "single",
+			SourceStage:     stages[index],
+			SourceAliasFrom: &aliasID,
+			FinalAssetIDs:   []int64{finalID},
+			ReferenceIDs:    []int64{4009},
+			ReviewPolicyIDs: policies,
+			Reason:          reason,
+		})
+	}
+	history = append(history, resourceRevisionMapping{
+		RevisionNo:   4,
+		Status:       "draft",
+		Mode:         "single",
+		SourceStage:  "reopen",
+		ReferenceIDs: []int64{4009},
+		ReviewPolicyIDs: []string{
+			reviewPolicyExplicitEventReplay,
+			reviewPolicyReopen,
+			reviewPolicyLegacyCustomizationTerminalNoAssets,
+		},
+		Reason: "policy " + reviewPolicyLegacyCustomizationTerminalNoAssets + ": reopen missing final",
+	})
+	resource := resourceMapping{
+		TaskID:            3091,
+		ScopeKind:         "sku",
+		ScopeRefID:        3311,
+		History:           history,
+		WorkingRevisionNo: &working,
+		V2Declared:        true,
+	}
+	if !isLegacyCompletedCustomizationMissingFinalResource(resource) {
+		t.Fatal("expected exact task 3091 four-revision resource contract")
+	}
+	drifted := resource
+	drifted.ScopeRefID = 3312
+	if isLegacyCompletedCustomizationMissingFinalResource(drifted) {
+		t.Fatal("unexpected acceptance of drifted task 3091 scope")
+	}
+
+	confirmedAt := time.Date(2026, 7, 28, 3, 30, 26, 0, time.UTC)
+	decision := taskStateDecisionMapping{
+		TaskID:           3091,
+		FromStatus:       "Completed",
+		TargetStatus:     "InProgress",
+		EvidenceEventIDs: []string{"task_event_log:post-close-upload"},
+		Confidence:       "confirmed_auto",
+		ReviewPolicyIDs:  []string{reviewPolicyLegacyCustomizationTerminalNoAssets},
+		ConfirmedBy:      1,
+		ConfirmedAt:      confirmedAt,
+		ConfirmationNote: "automatic exact missing-final decision",
+	}
+	decision.ManifestRowHash, _ = taskStateDecisionManifestHash(decision)
+	if err := validateTaskStateDecisions(
+		mappingFile{Version: 2, TaskDecisions: []taskStateDecisionMapping{decision}},
+		false,
+	); err != nil {
+		t.Fatalf("validate task 3091 decision: %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT task_type,task_status FROM tasks").
+		WithArgs(int64(3091)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status"}).
+			AddRow("new_product_development", "Completed"))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM users").
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("SELECT task_id,sequence,event_type").
+		WithArgs("post-close-upload").
+		WillReturnRows(sqlmock.NewRows(
+			[]string{"task_id", "sequence", "event_type", "payload", "created_at"},
+		).AddRow(
+			3091,
+			9,
+			"task.asset.upload_session.completed",
+			`{"asset_version_ids":[29144]}`,
+			confirmedAt,
+		))
+	if issue := validateTaskStateDecisionPreflight(
+		context.Background(),
+		db,
+		decision,
+		[]resourceMapping{resource},
+	); issue != nil {
+		t.Fatalf("validate task 3091 preflight: %+v", issue)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func retouchVisualTask2533Resource(t *testing.T, scopeID int64) resourceMapping {
 	t.Helper()
 	expected, ok := legacyRetouchVisualTask2533[scopeID]
