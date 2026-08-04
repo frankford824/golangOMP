@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   auditDecision: vi.fn(),
   reopen: vi.fn(),
   submitDesign: vi.fn(),
+  triggerModuleAction: vi.fn(),
   upload: vi.fn(),
 }))
 
@@ -24,6 +25,12 @@ vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
 
 vi.mock('@/services/upload/assetUploadFlow', () => ({
   uploadTaskFileViaAssetSession: mocks.upload,
+}))
+
+vi.mock('@/services/api/tasksApi', () => ({
+  tasksApi: {
+    triggerModuleAction: mocks.triggerModuleAction,
+  },
 }))
 
 import ResourceWorkflowPanel from './ResourceWorkflowPanel.vue'
@@ -102,6 +109,7 @@ describe('ResourceWorkflowPanel action contract', () => {
     mocks.auditDecision.mockResolvedValue(bundle())
     mocks.reopen.mockResolvedValue(bundle())
     mocks.submitDesign.mockResolvedValue(bundle())
+    mocks.triggerModuleAction.mockResolvedValue({ data: { data: { task_id: 41 } } })
     mocks.upload.mockResolvedValue({ version: { id: 201 } })
   })
 
@@ -166,6 +174,29 @@ describe('ResourceWorkflowPanel action contract', () => {
     })
     expect(wrapper.text()).toContain('运营建议套装 · 最终由设计判定')
     expect(wrapper.get('.mode-control button.selected').text()).toBe('单图')
+  })
+
+  it('prepares the customization module only after submit-design reports it is not ready', async () => {
+    mocks.submitDesign
+      .mockRejectedValueOnce(new Error('定制任务尚未完成设计准备'))
+      .mockResolvedValueOnce(bundle())
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'new_product_development',
+        businessLane: 'customization',
+        bundle: bundle(),
+        allowedActions: ['task.design.submit'],
+      },
+    })
+
+    await button(wrapper as ReturnType<typeof mountPanel>, '确认模式并提交源文件').trigger('click')
+    await flushPromises()
+
+    expect(mocks.triggerModuleAction).toHaveBeenCalledWith('41', 'customization', 'submit')
+    expect(mocks.submitDesign).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('设计源文件与模式已提交审核。')
+    wrapper.unmount()
   })
 
   it('uses task references before the first resource revision and reports missing files honestly', () => {

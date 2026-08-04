@@ -185,11 +185,12 @@ import {
 } from 'lucide-vue-next'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode } from '@/services/api/resourceGroupsApi'
+import { tasksApi } from '@/services/api/tasksApi'
 
 type UploadedFile = { id: number; name: string; inherited?: boolean }
 type EditorRow = { group: ResourceGroup; mode: ResourceMode; submittedSource: UploadedFile | null; source: UploadedFile | null; finals: UploadedFile[]; uploading: string }
 
-const props = defineProps<{ taskId: number; taskType: string; bundle: ResourceBundle; referenceCount?: number; skuModeHints?: Record<string, boolean>; allowedActions: string[] }>()
+const props = defineProps<{ taskId: number; taskType: string; businessLane?: string; bundle: ResourceBundle; referenceCount?: number; skuModeHints?: Record<string, boolean>; allowedActions: string[] }>()
 const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean] }>()
 const skuModeHints = computed(() => props.skuModeHints ?? {})
 const rows = ref<EditorRow[]>([])
@@ -218,6 +219,7 @@ const canApprove = computed(() => actionSet.value.has('task.audit.approve') || a
 const canAudit = computed(() => canReturnToDesign.value || canApprove.value)
 const canReopen = computed(() => actionSet.value.has('reopen') || actionSet.value.has('task.reopen'))
 const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(props.taskType.toLowerCase()))
+const isCustomization = computed(() => props.businessLane === 'customization' || ['regular_customization', 'customer_customization'].includes(props.taskType.toLowerCase()))
 const isDesignStage = computed(() => canSubmit.value && !isRetouch.value)
 const isRetouchStage = computed(() => canSubmit.value && isRetouch.value && !canReopen.value)
 const isAuditStage = computed(() => canAudit.value)
@@ -357,7 +359,20 @@ function submission(row: EditorRow): ResourceGroupSubmission {
   return result
 }
 async function run(action: () => Promise<ResourceBundle>, message: string) { busy.value = true; error.value = ''; success.value = ''; try { const bundle = await action(); success.value = message; emit('updated', bundle) } catch (cause) { error.value = cause instanceof Error ? cause.message : '操作失败，请刷新后重试。' } finally { busy.value = false } }
-async function submitDesign() { if (isRetouch.value ? !validRetouch.value : !validDesign.value) return; await run(() => resourceGroupsApi.submitDesign(props.taskId, props.bundle, rows.value.map(submission)), isRetouch.value ? '修图任务已结单。' : '设计源文件与模式已提交审核。') }
+async function submitDesignRequest() {
+  const groups = rows.value.map(submission)
+  try {
+    return await resourceGroupsApi.submitDesign(props.taskId, props.bundle, groups)
+  } catch (cause) {
+    const needsCustomizationPreparation = isCustomization.value
+      && cause instanceof Error
+      && cause.message.includes('定制任务尚未完成设计准备')
+    if (!needsCustomizationPreparation) throw cause
+    await tasksApi.triggerModuleAction(String(props.taskId), 'customization', 'submit')
+    return resourceGroupsApi.submitDesign(props.taskId, props.bundle, groups)
+  }
+}
+async function submitDesign() { if (isRetouch.value ? !validRetouch.value : !validDesign.value) return; await run(submitDesignRequest, isRetouch.value ? '修图任务已结单。' : '设计源文件与模式已提交审核。') }
 async function returnToDesign() { if (!reason.value) return; await run(() => resourceGroupsApi.auditDecision(props.taskId, props.bundle, 'return_to_design', reason.value), '已打回设计。') }
 async function approve() { if (!validAudit.value) return; await run(() => resourceGroupsApi.auditDecision(props.taskId, props.bundle, 'approve', reason.value, rows.value.map(submission)), '审核通过，任务已结单。') }
 async function reopen() { if (!reason.value) return; await run(() => resourceGroupsApi.reopen(props.taskId, props.bundle, reopenTarget.value, reason.value), '任务已重开。') }

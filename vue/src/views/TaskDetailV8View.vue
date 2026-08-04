@@ -101,6 +101,7 @@
             <ResourceWorkflowPanel
               :task-id="task.id"
               :task-type="task.task_type"
+              :business-lane="task.business_lane"
               :bundle="bundle"
               :reference-count="displayReferenceFiles.length"
               :sku-mode-hints="skuModeHints"
