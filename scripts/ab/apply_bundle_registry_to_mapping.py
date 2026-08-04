@@ -556,6 +556,10 @@ def merge_mapping(
             )
         displaced_alias = revision.pop("source_alias_from_task_asset_id", None)
         revision["source_bundle"] = copy.deepcopy(source_bundles[key])
+        # Proposal-only metadata is consumed once the confirmed immutable
+        # bundle exists. The Go migration contract accepts the resulting
+        # source_bundle snapshot, not its candidate.
+        revision.pop("source_bundle_candidate", None)
         revision.pop("blockers", None)
         revision["confidence"] = "proposed_review"
         revision["confirmed_by"] = 0

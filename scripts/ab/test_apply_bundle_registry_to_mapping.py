@@ -280,6 +280,7 @@ class ApplyBundleRegistryTests(unittest.TestCase):
             self.assertEqual(revision["confirmed_at"], MODULE.ZERO_TIME)
             self.assertEqual(revision["confirmation_note"], "")
             self.assertNotIn("blockers", revision)
+            self.assertNotIn("source_bundle_candidate", revision)
             self.assertNotIn("source_alias_from_task_asset_id", revision)
             self.assertEqual(
                 revision["source_bundle"]["task_asset_id"], 30001 + index
