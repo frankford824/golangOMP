@@ -333,9 +333,26 @@ class FakeDirectOSSFactory:
         )
         self.calls = []
 
-    def __call__(self, host, env_path, timeout):
-        self.calls.append((host, env_path, timeout))
+    def __call__(self, host, env_path, timeout, endpoint_override):
+        self.calls.append((host, env_path, timeout, endpoint_override))
         return self.process
+
+
+class CloningFakeDirectOSSFactory:
+    def __init__(self, responses, config_fingerprint=None):
+        self.responses = responses
+        self.config_fingerprint = config_fingerprint
+        self.calls = []
+        self.processes = []
+
+    def __call__(self, host, env_path, timeout, endpoint_override):
+        self.calls.append((host, env_path, timeout, endpoint_override))
+        process = FakeDirectOSSProcess(
+            self.responses,
+            config_fingerprint=self.config_fingerprint,
+        )
+        self.processes.append(process)
+        return process
 
 
 class BinaryWrapper:
@@ -378,6 +395,74 @@ class HydrateObjectManifestTest(unittest.TestCase):
             encoding="utf-8",
         )
         return path
+
+    def historical_unavailable_row(self):
+        contract = MODULE.historical_unavailable_exception
+        return {
+            "entity_key": contract.ENTITY_KEY,
+            "owner_kind": "task_asset",
+            "owner_id": contract.TASK_ASSET_ID,
+            "task_id": contract.TASK_ID,
+            "storage_ref_id": contract.EXPECTED_STORAGE_REF_ID,
+            "storage_adapter": contract.EXPECTED_STORAGE_ADAPTER,
+            "object_key": contract.EXPECTED_OBJECT_KEY,
+            "size": contract.EXPECTED_SIZE,
+            "mime_type": contract.EXPECTED_MIME_TYPE,
+            "sha256": "",
+            "status": contract.EXPECTED_STATUS,
+            "is_placeholder": False,
+        }
+
+    def write_historical_unavailable_attestation(self, root, manifest):
+        contract = MODULE.historical_unavailable_exception
+        row = self.historical_unavailable_row()
+        mapping_sha = "1" * 64
+        mapping_row_hash = "2" * 64
+        exception = {
+            "entity_key": contract.ENTITY_KEY,
+            "owner_kind": "task_asset",
+            "owner_id": contract.TASK_ASSET_ID,
+            "task_id": contract.TASK_ID,
+            "missing_task_asset_id": contract.TASK_ASSET_ID,
+            "strategy": contract.STRATEGY,
+            "policy_id": contract.POLICY_ID,
+            "expected_http_status": contract.EXPECTED_HTTP_STATUS,
+            "storage_ref_id": contract.EXPECTED_STORAGE_REF_ID,
+            "object_row_sha256": contract.canonical_hash(row),
+            "mapping_row_hash": mapping_row_hash,
+            "expected_file_size": contract.EXPECTED_SIZE,
+            "object_probe_result": contract.EXPECTED_PROBE_RESULT,
+            "object_probe_read_only_get_count": (
+                contract.EXPECTED_PROBE_READ_ONLY_GET_COUNT
+            ),
+            "object_probe_evidence_hash": contract.EXPECTED_PROBE_EVIDENCE_HASH,
+            "object_probe_input_manifest_sha256": (
+                contract.EXPECTED_PROBE_INPUT_MANIFEST_SHA256
+            ),
+            "object_probe_object_key_sha256": (
+                contract.EXPECTED_PROBE_OBJECT_KEY_SHA256
+            ),
+            "working_reference_count": 0,
+            "finalized_reference_count": 0,
+        }
+        attestation = {
+            "schema_version": contract.SCHEMA_VERSION,
+            "status": "PASS",
+            "exception_count": 1,
+            "mapping_sha256": mapping_sha,
+            "mapping_row_hash": mapping_row_hash,
+            "object_manifest_sha256": VERIFIER.sha256_file(manifest),
+            "sql_evidence_sha256": "3" * 64,
+            "api_evidence_sha256": "4" * 64,
+            "exceptions": [exception],
+        }
+        attestation["evidence_hash"] = contract.self_hash(attestation)
+        path = pathlib.Path(root) / "historical-unavailable-exception.json"
+        path.write_text(
+            contract.canonical_json(attestation) + "\n",
+            encoding="utf-8",
+        )
+        return path, attestation
 
     def run_hydrate(self, root, rows, adapter, **kwargs):
         root_path = pathlib.Path(root)
@@ -475,6 +560,228 @@ class HydrateObjectManifestTest(unittest.TestCase):
             self.assertEqual(row["mime_type"], "image/vnd.adobe.photoshop")
         self.assertEqual(hydrated[2], rows[2])
         self.assertEqual(len(checkpoint_value["completed"]), 1)
+
+    def test_exact_historical_unavailable_exception_skips_only_attested_row(self):
+        historical = self.historical_unavailable_row()
+        ordinary = self.row(10, "tasks/7/a.bin")
+        body = b"ordinary"
+        adapter = FakeAdapter({
+            ordinary["object_key"]: (body, "application/octet-stream"),
+        })
+        with tempfile.TemporaryDirectory() as root:
+            rows = [historical, ordinary]
+            manifest = self.write_manifest(root, rows)
+            attestation_path, attestation = (
+                self.write_historical_unavailable_attestation(root, manifest)
+            )
+            output = pathlib.Path(root) / "hydrated.jsonl"
+            result = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                pathlib.Path(root) / "checkpoint.json",
+                VERIFIER.VerifierConfig(upload=adapter),
+                historical_unavailable_exception_path=attestation_path,
+            )
+            hydrated = [
+                json.loads(line)
+                for line in output.read_text(encoding="utf-8").splitlines()
+            ]
+            attestation_sha = VERIFIER.sha256_file(attestation_path)
+
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(adapter.requests, [("GET", ordinary["object_key"])])
+        self.assertEqual(hydrated[0], historical)
+        self.assertEqual(hydrated[1]["sha256"], hashlib.sha256(body).hexdigest())
+        self.assertEqual(
+            result["historical_unavailable_exception_attestation_sha256"],
+            attestation_sha,
+        )
+        self.assertEqual(
+            result["historical_unavailable_exception_mapping_sha256"],
+            attestation["mapping_sha256"],
+        )
+        self.assertEqual(
+            result["historical_unavailable_exception_mapping_row_hash"],
+            attestation["mapping_row_hash"],
+        )
+        self.assertEqual(
+            result["historical_unavailable_exception_count"],
+            1,
+        )
+        self.assertEqual(result["configured_target_row_count"], 1)
+        self.assertEqual(result["read_only_get_count"], 1)
+        self.assertEqual(result["hydrated_row_count"], 1)
+
+    def test_exception_prunes_only_its_sticky_404_from_existing_checkpoint(self):
+        historical = self.historical_unavailable_row()
+        ordinary = self.row(10, "tasks/7/a.bin")
+        missing = urllib.error.HTTPError(
+            "https://secret.invalid", 404, "missing", {}, io.BytesIO()
+        )
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            rows = [historical, ordinary]
+            manifest = self.write_manifest(root, rows)
+            checkpoint = root_path / "checkpoint.json"
+            first_adapter = FakeAdapter({
+                historical["object_key"]: missing,
+                ordinary["object_key"]: (b"ordinary", "application/octet-stream"),
+            })
+            first = MODULE.hydrate_manifest(
+                manifest,
+                root_path / "first.jsonl",
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=first_adapter),
+                checkpoint_every=1,
+            )
+            self.assertEqual(first["status"], "BLOCKED")
+            attestation_path, _attestation = (
+                self.write_historical_unavailable_attestation(root, manifest)
+            )
+            resumed_adapter = FakeAdapter({})
+            output = root_path / "hydrated.jsonl"
+            resumed = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=resumed_adapter),
+                historical_unavailable_exception_path=attestation_path,
+            )
+            hydrated = [
+                json.loads(line)
+                for line in output.read_text(encoding="utf-8").splitlines()
+            ]
+            checkpoint_value = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+        self.assertEqual(resumed["status"], "PASS")
+        self.assertEqual(resumed["resumed_target_count"], 1)
+        self.assertEqual(resumed["resumed_failure_target_count"], 0)
+        self.assertEqual(resumed_adapter.requests, [])
+        self.assertEqual(hydrated[0], historical)
+        self.assertEqual(checkpoint_value["failed"], [])
+        self.assertEqual(len(checkpoint_value["completed"]), 1)
+
+    def test_exception_does_not_exempt_any_other_empty_sha_row(self):
+        historical = self.historical_unavailable_row()
+        ordinary = self.row(10, "tasks/7/a.bin")
+        missing = urllib.error.HTTPError(
+            "https://secret.invalid", 404, "missing", {}, io.BytesIO()
+        )
+        adapter = FakeAdapter({ordinary["object_key"]: missing})
+        with tempfile.TemporaryDirectory() as root:
+            manifest = self.write_manifest(root, [historical, ordinary])
+            attestation_path, _attestation = (
+                self.write_historical_unavailable_attestation(root, manifest)
+            )
+            result = MODULE.hydrate_manifest(
+                manifest,
+                pathlib.Path(root) / "hydrated.jsonl",
+                pathlib.Path(root) / "checkpoint.json",
+                VERIFIER.VerifierConfig(upload=adapter),
+                historical_unavailable_exception_path=attestation_path,
+            )
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(adapter.requests, [("GET", ordinary["object_key"])])
+        self.assertEqual(result["failure_count"], 1)
+
+    def test_invalid_exception_fails_before_any_remote_read(self):
+        historical = self.historical_unavailable_row()
+        adapter = FakeAdapter({
+            historical["object_key"]: (b"unexpected", "application/octet-stream"),
+        })
+        with tempfile.TemporaryDirectory() as root:
+            manifest = self.write_manifest(root, [historical])
+            attestation_path, attestation = (
+                self.write_historical_unavailable_attestation(root, manifest)
+            )
+            attestation["mapping_row_hash"] = "9" * 64
+            attestation_path.write_text(json.dumps(attestation), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "historical-unavailable attestation"
+            ):
+                MODULE.hydrate_manifest(
+                    manifest,
+                    pathlib.Path(root) / "hydrated.jsonl",
+                    pathlib.Path(root) / "checkpoint.json",
+                    VERIFIER.VerifierConfig(upload=adapter),
+                    historical_unavailable_exception_path=attestation_path,
+                )
+        self.assertEqual(adapter.requests, [])
+
+    def test_cli_accepts_exact_historical_unavailable_exception(self):
+        historical = self.historical_unavailable_row()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, [historical])
+            attestation_path, attestation = (
+                self.write_historical_unavailable_attestation(root, manifest)
+            )
+            output = root_path / "hydrated.jsonl"
+            evidence = root_path / "evidence.json"
+            checkpoint = root_path / "checkpoint.json"
+            exit_code = MODULE.main([
+                str(manifest),
+                str(output),
+                str(evidence),
+                "--checkpoint", str(checkpoint),
+                "--historical-unavailable-exception", str(attestation_path),
+            ])
+            result = json.loads(evidence.read_text(encoding="utf-8"))
+            hydrated = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["read_only_get_count"], 0)
+        self.assertEqual(result["historical_unavailable_exception_count"], 1)
+        self.assertEqual(
+            result["historical_unavailable_exception_mapping_sha256"],
+            attestation["mapping_sha256"],
+        )
+        self.assertEqual(hydrated, historical)
+
+    def test_cli_rejects_exception_path_collision_without_mutating_manifest(self):
+        historical = self.historical_unavailable_row()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, [historical])
+            original = manifest.read_bytes()
+            evidence = root_path / "evidence.json"
+            exit_code = MODULE.main([
+                str(manifest),
+                str(root_path / "hydrated.jsonl"),
+                str(evidence),
+                "--checkpoint", str(root_path / "checkpoint.json"),
+                "--historical-unavailable-exception", str(manifest),
+            ])
+            result = json.loads(evidence.read_text(encoding="utf-8"))
+            persisted = manifest.read_bytes()
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("paths must differ", result["failures"][0]["detail"])
+        self.assertEqual(persisted, original)
+
+    def test_cli_does_not_overwrite_exception_when_it_collides_with_evidence(self):
+        historical = self.historical_unavailable_row()
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, [historical])
+            attestation_path, _attestation = (
+                self.write_historical_unavailable_attestation(root, manifest)
+            )
+            original = attestation_path.read_bytes()
+            exit_code = MODULE.main([
+                str(manifest),
+                str(root_path / "hydrated.jsonl"),
+                str(attestation_path),
+                "--checkpoint", str(root_path / "checkpoint.json"),
+                "--historical-unavailable-exception", str(attestation_path),
+            ])
+            persisted = attestation_path.read_bytes()
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(persisted, original)
 
     def test_parallel_cloneable_adapter_hashes_with_independent_workers(self):
         objects = {
@@ -1155,7 +1462,11 @@ class HydrateObjectManifestTest(unittest.TestCase):
         self.assertFalse(output.exists())
 
     def direct_oss_adapter(
-        self, responses, interrupt_on=None, config_fingerprint=None
+        self,
+        responses,
+        interrupt_on=None,
+        config_fingerprint=None,
+        endpoint_override="",
     ):
         factory = FakeDirectOSSFactory(
             responses,
@@ -1166,6 +1477,7 @@ class HydrateObjectManifestTest(unittest.TestCase):
             "jst_ecs",
             "/root/ecommerce_ai/shared/main.env",
             5,
+            endpoint_override,
             process_factory=factory,
         )
         return adapter, factory
@@ -1316,6 +1628,82 @@ class HydrateObjectManifestTest(unittest.TestCase):
                 )
             changed.close()
 
+    def test_direct_oss_endpoint_override_reuses_existing_checkpoint(self):
+        objects = {
+            "tasks/7/a.bin": (200, b"a", "application/octet-stream"),
+        }
+        with tempfile.TemporaryDirectory() as root:
+            original, _original_factory = self.direct_oss_adapter(objects)
+            first, output, checkpoint = self.run_hydrate(
+                root,
+                [self.row(10, "tasks/7/a.bin")],
+                original,
+            )
+            original.close()
+            internal, internal_factory = self.direct_oss_adapter(
+                objects,
+                endpoint_override=(
+                    "oss-cn-hangzhou-internal.aliyuncs.com"
+                ),
+            )
+            second = MODULE.hydrate_manifest(
+                self.write_manifest(root, [self.row(10, "tasks/7/a.bin")]),
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=internal),
+            )
+            internal.close()
+            persisted = (
+                json.dumps(second)
+                + checkpoint.read_text(encoding="utf-8")
+            )
+        self.assertEqual(first["status"], "PASS")
+        self.assertEqual(second["status"], "PASS")
+        self.assertEqual(second["resumed_target_count"], 1)
+        self.assertEqual(internal_factory.process.frames, [])
+        self.assertNotIn(
+            "oss-cn-hangzhou-internal.aliyuncs.com", persisted
+        )
+
+    def test_direct_oss_clone_and_parallel_workers_preserve_override(self):
+        objects = {
+            "tasks/7/a.bin": (200, b"a", "application/octet-stream"),
+            "tasks/7/b.bin": (200, b"b", "application/octet-stream"),
+        }
+        endpoint_override = "oss-cn-hangzhou-internal.aliyuncs.com"
+        factory = CloningFakeDirectOSSFactory(objects)
+        adapter = MODULE.PersistentSSHDirectOSSAdapter(
+            "jst_ecs",
+            "/root/ecommerce_ai/shared/main.env",
+            5,
+            endpoint_override,
+            process_factory=factory,
+        )
+        clone = adapter.clone()
+        self.assertEqual(clone.endpoint_override, endpoint_override)
+        clone.close()
+        with tempfile.TemporaryDirectory() as root:
+            result, _output, checkpoint = self.run_hydrate(
+                root,
+                [
+                    self.row(10, "tasks/7/a.bin"),
+                    self.row(11, "tasks/7/b.bin"),
+                ],
+                adapter,
+                workers=2,
+            )
+            adapter.close()
+            persisted = (
+                json.dumps(result)
+                + checkpoint.read_text(encoding="utf-8")
+            )
+        self.assertEqual(result["status"], "PASS")
+        self.assertGreaterEqual(len(factory.calls), 2)
+        self.assertTrue(
+            all(call[3] == endpoint_override for call in factory.calls)
+        )
+        self.assertNotIn(endpoint_override, persisted)
+
     def test_direct_oss_helper_and_command_contain_no_config_values(self):
         compile(MODULE.REMOTE_DIRECT_OSS_HELPER, "<remote-direct-oss-helper>", "exec")
         command = MODULE.remote_direct_oss_command(
@@ -1325,6 +1713,176 @@ class HydrateObjectManifestTest(unittest.TestCase):
         self.assertNotIn("OSS_ACCESS_KEY_SECRET=", command)
         self.assertNotIn("OSS_ENDPOINT=", command)
         self.assertNotIn("OSS_BUCKET=", command)
+
+    def test_direct_oss_cli_requires_explicit_valid_override(self):
+        args = MODULE.parse_args([
+            "input.jsonl",
+            "output.jsonl",
+            "evidence.json",
+            "--checkpoint", "checkpoint.json",
+            "--ssh-direct-oss",
+            "--ssh-host", "jst_ecs",
+            "--ssh-env-file", "/root/main.env",
+            "--ssh-direct-oss-endpoint-override",
+            "oss-cn-hangzhou-internal.aliyuncs.com",
+        ])
+        adapter = MODULE.upload_adapter_from_args(args)
+        self.assertIsInstance(
+            adapter, MODULE.PersistentSSHDirectOSSAdapter
+        )
+        self.assertEqual(
+            adapter.endpoint_override,
+            "oss-cn-hangzhou-internal.aliyuncs.com",
+        )
+        with self.assertRaisesRegex(ValueError, "requires --ssh-direct-oss"):
+            MODULE.upload_adapter_from_args(
+                MODULE.parse_args([
+                    "input.jsonl",
+                    "output.jsonl",
+                    "evidence.json",
+                    "--checkpoint", "checkpoint.json",
+                    "--ssh-direct-oss-endpoint-override",
+                    "oss-cn-hangzhou-internal.aliyuncs.com",
+                ])
+            )
+
+    def test_direct_oss_override_rejects_non_bare_or_arbitrary_hosts_locally(self):
+        unsafe = (
+            "https://oss-cn-hangzhou-internal.aliyuncs.com",
+            "user@oss-cn-hangzhou-internal.aliyuncs.com",
+            "oss-cn-hangzhou-internal.aliyuncs.com/path",
+            "oss-cn-hangzhou-internal.aliyuncs.com?x=1",
+            "example.com",
+            "oss-cn-hangzhou.aliyuncs.com",
+        )
+        for value in unsafe:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError, "bare Aliyun internal regional endpoint"
+                ):
+                    MODULE.PersistentSSHDirectOSSAdapter(
+                        "jst_ecs", "/root/main.env", 5, value
+                    )
+
+    def execute_direct_oss_helper(self, env_text, endpoint_override):
+        request = json.dumps(
+            {
+                "max_object_bytes": 1024,
+                "object_key": "tasks/7/a.bin",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        stdin = io.BytesIO(
+            struct.pack("!I", len(request))
+            + request
+            + struct.pack("!I", 0)
+        )
+        stdout = io.BytesIO()
+        opener = FakeRemoteOpener(
+            body=b"direct-body",
+            mime="application/octet-stream",
+        )
+        with (
+            mock.patch.object(
+                pathlib.Path,
+                "open",
+                return_value=io.StringIO(env_text),
+            ),
+            mock.patch.object(
+                urllib.request, "build_opener", return_value=opener
+            ),
+            mock.patch.object(sys, "stdin", BinaryWrapper(stdin)),
+            mock.patch.object(sys, "stdout", BinaryWrapper(stdout)),
+            mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "helper",
+                    "/root/ecommerce_ai/shared/main.env",
+                    "5",
+                    endpoint_override,
+                ],
+            ),
+        ):
+            exec(
+                MODULE.REMOTE_DIRECT_OSS_HELPER,
+                {"__name__": "__main__"},
+            )
+        output = stdout.getvalue()
+        frames = []
+        offset = 0
+        while offset < len(output):
+            length = struct.unpack("!I", output[offset:offset + 4])[0]
+            offset += 4
+            frames.append(
+                json.loads(output[offset:offset + length].decode("utf-8"))
+            )
+            offset += length
+        return opener, frames, output
+
+    def test_direct_oss_helper_uses_only_same_region_internal_route(self):
+        env_text = (
+            "OSS_ACCESS_KEY_ID=access-key-secret\n"
+            "OSS_ACCESS_KEY_SECRET=signing-secret\n"
+            "OSS_BUCKET=test-bucket\n"
+            "OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com\n"
+            "UPLOAD_STORAGE_PROVIDER=oss\n"
+        )
+        public_opener, public_frames, _public_output = (
+            self.execute_direct_oss_helper(env_text, "")
+        )
+        internal_opener, internal_frames, internal_output = (
+            self.execute_direct_oss_helper(
+                env_text,
+                "oss-cn-hangzhou-internal.aliyuncs.com",
+            )
+        )
+        self.assertEqual(
+            public_frames[0]["config_fingerprint_sha256"],
+            internal_frames[0]["config_fingerprint_sha256"],
+        )
+        self.assertEqual(
+            urllib.parse.urlsplit(
+                public_opener.requests[0][0].full_url
+            ).hostname,
+            "test-bucket.oss-cn-hangzhou.aliyuncs.com",
+        )
+        self.assertEqual(
+            urllib.parse.urlsplit(
+                internal_opener.requests[0][0].full_url
+            ).hostname,
+            "test-bucket.oss-cn-hangzhou-internal.aliyuncs.com",
+        )
+        self.assertNotIn(b"access-key-secret", internal_output)
+        self.assertNotIn(b"signing-secret", internal_output)
+        self.assertNotIn(b"oss-cn-hangzhou", internal_output)
+
+    def test_direct_oss_helper_rejects_cross_region_and_non_exact_source(self):
+        base = (
+            "OSS_ACCESS_KEY_ID=id\n"
+            "OSS_ACCESS_KEY_SECRET=secret\n"
+            "OSS_BUCKET=bucket\n"
+            "UPLOAD_STORAGE_PROVIDER=oss\n"
+        )
+        with self.assertRaisesRegex(ValueError, "same-region"):
+            self.execute_direct_oss_helper(
+                base + "OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com\n",
+                "oss-cn-shanghai-internal.aliyuncs.com",
+            )
+        for source in (
+            "https://oss-cn-hangzhou.aliyuncs.com",
+            "oss-cn-hangzhou.aliyuncs.com/path",
+            "oss-cn-hangzhou-internal.aliyuncs.com",
+        ):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(
+                    ValueError, "exact public regional endpoint"
+                ):
+                    self.execute_direct_oss_helper(
+                        base + f"OSS_ENDPOINT={source}\n",
+                        "oss-cn-hangzhou-internal.aliyuncs.com",
+                    )
 
     def test_ssh_configuration_rejects_shell_injection_shapes(self):
         with self.assertRaisesRegex(ValueError, "host alias"):

@@ -26,7 +26,7 @@ except ModuleNotFoundError:  # Direct execution from scripts/ab.
 
 SCHEMA_VERSION = 1
 ZERO_SHA256 = "0" * 64
-HYDRATION_FIELDS = {
+LEGACY_HYDRATION_FIELDS = {
     "schema_version",
     "status",
     "input_manifest_sha256",
@@ -46,6 +46,22 @@ HYDRATION_FIELDS = {
     "failures",
     "evidence_hash",
 }
+HYDRATION_RETRY_FIELDS = {
+    "retried_transient_failure_target_count",
+    "retried_authorized_failure_target_count",
+    "failure_retry_authorization_sha256",
+}
+HYDRATION_EXCEPTION_FIELDS = {
+    "historical_unavailable_exception_attestation_sha256",
+    "historical_unavailable_exception_mapping_sha256",
+    "historical_unavailable_exception_mapping_row_hash",
+    "historical_unavailable_exception_count",
+}
+CURRENT_HYDRATION_FIELDS = (
+    LEGACY_HYDRATION_FIELDS
+    | HYDRATION_RETRY_FIELDS
+    | HYDRATION_EXCEPTION_FIELDS
+)
 
 
 class VerificationError(ValueError):
@@ -255,7 +271,15 @@ def load_hydration_evidence(path: pathlib.Path) -> tuple[dict[str, Any], str]:
             "force_reverify.hydration_evidence_invalid",
             "hydration evidence is not valid UTF-8 JSON",
         ) from exc
-    if not isinstance(payload, dict) or set(payload) != HYDRATION_FIELDS:
+    allowed_fields = {
+        frozenset(LEGACY_HYDRATION_FIELDS),
+        frozenset(LEGACY_HYDRATION_FIELDS | HYDRATION_RETRY_FIELDS),
+        frozenset(CURRENT_HYDRATION_FIELDS),
+    }
+    if (
+        not isinstance(payload, dict)
+        or frozenset(payload) not in allowed_fields
+    ):
         raise VerificationError(
             "force_reverify.hydration_evidence_invalid",
             "hydration evidence field contract differs",
@@ -372,6 +396,37 @@ def verify(
         exception_count = 1 if exception is not None else 0
         available_count = row_count - exception_count
         target_count = len(unique_targets)
+        current_hydration_contract = (
+            set(hydration) == CURRENT_HYDRATION_FIELDS
+        )
+        if exception is not None and not current_hydration_contract:
+            raise VerificationError(
+                "force_reverify.hydration_exception_binding",
+                "exception hydration evidence lacks the exact attestation binding",
+            )
+        if current_hydration_contract:
+            expected_exception_values = {
+                "historical_unavailable_exception_attestation_sha256": (
+                    exception_evidence_sha
+                    if exception is not None
+                    else ZERO_SHA256
+                ),
+                "historical_unavailable_exception_mapping_sha256": (
+                    mapping_sha if exception is not None else ZERO_SHA256
+                ),
+                "historical_unavailable_exception_mapping_row_hash": (
+                    mapping_row_hash if exception is not None else ZERO_SHA256
+                ),
+                "historical_unavailable_exception_count": exception_count,
+            }
+            if any(
+                hydration.get(field) != expected
+                for field, expected in expected_exception_values.items()
+            ):
+                raise VerificationError(
+                    "force_reverify.hydration_exception_binding",
+                    "hydration evidence exception binding differs from the attestation",
+                )
         if hydration.get("schema_version") != 1:
             raise VerificationError(
                 "force_reverify.hydration_evidence_invalid",
@@ -404,8 +459,8 @@ def verify(
             )
         expected_counts = {
             "row_count": row_count,
-            "already_complete_count": exception_count,
-            "missing_sha256_count": available_count,
+            "already_complete_count": 0,
+            "missing_sha256_count": row_count,
             "configured_target_row_count": available_count,
             "unique_target_count": target_count,
             "resumed_failure_target_count": 0,
@@ -417,6 +472,29 @@ def verify(
             require_count(hydration, field, expected)
         resumed_count = read_count(hydration, "resumed_target_count")
         get_count = read_count(hydration, "read_only_get_count")
+        if HYDRATION_RETRY_FIELDS.issubset(hydration):
+            retried_transient = read_count(
+                hydration, "retried_transient_failure_target_count"
+            )
+            retried_authorized = read_count(
+                hydration, "retried_authorized_failure_target_count"
+            )
+            authorization_sha = hydration.get(
+                "failure_retry_authorization_sha256"
+            )
+            if (
+                not isinstance(authorization_sha, str)
+                or not verifier.SHA256.fullmatch(authorization_sha)
+                or (
+                    (authorization_sha == ZERO_SHA256)
+                    != (retried_authorized == 0)
+                )
+                or retried_transient + retried_authorized > get_count
+            ):
+                raise VerificationError(
+                    "force_reverify.hydration_retry_binding",
+                    "hydration retry evidence is internally inconsistent",
+                )
         if resumed_count + get_count != target_count:
             raise VerificationError(
                 "force_reverify.hydration_count_mismatch",

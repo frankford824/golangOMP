@@ -67,6 +67,13 @@ HYDRATION_FIELDS = {
     "failures",
     "evidence_hash",
 }
+HYDRATION_EXCEPTION_FIELDS = {
+    "historical_unavailable_exception_attestation_sha256",
+    "historical_unavailable_exception_mapping_sha256",
+    "historical_unavailable_exception_mapping_row_hash",
+    "historical_unavailable_exception_count",
+}
+CURRENT_HYDRATION_FIELDS = HYDRATION_FIELDS | HYDRATION_EXCEPTION_FIELDS
 OBJECT_VERDICT_FIELDS = {
     "schema_version",
     "status",
@@ -356,9 +363,17 @@ def verify_remote_hydration(
     remote_rows: list[dict[str, Any]],
     evidence_path: pathlib.Path,
     checkpoint_path: pathlib.Path,
+    *,
+    exception_row: dict[str, Any] | None = None,
+    exception_attestation: dict[str, Any] | None = None,
+    exception_attestation_sha: str = ZERO_SHA256,
 ) -> tuple[dict[str, Any], str, str, str]:
     evidence, evidence_sha = read_json(evidence_path, "hydration evidence")
-    if set(evidence) != HYDRATION_FIELDS:
+    evidence_fields = set(evidence)
+    if frozenset(evidence_fields) not in {
+        frozenset(HYDRATION_FIELDS),
+        frozenset(CURRENT_HYDRATION_FIELDS),
+    }:
         raise AdjudicationError(
             "g06.hydration_contract", "hydration evidence field contract differs"
         )
@@ -380,17 +395,54 @@ def verify_remote_hydration(
             "g06.hydration_input_hash",
             "hydration evidence is not bound to the supplied input",
         )
-    if len(input_rows) != len(remote_rows):
+    input_exception_rows = [
+        row
+        for row in input_rows
+        if row["entity_key"] == historical.ENTITY_KEY
+    ]
+    if len(input_exception_rows) > 1:
+        raise AdjudicationError(
+            "g06.hydration_exception_count",
+            "hydration input contains duplicate historical exceptions",
+        )
+    has_exception_input = len(input_exception_rows) == 1
+    if has_exception_input and (
+        exception_row is None
+        or exception_attestation is None
+        or input_exception_rows[0] != exception_row
+    ):
+        raise AdjudicationError(
+            "g06.hydration_exception_binding",
+            "hydration input exception differs from the attested final row",
+        )
+    expected_final_by_entity = {
+        row["entity_key"]: row for row in remote_rows
+    }
+    if has_exception_input:
+        expected_final_by_entity[historical.ENTITY_KEY] = exception_row
+    if (
+        len(input_rows) != len(expected_final_by_entity)
+        or {row["entity_key"] for row in input_rows}
+        != set(expected_final_by_entity)
+    ):
         raise AdjudicationError(
             "g06.remote_row_count",
-            "hydration input and finalized remote subset row counts differ",
+            "hydration input and finalized hydration subset identities differ",
         )
-    for index, (source, final) in enumerate(zip(input_rows, remote_rows), 1):
-        if source["entity_key"] != final["entity_key"]:
-            raise AdjudicationError(
-                "g06.remote_entity_order",
-                f"remote entity order differs at row {index}",
-            )
+    expected_final_rows = [
+        expected_final_by_entity[source["entity_key"]]
+        for source in input_rows
+    ]
+    for index, (source, final) in enumerate(
+        zip(input_rows, expected_final_rows), 1
+    ):
+        if source["entity_key"] == historical.ENTITY_KEY:
+            if source != final:
+                raise AdjudicationError(
+                    "g06.hydration_exception_binding",
+                    "hydration changed the historical exception row",
+                )
+            continue
         for field in object_verifier.REQUIRED_FIELDS - HYDRATABLE_FIELDS:
             if source[field] != final[field]:
                 raise AdjudicationError(
@@ -404,29 +456,71 @@ def verify_remote_hydration(
                         "g06.remote_complete_drift",
                         f"hydration changed reviewed field {source['entity_key']}.{field}",
                     )
-    remote_sha = sha256_bytes(canonical_jsonl(remote_rows))
+    remote_sha = sha256_bytes(canonical_jsonl(expected_final_rows))
     if evidence.get("hydrated_manifest_sha256") != remote_sha:
         raise AdjudicationError(
             "g06.hydration_output_hash",
             "hydration output is not the finalized remote manifest subset",
         )
 
+    current_hydration_contract = (
+        evidence_fields == CURRENT_HYDRATION_FIELDS
+    )
+    if has_exception_input and not current_hydration_contract:
+        raise AdjudicationError(
+            "g06.hydration_exception_binding",
+            "exception hydration evidence lacks the exact attestation binding",
+        )
+    expected_exception_values = {
+        "historical_unavailable_exception_attestation_sha256": (
+            exception_attestation_sha if has_exception_input else ZERO_SHA256
+        ),
+        "historical_unavailable_exception_mapping_sha256": (
+            exception_attestation["mapping_sha256"]
+            if has_exception_input and exception_attestation is not None
+            else ZERO_SHA256
+        ),
+        "historical_unavailable_exception_mapping_row_hash": (
+            exception_attestation["mapping_row_hash"]
+            if has_exception_input and exception_attestation is not None
+            else ZERO_SHA256
+        ),
+        "historical_unavailable_exception_count": (
+            1 if has_exception_input else 0
+        ),
+    }
+    if current_hydration_contract and any(
+        evidence.get(field) != expected
+        for field, expected in expected_exception_values.items()
+    ):
+        raise AdjudicationError(
+            "g06.hydration_exception_binding",
+            "hydration evidence exception binding differs from the attestation",
+        )
+
     complete_count = sum(bool(row["sha256"]) for row in input_rows)
     missing_count = len(input_rows) - complete_count
+    target_rows = [
+        row
+        for row in input_rows
+        if (
+            not row["sha256"]
+            and row["entity_key"] != historical.ENTITY_KEY
+        )
+    ]
     unique_targets = {
         (target_kind(row["storage_adapter"]), row["object_key"])
-        for row in input_rows
-        if not row["sha256"]
+        for row in target_rows
     }
     expected_counts = {
         "row_count": len(input_rows),
         "already_complete_count": complete_count,
         "missing_sha256_count": missing_count,
-        "configured_target_row_count": missing_count,
+        "configured_target_row_count": len(target_rows),
         "unique_target_count": len(unique_targets),
         "resumed_failure_target_count": 0,
-        "hydrated_row_count": missing_count,
-        "deduplicated_get_count": missing_count - len(unique_targets),
+        "hydrated_row_count": len(target_rows),
+        "deduplicated_get_count": len(target_rows) - len(unique_targets),
         "failure_count": 0,
     }
     for field, expected in expected_counts.items():
@@ -498,8 +592,8 @@ def verify_remote_hydration(
             "rebased hydration checkpoint contract differs",
         ) from exc
     expected_metadata: dict[str, tuple[int, str, str]] = {}
-    for source, final in zip(input_rows, remote_rows):
-        if source["sha256"]:
+    for source, final in zip(input_rows, expected_final_rows):
+        if source["sha256"] or source["entity_key"] == historical.ENTITY_KEY:
             continue
         key = hydrator.checkpoint_key(
             target_kind(source["storage_adapter"]), source["object_key"]
@@ -903,7 +997,7 @@ def adjudicate(
                 "g06.final_manifest_hash",
                 "final manifest SHA-256 differs from the finalized boundary",
             )
-        remote, bundles, recoveries, _exception_row = split_final_rows(final_rows)
+        remote, bundles, recoveries, exception_row = split_final_rows(final_rows)
         remote_count, bundle_count, recovery_count, exception_count, final_count = (
             len(remote),
             len(bundles),
@@ -933,6 +1027,22 @@ def adjudicate(
                 "g06.hydration_input_hash",
                 "hydration input SHA-256 differs from the prepared boundary",
             )
+        (
+            hydration_exception_attestation,
+            hydration_exception,
+            hydration_exception_attestation_sha,
+        ) = historical.load_attestation(
+            exception_path
+        )
+        if (
+            hydration_exception["entity_key"] != exception_row["entity_key"]
+            or hydration_exception["object_row_sha256"]
+            != historical.canonical_hash(exception_row)
+        ):
+            raise AdjudicationError(
+                "g06.hydration_exception_binding",
+                "hydration exception attestation identifies a different row",
+            )
         _hydration, hydration_evidence_sha, remote_sha, checkpoint_sha = (
             verify_remote_hydration(
                 hydration_input,
@@ -940,19 +1050,31 @@ def adjudicate(
                 remote,
                 hydration_evidence_path,
                 hydration_checkpoint_path,
+                exception_row=exception_row,
+                exception_attestation=hydration_exception_attestation,
+                exception_attestation_sha=(
+                    hydration_exception_attestation_sha
+                ),
             )
         )
         hashes["hydration_evidence_sha256"] = hydration_evidence_sha
         hashes["remote_hydrated_manifest_sha256"] = remote_sha
         hashes["hydration_checkpoint_sha256"] = checkpoint_sha
+        frozen_hydration_exception_count = _hydration.get(
+            "historical_unavailable_exception_count", 0
+        )
         if require_frozen and (
-            _hydration.get("missing_sha256_count") != 9867
+            frozen_hydration_exception_count not in {0, 1}
+            or _hydration.get("missing_sha256_count")
+            != 9867 + frozen_hydration_exception_count
             or _hydration.get("configured_target_row_count") != 9867
+            or _hydration.get("hydrated_row_count") != 9867
             or _hydration.get("unique_target_count") != 8829
         ):
             raise AdjudicationError(
                 "g06.frozen_hydration_count",
-                "frozen hydration must be missing=9867 and unique=8829",
+                "frozen hydration must target 9867 available rows and may "
+                "add exactly one bound historical exception to missing SHA",
             )
         bundle_verdict_sha, bundle_manifest_sha = verify_bundle_verdict(
             bundles, bundle_verdict_path

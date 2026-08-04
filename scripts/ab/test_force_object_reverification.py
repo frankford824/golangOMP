@@ -67,6 +67,7 @@ def hydration_evidence(
     get_count: int | None = None,
     resumed_count: int = 0,
     exception_count: int = 0,
+    exception_path: pathlib.Path | None = None,
 ) -> dict:
     available_count = row_count - exception_count
     value = {
@@ -76,8 +77,8 @@ def hydration_evidence(
         "hydrated_manifest_sha256": PREPARE.sha256_file(hydrated),
         "checkpoint_sha256": hashlib.sha256(b"checkpoint").hexdigest(),
         "row_count": row_count,
-        "already_complete_count": exception_count,
-        "missing_sha256_count": available_count,
+        "already_complete_count": 0,
+        "missing_sha256_count": row_count,
         "configured_target_row_count": available_count,
         "unique_target_count": unique_targets,
         "resumed_target_count": resumed_count,
@@ -90,6 +91,27 @@ def hydration_evidence(
         "failure_count": 0,
         "failures": [],
     }
+    if exception_path is not None:
+        attestation, _exception, attestation_sha = EXCEPTION.load_attestation(
+            exception_path
+        )
+        value.update(
+            {
+                "retried_transient_failure_target_count": 0,
+                "retried_authorized_failure_target_count": 0,
+                "failure_retry_authorization_sha256": VERIFY.ZERO_SHA256,
+                "historical_unavailable_exception_attestation_sha256": (
+                    attestation_sha
+                ),
+                "historical_unavailable_exception_mapping_sha256": (
+                    attestation["mapping_sha256"]
+                ),
+                "historical_unavailable_exception_mapping_row_hash": (
+                    attestation["mapping_row_hash"]
+                ),
+                "historical_unavailable_exception_count": exception_count,
+            }
+        )
     value["evidence_hash"] = hashlib.sha256(
         VERIFY.canonical_json(value).encode("utf-8")
     ).hexdigest()
@@ -221,6 +243,7 @@ class ForceObjectReverificationTest(unittest.TestCase):
             row_count=2,
             unique_targets=1,
             exception_count=1,
+            exception_path=exception_path,
         )
         evidence.write_text(
             VERIFY.canonical_json(payload) + "\n", encoding="utf-8"
@@ -245,6 +268,44 @@ class ForceObjectReverificationTest(unittest.TestCase):
                     VERIFY.canonical_json(unsigned).encode("utf-8")
                 ).hexdigest(),
             )
+
+    def test_current_zero_exception_fields_keep_no_exception_evidence_compatible(self):
+        with tempfile.TemporaryDirectory() as raw:
+            reviewed, force, hydrated, evidence, _rows = (
+                self.make_pass_documents(pathlib.Path(raw))
+            )
+            payload = json.loads(evidence.read_text(encoding="utf-8"))
+            payload.update(
+                {
+                    "retried_transient_failure_target_count": 0,
+                    "retried_authorized_failure_target_count": 0,
+                    "failure_retry_authorization_sha256": VERIFY.ZERO_SHA256,
+                    "historical_unavailable_exception_attestation_sha256": (
+                        VERIFY.ZERO_SHA256
+                    ),
+                    "historical_unavailable_exception_mapping_sha256": (
+                        VERIFY.ZERO_SHA256
+                    ),
+                    "historical_unavailable_exception_mapping_row_hash": (
+                        VERIFY.ZERO_SHA256
+                    ),
+                    "historical_unavailable_exception_count": 0,
+                }
+            )
+            payload["evidence_hash"] = hashlib.sha256(
+                VERIFY.canonical_json(
+                    {
+                        key: value
+                        for key, value in payload.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            ).hexdigest()
+            evidence.write_text(
+                VERIFY.canonical_json(payload) + "\n", encoding="utf-8"
+            )
+            result = VERIFY.verify(reviewed, force, hydrated, evidence)
+        self.assertEqual("PASS", result["status"])
 
     def test_hydrated_row_tampering_blocks(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -407,6 +468,68 @@ class ForceObjectReverificationTest(unittest.TestCase):
         self.assertEqual("BLOCKED", result["status"])
         self.assertEqual(
             "force_reverify.exception_invalid",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_hydration_exception_binding_must_match_exact_attestation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            reviewed, force, hydrated, evidence, exception, _rows = (
+                self.make_exception_documents(pathlib.Path(raw))
+            )
+            payload = json.loads(evidence.read_text(encoding="utf-8"))
+            payload[
+                "historical_unavailable_exception_mapping_row_hash"
+            ] = "9" * 64
+            payload["evidence_hash"] = hashlib.sha256(
+                VERIFY.canonical_json(
+                    {
+                        key: value
+                        for key, value in payload.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            ).hexdigest()
+            evidence.write_text(
+                VERIFY.canonical_json(payload) + "\n", encoding="utf-8"
+            )
+            result = VERIFY.verify(
+                reviewed, force, hydrated, evidence, exception
+            )
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "force_reverify.hydration_exception_binding",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_legacy_hydration_evidence_cannot_authorize_an_exception(self):
+        with tempfile.TemporaryDirectory() as raw:
+            reviewed, force, hydrated, evidence, exception, _rows = (
+                self.make_exception_documents(pathlib.Path(raw))
+            )
+            payload = json.loads(evidence.read_text(encoding="utf-8"))
+            for field in (
+                VERIFY.HYDRATION_RETRY_FIELDS
+                | VERIFY.HYDRATION_EXCEPTION_FIELDS
+            ):
+                payload.pop(field)
+            payload["evidence_hash"] = hashlib.sha256(
+                VERIFY.canonical_json(
+                    {
+                        key: value
+                        for key, value in payload.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            ).hexdigest()
+            evidence.write_text(
+                VERIFY.canonical_json(payload) + "\n", encoding="utf-8"
+            )
+            result = VERIFY.verify(
+                reviewed, force, hydrated, evidence, exception
+            )
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "force_reverify.hydration_exception_binding",
             result["violations"][0]["violation_code"],
         )
 

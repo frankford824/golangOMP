@@ -31,8 +31,10 @@ from typing import Any, BinaryIO, Callable
 
 try:
     from scripts.ab import object_manifest_verifier as verifier
+    from scripts.ab import historical_unavailable_exception
 except ModuleNotFoundError:  # Direct execution from scripts/ab.
     import object_manifest_verifier as verifier
+    import historical_unavailable_exception
 
 
 SCHEMA_VERSION = 1
@@ -46,6 +48,9 @@ MAX_PROTOCOL_HEADER = 64 * 1024
 MAX_PROTOCOL_OBJECT_KEY = 64 * 1024
 SSH_HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 REMOTE_PATH = re.compile(r"^/[A-Za-z0-9._/-]+$")
+DIRECT_OSS_INTERNAL_ENDPOINT = re.compile(
+    r"^oss-[a-z0-9]+(?:-[a-z0-9]+)*-internal\.aliyuncs\.com$"
+)
 SAFE_CHECKPOINT_FAILURE_DETAILS = {
     "timeout",
     "tls_error",
@@ -358,6 +363,20 @@ def endpoint_origin(endpoint_value, bucket):
         host = bucket + "." + host
     return parsed.scheme + "://" + host
 
+def endpoint_with_override(endpoint_value, override_value):
+    if not override_value:
+        return endpoint_value
+    public = re.fullmatch(
+        r"oss-([a-z0-9]+(?:-[a-z0-9]+)*)\.aliyuncs\.com",
+        endpoint_value,
+    )
+    if public is None or "internal" in public.group(1).split("-"):
+        raise ValueError("OSS endpoint is not an exact public regional endpoint")
+    expected = "oss-" + public.group(1) + "-internal.aliyuncs.com"
+    if override_value != expected:
+        raise ValueError("OSS endpoint override is not the same-region internal endpoint")
+    return override_value
+
 def safe_error_detail(exc):
     if isinstance(exc, (TimeoutError, socket.timeout)):
         return "timeout"
@@ -388,13 +407,17 @@ def error_frame(status, detail):
 
 env_path = sys.argv[1]
 timeout = float(sys.argv[2])
+endpoint_override = sys.argv[3]
 if timeout <= 0 or timeout > 3600:
     raise ValueError("invalid timeout")
 config = load_env(env_path)
 bucket = config["OSS_BUCKET"]
 access_key_id = config["OSS_ACCESS_KEY_ID"]
 access_key_secret = config["OSS_ACCESS_KEY_SECRET"]
-origin = endpoint_origin(config["OSS_ENDPOINT"], bucket)
+route_endpoint = endpoint_with_override(
+    config["OSS_ENDPOINT"], endpoint_override
+)
+origin = endpoint_origin(route_endpoint, bucket)
 fingerprint_source = "\n".join([
     "adapter=" + PROTOCOL,
     "provider=" + config["UPLOAD_STORAGE_PROVIDER"],
@@ -578,6 +601,15 @@ def validate_remote_env_path(value: str) -> str:
     return value
 
 
+def validate_direct_oss_endpoint_override(value: str) -> str:
+    if value and not DIRECT_OSS_INTERNAL_ENDPOINT.fullmatch(value):
+        raise ValueError(
+            "SSH direct OSS endpoint override must be a bare Aliyun internal "
+            "regional endpoint"
+        )
+    return value
+
+
 def remote_command(env_path: str, base_url: str, timeout_seconds: float) -> str:
     return " ".join([
         "python3", "-u", "-c", shlex.quote(REMOTE_UPLOAD_HELPER),
@@ -610,10 +642,18 @@ def start_ssh_process(
     )
 
 
-def remote_direct_oss_command(env_path: str, timeout_seconds: float) -> str:
+def remote_direct_oss_command(
+    env_path: str,
+    timeout_seconds: float,
+    endpoint_override: str = "",
+) -> str:
+    endpoint_override = validate_direct_oss_endpoint_override(
+        endpoint_override
+    )
     return " ".join([
         "python3", "-u", "-c", shlex.quote(REMOTE_DIRECT_OSS_HELPER),
         shlex.quote(env_path), shlex.quote(str(timeout_seconds)),
+        shlex.quote(endpoint_override),
     ])
 
 
@@ -621,6 +661,7 @@ def start_direct_oss_ssh_process(
     host: str,
     env_path: str,
     timeout_seconds: float,
+    endpoint_override: str,
 ) -> subprocess.Popen:
     connect_timeout = max(1, min(3600, int(timeout_seconds)))
     return subprocess.Popen(
@@ -630,7 +671,9 @@ def start_direct_oss_ssh_process(
             "-o", "LogLevel=ERROR",
             "-o", f"ConnectTimeout={connect_timeout}",
             host,
-            remote_direct_oss_command(env_path, timeout_seconds),
+            remote_direct_oss_command(
+                env_path, timeout_seconds, endpoint_override
+            ),
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -884,12 +927,18 @@ class PersistentSSHDirectOSSAdapter:
         host: str,
         env_path: str,
         timeout_seconds: float,
+        endpoint_override: str = "",
         *,
-        process_factory: Callable[[str, str, float], Any] = start_direct_oss_ssh_process,
+        process_factory: Callable[
+            [str, str, float, str], Any
+        ] = start_direct_oss_ssh_process,
     ):
         self.host = validate_ssh_host(host)
         self.env_path = validate_remote_env_path(env_path)
         self.timeout_seconds = timeout_seconds
+        self.endpoint_override = validate_direct_oss_endpoint_override(
+            endpoint_override
+        )
         self.process_factory = process_factory
         static_origin = "\x1f".join((self.protocol, self.host, self.env_path))
         self.base_url = (
@@ -911,7 +960,10 @@ class PersistentSSHDirectOSSAdapter:
                 raise SSHProtocolError("ssh direct OSS transport exited")
             return
         process = self.process_factory(
-            self.host, self.env_path, self.timeout_seconds
+            self.host,
+            self.env_path,
+            self.timeout_seconds,
+            self.endpoint_override,
         )
         if process.stdin is None or process.stdout is None:
             try:
@@ -955,6 +1007,7 @@ class PersistentSSHDirectOSSAdapter:
             self.host,
             self.env_path,
             self.timeout_seconds,
+            self.endpoint_override,
             process_factory=self.process_factory,
         )
 
@@ -1665,6 +1718,10 @@ def result_document(
     retried_transient_failure_targets: int,
     retried_authorized_failure_targets: int,
     failure_retry_authorization_sha: str,
+    historical_unavailable_exception_attestation_sha: str,
+    historical_unavailable_exception_mapping_sha: str,
+    historical_unavailable_exception_mapping_row_hash: str,
+    historical_unavailable_exception_count: int,
     get_count: int,
     hydrated_rows: int,
     failures: list[dict[str, Any]],
@@ -1690,6 +1747,18 @@ def result_document(
         ),
         "failure_retry_authorization_sha256": (
             failure_retry_authorization_sha
+        ),
+        "historical_unavailable_exception_attestation_sha256": (
+            historical_unavailable_exception_attestation_sha
+        ),
+        "historical_unavailable_exception_mapping_sha256": (
+            historical_unavailable_exception_mapping_sha
+        ),
+        "historical_unavailable_exception_mapping_row_hash": (
+            historical_unavailable_exception_mapping_row_hash
+        ),
+        "historical_unavailable_exception_count": (
+            historical_unavailable_exception_count
         ),
         "read_only_get_count": get_count,
         "hydrated_row_count": hydrated_rows,
@@ -1720,6 +1789,7 @@ def hydrate_manifest(
     workers: int = 1,
     retry_transient_failures: bool = False,
     failure_retry_authorization_path: pathlib.Path | None = None,
+    historical_unavailable_exception_path: pathlib.Path | None = None,
 ) -> dict[str, Any]:
     if checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
@@ -1729,6 +1799,45 @@ def hydrate_manifest(
         raise ValueError("workers must be in [1, 16]")
 
     rows, input_sha = read_manifest(manifest_path)
+    historical_unavailable_attestation_sha = ZERO_SHA256
+    historical_unavailable_mapping_sha = ZERO_SHA256
+    historical_unavailable_mapping_row_hash = ZERO_SHA256
+    historical_unavailable_count = 0
+    historical_unavailable_entity = ""
+    historical_unavailable_checkpoint_key = ""
+    if historical_unavailable_exception_path is not None:
+        attestation, exception, historical_unavailable_attestation_sha = (
+            historical_unavailable_exception.load_attestation(
+                historical_unavailable_exception_path,
+                manifest_path=manifest_path,
+            )
+        )
+        historical_unavailable_mapping_sha = attestation["mapping_sha256"]
+        historical_unavailable_mapping_row_hash = attestation["mapping_row_hash"]
+        historical_unavailable_count = attestation["exception_count"]
+        historical_unavailable_entity = exception["entity_key"]
+        exception_rows = [
+            row for row in rows
+            if row["entity_key"] == historical_unavailable_entity
+        ]
+        if len(exception_rows) != 1 or exception_rows[0]["sha256"] != "":
+            raise ValueError(
+                "historical-unavailable exception does not identify one empty-SHA row"
+            )
+        normalized_adapter = (
+            exception_rows[0]["storage_adapter"].strip().lower()
+        )
+        if normalized_adapter in verifier.UPLOAD_ADAPTERS:
+            exception_adapter_kind = "upload"
+        elif normalized_adapter in verifier.OSS_ADAPTERS:
+            exception_adapter_kind = "oss"
+        else:
+            raise ValueError(
+                "historical-unavailable exception uses an unsupported adapter"
+            )
+        historical_unavailable_checkpoint_key = checkpoint_key(
+            exception_adapter_kind, exception_rows[0]["object_key"]
+        )
     fingerprints = adapter_fingerprints(config)
     checkpoint_input_sha = (
         verifier.sha256_file(checkpoint_path)
@@ -1744,6 +1853,8 @@ def hydrate_manifest(
     for index, row in enumerate(rows):
         if row["sha256"]:
             already_complete += 1
+            continue
+        if row["entity_key"] == historical_unavailable_entity:
             continue
         resolved = adapter_kind(config, row["storage_adapter"])
         if resolved is None:
@@ -1766,6 +1877,9 @@ def hydrate_manifest(
         target["entities"].append(row["entity_key"])
         target["row_indexes"].append(index)
 
+    if historical_unavailable_checkpoint_key:
+        completed.pop(historical_unavailable_checkpoint_key, None)
+        failed_targets.pop(historical_unavailable_checkpoint_key, None)
     unknown_checkpoint_results = (set(completed) | set(failed_targets)) - set(targets)
     if unknown_checkpoint_results:
         raise ValueError("checkpoint contains an object outside the current hydration targets")
@@ -1988,6 +2102,18 @@ def hydrate_manifest(
         failure_retry_authorization_sha=(
             failure_retry_authorization_sha
         ),
+        historical_unavailable_exception_attestation_sha=(
+            historical_unavailable_attestation_sha
+        ),
+        historical_unavailable_exception_mapping_sha=(
+            historical_unavailable_mapping_sha
+        ),
+        historical_unavailable_exception_mapping_row_hash=(
+            historical_unavailable_mapping_row_hash
+        ),
+        historical_unavailable_exception_count=(
+            historical_unavailable_count
+        ),
         get_count=get_count,
         hydrated_rows=hydrated_rows,
         failures=failures,
@@ -2012,6 +2138,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="stream OSS objects on the SSH host and return only size/MIME/SHA-256 metadata",
     )
+    parser.add_argument(
+        "--ssh-direct-oss-endpoint-override",
+        help=(
+            "explicit bare same-region Aliyun OSS internal endpoint for SSH "
+            "direct reads; valid only with --ssh-direct-oss"
+        ),
+    )
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY)
     parser.add_argument("--workers", type=int, default=1)
@@ -2029,6 +2162,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "exact self-hashed authorization JSON for individually identified "
             "sticky checkpoint failures with two matching one-target reprobes"
+        ),
+    )
+    parser.add_argument(
+        "--historical-unavailable-exception",
+        help=(
+            "exact historical-unavailable PASS attestation bound to the input "
+            "manifest; excludes only task_asset:12323 from remote hydration"
         ),
     )
     parser.add_argument("--max-object-bytes", type=int, default=DEFAULT_MAX_OBJECT_BYTES)
@@ -2068,6 +2208,11 @@ def upload_adapter_from_args(
             args.ssh_host,
             args.ssh_env_file,
             args.timeout_seconds,
+            args.ssh_direct_oss_endpoint_override or "",
+        )
+    if args.ssh_direct_oss_endpoint_override:
+        raise ValueError(
+            "--ssh-direct-oss-endpoint-override requires --ssh-direct-oss"
         )
     ssh_values = (args.ssh_host, args.ssh_env_file, args.ssh_upload_base_url)
     if any(ssh_values) and not all(ssh_values):
@@ -2102,6 +2247,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.failure_retry_authorization
         else None
     )
+    historical_unavailable_exception_path = (
+        pathlib.Path(args.historical_unavailable_exception)
+        if args.historical_unavailable_exception
+        else None
+    )
+    protected_evidence_inputs = {manifest.resolve(), checkpoint.resolve()}
+    if failure_retry_authorization is not None:
+        protected_evidence_inputs.add(failure_retry_authorization.resolve())
+    if historical_unavailable_exception_path is not None:
+        protected_evidence_inputs.add(
+            historical_unavailable_exception_path.resolve()
+        )
+    evidence_collides_with_input = (
+        evidence_path.resolve() in protected_evidence_inputs
+    )
     upload_adapter: (
         verifier.HTTPReadAdapter
         | PersistentSSHReadAdapter
@@ -2115,10 +2275,12 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if failure_retry_authorization is not None:
             resolved.append(failure_retry_authorization.resolve())
+        if historical_unavailable_exception_path is not None:
+            resolved.append(historical_unavailable_exception_path.resolve())
         if len(set(resolved)) != len(resolved):
             raise ValueError(
-                "manifest, output, evidence, checkpoint, and authorization paths "
-                "must differ"
+                "manifest, output, evidence, checkpoint, authorization, and "
+                "historical-unavailable exception paths must differ"
             )
         upload_adapter = upload_adapter_from_args(args)
         config = verifier.VerifierConfig(
@@ -2132,6 +2294,9 @@ def main(argv: list[str] | None = None) -> int:
             workers=args.workers,
             retry_transient_failures=args.retry_transient_failures,
             failure_retry_authorization_path=failure_retry_authorization,
+            historical_unavailable_exception_path=(
+                historical_unavailable_exception_path
+            ),
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         input_sha = verifier.sha256_file(manifest) if manifest.is_file() else ZERO_SHA256
@@ -2150,6 +2315,10 @@ def main(argv: list[str] | None = None) -> int:
             retried_transient_failure_targets=0,
             retried_authorized_failure_targets=0,
             failure_retry_authorization_sha=ZERO_SHA256,
+            historical_unavailable_exception_attestation_sha=ZERO_SHA256,
+            historical_unavailable_exception_mapping_sha=ZERO_SHA256,
+            historical_unavailable_exception_mapping_row_hash=ZERO_SHA256,
+            historical_unavailable_exception_count=0,
             get_count=0, hydrated_rows=0, failures=[failure],
         )
     finally:
@@ -2158,6 +2327,8 @@ def main(argv: list[str] | None = None) -> int:
             (PersistentSSHReadAdapter, PersistentSSHDirectOSSAdapter),
         ):
             upload_adapter.close()
+    if evidence_collides_with_input:
+        return 1
     atomic_write_json(evidence_path, result)
     return 0 if result["status"] == "PASS" else 1
 

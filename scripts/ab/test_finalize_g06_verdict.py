@@ -496,6 +496,139 @@ class FinalizeG06VerdictTest(unittest.TestCase):
             "api": api_path,
         }
 
+    def bind_hydration_exception(
+        self, paths: dict[str, pathlib.Path | str]
+    ) -> None:
+        hydration_input = paths["hydration_input"]
+        final_manifest = paths["final_manifest"]
+        checkpoint_path = paths["hydration_checkpoint"]
+        hydration_path = paths["hydration_evidence"]
+        exception_path = paths["exception"]
+        input_rows = [
+            json.loads(line)
+            for line in hydration_input.read_text(encoding="utf-8").splitlines()
+        ]
+        final_rows = [
+            json.loads(line)
+            for line in final_manifest.read_text(encoding="utf-8").splitlines()
+        ]
+        exception_row = next(
+            row
+            for row in final_rows
+            if row["entity_key"] == HISTORICAL.ENTITY_KEY
+        )
+        input_rows = sorted(
+            input_rows + [exception_row], key=MODULE.row_sort_key
+        )
+        hydration_input.write_bytes(MODULE.canonical_jsonl(input_rows))
+        input_sha = MODULE.sha256_file(hydration_input)
+        paths["hydration_input_sha"] = input_sha
+
+        final_by_entity = {row["entity_key"]: row for row in final_rows}
+        hydrated_rows = [
+            final_by_entity[row["entity_key"]] for row in input_rows
+        ]
+        hydrated_sha = MODULE.sha256_bytes(
+            MODULE.canonical_jsonl(hydrated_rows)
+        )
+        checkpoint = json.loads(
+            checkpoint_path.read_text(encoding="utf-8")
+        )
+        checkpoint["input_manifest_sha256"] = input_sha
+        self.write_json(checkpoint_path, checkpoint)
+        checkpoint_sha = MODULE.sha256_file(checkpoint_path)
+
+        attestation, _exception, attestation_sha = (
+            HISTORICAL.load_attestation(exception_path)
+        )
+        target_rows = [
+            row
+            for row in input_rows
+            if (
+                not row["sha256"]
+                and row["entity_key"] != HISTORICAL.ENTITY_KEY
+            )
+        ]
+        unique_targets = {
+            (MODULE.target_kind(row["storage_adapter"]), row["object_key"])
+            for row in target_rows
+        }
+        hydration = json.loads(
+            hydration_path.read_text(encoding="utf-8")
+        )
+        hydration.update(
+            {
+                "input_manifest_sha256": input_sha,
+                "hydrated_manifest_sha256": hydrated_sha,
+                "checkpoint_sha256": checkpoint_sha,
+                "row_count": len(input_rows),
+                "already_complete_count": sum(
+                    bool(row["sha256"]) for row in input_rows
+                ),
+                "missing_sha256_count": sum(
+                    not bool(row["sha256"]) for row in input_rows
+                ),
+                "configured_target_row_count": len(target_rows),
+                "unique_target_count": len(unique_targets),
+                "hydrated_row_count": len(target_rows),
+                "deduplicated_get_count": (
+                    len(target_rows) - len(unique_targets)
+                ),
+                "historical_unavailable_exception_attestation_sha256": (
+                    attestation_sha
+                ),
+                "historical_unavailable_exception_mapping_sha256": (
+                    attestation["mapping_sha256"]
+                ),
+                "historical_unavailable_exception_mapping_row_hash": (
+                    attestation["mapping_row_hash"]
+                ),
+                "historical_unavailable_exception_count": 1,
+            }
+        )
+        hydration["evidence_hash"] = MODULE.sha256_bytes(
+            MODULE.canonical_json(
+                {
+                    key: value
+                    for key, value in hydration.items()
+                    if key != "evidence_hash"
+                }
+            ).encode("utf-8")
+        )
+        self.write_json(hydration_path, hydration)
+
+    def add_zero_exception_binding(
+        self, paths: dict[str, pathlib.Path | str]
+    ) -> None:
+        hydration_path = paths["hydration_evidence"]
+        hydration = json.loads(
+            hydration_path.read_text(encoding="utf-8")
+        )
+        hydration.update(
+            {
+                "historical_unavailable_exception_attestation_sha256": (
+                    MODULE.ZERO_SHA256
+                ),
+                "historical_unavailable_exception_mapping_sha256": (
+                    MODULE.ZERO_SHA256
+                ),
+                "historical_unavailable_exception_mapping_row_hash": (
+                    MODULE.ZERO_SHA256
+                ),
+                "historical_unavailable_exception_count": 0,
+            }
+        )
+        hydration["evidence_hash"] = MODULE.sha256_bytes(
+            MODULE.canonical_json(
+                {
+                    key: value
+                    for key, value in hydration.items()
+                    if key != "evidence_hash"
+                }
+            ).encode("utf-8")
+        )
+        self.write_json(hydration_path, hydration)
+
     def adjudicate(self, paths: dict[str, pathlib.Path | str]) -> dict:
         return MODULE.adjudicate(
             mapping_path=paths["mapping"],
@@ -530,6 +663,105 @@ class FinalizeG06VerdictTest(unittest.TestCase):
         self.assertEqual(3, result["recovery_row_count"])
         self.assertEqual(1, result["exception_count"])
         self.assertRegex(result["evidence_hash"], MODULE.SHA256)
+
+    def test_current_zero_exception_fields_keep_legacy_remote_subset_compatible(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            self.add_zero_exception_binding(paths)
+            result = self.adjudicate(paths)
+        self.assertEqual("PASS", result["status"])
+
+    def test_bound_exception_hydration_passes_with_target_count_gap(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            self.bind_hydration_exception(paths)
+            hydration = json.loads(
+                paths["hydration_evidence"].read_text(encoding="utf-8")
+            )
+            result = self.adjudicate(paths)
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(2, hydration["missing_sha256_count"])
+        self.assertEqual(1, hydration["configured_target_row_count"])
+        self.assertEqual(1, hydration["hydrated_row_count"])
+        self.assertEqual(1, hydration["historical_unavailable_exception_count"])
+
+    def test_bound_exception_hydration_rejects_attestation_hash_drift(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            self.bind_hydration_exception(paths)
+            evidence = json.loads(
+                paths["hydration_evidence"].read_text(encoding="utf-8")
+            )
+            evidence[
+                "historical_unavailable_exception_attestation_sha256"
+            ] = "9" * 64
+            evidence["evidence_hash"] = MODULE.sha256_bytes(
+                MODULE.canonical_json(
+                    {
+                        key: value
+                        for key, value in evidence.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            )
+            self.write_json(paths["hydration_evidence"], evidence)
+            result = self.adjudicate(paths)
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "g06.hydration_exception_binding",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_bound_exception_hydration_rejects_missing_target_gap_drift(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            self.bind_hydration_exception(paths)
+            evidence = json.loads(
+                paths["hydration_evidence"].read_text(encoding="utf-8")
+            )
+            evidence["missing_sha256_count"] = 1
+            evidence["evidence_hash"] = MODULE.sha256_bytes(
+                MODULE.canonical_json(
+                    {
+                        key: value
+                        for key, value in evidence.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            )
+            self.write_json(paths["hydration_evidence"], evidence)
+            result = self.adjudicate(paths)
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "g06.hydration_count",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_legacy_evidence_cannot_authorize_exception_in_hydration_input(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            self.bind_hydration_exception(paths)
+            evidence = json.loads(
+                paths["hydration_evidence"].read_text(encoding="utf-8")
+            )
+            for field in MODULE.HYDRATION_EXCEPTION_FIELDS:
+                evidence.pop(field)
+            evidence["evidence_hash"] = MODULE.sha256_bytes(
+                MODULE.canonical_json(
+                    {
+                        key: value
+                        for key, value in evidence.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            )
+            self.write_json(paths["hydration_evidence"], evidence)
+            result = self.adjudicate(paths)
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "g06.hydration_exception_binding",
+            result["violations"][0]["violation_code"],
+        )
 
     def test_pass_standard_verdict_matches_existing_g8_contract(self):
         with tempfile.TemporaryDirectory() as raw:
