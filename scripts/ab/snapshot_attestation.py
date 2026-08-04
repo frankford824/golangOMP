@@ -173,7 +173,8 @@ def validate_attestation(
         port = item.get("database_port")
         container_name = str(item.get("container_name") or "")
         expected_marker = re.compile(
-            rf"(?:^|[-_])clone[-_]?{expected_clone_label.lower()}(?:[-_.]|$)"
+            rf"(?:^|[-_])(?:clone|prebundle)[-_]?"
+            rf"{expected_clone_label.lower()}(?:[-_.]|$)"
         )
         if database != PHYSICAL_DATABASE:
             add(

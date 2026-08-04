@@ -205,6 +205,22 @@ class SnapshotAttestationTest(unittest.TestCase):
         self.assertEqual("PASS", verdict["status"])
         self.assertEqual(2, verdict["schema_version"])
 
+    def test_physical_clone_a_accepts_explicit_prebundle_side_marker(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            physical = self.create_physical_attestation(
+                root, "A", database_port=3332, container_suffix="1"
+            )
+            value = json.loads(physical.read_text(encoding="utf-8"))
+            value["container_name"] = "codex-v1295-prebundle-a-mysql"
+            violations = MODULE.validate_attestation(
+                value,
+                label="A",
+                expected_run_id="formal-run-1",
+                expected_clone_label="A",
+            )
+        self.assertEqual([], violations)
+
     def test_physical_clone_requires_distinct_port_container_and_inspect(self):
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)
