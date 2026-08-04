@@ -574,6 +574,26 @@ export interface paths {
         patch: operations["updatePlanningSKU"];
         trace?: never;
     };
+    "/v1/tasks/{id}/planning-skus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the current planning-SKU rows and private product-image previews for one task
+         * @description Product images remain planning-SKU revision resources and are not projected as task resource-group attachments.
+         */
+        get: operations["getTaskPlanningSKUs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks/{id}/planning-skus/export.xlsx": {
         parameters: {
             query?: never;
@@ -3902,7 +3922,7 @@ export interface paths {
         put?: never;
         /**
          * Preview cost rule estimate
-         * @description Minimal preview contract for the governed cost-rule skeleton. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, and unsupported size-based formulas return `requires_manual_review=true`. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
+         * @description Read-only preview contract available to every authenticated account so task and asset viewers can verify the governed calculation without changing rules or persisted business data. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, and unsupported size-based formulas return `requires_manual_review=true`. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
          */
         post: {
             parameters: {
@@ -5424,7 +5444,7 @@ export interface paths {
         head?: never;
         /**
          * Patch one batch SKU item
-         * @description Updates row-scoped batch SKU fields such as product name, ERP product i_id, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+         * @description Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to a task created by the current actor. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation. Per-SKU cost remains governed by the separate `cost-info` endpoint and still requires `catalog.manage`.
          */
         patch: {
             parameters: {
@@ -5443,6 +5463,16 @@ export interface paths {
                         product_name?: string | null;
                         i_id?: string | null;
                         product_i_id?: string | null;
+                        spec_text?: string | null;
+                        size_text?: string | null;
+                        /** Format: double */
+                        width?: number | null;
+                        /** Format: double */
+                        height?: number | null;
+                        /** Format: double */
+                        area?: number | null;
+                        /** Format: int64 */
+                        quantity?: number | null;
                         design_requirement?: string | null;
                         reference_file_refs?: components["schemas"]["ReferenceFileRef"][] | null;
                         trigger_filing?: boolean | null;
@@ -5610,7 +5640,11 @@ export interface paths {
         head?: never;
         /**
          * Update task business-info and generic cost fields
-         * @description Maintains the task's category, specification, cost, and ERP filing information. When category plus minimal
+         * @description Maintains the task's editable business information. `catalog.manage` may update tasks in its
+         *     stable data scope. `task.create` may update ordinary fields only for a task created by the
+         *     current actor. Completed, archived, and cancelled tasks are immutable through this endpoint.
+         *     Manual cost, cost-rule selection, and forced filing controls remain restricted to
+         *     `catalog.manage`. When category plus minimal
          *     width/height/area/quantity/process inputs are present, the backend also triggers skeleton
          *     cost preview and persists `estimated_cost`, rule provenance, governed
          *     `matched_rule_version`, and manual-review state. Existing-product tasks may also persist or
@@ -5922,9 +5956,12 @@ export interface paths {
         /**
          * Assign task to designer
          * @description Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task.
-         *     Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment,
-         *     intersected with the task's stable organization-ID scope;
-         *     legacy roles and department/team names never grant access. The action is exposed to clients as
+         *     Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment.
+         *     First assignment and ordinary management reassignment are intersected with the task's stable
+         *     organization-ID scope. The explicitly assigned current designer/handler may also delegate an
+         *     `InProgress` task when their active `task.reassign` grant allows the task type; this narrow
+         *     relationship does not authorize unassigned pool work. Legacy roles and department/team names
+         *     never grant access. The action is exposed to clients as
          *     `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`,
          *     and `Blocked` are rejected.
          */
@@ -5954,7 +5991,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description `PERMISSION_DENIED` when the exact assign/reassign capability is missing or the task is outside the actor's stable organization-ID scope. */
+                /** @description `PERMISSION_DENIED` when the exact assign/reassign capability is missing, or when neither stable organization-ID scope nor the current-assignee delegation rule matches. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -15277,6 +15314,149 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/asset-workbench/settlement/supplements/batch-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete draft or approved settlement supplements in one transaction
+         * @description Atomically marks every requested supplement as `voided`, soft-deletes all linked upload files, voids the linked supplement submission items, and removes their amounts from unsettled totals. Submitters and managers may delete only their own supplement rows; settlement roles may delete any payee's rows. If any row is missing, unauthorized, already in a batch, settled, or voided, no requested row is changed.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        supplement_ids: number[];
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Atomically deleted supplement rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                deleted_ids?: number[];
+                                supplements?: {
+                                    id?: number;
+                                    payee_user_id?: number;
+                                    business_month?: string;
+                                    linked_batch_id?: number | null;
+                                    /** @enum {string} */
+                                    status?: "draft" | "approved" | "in_batch" | "settled" | "voided";
+                                    /** @description File/work display name used for duplicate hints. */
+                                    order_no?: string;
+                                    /**
+                                     * Format: date
+                                     * @description Desired supplement date for display and indexed server-side filtering; settlement still uses business_month.
+                                     */
+                                    supplement_date?: string | null;
+                                    difficulty_class?: string;
+                                    finalized?: boolean;
+                                    page_count?: number;
+                                    gross_amount?: number;
+                                    /** @description Files uploaded through the normal OSS upload-directory and preview pipeline for this supplement. */
+                                    files?: {
+                                        id?: number;
+                                        submission_id?: number;
+                                        submission_item_id?: number;
+                                        upload_directory_id?: number | null;
+                                        upload_directory_name?: string;
+                                        upload_directory_prefix?: string;
+                                        upload_directory_difficulty_class?: string;
+                                        upload_batch_id?: string;
+                                        relative_path?: string;
+                                        display_name?: string;
+                                        is_folder_upload?: boolean;
+                                        original_filename?: string;
+                                        file_type?: string;
+                                        mime_type?: string;
+                                        file_size?: number;
+                                        file_hash?: string;
+                                        preview_status?: string;
+                                        preview_key?: string;
+                                        preview_error?: string;
+                                    }[];
+                                    duplicate_hint_json?: {
+                                        has_duplicates?: boolean;
+                                        submission_item_ids?: number[];
+                                        supplement_ids?: number[];
+                                        /**
+                                         * Format: date
+                                         * @description Desired supplement date for display; settlement still uses business_month.
+                                         */
+                                        supplement_date?: string;
+                                    } & {
+                                        [key: string]: unknown;
+                                    };
+                                    created_by?: number;
+                                    /** Format: date-time */
+                                    created_at?: string;
+                                    /** Format: date-time */
+                                    updated_at?: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid request or missing reason */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden because a requested row belongs to another payee */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description One or more supplements were not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description One or more supplements are already in batch */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/asset-workbench/settlement/supplements/{supplement_id}": {
         parameters: {
             query?: never;
@@ -15289,7 +15469,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a draft or approved settlement supplement
-         * @description Deletes by marking the supplement as `voided`; in-batch and settled supplement rows are protected.
+         * @description Atomically marks the supplement as `voided`, soft-deletes linked upload files, voids the linked supplement submission item, and removes its amount from unsettled totals. Submitters and managers may delete only their own rows; settlement roles may delete any payee's row. In-batch, settled, and already-voided rows are protected.
          */
         delete: {
             parameters: {
@@ -15300,10 +15480,10 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: {
+            requestBody: {
                 content: {
                     "application/json": {
-                        reason?: string;
+                        reason: string;
                     };
                 };
             };
@@ -15390,7 +15570,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Forbidden */
+                /** @description Forbidden because the supplement belongs to another payee */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -15610,6 +15790,102 @@ export interface paths {
                     content?: never;
                 };
                 /** @description Upload session cannot be completed from current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/upload-sessions/{session_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an asset workbench upload session
+         * @description Cancels an owned upload session and aborts or removes its pending OSS upload object when applicable. Asset settlement users may cancel sessions they created while associating a file with an administrator-entered supplement.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    session_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Upload session cancelled */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                id?: number;
+                                session_id?: string;
+                                status?: string;
+                                object_key?: string;
+                                upload_directory_id?: number | null;
+                                upload_directory_name?: string;
+                                upload_directory_prefix?: string;
+                                upload_directory_difficulty_class?: string;
+                                upload_batch_id?: string;
+                                relative_path?: string;
+                                is_folder_upload?: boolean;
+                                expected_business_month?: string;
+                                original_filename?: string;
+                                file_size?: number;
+                                mime_type?: string;
+                                file_hash?: string;
+                                upload_id?: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Upload session not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Upload session cannot be cancelled from current state */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -19199,6 +19475,10 @@ export interface components {
         };
         /**
          * @description `operator_id` is optional. When omitted, the backend uses the current authenticated actor.
+         *     `catalog.manage` may update ordinary and governed fields within its stable data scope.
+         *     `task.create` may update ordinary business fields only when the current actor created the
+         *     task and the task is not completed, archived, or cancelled. Task creators cannot submit
+         *     manual-cost, cost-rule, `trigger_filing`, or `filed_at` controls.
          *     Existing-product rebinding may pass `product_selection.erp_product` so the backend can
          *     cache or bind the chosen ERP Bridge product while preserving external id, sku, image,
          *     and price snapshot data under task-side `product_selection`.
@@ -19227,6 +19507,10 @@ export interface components {
             design_requirement?: string;
             /** @description Editable original-product change request. For `new_product_development` and `retouch_task`, this is accepted as a compatibility alias of `design_requirement`. */
             change_request?: string;
+            /** @description Editable operation note. An explicit empty string clears the existing note. */
+            note?: string;
+            /** @description Compatibility alias for `note`. */
+            operation_note?: string;
             craft_text?: string;
             /** Format: double */
             width?: number | null;
@@ -19403,6 +19687,10 @@ export interface components {
             quantity?: number | null;
             process?: string;
             notes?: string;
+            /** @description ERP item identifier used for exact governed-rule binding. */
+            erp_i_id?: string;
+            /** @description Product item identifier used for exact governed-rule binding when ERP i_id is absent. */
+            product_i_id?: string;
         };
         CostRulePreviewMatch: {
             rule_id?: number;
@@ -21074,6 +21362,12 @@ export interface components {
             erp_product_i_id?: string;
             erp_product_name?: string;
             product_image_ref_id?: string;
+            /**
+             * Format: uri
+             * @description Short-lived private preview URL for the planning SKU product image.
+             */
+            product_image_url?: string;
+            product_image_name?: string;
             reason: string;
             /** Format: int64 */
             created_by: number;
@@ -22275,6 +22569,32 @@ export interface operations {
             400: components["responses"]["V8BadRequest"];
             403: components["responses"]["V8Forbidden"];
             409: components["responses"]["V8Conflict"];
+        };
+    };
+    getTaskPlanningSKUs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current planning-SKU result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PlanningSKUCreateResult"];
+                    };
+                };
+            };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
         };
     };
     exportTaskPlanningSKUs: {
