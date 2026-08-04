@@ -135,6 +135,8 @@ class PrepareAssetRecoveryTest(unittest.TestCase):
             "output": output,
             "materialize": materialize,
             "fixture_root": fixture_root,
+            "target_environment": "clone_b",
+            "production_release": "",
         })()
 
     def test_prepare_is_write_free_and_contains_complete_rollback(self):
@@ -153,6 +155,38 @@ class PrepareAssetRecoveryTest(unittest.TestCase):
                     "db_rollback_plan", entry["rollback_registry"]
                 )
                 self.assertFalse((root / "objects").exists())
+
+    def test_production_plan_uses_oss_and_cannot_materialize_fixture(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            mapping, evidence = self.fixture(root)
+            output = root / "production-plan.json"
+            args = self.args(mapping, evidence, output)
+            args.target_environment = "production"
+            args.production_release = "v1.295"
+            plan = MODULE.run(args)
+            self.assertEqual(plan["target_environment"], "production")
+            self.assertEqual(plan["production_release"], "v1.295")
+            for entry in plan["entries"]:
+                self.assertTrue(
+                    entry["target_object_key"].startswith(
+                        "v8-production/v1.295/"
+                    )
+                )
+                self.assertEqual(
+                    entry["db_apply_plan"][
+                        "insert_asset_storage_ref"
+                    ]["storage_adapter"],
+                    "oss_upload_service",
+                )
+            args.output = root / "invalid-production-plan.json"
+            args.materialize = True
+            args.fixture_root = root / "fixture"
+            with self.assertRaisesRegex(
+                ValueError,
+                "cannot materialize",
+            ):
+                MODULE.run(args)
 
     def test_materialize_is_contained_verified_and_idempotent(self):
         with tempfile.TemporaryDirectory() as raw:

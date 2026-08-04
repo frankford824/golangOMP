@@ -24,9 +24,10 @@ from typing import Any
 
 
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$")
+RELEASE_ID = re.compile(r"^v[0-9]+\.[0-9]+(?:\.[0-9]+)?$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 POLICY = "legacy_deleted_asset_recovery_v1"
-STRATEGY = "clone_b_prematerialized_storage_ref_v1"
+STRATEGY = "verified_oss_recovery_v1"
 NAMESPACE = uuid.UUID("881b0034-ec6d-4b9e-95bd-8e3427b3b650")
 ALLOWED = {
     23989: (2807, 24034, 683001),
@@ -179,6 +180,9 @@ def build_entry(
     mapping_sha256: str,
     row: dict[str, Any],
     evidence: dict[str, Any],
+    *,
+    target_environment: str,
+    production_release: str,
 ) -> dict[str, Any]:
     task_id, source_id, size = validate_confirmed_row(row)
     missing_id = row["missing_task_asset_id"]
@@ -269,10 +273,25 @@ def build_entry(
     target_ref = str(
         uuid.uuid5(NAMESPACE, f"{run_id}:{mapping_sha256}:{missing_id}:{actual_sha256}")
     )
-    object_key = (
-        f"v8-ab/{run_id}/recovered/task-{task_id}/"
-        f"task-asset-{missing_id}/{actual_sha256}.bin"
-    )
+    if target_environment == "clone_b":
+        object_key = (
+            f"v8-ab/{run_id}/recovered/task-{task_id}/"
+            f"task-asset-{missing_id}/{actual_sha256}.bin"
+        )
+        storage_adapter = "local"
+    elif target_environment == "production":
+        if not RELEASE_ID.fullmatch(production_release):
+            raise ValueError(
+                "production recovery requires a valid --production-release"
+            )
+        object_key = (
+            f"v8-production/{production_release}/{run_id}/"
+            f"recovered/task-{task_id}/task-asset-{missing_id}/"
+            f"{actual_sha256}.bin"
+        )
+        storage_adapter = "oss_upload_service"
+    else:
+        raise ValueError("target_environment must be clone_b or production")
     target_values = {
         "storage_ref_id": target_ref,
         "storage_key": object_key,
@@ -297,7 +316,7 @@ def build_entry(
         "owner_type": "task_asset",
         "owner_id": missing_id,
         "upload_request_id": missing_before.get("upload_request_id"),
-        "storage_adapter": "local",
+        "storage_adapter": storage_adapter,
         "ref_type": "task_asset_object",
         "ref_key": object_key,
         "file_name": missing_before.get("file_name"),
@@ -699,6 +718,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("evidence.run_id is invalid")
     if evidence.get("mapping_sha256") != mapping_sha256:
         raise ValueError("evidence mapping_sha256 mismatch")
+    target_environment = str(
+        getattr(args, "target_environment", "clone_b") or ""
+    )
+    production_release = str(
+        getattr(args, "production_release", "") or ""
+    )
+    if target_environment not in {"clone_b", "production"}:
+        raise ValueError(
+            "--target-environment must be clone_b or production"
+        )
+    if target_environment == "production":
+        if not RELEASE_ID.fullmatch(production_release):
+            raise ValueError(
+                "--production-release is required for production"
+            )
+        if getattr(args, "materialize", False):
+            raise ValueError(
+                "production recovery plans cannot materialize a local fixture"
+            )
+        if getattr(args, "fixture_root", None) is not None:
+            raise ValueError(
+                "production recovery plans cannot use --fixture-root"
+            )
+    elif production_release:
+        raise ValueError(
+            "--production-release is only valid for production"
+        )
     recovery_rows = {
         row.get("missing_task_asset_id"): row
         for row in mapping.get("asset_recoveries", [])
@@ -715,7 +761,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if set(by_missing) != set(ALLOWED):
         raise ValueError("evidence must contain all three exact recoveries")
     entries = [
-        build_entry(run_id, mapping_sha256, recovery_rows[missing_id], by_missing[missing_id])
+        build_entry(
+            run_id,
+            mapping_sha256,
+            recovery_rows[missing_id],
+            by_missing[missing_id],
+            target_environment=target_environment,
+            production_release=production_release,
+        )
         for missing_id in sorted(ALLOWED)
     ]
     expected_write_ahead = getattr(args, "expected_write_ahead", None)
@@ -828,6 +881,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             expected.get("version") != 1
             or expected.get("status") != status
             or expected.get("run_id") != run_id
+            or expected.get("target_environment") != target_environment
+            or expected.get("production_release")
+            != (
+                production_release
+                if target_environment == "production"
+                else ""
+            )
             or expected.get("mapping_sha256") != mapping_sha256
             or not SHA256.fullmatch(expected_hash)
             or sha256_bytes(canonical_bytes(unsigned)) != expected_hash
@@ -864,6 +924,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "version": 1,
         "status": "MATERIALIZED" if args.materialize else "PREPARED",
         "run_id": run_id,
+        "target_environment": target_environment,
+        "production_release": (
+            production_release
+            if target_environment == "production"
+            else ""
+        ),
         "mapping_sha256": mapping_sha256,
         "database_writes_executed": False,
         "production_writes_executed": False,
@@ -890,6 +956,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--materialize", action="store_true")
     parser.add_argument("--fixture-root", type=pathlib.Path)
     parser.add_argument("--expected-write-ahead", type=pathlib.Path)
+    parser.add_argument(
+        "--target-environment",
+        choices=("clone_b", "production"),
+        default="clone_b",
+    )
+    parser.add_argument("--production-release", default="")
     return parser.parse_args()
 
 

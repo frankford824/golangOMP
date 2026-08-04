@@ -792,7 +792,7 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 		return err
 	}
 	for _, recovery := range m.AssetRecoveries {
-		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+		if recovery.Strategy == "verified_oss_recovery_v1" {
 			continue
 		}
 		if _, err := queryStringIDs(ctx, tx, `SELECT ref_id FROM asset_storage_refs WHERE ref_id=? FOR UPDATE`, recovery.OriginalStorageRefID); err != nil {

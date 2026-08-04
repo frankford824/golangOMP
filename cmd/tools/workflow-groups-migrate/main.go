@@ -1971,7 +1971,7 @@ func lockCutoverTargetsLegacy(ctx context.Context, tx *sql.Tx, m mappingFile) er
 		}
 	}
 	for _, recovery := range m.AssetRecoveries {
-		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+		if recovery.Strategy == "verified_oss_recovery_v1" {
 			continue
 		}
 		if _, err := queryStringIDs(ctx, tx, `SELECT ref_id FROM asset_storage_refs WHERE ref_id=? FOR UPDATE`, recovery.OriginalStorageRefID); err != nil {
@@ -2271,7 +2271,7 @@ func captureAssetStorageRefStates(ctx context.Context, q snapshotQueryer, recove
 	}
 	byRefID := make(map[string]assetStorageRefStatusSnapshot, len(recoveries))
 	for _, recovery := range recoveries {
-		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+		if recovery.Strategy == "verified_oss_recovery_v1" {
 			continue
 		}
 		refID := strings.TrimSpace(recovery.OriginalStorageRefID)
@@ -2969,7 +2969,7 @@ func validateHistoricalUnavailableRecoveryEvidence(
 
 func applyAssetRecoveries(ctx context.Context, tx *sql.Tx, recoveries []assetRecoveryMapping) error {
 	for _, recovery := range recoveries {
-		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+		if recovery.Strategy == "verified_oss_recovery_v1" {
 			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
 				return err
 			}
@@ -3021,7 +3021,7 @@ func applyAssetRecoveries(ctx context.Context, tx *sql.Tx, recoveries []assetRec
 
 func validatePrematerializedAssetRecoveries(ctx context.Context, q snapshotQueryer, recoveries []assetRecoveryMapping) error {
 	for _, recovery := range recoveries {
-		if recovery.Confidence != "confirmed_auto" || recovery.Strategy != "clone_b_prematerialized_storage_ref_v1" {
+		if recovery.Confidence != "confirmed_auto" || recovery.Strategy != "verified_oss_recovery_v1" {
 			continue
 		}
 		if err := validatePrematerializedAssetRecoveryEvidence(ctx, q, recovery); err != nil {
@@ -3912,7 +3912,7 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 		}
 	}
 	for _, recovery := range m.AssetRecoveries {
-		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+		if recovery.Strategy == "verified_oss_recovery_v1" {
 			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
 				return fmt.Errorf("cutover blocked: prematerialized recovery evidence drifted: %w", err)
 			}

@@ -39,7 +39,10 @@ export default defineConfig(({ mode }) => {
     build: {
       // `vite build --mode test` 输出到 `dist-test/`，避免覆盖生产 `dist/`
       outDir: mode === 'test' ? 'dist-test' : 'dist',
-      chunkSizeWarningLimit: 1100,
+      // Univer formula/render engines are intentionally isolated as route-lazy
+      // sheet chunks by sharedManualChunks. Keep the budget only just above
+      // the current largest engine so any further growth is still reported.
+      chunkSizeWarningLimit: 5300,
       rollupOptions: {
         output: {
           manualChunks: sharedManualChunks,

@@ -27,10 +27,22 @@ class GeneratorTest(unittest.TestCase):
     def test_timezone_truth_requires_one_uniform_proven_legacy_cohort(self):
         truth = self.timezone_truth()
         self.assertEqual(MODULE.validate_legacy_timezone_truth(truth)["matched_asset_created_events"], 21305)
+        bounded_latency = self.timezone_truth()
+        bounded_latency["timezone_truth"][0]["asset_created_max_delta_seconds"] = 28805
+        self.assertEqual(
+            MODULE.validate_legacy_timezone_truth(bounded_latency)[
+                "asset_created_max_delta_seconds"
+            ],
+            28805,
+        )
         mixed = self.timezone_truth()
         mixed["timezone_truth"][0]["near_eight_hour_asset_created_events"] -= 1
         with self.assertRaisesRegex(RuntimeError, "refusing blanket normalization"):
             MODULE.validate_legacy_timezone_truth(mixed)
+        out_of_bound = self.timezone_truth()
+        out_of_bound["timezone_truth"][0]["asset_created_max_delta_seconds"] = 28811
+        with self.assertRaisesRegex(RuntimeError, "refusing blanket normalization"):
+            MODULE.validate_legacy_timezone_truth(out_of_bound)
         non_utc = self.timezone_truth()
         non_utc["timezone_truth"][0]["system_time_zone"] = "CST"
         with self.assertRaisesRegex(RuntimeError, "system_time_zone"):
@@ -233,6 +245,59 @@ class GeneratorTest(unittest.TestCase):
                     }
                 ),
             )
+
+    def test_access_decisions_use_reviewable_stable_org_and_allow_empty_no_grant(self):
+        rows = {
+            "users_org": [
+                {
+                    "id": 340,
+                    "status": "active",
+                    "department_id": None,
+                    "team_id": None,
+                },
+                {
+                    "id": 341,
+                    "status": "active",
+                    "department_id": None,
+                    "team_id": None,
+                },
+            ],
+            "legacy_roles": [
+                {"user_id": 340, "role": "DepartmentAdmin"},
+                {"user_id": 341, "role": "Warehouse"},
+            ],
+            "access_assignments": [],
+        }
+        organization_mappings = [
+            {
+                "subject_type": "user",
+                "subject_id": 340,
+                "target_department_id": 12,
+                "target_team_id": 38,
+                "confidence": "proposed_review",
+            },
+            {
+                "subject_type": "user",
+                "subject_id": 341,
+                "target_department_id": 11,
+                "target_team_id": 32,
+                "confidence": "proposed_review",
+            },
+        ]
+
+        decisions, _ = MODULE.build_access_decisions(
+            rows, organization_mappings
+        )
+
+        self.assertEqual(len(decisions), 1)
+        warehouse = decisions[0]
+        self.assertEqual(
+            (warehouse["user_id"], warehouse["legacy_role"]),
+            (341, "Warehouse"),
+        )
+        self.assertEqual(warehouse["action"], "no_new_grant")
+        self.assertEqual(warehouse["confidence"], "proposed_review")
+        self.assertNotIn("blockers", warehouse)
 
     def test_enumerated_uat_orphan_org_uses_unassigned_sink_not_alias(self):
         rows = {

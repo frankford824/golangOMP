@@ -26,7 +26,7 @@ SCHEMA_VERSION = 2
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 BUNDLE_KIND = "bundle_materialization_v2"
 RECOVERY_KIND = "recovery_materialization_v2"
-BUNDLE_STRATEGY = "clone_b_prematerialized_storage_ref_v1"
+BUNDLE_STRATEGY = "verified_oss_recovery_v1"
 
 
 class ReceiptError(ValueError):

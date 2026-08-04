@@ -14,7 +14,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 RECOVERY_IDS = (23989, 23990, 23991)
 TASK_ID = 2807
 POLICY = "legacy_deleted_asset_recovery_v1"
-STRATEGY = "clone_b_prematerialized_storage_ref_v1"
+STRATEGY = "verified_oss_recovery_v1"
 FINAL_STORAGE_ADAPTER = "clone_b_recovery"
 APPROVED_MAPPING_SHA256 = (
     "b19d48eacbc6700536f7e3b3286d1b35f023763cebdd13329b9c8bf76f6b01f7"

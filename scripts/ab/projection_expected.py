@@ -340,7 +340,7 @@ def apply_recovery_plan(
     expected = {
         int(row["missing_task_asset_id"]): row
         for row in mapping.get("asset_recoveries", [])
-        if row.get("strategy") == "clone_b_prematerialized_storage_ref_v1"
+        if row.get("strategy") == "verified_oss_recovery_v1"
     }
     if not plan_path_value:
         if expected:

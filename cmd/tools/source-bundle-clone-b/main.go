@@ -30,16 +30,6 @@ var (
 	runIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
 )
 
-var exactScopes = map[string][]int64{
-	"485/sku/365/1":   {293, 297},
-	"523/sku/398/1":   {402, 403, 404, 405},
-	"523/sku/400/1":   {358, 359, 360, 361},
-	"2234/sku/2401/2": {12672, 12673},
-	"2251/sku/2417/2": {13103, 13104, 13105, 13106, 13107},
-	"2477/sku/2725/2": {18989, 18991, 18993},
-	"2598/sku/2869/2": {20799, 20802},
-}
-
 type options struct {
 	DSN                    string
 	Mode                   string
@@ -684,12 +674,23 @@ func validateDocuments(reg registry, manifest confirmedManifest, o options, mani
 	if err != nil {
 		return nil, err
 	}
-	if len(reg.Entries) != len(exactScopes) || len(manifest.Bundles) != len(exactScopes) {
-		return nil, errors.New("registry/manifest must contain the seven exact bundle scopes")
+	if len(reg.Entries) == 0 || len(reg.Entries) != len(manifest.Bundles) {
+		return nil, errors.New("registry/manifest bundle scope counts must match and be non-zero")
 	}
 	manifestByScope := map[string]manifestBundle{}
 	for _, item := range manifest.Bundles {
-		manifestByScope[scopeKey(item.TaskID, item.ScopeKind, item.ScopeRefID, item.RevisionNo)] = item
+		key := scopeKey(item.TaskID, item.ScopeKind, item.ScopeRefID, item.RevisionNo)
+		if _, duplicate := manifestByScope[key]; duplicate {
+			return nil, fmt.Errorf("duplicate manifest bundle scope %s", key)
+		}
+		if item.TaskID <= 0 || item.RevisionNo <= 0 ||
+			(item.ScopeKind != "sku" && item.ScopeKind != "task") ||
+			(item.ScopeKind == "sku" && item.ScopeRefID <= 0) ||
+			(item.ScopeKind == "task" && item.ScopeRefID != 0) ||
+			len(item.OrderedMembers) < 2 {
+			return nil, fmt.Errorf("manifest bundle scope %s is invalid", key)
+		}
+		manifestByScope[key] = item
 	}
 	seenBundleAssetIDs := map[int64]struct{}{}
 	seenRootAssetIDs := map[int64]struct{}{}
@@ -698,10 +699,13 @@ func validateDocuments(reg registry, manifest confirmedManifest, o options, mani
 	var result []validatedEntry
 	for _, item := range reg.Entries {
 		key := scopeKey(item.TaskID, item.ScopeKind, item.ScopeRefID, item.RevisionNo)
-		expectedMembers, allowed := exactScopes[key]
 		manifestItem, found := manifestByScope[key]
-		if !allowed || !found || item.ScopeKind != "sku" {
-			return nil, fmt.Errorf("scope %s is outside the exact seven-scope allowlist", key)
+		if !found {
+			return nil, fmt.Errorf("scope %s is absent from the confirmed manifest", key)
+		}
+		expectedMembers := make([]int64, 0, len(manifestItem.OrderedMembers))
+		for _, member := range manifestItem.OrderedMembers {
+			expectedMembers = append(expectedMembers, member.TaskAssetID)
 		}
 		if !manifestItem.Confirmed ||
 			item.SourceBundle.TaskAssetID != manifestItem.BundleTaskAssetID ||
@@ -741,8 +745,8 @@ func validateDocuments(reg registry, manifest confirmedManifest, o options, mani
 			manifestSHA: manifestSHA,
 		})
 	}
-	if len(seenMembers) != 22 || len(manifestByScope) != len(exactScopes) {
-		return nil, errors.New("bundle documents must identify exactly 22 unique members")
+	if len(result) != len(manifestByScope) {
+		return nil, errors.New("registry does not cover every confirmed manifest bundle")
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].registry.TaskAssetCandidate.ID < result[j].registry.TaskAssetCandidate.ID
@@ -907,7 +911,7 @@ func validateEntryIdentity(item registryEntry, manifest manifestBundle, runID st
 		return errors.New("rollback candidate does not match bundle identity")
 	}
 	if len(item.SourceBundle.Members) != len(expectedMembers) || len(manifest.OrderedMembers) != len(expectedMembers) {
-		return errors.New("member count differs from exact scope allowlist")
+		return errors.New("member count differs from confirmed manifest")
 	}
 	for index, memberID := range expectedMembers {
 		sourceMember := item.SourceBundle.Members[index]
@@ -916,7 +920,7 @@ func validateEntryIdentity(item registryEntry, manifest manifestBundle, runID st
 			manifestMember.TaskID != item.TaskID || !sourceMember.Confirmed || !manifestMember.Confirmed ||
 			!sha256Pattern.MatchString(sourceMember.SHA256) || sourceMember.SHA256 != manifestMember.SHA256 ||
 			manifestMember.AssetID <= 0 || strings.TrimSpace(manifestMember.StorageRefID) == "" {
-			return errors.New("ordered member identity/hash differs from exact confirmed manifest")
+			return errors.New("ordered member identity/hash differs from confirmed manifest")
 		}
 		if _, duplicate := seen[memberID]; duplicate {
 			return errors.New("member task_asset is reused across bundle scopes")
@@ -1076,7 +1080,7 @@ func lockBundleState(ctx context.Context, tx transaction, entry validatedEntry, 
 	var taskID, currentVersionID, createdBy int64
 	var assetNo, assetType, scopeSKU string
 	err := tx.QueryRowContext(ctx, `
-		SELECT task_id,asset_no,scope_sku_code,asset_type,current_version_id,created_by
+		SELECT task_id,asset_no,COALESCE(scope_sku_code,''),asset_type,current_version_id,created_by
 		FROM design_assets WHERE id=? FOR UPDATE`, entry.manifest.BundleAssetID).Scan(
 		&taskID, &assetNo, &scopeSKU, &assetType, &currentVersionID, &createdBy,
 	)
@@ -1175,17 +1179,10 @@ func applyAll(
 ) (int, int, []memberBefore, error) {
 	// Fill scope codes first while the transaction is serializable.
 	for index := range entries {
-		if err := tx.QueryRowContext(ctx, `
-			SELECT sku_code FROM task_sku_items
-			WHERE id=? AND task_id=? FOR UPDATE`,
-			entries[index].registry.ScopeRefID, entries[index].registry.TaskID,
-		).Scan(&entries[index].scopeSKUCode); err != nil {
+		if err := loadScopeSKUCode(ctx, tx, &entries[index]); err != nil {
 			return 0, 0, nil, fmt.Errorf("scope %s SKU identity: %w",
 				scopeKey(entries[index].registry.TaskID, entries[index].registry.ScopeKind,
 					entries[index].registry.ScopeRefID, entries[index].registry.RevisionNo), err)
-		}
-		if strings.TrimSpace(entries[index].scopeSKUCode) == "" {
-			return 0, 0, nil, errors.New("bundle SKU code is empty")
 		}
 	}
 	type prepared struct {
@@ -1261,6 +1258,38 @@ func applyAll(
 	return len(items), 0, before, nil
 }
 
+func loadScopeSKUCode(ctx context.Context, tx transaction, entry *validatedEntry) error {
+	switch entry.registry.ScopeKind {
+	case "task":
+		if entry.registry.ScopeRefID != 0 {
+			return errors.New("task bundle scope_ref_id must be zero")
+		}
+		entry.scopeSKUCode = ""
+		return nil
+	case "sku":
+		if err := tx.QueryRowContext(ctx, `
+			SELECT sku_code FROM task_sku_items
+			WHERE id=? AND task_id=? FOR UPDATE`,
+			entry.registry.ScopeRefID, entry.registry.TaskID,
+		).Scan(&entry.scopeSKUCode); err != nil {
+			return err
+		}
+		if strings.TrimSpace(entry.scopeSKUCode) == "" {
+			return errors.New("bundle SKU code is empty")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported bundle scope_kind %q", entry.registry.ScopeKind)
+	}
+}
+
+func scopeSKUValue(entry validatedEntry) any {
+	if entry.registry.ScopeKind == "task" {
+		return nil
+	}
+	return entry.scopeSKUCode
+}
+
 func insertBundleRows(ctx context.Context, tx transaction, entry validatedEntry, manifest confirmedManifest) error {
 	createdAt := entry.confirmedAt.Format("2006-01-02 15:04:05")
 	if result, err := tx.ExecContext(ctx, `
@@ -1269,7 +1298,7 @@ func insertBundleRows(ctx context.Context, tx transaction, entry validatedEntry,
 		   asset_type,current_version_id,created_by,created_at,updated_at)
 		VALUES (?,?,?,?,?,NULL,'source',?,?,?,?)`,
 		entry.manifest.BundleAssetID, entry.registry.TaskID,
-		bundleAssetNo(entry.registry.TaskAssetCandidate.ID), nil, entry.scopeSKUCode,
+		bundleAssetNo(entry.registry.TaskAssetCandidate.ID), nil, scopeSKUValue(entry),
 		entry.registry.TaskAssetCandidate.ID, manifest.ConfirmedBy, createdAt, createdAt,
 	); err != nil {
 		return err
@@ -1287,7 +1316,7 @@ func insertBundleRows(ctx context.Context, tx transaction, entry validatedEntry,
 		        'source-bundle.zip','source-bundle.zip','application/zip',?,?,?,
 		        'uploaded','not_applicable',?,?,?,'migration',0,'not_applicable',?)`,
 		entry.registry.TaskAssetCandidate.ID, entry.registry.TaskID, entry.manifest.BundleAssetID,
-		entry.scopeSKUCode, entry.registry.TaskAssetCandidate.ID,
+		scopeSKUValue(entry), entry.registry.TaskAssetCandidate.ID,
 		entry.registry.AssetStorageRefCandidate.RefID, entry.registry.Size,
 		entry.registry.ObjectKey, entry.registry.BundleSHA256, manifest.ConfirmedBy,
 		createdAt, bundleRemark(entry.registry, entry.manifestSHA), createdAt,
@@ -1318,7 +1347,7 @@ func rollbackAll(ctx context.Context, tx transaction, entries []validatedEntry, 
 		expectedMembers += len(entry.manifest.OrderedMembers)
 	}
 	if report.ChangedBundleCount != len(entries) || report.AlreadyAppliedCount != 0 || len(report.MemberBefore) != expectedMembers {
-		return 0, 0, errors.New("rollback requires the original changing apply report for all seven bundles and 22 members")
+		return 0, 0, errors.New("rollback requires the original changing apply report for every confirmed bundle and member")
 	}
 	beforeByID := map[int64]memberBefore{}
 	for _, member := range report.MemberBefore {
@@ -1329,11 +1358,7 @@ func rollbackAll(ctx context.Context, tx transaction, entries []validatedEntry, 
 	}
 	allApplied, allBefore := true, true
 	for index := range entries {
-		if err := tx.QueryRowContext(ctx, `
-			SELECT sku_code FROM task_sku_items
-			WHERE id=? AND task_id=? FOR UPDATE`,
-			entries[index].registry.ScopeRefID, entries[index].registry.TaskID,
-		).Scan(&entries[index].scopeSKUCode); err != nil {
+		if err := loadScopeSKUCode(ctx, tx, &entries[index]); err != nil {
 			return 0, 0, err
 		}
 		members, err := lockAndValidateMembers(ctx, tx, entries[index])

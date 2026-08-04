@@ -1073,7 +1073,7 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             {
                 "missing_task_asset_id": 1,
                 "task_id": 1,
-                "strategy": "clone_b_prematerialized_storage_ref_v1",
+                "strategy": "verified_oss_recovery_v1",
                 "recovery_source_task_asset_id": 1,
                 "recovery_source_storage_ref_id": "ref-001",
                 "recovery_source_sha256": "a" * 64,
@@ -1098,7 +1098,7 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             "source_content_sha256": "a" * 64,
             "source_size": 10,
             "source_mime": "image/png",
-            "strategy": "clone_b_prematerialized_storage_ref_v1",
+            "strategy": "verified_oss_recovery_v1",
             "source_receipt_sha256": "f" * 64,
         }
         receipt = self.write_receipt(
@@ -1122,7 +1122,7 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             {
                 "missing_task_asset_id": 1,
                 "task_id": 1,
-                "strategy": "clone_b_prematerialized_storage_ref_v1",
+                "strategy": "verified_oss_recovery_v1",
                 "recovery_source_task_asset_id": 1,
                 "recovery_source_storage_ref_id": "ref-001",
                 "recovery_source_sha256": "a" * 64,
@@ -1147,7 +1147,7 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             "source_content_sha256": "a" * 64,
             "source_size": 10,
             "source_mime": "image/png",
-            "strategy": "clone_b_prematerialized_storage_ref_v1",
+            "strategy": "verified_oss_recovery_v1",
             "source_receipt_sha256": "f" * 64,
         }
 
@@ -1180,7 +1180,7 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             {
                 "missing_task_asset_id": 1,
                 "task_id": 1,
-                "strategy": "clone_b_prematerialized_storage_ref_v1",
+                "strategy": "verified_oss_recovery_v1",
                 "recovery_source_task_asset_id": 1,
                 "recovery_source_storage_ref_id": "ref-001",
                 "recovery_source_sha256": "a" * 64,
@@ -1208,7 +1208,7 @@ class BuildAPIOracleV3Test(unittest.TestCase):
             "source_content_sha256": "a" * 64,
             "source_size": 10,
             "source_mime": "image/png",
-            "strategy": "clone_b_prematerialized_storage_ref_v1",
+            "strategy": "verified_oss_recovery_v1",
             "source_receipt_sha256": "f" * 64,
         }
         mutations = {

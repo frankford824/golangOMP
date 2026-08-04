@@ -165,7 +165,9 @@
         "--component-dir",
         "{run_dir}",
         "--fixture-root",
-        "{clone_root}/fixture-upload-b"
+        "{clone_root}/fixture-upload-b",
+        "--mapping",
+        "{mapping_file}"
       ],
       "expected_artifacts": [
         "{run_dir}/recovery-db-rollback.json",

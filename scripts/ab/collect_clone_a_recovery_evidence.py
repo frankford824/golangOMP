@@ -29,7 +29,7 @@ DSN = re.compile(
 )
 CLONE_A_DB = re.compile(r"^ab_[A-Za-z0-9_]*_a(?:_|$)[A-Za-z0-9_]*$")
 POLICY = "legacy_deleted_asset_recovery_v1"
-STRATEGY = "clone_b_prematerialized_storage_ref_v1"
+STRATEGY = "verified_oss_recovery_v1"
 SOURCE_TASK_ID = 2098
 ALLOWLIST = {
     23989: (2807, 24034, 683001),

@@ -24,6 +24,13 @@ def fake_sha(value: int) -> str:
     return f"{value:064x}"
 
 
+TEST_SCOPES = {
+    (480, "task", 0, 1): (242, 243, 246, 249, 254),
+    (523, "sku", 398, 1): (402, 403, 404, 405),
+    (1264, "retouch_requirement", 44, 2): (5501, 6316),
+}
+
+
 class ApplyBundleRegistryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -48,7 +55,7 @@ class ApplyBundleRegistryTests(unittest.TestCase):
 
     def make_mapping(self):
         resources = []
-        for index, (key, members) in enumerate(MODULE.EXACT_SCOPES.items(), 1):
+        for index, (key, members) in enumerate(TEST_SCOPES.items(), 1):
             task_id, scope_kind, scope_ref_id, revision_no = key
             revision = {
                 "revision_no": revision_no,
@@ -72,6 +79,10 @@ class ApplyBundleRegistryTests(unittest.TestCase):
                     "multiple source assets require a reviewed deterministic ZIP bundle"
                 ],
                 "review_policy_ids": ["explicit_event_replay"],
+                "source_bundle_candidate": {
+                    "ordering": "completion_time_then_task_asset_id",
+                    "ordered_member_task_asset_ids": list(members),
+                },
             }
             if index <= 3:
                 revision["blockers"].append(
@@ -102,7 +113,7 @@ class ApplyBundleRegistryTests(unittest.TestCase):
 
     def make_manifest(self):
         bundles = []
-        for index, (key, members) in enumerate(MODULE.EXACT_SCOPES.items(), 1):
+        for index, (key, members) in enumerate(TEST_SCOPES.items(), 1):
             task_id, scope_kind, scope_ref_id, revision_no = key
             bundles.append(
                 {
@@ -141,7 +152,7 @@ class ApplyBundleRegistryTests(unittest.TestCase):
 
     def make_registry(self):
         entries = []
-        for index, (key, members) in enumerate(MODULE.EXACT_SCOPES.items(), 1):
+        for index, (key, members) in enumerate(TEST_SCOPES.items(), 1):
             task_id, scope_kind, scope_ref_id, revision_no = key
             manifest_bundle = self.manifest["bundles"][index - 1]
             object_key = (
@@ -252,7 +263,7 @@ class ApplyBundleRegistryTests(unittest.TestCase):
 
     def test_exact_merge_remains_unreviewed_and_hash_bound(self):
         output, evidence = self.prepare()
-        self.assertEqual(evidence["target_count"], 7)
+        self.assertEqual(evidence["target_count"], len(TEST_SCOPES))
         self.assertFalse(evidence["business_policy_review_performed"])
         self.assertEqual(
             evidence["input_sha256"],
@@ -320,7 +331,7 @@ class ApplyBundleRegistryTests(unittest.TestCase):
     def test_rejects_scope_and_member_identity_drift(self):
         self.registry["entries"][0]["scope_ref_id"] = 999
         self.rewrite_registry()
-        with self.assertRaisesRegex(ValueError, "unexpected or duplicate scope"):
+        with self.assertRaisesRegex(ValueError, "scope_ref_id is invalid"):
             self.prepare()
         self.setUp_fresh()
         self.registry["entries"][0]["source_bundle"]["members"].reverse()
@@ -350,10 +361,17 @@ class ApplyBundleRegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "status=MATERIALIZED"):
             self.prepare()
         self.setUp_fresh()
-        self.manifest["bundles"][0]["bundle_task_asset_id"] = 293
-        self.registry["entries"][0]["source_bundle"]["task_asset_id"] = 293
-        self.registry["entries"][0]["task_asset_candidate"]["id"] = 293
-        self.registry["entries"][0]["rollback_candidate"]["task_asset_id"] = 293
+        first_member = TEST_SCOPES[next(iter(TEST_SCOPES))][0]
+        self.manifest["bundles"][0]["bundle_task_asset_id"] = first_member
+        self.registry["entries"][0]["source_bundle"][
+            "task_asset_id"
+        ] = first_member
+        self.registry["entries"][0]["task_asset_candidate"][
+            "id"
+        ] = first_member
+        self.registry["entries"][0]["rollback_candidate"][
+            "task_asset_id"
+        ] = first_member
         self.rewrite_manifest_and_registry()
         with self.assertRaisesRegex(ValueError, "reuses a source member id"):
             self.prepare()
@@ -366,7 +384,7 @@ class ApplyBundleRegistryTests(unittest.TestCase):
         self.mapping_sha = MODULE.sha256_file(self.mapping_path)
         self.manifest["mapping_sha256"] = self.mapping_sha
         self.rewrite_manifest_and_registry()
-        with self.assertRaisesRegex(ValueError, "exact multi-source hard blocker"):
+        with self.assertRaisesRegex(ValueError, "invalid bundle candidate"):
             self.prepare()
         self.setUp_fresh()
         self.mapping["resources"][0]["history"][0]["manifest_row_hash"] = "0" * 64

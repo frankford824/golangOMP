@@ -14,7 +14,8 @@ boundary:
 * rollback restores the database first, then the guard, then fixture bytes.
 
 The wrapper is deliberately restricted to the existing task-2807 recovery and
-seven reviewed source-bundle executors.  It is not a general migration shell.
+the hash-bound, confirmed source-bundle manifest. It is not a general migration
+shell.
 """
 
 from __future__ import annotations
@@ -633,6 +634,36 @@ def validate_bundle_report(
     return value
 
 
+def manifest_bundle_count(manifest: dict[str, Any]) -> int:
+    bundles = manifest.get("bundles")
+    if not isinstance(bundles, list) or not bundles:
+        raise ComponentError("bundle manifest must contain at least one bundle")
+    keys: set[tuple[int, str, int, int]] = set()
+    for index, bundle in enumerate(bundles):
+        if not isinstance(bundle, dict):
+            raise ComponentError(
+                f"bundle manifest bundles[{index}] is invalid"
+            )
+        key = (
+            int(bundle.get("task_id") or 0),
+            str(bundle.get("scope_kind") or ""),
+            int(bundle.get("scope_ref_id") or 0),
+            int(bundle.get("revision_no") or 0),
+        )
+        if (
+            key[0] <= 0
+            or key[1] not in {"task", "sku", "retouch_requirement"}
+            or key[2] < 0
+            or key[3] <= 0
+            or key in keys
+        ):
+            raise ComponentError(
+                f"bundle manifest bundles[{index}] scope is invalid"
+            )
+        keys.add(key)
+    return len(bundles)
+
+
 def validate_bundle_journal(
     path: pathlib.Path,
     *,
@@ -660,6 +691,9 @@ def validate_bundle_journal(
         int(member["task_asset_id"]): str(member["sha256"])
         for member in members
     }
+    bundles = manifest.get("bundles")
+    expected_bundle_count = len(bundles) if isinstance(bundles, list) else 0
+    expected_member_count = len(expected)
     if (
         value.get("schema_version") != 1
         or value.get("kind")
@@ -673,14 +707,15 @@ def validate_bundle_journal(
         or value.get("manifest_sha256") != manifest_sha256
         or value.get("prepared_before_first_database_mutation") is not True
         or value.get("database_commit_state") != "unknown"
-        or value.get("expected_bundle_count") != 7
-        or value.get("expected_member_count") != 22
-        or value.get("changed_bundle_count") != 7
+        or expected_bundle_count <= 0
+        or expected_member_count <= 0
+        or value.get("expected_bundle_count") != expected_bundle_count
+        or value.get("expected_member_count") != expected_member_count
+        or value.get("changed_bundle_count") != expected_bundle_count
         or value.get("already_applied_bundle_count") != 0
         or value.get("production_writes_executed") is not False
         or not isinstance(before, list)
-        or len(before) != 22
-        or len(expected) != 22
+        or len(before) != expected_member_count
         or not isinstance(auto_before, list)
         or not isinstance(auto_ceilings, list)
         or [item.get("table") for item in auto_before]
@@ -881,6 +916,7 @@ def validate_bundle_registry_for_apply(
     write_ahead: pathlib.Path,
     component_dir: pathlib.Path,
     run_id: str,
+    expected_bundle_count: int,
 ) -> list[pathlib.Path]:
     verify_self_bound(value, "bundle registry")
     if (
@@ -894,7 +930,12 @@ def validate_bundle_registry_for_apply(
     if not registry.is_file() or registry.is_symlink():
         raise ComponentError("bundle registry must be a regular non-symlink file")
     entries = value.get("entries")
-    if not isinstance(entries, list) or len(entries) != 7:
+    if (
+        isinstance(expected_bundle_count, bool)
+        or expected_bundle_count <= 0
+        or not isinstance(entries, list)
+        or len(entries) != expected_bundle_count
+    ):
         raise ComponentError("bundle registry entries differ")
     b_root = pathlib.Path(str(value.get("b_root") or ""))
     if (
@@ -1444,6 +1485,7 @@ def bundle_apply(
     db_journal = component_dir / "bundle-db-rollback-journal.json"
     report = component_dir / "bundle-component-apply.json"
     manifest_value = read_object(args.manifest, "bundle-manifest")
+    bundle_count = manifest_bundle_count(manifest_value)
     candidate = str(manifest_value.get("source_candidate_sha256") or "")
     if (
         manifest_value.get("run_id") != args.run_id
@@ -1490,6 +1532,7 @@ def bundle_apply(
             write_ahead=write_ahead,
             component_dir=component_dir,
             run_id=args.run_id,
+            expected_bundle_count=bundle_count,
         )
         registry_sha = sha256_file(registry)
         manifest_sha = sha256_file(args.manifest)
@@ -1549,7 +1592,7 @@ def bundle_apply(
             rollback_journal_evidence_sha256=journal_value[
                 "evidence_sha256"
             ],
-            changed=7,
+            changed=bundle_count,
             already=0,
         )
         run_command(
@@ -1582,7 +1625,7 @@ def bundle_apply(
                 "evidence_sha256"
             ],
             changed=0,
-            already=7,
+            already=bundle_count,
         )
         second_journal = validate_bundle_journal(
             db_journal,
@@ -1667,9 +1710,12 @@ def bundle_apply(
                         rollback_journal_evidence_sha256=read_object(
                             db_journal, "bundle rollback journal"
                         )["evidence_sha256"],
-                        changed=7,
+                        changed=bundle_count,
                         already=0,
-                        allowed_counts={(7, 0), (0, 7)},
+                        allowed_counts={
+                            (bundle_count, 0),
+                            (0, bundle_count),
+                        },
                     )
                     compensation.append("database_restored")
                 except Exception as exc:
@@ -1783,6 +1829,7 @@ def bundle_rollback(
         component_dir / "bundle-apply-compensation-state.json"
     )
     manifest_value = read_object(args.manifest, "bundle-manifest")
+    bundle_count = manifest_bundle_count(manifest_value)
     candidate = str(manifest_value.get("source_candidate_sha256") or "")
     rollback_registry = (
         registry
@@ -1802,8 +1849,13 @@ def bundle_rollback(
         raise ComponentError("bundle rollback input binding is invalid")
     if registry_value.get("status") in {"WRITE_AHEAD", "MATERIALIZED"}:
         entries = registry_value.get("entries")
-        if not isinstance(entries, list) or len(entries) != 7:
-            raise ComponentError("bundle rollback registry must contain seven entries")
+        if (
+            not isinstance(entries, list)
+            or len(entries) != bundle_count
+        ):
+            raise ComponentError(
+                "bundle rollback registry entry count differs from manifest"
+            )
     registry_sha = sha256_file(registry) if registry.is_file() else ""
     manifest_sha = sha256_file(args.manifest)
     compensation_complete = False
@@ -1859,9 +1911,12 @@ def bundle_rollback(
             rollback_journal_evidence_sha256=read_object(
                 db_journal, "bundle rollback journal"
             )["evidence_sha256"],
-            changed=7,
+            changed=bundle_count,
             already=0,
-            allowed_counts={(7, 0), (0, 7)},
+            allowed_counts={
+                (bundle_count, 0),
+                (0, bundle_count),
+            },
         )
         rollback_target = db_rollback_recheck
         rollback_artifacts.append(db_rollback_recheck)
@@ -1894,7 +1949,7 @@ def bundle_rollback(
                 rollback_journal_evidence_sha256=journal_value[
                     "evidence_sha256"
                 ],
-                changed=7,
+                changed=bundle_count,
                 already=0,
             )
             apply_crosscheck = db_apply
@@ -1928,12 +1983,23 @@ def bundle_rollback(
             rollback_journal_evidence_sha256=read_object(
                 db_journal, "bundle rollback journal"
             )["evidence_sha256"],
-            changed=0 if rollback_target == db_rollback_recheck else 7,
-            already=7 if rollback_target == db_rollback_recheck else 0,
+            changed=(
+                0
+                if rollback_target == db_rollback_recheck
+                else bundle_count
+            ),
+            already=(
+                bundle_count
+                if rollback_target == db_rollback_recheck
+                else 0
+            ),
             allowed_counts=(
                 None
                 if rollback_target == db_rollback_recheck
-                else {(7, 0), (0, 7)}
+                else {
+                    (bundle_count, 0),
+                    (0, bundle_count),
+                }
             ),
         )
     if binding is not None:

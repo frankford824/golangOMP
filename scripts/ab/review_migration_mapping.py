@@ -38,6 +38,7 @@ POLICIES = (
     "legacy_retouch_premature_terminal_partial_v1",
     "legacy_retouch_visual_scope_task2533_v1",
     "legacy_multi_sku_atomic_batch_submit_v1",
+    "legacy_atomic_upload_batch_submit_v1",
     "legacy_audit_stage_final_snapshot_v1",
     "legacy_purchase_to_sku_planning_v1",
     "legacy_incomplete_uat_planning_tombstone_v1",
@@ -105,6 +106,11 @@ POLICY_CATALOG = {
         "Approve the last scoped submit as the trigger for the task-level "
         "atomic transition only after full SKU coverage is independently "
         "proven."
+    ),
+    "legacy_atomic_upload_batch_submit_v1": (
+        "Approve one deterministic submission snapshot from contiguous "
+        "same-actor completed upload sessions within fifteen minutes of the "
+        "submit boundary when no other workflow boundary intervenes."
     ),
     "legacy_audit_stage_final_snapshot_v1": (
         "Approve an audit-stage replacement snapshot only when every changed "
@@ -174,9 +180,9 @@ POLICY_CATALOG = {
     "legacy_deleted_asset_recovery_v1": (
         "Record the frozen size and pairwise preview/design-thumb evidence for "
         "a missing legacy object. Approval establishes only the semantic "
-        "recovery decision; it does not prove Clone B byte materialization, "
-        "database apply, object verification, or rollback, which remain "
-        "mandatory later G4/G8 gates."
+        "recovery decision; it does not prove target-environment byte "
+        "materialization, database apply, object verification, or rollback, "
+        "which remain mandatory later G4/G8 gates."
     ),
     "legacy_historical_asset_unavailable_v1": (
         "Record an irrecoverable superseded historical asset without claiming "
@@ -638,7 +644,7 @@ def validate_candidate(candidate: dict[str, Any]) -> None:
         expected_strategy = (
             "historical_unavailable_tombstone_v1"
             if missing_id == 12323
-            else "clone_b_prematerialized_storage_ref_v1"
+            else "verified_oss_recovery_v1"
         )
         expected_policy = (
             "legacy_historical_asset_unavailable_v1"
@@ -787,7 +793,11 @@ def validate_candidate(candidate: dict[str, Any]) -> None:
         }:
             raise ValueError(f"{path}.action is invalid")
         evidence = item.get("required_existing_assignments")
-        if not isinstance(evidence, list) or (confidence != "hard_blocked" and not evidence):
+        if not isinstance(evidence, list) or (
+            confidence != "hard_blocked"
+            and item.get("action") == "preserve_existing"
+            and not evidence
+        ):
             raise ValueError(f"{path}.required_existing_assignments is invalid")
         evidence_keys: list[tuple[str, str, str, int]] = []
         for evidence_index, assignment in enumerate(evidence):

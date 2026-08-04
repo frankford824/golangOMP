@@ -608,6 +608,25 @@ def write_component_chain_fixture(
 
 
 class CloneBMaterializationComponentTest(unittest.TestCase):
+    def test_manifest_bundle_count_supports_current_dynamic_cohort(self):
+        manifest = {
+            "bundles": [
+                {
+                    "task_id": 1000 + index,
+                    "scope_kind": "sku",
+                    "scope_ref_id": 2000 + index,
+                    "revision_no": 1,
+                }
+                for index in range(70)
+            ]
+        }
+        self.assertEqual(component.manifest_bundle_count(manifest), 70)
+        manifest["bundles"].append(dict(manifest["bundles"][0]))
+        with self.assertRaisesRegex(
+            component.ComponentError, "scope is invalid"
+        ):
+            component.manifest_bundle_count(manifest)
+
     def test_guard_absent_is_frozen_provisioned_and_exactly_removed(self):
         connection = FakeConnection()
         binding = component.guard_binding(
@@ -937,6 +956,15 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                         "status": "CONFIRMED",
                         "run_id": "formal-test",
                         "source_candidate_sha256": "b" * 64,
+                        "bundles": [
+                            {
+                                "task_id": 1000 + index,
+                                "scope_kind": "sku",
+                                "scope_ref_id": 2000 + index,
+                                "revision_no": 1,
+                            }
+                            for index in range(7)
+                        ],
                     }
                 )
                 + "\n",
@@ -1243,6 +1271,7 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                 write_ahead=write_ahead,
                 component_dir=component_dir,
                 run_id=run_id,
+                expected_bundle_count=7,
             )
             self.assertEqual(14, len(receipts))
 
@@ -1255,6 +1284,7 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     write_ahead=write_ahead,
                     component_dir=component_dir,
                     run_id=run_id,
+                    expected_bundle_count=7,
                 )
 
             for recorded in ("", str(component_dir / "outside.json")):
@@ -1272,6 +1302,7 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                         write_ahead=write_ahead,
                         component_dir=component_dir,
                         run_id=run_id,
+                        expected_bundle_count=7,
                     )
 
             reused = json.loads(json.dumps(unsigned))
@@ -1291,6 +1322,7 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                 write_ahead=write_ahead,
                 component_dir=component_dir,
                 run_id=run_id,
+                expected_bundle_count=7,
             )
             first_ownership.write_bytes(ownership_bytes[first_asset_id])
 
@@ -1312,6 +1344,7 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     write_ahead=write_ahead,
                     component_dir=component_dir,
                     run_id=run_id,
+                    expected_bundle_count=7,
                 )
 
 

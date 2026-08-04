@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,11 +19,14 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+
+	"workflow/service"
 )
 
 const (
-	planVersion      = 1
-	guardEnvironment = "clone_b"
+	planVersion       = 1
+	confirmPhrase     = "PRODUCTION_ASSET_RECOVERY_2807"
+	targetEnvironment = "production"
 )
 
 type exactRecovery struct {
@@ -37,14 +41,18 @@ var exactRecoveries = map[int64]exactRecovery{
 }
 
 type options struct {
-	DSN             string
-	Mode            string
-	PlanFile        string
-	FixtureRoot     string
-	ReportFile      string
-	ConfirmDatabase string
-	ConfirmHost     string
-	ConfirmRunID    string
+	DSN               string
+	Mode              string
+	PlanFile          string
+	SourceRoot        string
+	ReportFile        string
+	CutoverMarker     string
+	ConfirmDatabase   string
+	ConfirmHost       string
+	ConfirmRunID      string
+	ConfirmRelease    string
+	ConfirmCommit     string
+	ConfirmProduction string
 }
 
 type recoveryPlan struct {
@@ -56,6 +64,7 @@ type recoveryPlan struct {
 	MappingSHA256            string          `json:"mapping_sha256"`
 	DatabaseWritesExecuted   bool            `json:"database_writes_executed"`
 	ProductionWritesExecuted bool            `json:"production_writes_executed"`
+	EvidenceSHA256           string          `json:"evidence_sha256"`
 	Entries                  []recoveryEntry `json:"entries"`
 }
 
@@ -94,15 +103,26 @@ type rowMutation struct {
 type executionReport struct {
 	Version                      int       `json:"version"`
 	Mode                         string    `json:"mode"`
+	Environment                  string    `json:"environment"`
+	Release                      string    `json:"release"`
 	RunID                        string    `json:"run_id"`
 	Database                     string    `json:"database"`
 	Host                         string    `json:"host"`
+	ApprovedCommit               string    `json:"approved_commit"`
 	PlanSHA256                   string    `json:"plan_sha256"`
 	ExecutedAt                   time.Time `json:"executed_at"`
 	ChangedEntries               int       `json:"changed_entries"`
 	AlreadyInTargetStateEntries  int       `json:"already_in_target_state_entries"`
 	DatabaseTransactionCommitted bool      `json:"database_transaction_committed"`
 	ObjectStorageWritesExecuted  bool      `json:"object_storage_writes_executed"`
+	ObjectStorageDeletesExecuted bool      `json:"object_storage_deletes_executed"`
+}
+
+type objectStore interface {
+	UploadObjectFromReader(context.Context, string, string, io.Reader) error
+	StatObject(context.Context, string) (*service.OSSObjectInfo, bool, error)
+	OpenObject(context.Context, string) (io.ReadCloser, error)
+	DeleteObject(context.Context, string) error
 }
 
 type transaction interface {
@@ -114,14 +134,18 @@ type transaction interface {
 
 func main() {
 	var o options
-	flag.StringVar(&o.DSN, "dsn", os.Getenv("CLONE_B_MYSQL_DSN"), "Clone B MySQL DSN; MYSQL_DSN is deliberately ignored")
+	flag.StringVar(&o.DSN, "dsn", os.Getenv("MYSQL_DSN"), "production MySQL DSN")
 	flag.StringVar(&o.Mode, "mode", "", "apply or rollback")
-	flag.StringVar(&o.PlanFile, "plan", "", "materialized plan from prepare_asset_recovery.py")
-	flag.StringVar(&o.FixtureRoot, "fixture-root", "", "run-scoped materialized object root")
+	flag.StringVar(&o.PlanFile, "plan", "", "production plan from prepare_asset_recovery.py")
+	flag.StringVar(&o.SourceRoot, "source-root", "", "directory containing the three frozen source files")
 	flag.StringVar(&o.ReportFile, "report-file", "", "new execution report path")
-	flag.StringVar(&o.ConfirmDatabase, "confirm-database", "", "must exactly match the Clone B database")
+	flag.StringVar(&o.CutoverMarker, "cutover-marker", "", "exact-commit cutover marker")
+	flag.StringVar(&o.ConfirmDatabase, "confirm-database", "", "must exactly match the production database")
 	flag.StringVar(&o.ConfirmHost, "confirm-host", "", "must exactly match the DSN host")
-	flag.StringVar(&o.ConfirmRunID, "confirm-run-id", "", "must exactly match the plan and DB guard run_id")
+	flag.StringVar(&o.ConfirmRunID, "confirm-run-id", "", "must exactly match the plan run_id")
+	flag.StringVar(&o.ConfirmRelease, "confirm-release", "", "must exactly match the plan release")
+	flag.StringVar(&o.ConfirmCommit, "confirm-commit", "", "40-character approved commit")
+	flag.StringVar(&o.ConfirmProduction, "confirm-production", "", "required production confirmation phrase")
 	flag.Parse()
 
 	if err := run(context.Background(), o); err != nil {
@@ -135,6 +159,9 @@ func run(ctx context.Context, o options) error {
 	if err != nil {
 		return err
 	}
+	if err := validateCutoverMarker(o.CutoverMarker, o.ConfirmCommit); err != nil {
+		return err
+	}
 	planBytes, err := os.ReadFile(o.PlanFile)
 	if err != nil {
 		return err
@@ -142,22 +169,29 @@ func run(ctx context.Context, o options) error {
 	planSHA := sha256Hex(planBytes)
 	var plan recoveryPlan
 	if err := json.Unmarshal(planBytes, &plan); err != nil {
-		return fmt.Errorf("decode recovery plan: %w", err)
+		return fmt.Errorf("decode production recovery plan: %w", err)
 	}
-	if err := validatePlan(plan, o.ConfirmRunID, o.FixtureRoot); err != nil {
+	if err := validatePlanBytes(planBytes, plan); err != nil {
+		return err
+	}
+	if err := validatePlan(plan, o); err != nil {
 		return err
 	}
 	sort.Slice(plan.Entries, func(i, j int) bool {
 		return plan.Entries[i].MissingTaskAssetID < plan.Entries[j].MissingTaskAssetID
 	})
 
+	oss, err := productionOSS()
+	if err != nil {
+		return err
+	}
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("connect Clone B: %w", err)
+		return fmt.Errorf("connect production database: %w", err)
 	}
 	var database string
 	if err := db.QueryRowContext(ctx, `SELECT DATABASE()`).Scan(&database); err != nil {
@@ -167,62 +201,45 @@ func run(ctx context.Context, o options) error {
 		return fmt.Errorf("database identity mismatch: connected=%q confirmed=%q dsn=%q", database, o.ConfirmDatabase, cfg.DBName)
 	}
 
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	changed, already, objectWrites, objectDeletes, err := execute(
+		ctx, db, oss, plan, o,
+	)
 	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := validateCloneGuard(ctx, tx, plan.RunID, planSHA); err != nil {
-		return err
-	}
-
-	changed := 0
-	already := 0
-	for _, entry := range plan.Entries {
-		var didChange bool
-		if o.Mode == "apply" {
-			didChange, err = applyEntry(ctx, tx, entry)
-		} else {
-			didChange, err = rollbackEntry(ctx, tx, entry)
-		}
-		if err != nil {
-			return fmt.Errorf("task_asset %d: %w", entry.MissingTaskAssetID, err)
-		}
-		if didChange {
-			changed++
-		} else {
-			already++
-		}
-	}
-	if err := tx.Commit(); err != nil {
 		return err
 	}
 	report := executionReport{
 		Version:                      1,
 		Mode:                         o.Mode,
+		Environment:                  targetEnvironment,
+		Release:                      plan.ProductionRelease,
 		RunID:                        plan.RunID,
 		Database:                     database,
 		Host:                         host,
+		ApprovedCommit:               o.ConfirmCommit,
 		PlanSHA256:                   planSHA,
 		ExecutedAt:                   time.Now().UTC(),
 		ChangedEntries:               changed,
 		AlreadyInTargetStateEntries:  already,
 		DatabaseTransactionCommitted: true,
-		ObjectStorageWritesExecuted:  false,
+		ObjectStorageWritesExecuted:  objectWrites,
+		ObjectStorageDeletesExecuted: objectDeletes,
 	}
 	if err := writeNewJSON(o.ReportFile, report); err != nil {
 		if o.Mode == "apply" && changed > 0 {
-			compensationErr := compensateCommittedApply(
-				ctx, db, plan.RunID, planSHA, plan.Entries,
+			rollbackOptions := o
+			rollbackOptions.Mode = "rollback"
+			_, _, _, _, compensationErr := execute(
+				ctx, db, oss, plan, rollbackOptions,
 			)
 			if compensationErr != nil {
 				return fmt.Errorf(
-					"write apply report: %v; committed database apply compensation failed: %w",
-					err, compensationErr,
+					"write production apply report: %v; committed apply compensation failed: %w",
+					err,
+					compensationErr,
 				)
 			}
 			return fmt.Errorf(
-				"write apply report: %w; committed database apply was compensated",
+				"write production apply report: %w; committed database and OSS apply was compensated",
 				err,
 			)
 		}
@@ -231,38 +248,164 @@ func run(ctx context.Context, o options) error {
 	return nil
 }
 
-func compensateCommittedApply(
+func execute(
 	ctx context.Context,
 	db *sql.DB,
-	runID string,
-	planSHA string,
-	entries []recoveryEntry,
-) error {
+	objects objectStore,
+	plan recoveryPlan,
+	o options,
+) (changed, already int, objectWrites, objectDeletes bool, err error) {
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
-		return err
+		return 0, 0, false, false, err
 	}
 	defer tx.Rollback()
-	if err := validateCloneGuard(ctx, tx, runID, planSHA); err != nil {
-		return err
-	}
-	for index := len(entries) - 1; index >= 0; index-- {
-		changed, err := rollbackEntry(ctx, tx, entries[index])
+
+	states := make([]lockedState, len(plan.Entries))
+	allBefore, allAfter := true, true
+	for index, entry := range plan.Entries {
+		states[index], err = readLockedState(ctx, tx, entry)
 		if err != nil {
-			return fmt.Errorf(
-				"task_asset %d compensation: %w",
-				entries[index].MissingTaskAssetID,
+			return 0, 0, false, false, fmt.Errorf("task_asset %d: %w", entry.MissingTaskAssetID, err)
+		}
+		allBefore = allBefore && states[index].equals(expectedBefore(entry))
+		allAfter = allAfter && states[index].equals(expectedAfter(entry))
+	}
+	if !allBefore && !allAfter {
+		return 0, 0, false, false, errors.New("recovery rows are in a mixed or drifted state")
+	}
+
+	if o.Mode == "apply" {
+		if allAfter {
+			for _, entry := range plan.Entries {
+				if err := verifyRemoteObject(ctx, objects, entry); err != nil {
+					return 0, 0, false, false, err
+				}
+			}
+			if err := tx.Commit(); err != nil {
+				return 0, 0, false, false, err
+			}
+			return 0, len(plan.Entries), false, false, nil
+		}
+		created := make([]recoveryEntry, 0, len(plan.Entries))
+		commitAttempted := false
+		defer func() {
+			if err == nil || commitAttempted {
+				return
+			}
+			for index := len(created) - 1; index >= 0; index-- {
+				_ = deleteVerifiedObject(ctx, objects, created[index], true)
+			}
+		}()
+		for _, entry := range plan.Entries {
+			_, exists, statErr := objects.StatObject(ctx, entry.TargetObjectKey)
+			if statErr != nil {
+				return 0, 0, false, false, statErr
+			}
+			if exists {
+				return 0, 0, false, false, fmt.Errorf(
+					"task_asset %d target object already exists before first apply",
+					entry.MissingTaskAssetID,
+				)
+			}
+			sourceFile := sourcePath(o.SourceRoot, entry)
+			if err := verifyLocalSource(sourceFile, entry); err != nil {
+				return 0, 0, false, false, err
+			}
+			source, openErr := os.Open(sourceFile)
+			if openErr != nil {
+				return 0, 0, false, false, openErr
+			}
+			mimeType := fmt.Sprint(entry.DBApplyPlan.InsertStorageRef["mime_type"])
+			uploadErr := objects.UploadObjectFromReader(
+				ctx, entry.TargetObjectKey, mimeType, source,
+			)
+			closeErr := source.Close()
+			if uploadErr != nil {
+				return 0, 0, false, false, uploadErr
+			}
+			if closeErr != nil {
+				return 0, 0, false, false, closeErr
+			}
+			created = append(created, entry)
+			if err := verifyRemoteObject(ctx, objects, entry); err != nil {
+				return 0, 0, false, false, err
+			}
+		}
+		objectWrites = len(created) > 0
+		for _, entry := range plan.Entries {
+			if err := insertStorageRef(ctx, tx, entry.DBApplyPlan.InsertStorageRef); err != nil {
+				return 0, 0, objectWrites, false, err
+			}
+			if err := updateTaskAsset(ctx, tx, entry.DBApplyPlan.UpdateTaskAsset); err != nil {
+				return 0, 0, objectWrites, false, err
+			}
+			if err := updateUpload(ctx, tx, entry.DBApplyPlan.UpdateUpload); err != nil {
+				return 0, 0, objectWrites, false, err
+			}
+		}
+		commitAttempted = true
+		if err := tx.Commit(); err != nil {
+			return 0, 0, objectWrites, false, fmt.Errorf(
+				"production commit result is ambiguous; preserve exact OSS objects and reconcile DB state before retry: %w",
 				err,
 			)
 		}
-		if !changed {
-			return fmt.Errorf(
-				"task_asset %d compensation found no committed apply",
-				entries[index].MissingTaskAssetID,
+		created = nil
+		return len(plan.Entries), 0, objectWrites, false, nil
+	}
+
+	for _, entry := range plan.Entries {
+		_, exists, statErr := objects.StatObject(ctx, entry.TargetObjectKey)
+		if statErr != nil {
+			return 0, 0, false, false, statErr
+		}
+		if exists {
+			if err := verifyRemoteObject(ctx, objects, entry); err != nil {
+				return 0, 0, false, false, err
+			}
+		} else if allAfter {
+			return 0, 0, false, false, fmt.Errorf(
+				"task_asset %d recovery object is missing before rollback",
+				entry.MissingTaskAssetID,
 			)
 		}
 	}
-	return tx.Commit()
+	if allAfter {
+		for _, entry := range plan.Entries {
+			if err := updateTaskAsset(ctx, tx, entry.Rollback.DBRollbackPlan.RestoreTaskAsset); err != nil {
+				return 0, 0, false, false, err
+			}
+			if err := updateUpload(ctx, tx, entry.Rollback.DBRollbackPlan.RestoreUpload); err != nil {
+				return 0, 0, false, false, err
+			}
+			result, deleteErr := tx.ExecContext(
+				ctx,
+				`DELETE FROM asset_storage_refs WHERE ref_id=?`,
+				entry.TargetStorageRefID,
+			)
+			if deleteErr != nil {
+				return 0, 0, false, false, deleteErr
+			}
+			if err := requireOne(result, "delete created storage ref"); err != nil {
+				return 0, 0, false, false, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, false, false, err
+	}
+	for _, entry := range plan.Entries {
+		deleted, deleteErr := deleteVerifiedObjectIfPresent(ctx, objects, entry)
+		if deleteErr != nil {
+			return 0, 0, false, objectDeletes, deleteErr
+		}
+		objectDeletes = objectDeletes || deleted
+	}
+	if allAfter {
+		return len(plan.Entries), 0, false, objectDeletes, nil
+	}
+	return 0, len(plan.Entries), false, objectDeletes, nil
 }
 
 func validateOptions(o options) (*mysql.Config, string, error) {
@@ -270,28 +413,51 @@ func validateOptions(o options) (*mysql.Config, string, error) {
 		return nil, "", errors.New("--mode must be apply or rollback")
 	}
 	for name, value := range map[string]string{
-		"--dsn/CLONE_B_MYSQL_DSN": o.DSN,
-		"--plan":                  o.PlanFile,
-		"--fixture-root":          o.FixtureRoot,
-		"--report-file":           o.ReportFile,
-		"--confirm-database":      o.ConfirmDatabase,
-		"--confirm-host":          o.ConfirmHost,
-		"--confirm-run-id":        o.ConfirmRunID,
+		"--dsn/MYSQL_DSN":    o.DSN,
+		"--plan":             o.PlanFile,
+		"--source-root":      o.SourceRoot,
+		"--report-file":      o.ReportFile,
+		"--cutover-marker":   o.CutoverMarker,
+		"--confirm-database": o.ConfirmDatabase,
+		"--confirm-host":     o.ConfirmHost,
+		"--confirm-run-id":   o.ConfirmRunID,
+		"--confirm-release":  o.ConfirmRelease,
+		"--confirm-commit":   o.ConfirmCommit,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return nil, "", fmt.Errorf("%s is required", name)
 		}
 	}
+	if o.ConfirmProduction != confirmPhrase {
+		return nil, "", errors.New("exact --confirm-production phrase is required")
+	}
+	sourceInfo, err := os.Lstat(o.SourceRoot)
+	if err != nil || !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, "", errors.New("--source-root must be an existing real directory")
+	}
+	reportParent := filepath.Dir(o.ReportFile)
+	if info, err := os.Lstat(reportParent); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, "", errors.New("--report-file parent must be an existing real directory")
+	}
+	if _, err := os.Lstat(o.ReportFile); err == nil || !errors.Is(err, os.ErrNotExist) {
+		return nil, "", errors.New("--report-file must not already exist")
+	}
+	if len(o.ConfirmCommit) != 40 {
+		return nil, "", errors.New("--confirm-commit must be a full 40-character commit")
+	}
+	if _, err := hex.DecodeString(o.ConfirmCommit); err != nil {
+		return nil, "", errors.New("--confirm-commit is not hexadecimal")
+	}
 	cfg, err := mysql.ParseDSN(o.DSN)
 	if err != nil {
-		return nil, "", fmt.Errorf("parse Clone B DSN: %w", err)
+		return nil, "", fmt.Errorf("parse production DSN: %w", err)
 	}
 	if cfg.Net != "tcp" {
-		return nil, "", errors.New("Clone B executor only accepts a TCP DSN")
+		return nil, "", errors.New("production executor only accepts a TCP DSN")
 	}
 	host, _, err := net.SplitHostPort(cfg.Addr)
 	if err != nil {
-		return nil, "", fmt.Errorf("Clone B DSN address must include an explicit port: %w", err)
+		return nil, "", fmt.Errorf("production DSN address must include an explicit port: %w", err)
 	}
 	if !isLoopbackHost(host) {
 		return nil, "", fmt.Errorf("refusing non-loopback database host %q", host)
@@ -299,8 +465,8 @@ func validateOptions(o options) (*mysql.Config, string, error) {
 	if host != o.ConfirmHost {
 		return nil, "", fmt.Errorf("host confirmation mismatch: dsn=%q confirmed=%q", host, o.ConfirmHost)
 	}
-	if !isSafeCloneBDatabaseName(cfg.DBName) {
-		return nil, "", fmt.Errorf("refusing unmarked database %q; name must start with ab_ and end with _b", cfg.DBName)
+	if isCloneDatabaseName(cfg.DBName) {
+		return nil, "", fmt.Errorf("refusing Clone B database %q", cfg.DBName)
 	}
 	if cfg.DBName != o.ConfirmDatabase {
 		return nil, "", fmt.Errorf("database confirmation mismatch: dsn=%q confirmed=%q", cfg.DBName, o.ConfirmDatabase)
@@ -310,60 +476,101 @@ func validateOptions(o options) (*mysql.Config, string, error) {
 	return cfg, host, nil
 }
 
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
+func validateCutoverMarker(path, commit string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("cutover marker must be a real regular file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	expected := "APPROVED_COMMIT=" + commit + "\n"
+	if string(raw) != expected {
+		return errors.New("cutover marker does not exactly bind the approved commit")
+	}
+	return nil
 }
 
-func isSafeCloneBDatabaseName(name string) bool {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	return strings.HasPrefix(lower, "ab_") && strings.HasSuffix(lower, "_b")
+func validatePlanBytes(raw []byte, plan recoveryPlan) error {
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return err
+	}
+	evidence, ok := object["evidence_sha256"].(string)
+	if !ok || len(evidence) != 64 {
+		return errors.New("production plan evidence_sha256 is missing")
+	}
+	delete(object, "evidence_sha256")
+	canonical, err := json.Marshal(object)
+	if err != nil {
+		return err
+	}
+	if sha256Hex(canonical) != evidence || plan.EvidenceSHA256 != evidence {
+		return errors.New("production plan evidence_sha256 is stale")
+	}
+	return nil
 }
 
-func validatePlan(plan recoveryPlan, confirmRunID, fixtureRoot string) error {
-	if plan.Version != planVersion || plan.Status != "MATERIALIZED" {
-		return errors.New("plan must be version 1 with status MATERIALIZED")
+func validatePlan(plan recoveryPlan, o options) error {
+	if plan.Version != planVersion || plan.Status != "PREPARED" {
+		return errors.New("production plan must be version 1 with status PREPARED")
 	}
-	if plan.TargetEnvironment != guardEnvironment || plan.ProductionRelease != "" {
-		return errors.New("Clone B executor requires an explicit clone_b plan")
+	if plan.TargetEnvironment != targetEnvironment ||
+		plan.ProductionRelease != o.ConfirmRelease ||
+		plan.RunID != o.ConfirmRunID {
+		return errors.New("production plan environment, release, or run_id confirmation mismatch")
 	}
 	if plan.DatabaseWritesExecuted || plan.ProductionWritesExecuted {
-		return errors.New("plan write flags must both be false")
-	}
-	if plan.RunID == "" || plan.RunID != confirmRunID {
-		return errors.New("plan run_id does not match --confirm-run-id")
+		return errors.New("production plan write flags must both be false")
 	}
 	if len(plan.Entries) != len(exactRecoveries) {
-		return errors.New("plan must contain the three exact task 2807 recoveries")
+		return errors.New("production plan must contain the three exact task 2807 recoveries")
 	}
 	seen := map[int64]bool{}
 	for _, entry := range plan.Entries {
 		exact, ok := exactRecoveries[entry.MissingTaskAssetID]
-		if !ok || entry.SourceTaskAssetID != exact.sourceID || entry.SourceSize != exact.size || seen[entry.MissingTaskAssetID] {
-			return errors.New("plan recovery set differs from the frozen task 2807 allowlist")
+		if !ok || seen[entry.MissingTaskAssetID] ||
+			entry.SourceTaskAssetID != exact.sourceID ||
+			entry.SourceSize != exact.size {
+			return errors.New("production plan recovery set differs from the frozen allowlist")
 		}
 		seen[entry.MissingTaskAssetID] = true
-		if err := validateEntry(entry, fixtureRoot); err != nil {
+		if err := validateEntry(entry, plan); err != nil {
 			return fmt.Errorf("task_asset %d: %w", entry.MissingTaskAssetID, err)
 		}
 	}
 	return nil
 }
 
-func validateEntry(entry recoveryEntry, fixtureRoot string) error {
-	if len(entry.SourceSHA256) != 64 || entry.SourceSize <= 0 ||
-		entry.TargetStorageRefID == "" || entry.TargetObjectKey == "" ||
+func validateEntry(entry recoveryEntry, plan recoveryPlan) error {
+	if len(entry.SourceSHA256) != 64 ||
+		entry.TargetStorageRefID == "" ||
 		entry.Rollback.DeleteStorageRefID != entry.TargetStorageRefID ||
 		entry.Rollback.DeleteObjectKey != entry.TargetObjectKey ||
 		entry.Rollback.ExpectedObjectSHA != entry.SourceSHA256 {
 		return errors.New("plan entry identity or rollback registry is incomplete")
 	}
-	decodedSHA, err := hex.DecodeString(entry.SourceSHA256)
-	if err != nil || len(decodedSHA) != sha256.Size {
+	decoded, err := hex.DecodeString(entry.SourceSHA256)
+	if err != nil || len(decoded) != sha256.Size {
 		return errors.New("source SHA-256 is invalid")
+	}
+	prefix := "v8-production/" + plan.ProductionRelease + "/" + plan.RunID + "/recovered/task-2807/"
+	expectedObjectKey := fmt.Sprintf(
+		"%stask-asset-%d/%s.bin",
+		prefix,
+		entry.MissingTaskAssetID,
+		entry.SourceSHA256,
+	)
+	if entry.TargetObjectKey != expectedObjectKey ||
+		entry.DBApplyPlan.InsertStorageRef["storage_adapter"] != "oss_upload_service" ||
+		entry.DBApplyPlan.InsertStorageRef["ref_key"] != entry.TargetObjectKey ||
+		entry.DBApplyPlan.InsertStorageRef["ref_id"] != entry.TargetStorageRefID ||
+		asInt64(entry.DBApplyPlan.InsertStorageRef["owner_id"]) != entry.MissingTaskAssetID {
+		return errors.New("production OSS storage identity is invalid")
 	}
 	if entry.TargetStorageRefID == fmt.Sprint(entry.Rollback.OriginalStorageRef["ref_id"]) {
 		return errors.New("target storage ref must not reuse the deleted original ref")
@@ -383,21 +590,13 @@ func validateEntry(entry recoveryEntry, fixtureRoot string) error {
 	if err := requireMapFields(entry.DBApplyPlan.InsertStorageRef, storageRefFields(), "storage ref insert"); err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(entry.DBApplyPlan.UpdateTaskAsset.Where, map[string]any{"id": float64(entry.MissingTaskAssetID)}) ||
-		!reflect.DeepEqual(entry.DBRollbackTaskWhere(), entry.DBApplyPlan.UpdateTaskAsset.Where) {
-		return errors.New("task asset where clause is not exact")
-	}
 	requestID := entry.DBApplyPlan.UpdateUpload.Where["request_id"]
-	if requestID == nil || requestID == "" ||
-		!reflect.DeepEqual(entry.Rollback.DBRollbackPlan.RestoreUpload.Where, entry.DBApplyPlan.UpdateUpload.Where) {
-		return errors.New("upload request where clause is not exact")
-	}
-	if entry.DBApplyPlan.InsertStorageRef["ref_id"] != entry.TargetStorageRefID ||
-		entry.DBApplyPlan.InsertStorageRef["owner_type"] != "task_asset" ||
-		asInt64(entry.DBApplyPlan.InsertStorageRef["owner_id"]) != entry.MissingTaskAssetID ||
-		entry.DBApplyPlan.InsertStorageRef["storage_adapter"] != "local" ||
-		entry.DBApplyPlan.InsertStorageRef["ref_key"] != entry.TargetObjectKey {
-		return errors.New("storage ref insert does not match the recovery identity")
+	if !reflect.DeepEqual(entry.DBApplyPlan.UpdateTaskAsset.Where, map[string]any{"id": float64(entry.MissingTaskAssetID)}) ||
+		!reflect.DeepEqual(entry.Rollback.DBRollbackPlan.RestoreTaskAsset.Where, entry.DBApplyPlan.UpdateTaskAsset.Where) ||
+		requestID == nil || requestID == "" ||
+		!reflect.DeepEqual(entry.Rollback.DBRollbackPlan.RestoreUpload.Where, entry.DBApplyPlan.UpdateUpload.Where) ||
+		entry.Rollback.DBRollbackPlan.DeleteStorageRef.Where["ref_id"] != entry.TargetStorageRefID {
+		return errors.New("production DB where clauses are not exact")
 	}
 	taskAfter := entry.DBApplyPlan.UpdateTaskAsset.Set
 	if taskAfter["storage_ref_id"] != entry.TargetStorageRefID ||
@@ -418,13 +617,11 @@ func validateEntry(entry recoveryEntry, fixtureRoot string) error {
 		uploadAfter["session_status"] != "completed" {
 		return errors.New("upload request target state differs from the frozen recovery contract")
 	}
-	if entry.DBApplyPlan.InsertStorageRef["upload_request_id"] != requestID ||
+	if entry.DBApplyPlan.InsertStorageRef["owner_type"] != "task_asset" ||
+		entry.DBApplyPlan.InsertStorageRef["upload_request_id"] != requestID ||
 		entry.Rollback.RestoreTaskAsset["storage_ref_id"] != entry.Rollback.OriginalStorageRef["ref_id"] ||
 		entry.Rollback.RestoreUpload["bound_ref_id"] != entry.Rollback.OriginalStorageRef["ref_id"] {
 		return errors.New("before/after rows do not share one exact upload and storage identity")
-	}
-	if entry.Rollback.DBRollbackPlan.DeleteStorageRef.Where["ref_id"] != entry.TargetStorageRefID {
-		return errors.New("storage ref rollback where clause is not exact")
 	}
 	if !reflect.DeepEqual(
 		normalizeMap(selectFields(entry.Rollback.RestoreTaskAsset, taskAssetFields())),
@@ -442,124 +639,118 @@ func validateEntry(entry recoveryEntry, fixtureRoot string) error {
 		fmt.Sprint(entry.Rollback.OriginalStorageRef["status"]) == "" {
 		return errors.New("original storage ref before state is incomplete")
 	}
-	target, err := containedFixturePath(fixtureRoot, entry.TargetObjectKey)
+	return nil
+}
+
+func productionOSS() (*service.OSSDirectService, error) {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("UPLOAD_STORAGE_PROVIDER"))) != "oss" {
+		return nil, errors.New("production recovery requires UPLOAD_STORAGE_PROVIDER=oss")
+	}
+	oss := service.NewOSSDirectService(service.OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        os.Getenv("OSS_ENDPOINT"),
+		Bucket:          os.Getenv("OSS_BUCKET"),
+		AccessKeyID:     os.Getenv("OSS_ACCESS_KEY_ID"),
+		AccessKeySecret: os.Getenv("OSS_ACCESS_KEY_SECRET"),
+		PublicEndpoint:  os.Getenv("OSS_PUBLIC_ENDPOINT"),
+		HTTPTimeout:     10 * time.Minute,
+	})
+	if !oss.Enabled() {
+		return nil, errors.New("production OSS configuration is incomplete")
+	}
+	return oss, nil
+}
+
+func sourcePath(root string, entry recoveryEntry) string {
+	return filepath.Join(
+		root,
+		fmt.Sprintf(
+			"task-asset-%d-%s.jpg",
+			entry.SourceTaskAssetID,
+			entry.SourceSHA256,
+		),
+	)
+}
+
+func verifyLocalSource(path string, entry recoveryEntry) error {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	info, err := os.Stat(target)
-	if err != nil {
-		return fmt.Errorf("materialized object is not readable: %w", err)
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 ||
+		info.Size() != entry.SourceSize {
+		return fmt.Errorf(
+			"task_asset %d frozen source file is missing or drifted",
+			entry.MissingTaskAssetID,
+		)
 	}
-	if info.Size() != entry.SourceSize {
-		return errors.New("materialized object size differs from plan")
-	}
-	digest, err := sha256File(target)
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	if digest != entry.SourceSHA256 {
-		return errors.New("materialized object SHA-256 differs from plan")
+	defer file.Close()
+	digest := sha256.New()
+	written, err := io.Copy(digest, file)
+	if err != nil {
+		return err
+	}
+	if written != entry.SourceSize ||
+		hex.EncodeToString(digest.Sum(nil)) != entry.SourceSHA256 {
+		return fmt.Errorf(
+			"task_asset %d frozen source SHA-256 is drifted",
+			entry.MissingTaskAssetID,
+		)
 	}
 	return nil
 }
 
-func (entry recoveryEntry) DBRollbackTaskWhere() map[string]any {
-	return entry.Rollback.DBRollbackPlan.RestoreTaskAsset.Where
-}
-
-func containedFixturePath(root, objectKey string) (string, error) {
-	base, err := filepath.Abs(root)
+func verifyRemoteObject(ctx context.Context, objects objectStore, entry recoveryEntry) error {
+	info, exists, err := objects.StatObject(ctx, entry.TargetObjectKey)
 	if err != nil {
-		return "", err
+		return err
 	}
-	target, err := filepath.Abs(filepath.Join(base, "objects", filepath.FromSlash(objectKey)))
+	if !exists || info.ContentLength != entry.SourceSize {
+		return fmt.Errorf("task_asset %d production object size is missing or drifted", entry.MissingTaskAssetID)
+	}
+	reader, err := objects.OpenObject(ctx, entry.TargetObjectKey)
 	if err != nil {
-		return "", err
+		return err
 	}
-	prefix := base + string(os.PathSeparator)
-	if target == base || !strings.HasPrefix(target, prefix) {
-		return "", errors.New("object path escapes fixture root")
+	digest := sha256.New()
+	written, copyErr := io.Copy(digest, reader)
+	closeErr := reader.Close()
+	if copyErr != nil {
+		return copyErr
 	}
-	return target, nil
-}
-
-func validateCloneGuard(ctx context.Context, tx transaction, runID, planSHA string) error {
-	// Clone provisioning owns this deliberately non-migrated guard table:
-	//   CREATE TABLE v8_ab_clone_guard (
-	//     singleton_id TINYINT PRIMARY KEY,
-	//     environment VARCHAR(32) NOT NULL,
-	//     run_id VARCHAR(81) NOT NULL,
-	//     plan_sha256 CHAR(64) NOT NULL
-	//   );
-	// Exactly one singleton_id=1 row must be installed in Clone B after the
-	// materialized plan is frozen. This tool never creates or updates the guard.
-	var environment, guardedRunID, guardedPlanSHA string
-	err := tx.QueryRowContext(ctx, `
-		SELECT environment,run_id,plan_sha256
-		FROM v8_ab_clone_guard
-		WHERE singleton_id=1
-		FOR UPDATE`).Scan(&environment, &guardedRunID, &guardedPlanSHA)
-	if err != nil {
-		return fmt.Errorf("Clone B guard missing or unreadable: %w", err)
+	if closeErr != nil {
+		return closeErr
 	}
-	if environment != guardEnvironment || guardedRunID != runID || guardedPlanSHA != planSHA {
-		return errors.New("Clone B guard does not bind environment, run_id, and plan SHA-256")
+	if written != entry.SourceSize ||
+		hex.EncodeToString(digest.Sum(nil)) != entry.SourceSHA256 {
+		return fmt.Errorf("task_asset %d production object SHA-256 is drifted", entry.MissingTaskAssetID)
 	}
 	return nil
 }
 
-func applyEntry(ctx context.Context, tx transaction, entry recoveryEntry) (bool, error) {
-	state, err := readLockedState(ctx, tx, entry)
-	if err != nil {
+func deleteVerifiedObjectIfPresent(ctx context.Context, objects objectStore, entry recoveryEntry) (bool, error) {
+	_, exists, err := objects.StatObject(ctx, entry.TargetObjectKey)
+	if err != nil || !exists {
 		return false, err
 	}
-	before := expectedBefore(entry)
-	after := expectedAfter(entry)
-	if state.equals(after) {
-		return false, nil
-	}
-	if !state.equals(before) {
-		return false, errors.New("before-state drift or partial prior apply")
-	}
-	if err := insertStorageRef(ctx, tx, entry.DBApplyPlan.InsertStorageRef); err != nil {
-		return false, err
-	}
-	if err := updateTaskAsset(ctx, tx, entry.DBApplyPlan.UpdateTaskAsset); err != nil {
-		return false, err
-	}
-	if err := updateUpload(ctx, tx, entry.DBApplyPlan.UpdateUpload); err != nil {
+	if err := deleteVerifiedObject(ctx, objects, entry, false); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func rollbackEntry(ctx context.Context, tx transaction, entry recoveryEntry) (bool, error) {
-	state, err := readLockedState(ctx, tx, entry)
-	if err != nil {
-		return false, err
+func deleteVerifiedObject(ctx context.Context, objects objectStore, entry recoveryEntry, bestEffort bool) error {
+	if err := verifyRemoteObject(ctx, objects, entry); err != nil {
+		if bestEffort {
+			return objects.DeleteObject(ctx, entry.TargetObjectKey)
+		}
+		return err
 	}
-	before := expectedBefore(entry)
-	after := expectedAfter(entry)
-	if state.equals(before) {
-		return false, nil
-	}
-	if !state.equals(after) {
-		return false, errors.New("after-state drift or partial prior rollback")
-	}
-	if err := updateTaskAsset(ctx, tx, entry.Rollback.DBRollbackPlan.RestoreTaskAsset); err != nil {
-		return false, err
-	}
-	if err := updateUpload(ctx, tx, entry.Rollback.DBRollbackPlan.RestoreUpload); err != nil {
-		return false, err
-	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM asset_storage_refs WHERE ref_id=?`, entry.TargetStorageRefID)
-	if err != nil {
-		return false, err
-	}
-	if err := requireOne(result, "delete created storage ref"); err != nil {
-		return false, err
-	}
-	return true, nil
+	return objects.DeleteObject(ctx, entry.TargetObjectKey)
 }
 
 type lockedState struct {
@@ -612,7 +803,10 @@ func readLockedState(ctx context.Context, tx transaction, entry recoveryEntry) (
 	if err != nil {
 		return lockedState{}, fmt.Errorf("lock/read target storage ref: %w", err)
 	}
-	return lockedState{taskAsset: taskAsset, uploadRequest: upload, originalStatus: originalStatus, targetStorageRef: target}, nil
+	return lockedState{
+		taskAsset: taskAsset, uploadRequest: upload,
+		originalStatus: originalStatus, targetStorageRef: target,
+	}, nil
 }
 
 const taskAssetStateSQL = `
@@ -763,22 +957,22 @@ func normalizeMap(value map[string]any) map[string]any {
 		switch typed := item.(type) {
 		case float64:
 			result[key] = fmt.Sprintf("%.0f", typed)
-		case int64:
-			result[key] = fmt.Sprintf("%d", typed)
-		case int:
-			result[key] = fmt.Sprintf("%d", typed)
 		default:
-			result[key] = item
+			result[key] = typed
 		}
 	}
 	return result
 }
 
 func normalizeTime(value string) string {
-	value = strings.TrimSuffix(value, "Z")
-	value = strings.Replace(value, "T", " ", 1)
-	if dot := strings.IndexByte(value, '.'); dot >= 0 {
-		value = value[:dot]
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{
+		"2006-01-02 15:04:05",
+		time.RFC3339Nano,
+	} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.UTC().Format("2006-01-02 15:04:05")
+		}
 	}
 	return value
 }
@@ -794,26 +988,36 @@ func asInt64(value any) int64 {
 	switch typed := value.(type) {
 	case float64:
 		return int64(typed)
+	case json.Number:
+		parsed, _ := typed.Int64()
+		return parsed
 	case int64:
 		return typed
 	case int:
 		return int64(typed)
 	default:
-		return 0
+		var parsed int64
+		_, _ = fmt.Sscan(fmt.Sprint(value), &parsed)
+		return parsed
 	}
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isCloneDatabaseName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(lower, "ab_") || strings.HasSuffix(lower, "_b")
 }
 
 func sha256Hex(value []byte) string {
-	sum := sha256.Sum256(value)
-	return hex.EncodeToString(sum[:])
-}
-
-func sha256File(path string) (string, error) {
-	value, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return sha256Hex(value), nil
+	digest := sha256.Sum256(value)
+	return hex.EncodeToString(digest[:])
 }
 
 func writeNewJSON(path string, value any) error {
@@ -824,11 +1028,11 @@ func writeNewJSON(path string, value any) error {
 	data = append(data, '\n')
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("create report without overwrite: %w", err)
-	}
-	defer file.Close()
-	if _, err := file.Write(data); err != nil {
 		return err
 	}
-	return file.Sync()
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }

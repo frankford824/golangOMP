@@ -815,7 +815,7 @@ func TestValidateAssetRecoveriesAreFrozenAndFailClosed(t *testing.T) {
 	proposed := assetRecoveryMapping{
 		TaskID: 2807, MissingTaskAssetID: 23989,
 		RecoverySourceTaskAssetID:  24034,
-		Strategy:                   "clone_b_prematerialized_storage_ref_v1",
+		Strategy:                   "verified_oss_recovery_v1",
 		OriginalStorageRefID:       "f511c5d4-507f-4a69-bf10-70bae369429d",
 		RecoverySourceStorageRefID: "983a746c-c674-4f5c-8812-073be989b194",
 		ExpectedFileSize:           683001,

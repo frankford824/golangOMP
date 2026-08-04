@@ -136,7 +136,7 @@ func TestRegistryDecoderAcceptsMaterializerOwnershipReceipt(t *testing.T) {
 	}
 }
 
-func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
+func TestValidateDocumentsRequiresConfirmedDynamicScopesAndBytes(t *testing.T) {
 	root := t.TempDir()
 	runID := "formal-bundle-run"
 	bRoot := filepath.Join(
@@ -156,7 +156,16 @@ func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
 		DatabaseWritePerformed: false,
 	}
 	bundleIndex := int64(0)
-	for key, memberIDs := range exactScopes {
+	testScopes := map[string][]int64{
+		"485/sku/365/1":   {293, 297},
+		"523/sku/398/1":   {402, 403, 404, 405},
+		"523/sku/400/1":   {358, 359, 360, 361},
+		"2234/sku/2401/2": {12672, 12673},
+		"2251/sku/2417/2": {13103, 13104, 13105, 13106, 13107},
+		"2477/sku/2725/2": {18989, 18991, 18993},
+		"2598/sku/2869/2": {20799, 20802},
+	}
+	for key, memberIDs := range testScopes {
 		parts := strings.Split(key, "/")
 		var taskID, scopeRef int64
 		var revision int
@@ -868,7 +877,7 @@ func expectBundleState(mock sqlmock.Sqlmock, entry validatedEntry, reviewer int6
 		WithArgs(entry.registry.ObjectKey, entry.registry.AssetStorageRefCandidate.RefID).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	if !exact {
-		mock.ExpectQuery("SELECT task_id,asset_no,scope_sku_code,asset_type,current_version_id,created_by").
+		mock.ExpectQuery("SELECT task_id,asset_no,COALESCE\\(scope_sku_code,''\\),asset_type,current_version_id,created_by").
 			WithArgs(entry.manifest.BundleAssetID).WillReturnError(sql.ErrNoRows)
 		mock.ExpectQuery("SELECT task_id,asset_id,COALESCE\\(scope_sku_code,''\\),asset_type,binding_state").
 			WithArgs(entry.registry.TaskAssetCandidate.ID).WillReturnError(sql.ErrNoRows)
@@ -876,7 +885,7 @@ func expectBundleState(mock sqlmock.Sqlmock, entry validatedEntry, reviewer int6
 			WithArgs(entry.registry.AssetStorageRefCandidate.RefID).WillReturnError(sql.ErrNoRows)
 		return
 	}
-	mock.ExpectQuery("SELECT task_id,asset_no,scope_sku_code,asset_type,current_version_id,created_by").
+	mock.ExpectQuery("SELECT task_id,asset_no,COALESCE\\(scope_sku_code,''\\),asset_type,current_version_id,created_by").
 		WithArgs(entry.manifest.BundleAssetID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"task_id", "asset_no", "scope_sku_code", "asset_type", "current_version_id", "created_by",

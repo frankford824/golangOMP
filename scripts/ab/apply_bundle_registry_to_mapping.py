@@ -27,6 +27,11 @@ MULTI_SOURCE_BLOCKERS = {
     "multiple source assets require a reviewed deterministic ZIP bundle",
     "design revision has no uniquely evidenced source asset",
 }
+ALLOWED_SCOPE_KINDS = {"task", "sku", "retouch_requirement"}
+# Historical compatibility contract used only by
+# ``reapply_approved_source_bundles.py`` and legacy G06 fixtures.  The current
+# registry bridge derives its complete scope set from the candidate mapping
+# and does not consult this constant.
 EXACT_SCOPES: dict[tuple[int, str, int, int], tuple[int, ...]] = {
     (485, "sku", 365, 1): (293, 297),
     (523, "sku", 398, 1): (402, 403, 404, 405),
@@ -102,10 +107,85 @@ def scope_key(value: dict[str, Any], path: str) -> tuple[int, str, int, int]:
     revision_no = require_positive_int(
         value.get("revision_no"), f"{path}.revision_no"
     )
-    if kind != "sku":
-        raise ValueError(f"{path}.scope_kind must be sku")
-    ref_id = require_positive_int(ref_id, f"{path}.scope_ref_id")
+    if kind not in ALLOWED_SCOPE_KINDS:
+        raise ValueError(f"{path}.scope_kind is invalid")
+    if (
+        isinstance(ref_id, bool)
+        or not isinstance(ref_id, int)
+        or (kind == "task" and ref_id != 0)
+        or (kind != "task" and ref_id <= 0)
+    ):
+        raise ValueError(f"{path}.scope_ref_id is invalid")
     return task_id, kind, ref_id, revision_no
+
+
+def mapping_bundle_scopes(
+    mapping: dict[str, Any],
+) -> dict[tuple[int, str, int, int], tuple[int, ...]]:
+    if mapping.get("version") != 2 or not isinstance(
+        mapping.get("resources"), list
+    ):
+        raise ValueError("mapping must be version 2 with a resources array")
+    result: dict[tuple[int, str, int, int], tuple[int, ...]] = {}
+    for resource_index, resource in enumerate(mapping["resources"]):
+        path = f"resources[{resource_index}]"
+        if not isinstance(resource, dict) or not isinstance(
+            resource.get("history"), list
+        ):
+            raise ValueError(f"{path}.history must be an array")
+        for revision_index, revision in enumerate(resource["history"]):
+            revision_path = f"{path}.history[{revision_index}]"
+            if not isinstance(revision, dict):
+                raise ValueError(f"{revision_path} must be an object")
+            candidate = revision.get("source_bundle_candidate")
+            if candidate is None:
+                continue
+            key = scope_key(
+                {
+                    "task_id": resource.get("task_id"),
+                    "scope_kind": resource.get("scope_kind"),
+                    "scope_ref_id": resource.get("scope_ref_id"),
+                    "revision_no": revision.get("revision_no"),
+                },
+                revision_path,
+            )
+            blockers = revision.get("blockers")
+            members = (
+                candidate.get("ordered_member_task_asset_ids")
+                if isinstance(candidate, dict)
+                else None
+            )
+            if (
+                key in result
+                or revision.get("confidence") != "hard_blocked"
+                or not isinstance(blockers, list)
+                or not blockers
+                or any(
+                    blocker not in MULTI_SOURCE_BLOCKERS
+                    for blocker in blockers
+                )
+                or "multiple source assets require a reviewed deterministic ZIP bundle"
+                not in blockers
+                or not isinstance(candidate, dict)
+                or candidate.get("ordering")
+                != "completion_time_then_task_asset_id"
+                or not isinstance(members, list)
+                or len(members) < 2
+                or any(
+                    isinstance(member, bool)
+                    or not isinstance(member, int)
+                    or member <= 0
+                    for member in members
+                )
+                or len(members) != len(set(members))
+            ):
+                raise ValueError(
+                    f"{revision_path} has an invalid bundle candidate"
+                )
+            result[key] = tuple(members)
+    if not result:
+        raise ValueError("mapping contains no deterministic bundle candidates")
+    return result
 
 
 def manifest_hash_for_source_bundle(source_bundle: dict[str, Any]) -> str:
@@ -190,6 +270,9 @@ def validate_source_bundle(
 def validate_manifest(
     manifest: dict[str, Any],
     mapping_sha256: str,
+    expected_scopes: dict[
+        tuple[int, str, int, int], tuple[int, ...]
+    ],
 ) -> tuple[dict[tuple[int, str, int, int], dict[str, Any]], str]:
     if manifest.get("schema_version") != 1 or manifest.get("status") != "CONFIRMED":
         raise ValueError("manifest must be schema_version=1 and status=CONFIRMED")
@@ -227,7 +310,7 @@ def validate_manifest(
         if not isinstance(bundle, dict) or bundle.get("confirmed") is not True:
             raise ValueError(f"{path} must be confirmed=true")
         key = scope_key(bundle, path)
-        if key not in EXACT_SCOPES or key in result:
+        if key not in expected_scopes or key in result:
             raise ValueError(f"{path} has an unexpected or duplicate scope")
         task_asset_id = require_positive_int(
             bundle.get("bundle_task_asset_id"),
@@ -270,7 +353,7 @@ def validate_manifest(
                 "storage_ref_id"
             ].strip():
                 raise ValueError(f"{member_path}.storage_ref_id is required")
-        if tuple(ids) != EXACT_SCOPES[key]:
+        if tuple(ids) != expected_scopes[key]:
             raise ValueError(f"{path}.ordered_members order/identity drifted")
         if task_asset_id in ids:
             raise ValueError(f"{path} bundle output reuses a source member id")
@@ -279,8 +362,10 @@ def validate_manifest(
         normalized["_confirmed_at"] = confirmed_at
         normalized["_confirmation_note"] = note
         result[key] = normalized
-    if set(result) != set(EXACT_SCOPES):
-        raise ValueError("manifest must contain exactly the seven frozen scopes")
+    if set(result) != set(expected_scopes):
+        raise ValueError(
+            "manifest scopes differ from the mapping bundle candidates"
+        )
     return result, run_id
 
 
@@ -289,6 +374,9 @@ def validate_registry(
     manifest_sha256: str,
     run_id: str,
     manifest_bundles: dict[tuple[int, str, int, int], dict[str, Any]],
+    expected_scopes: dict[
+        tuple[int, str, int, int], tuple[int, ...]
+    ],
 ) -> dict[tuple[int, str, int, int], dict[str, Any]]:
     if (
         registry.get("schema_version") != 1
@@ -311,12 +399,12 @@ def validate_registry(
         if not isinstance(entry, dict):
             raise ValueError(f"{path} must be an object")
         key = scope_key(entry, path)
-        if key not in EXACT_SCOPES or key in result:
+        if key not in expected_scopes or key in result:
             raise ValueError(f"{path} has an unexpected or duplicate scope")
         manifest_bundle = manifest_bundles[key]
         source_bundle = validate_source_bundle(
             entry.get("source_bundle"),
-            EXACT_SCOPES[key],
+            expected_scopes[key],
             manifest_bundle,
             f"{path}.source_bundle",
         )
@@ -381,8 +469,10 @@ def validate_registry(
         ):
             raise ValueError(f"{path}.rollback_candidate drifted")
         result[key] = source_bundle
-    if set(result) != set(EXACT_SCOPES):
-        raise ValueError("registry must contain exactly the seven frozen scopes")
+    if set(result) != set(expected_scopes):
+        raise ValueError(
+            "registry scopes differ from the mapping bundle candidates"
+        )
     return result
 
 
@@ -399,6 +489,9 @@ def revision_hash(revision: dict[str, Any]) -> str:
 def merge_mapping(
     mapping: dict[str, Any],
     source_bundles: dict[tuple[int, str, int, int], dict[str, Any]],
+    expected_scopes: dict[
+        tuple[int, str, int, int], tuple[int, ...]
+    ],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if mapping.get("version") != 2 or not isinstance(mapping.get("resources"), list):
         raise ValueError("mapping must be version 2 with a resources array")
@@ -417,16 +510,18 @@ def merge_mapping(
             if not isinstance(revision, dict):
                 raise ValueError(f"{path}.history[{revision_index}] must be an object")
             key = (task_id, kind, ref_id, revision.get("revision_no"))
-            if key not in EXACT_SCOPES:
+            if key not in expected_scopes:
                 continue
             if key in targets:
                 raise ValueError(f"mapping duplicates frozen scope {key}")
             targets[key] = revision
-    if set(targets) != set(EXACT_SCOPES):
-        raise ValueError("mapping does not contain exactly the seven frozen revisions")
+    if set(targets) != set(expected_scopes):
+        raise ValueError(
+            "mapping revisions differ from the frozen bundle candidates"
+        )
 
     evidence_rows = []
-    for key in EXACT_SCOPES:
+    for key in expected_scopes:
         revision = targets[key]
         prior_hash = require_sha256(
             revision.get("manifest_row_hash"),
@@ -473,7 +568,9 @@ def merge_mapping(
                 "scope_kind": key[1],
                 "scope_ref_id": key[2],
                 "revision_no": key[3],
-                "ordered_member_task_asset_ids": list(EXACT_SCOPES[key]),
+                "ordered_member_task_asset_ids": list(
+                    expected_scopes[key]
+                ),
                 "bundle_task_asset_id": source_bundles[key]["task_asset_id"],
                 "bundle_sha256": source_bundles[key]["bundle_sha256"],
                 "prior_manifest_row_hash": prior_hash,
@@ -516,13 +613,24 @@ def prepare_outputs(
     mapping = load_object(mapping_path, "mapping")
     manifest = load_object(manifest_path, "manifest")
     registry = load_object(registry_path, "registry")
+    expected_scopes = mapping_bundle_scopes(mapping)
     manifest_bundles, run_id = validate_manifest(
-        manifest, actual["mapping_sha256"]
+        manifest,
+        actual["mapping_sha256"],
+        expected_scopes,
     )
     source_bundles = validate_registry(
-        registry, actual["manifest_sha256"], run_id, manifest_bundles
+        registry,
+        actual["manifest_sha256"],
+        run_id,
+        manifest_bundles,
+        expected_scopes,
     )
-    output, rows = merge_mapping(mapping, source_bundles)
+    output, rows = merge_mapping(
+        mapping,
+        source_bundles,
+        expected_scopes,
+    )
     output_bytes = canonical_bytes(output)
     evidence = {
         "schema_version": 1,

@@ -233,7 +233,7 @@ def asset_recovery(
                 23991: 24040,
             }[missing_task_asset_id],
             "rejected_source_task_asset_ids": [],
-            "strategy": "clone_b_prematerialized_storage_ref_v1",
+            "strategy": "verified_oss_recovery_v1",
             "original_storage_ref_id": f"missing-{missing_task_asset_id}",
             "expected_file_size": 683000,
             "preview_whole_hash": "",
@@ -377,6 +377,20 @@ class ReviewMigrationMappingTest(unittest.TestCase):
         self.prepare()
         self.assertEqual(first, (self.ledger.read_bytes(), self.template.read_bytes()))
         self.assertEqual(candidate_before, self.candidate.read_bytes())
+
+    def test_no_new_grant_allows_proven_empty_existing_assignments(self):
+        decision = access()
+        decision["required_existing_assignments"] = []
+        decision["manifest_row_hash"] = review.canonical_mapping_row_hash(
+            decision
+        )
+        self.write_candidate(mapping(access_decisions=[decision]))
+        self.prepare()
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        access_row = next(
+            row for row in ledger["rows"] if row["row_type"] == "access"
+        )
+        self.assertTrue(access_row["eligible"])
 
     def test_review_promotes_org_and_access_but_keeps_hard_rows_byte_identical(self):
         hard_org = organization(

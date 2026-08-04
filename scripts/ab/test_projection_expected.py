@@ -167,7 +167,7 @@ class ProjectionExpectedTest(unittest.TestCase):
                 {
                     "task_id": 10,
                     "missing_task_asset_id": 200,
-                    "strategy": "clone_b_prematerialized_storage_ref_v1",
+                    "strategy": "verified_oss_recovery_v1",
                     "recovery_source_sha256": "1" * 64,
                     "expected_file_size": 4,
                 }

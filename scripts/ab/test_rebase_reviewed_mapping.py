@@ -88,7 +88,7 @@ def candidate_mapping():
                     "task_id": 12,
                     "missing_task_asset_id": 120,
                     "recovery_source_task_asset_id": 121,
-                    "strategy": "clone_b_prematerialized_storage_ref_v1",
+                    "strategy": "verified_oss_recovery_v1",
                     "review_policy_ids": [
                         "legacy_deleted_asset_recovery_v1"
                     ],

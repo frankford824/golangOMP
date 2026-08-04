@@ -945,7 +945,7 @@ func validateAssetRecoveries(m mappingFile, allowCandidateConfidence bool) error
 		if !known {
 			return fmt.Errorf("%s: missing task asset is outside the frozen recovery evidence set", path)
 		}
-		expectedStrategy := "clone_b_prematerialized_storage_ref_v1"
+		expectedStrategy := "verified_oss_recovery_v1"
 		expectedPolicy := reviewPolicyLegacyDeletedAssetRecovery
 		if recovery.MissingTaskAssetID == 12323 {
 			expectedStrategy = "historical_unavailable_tombstone_v1"

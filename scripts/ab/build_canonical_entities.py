@@ -418,7 +418,7 @@ def build_entities(
     tasks = unique_index(rows["task"], "id", "task")
     assets = unique_index(rows["asset"], "id", "asset")
     for recovery in mapping.get("asset_recoveries", []):
-        if recovery.get("strategy") != "clone_b_prematerialized_storage_ref_v1":
+        if recovery.get("strategy") != "verified_oss_recovery_v1":
             continue
         recovered_id = int(recovery.get("missing_task_asset_id") or 0)
         recovered_hash = str(recovery.get("recovery_source_sha256") or "")

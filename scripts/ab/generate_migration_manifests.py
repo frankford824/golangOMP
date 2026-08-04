@@ -25,6 +25,7 @@ WAREHOUSE_REOPEN_EVENTS = {"task.warehouse.rejected"}
 SUPPLEMENT_EVENTS = {"task.audit.supplement_uploaded"}
 UPLOAD_SESSION_COMPLETED_EVENTS = {"task.asset.upload_session.completed"}
 BATCH_SUBMIT_POLICY = "legacy_multi_sku_atomic_batch_submit_v1"
+ATOMIC_UPLOAD_BATCH_SUBMIT_POLICY = "legacy_atomic_upload_batch_submit_v1"
 AUDIT_STAGE_FINAL_SNAPSHOT_POLICY = "legacy_audit_stage_final_snapshot_v1"
 EXPLICIT_EVENT_REPLAY_POLICY = "explicit_event_replay"
 DELIVERY_SOURCE_ALIAS_POLICY = "delivery_source_alias"
@@ -75,6 +76,7 @@ REVIEW_POLICY_ORDER = (
     RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY,
     RETOUCH_VISUAL_SCOPE_TASK2533_POLICY,
     BATCH_SUBMIT_POLICY,
+    ATOMIC_UPLOAD_BATCH_SUBMIT_POLICY,
     AUDIT_STAGE_FINAL_SNAPSHOT_POLICY,
     LEGACY_PURCHASE_TO_PLANNING_POLICY,
     INCOMPLETE_UAT_PLANNING_TOMBSTONE_POLICY,
@@ -335,6 +337,10 @@ def revision_review_policy_ids(
         policies.append(RETOUCH_VISUAL_SCOPE_TASK2533_POLICY)
     if revision.get("reason", "").startswith(f"policy {BATCH_SUBMIT_POLICY}:"):
         policies.append(BATCH_SUBMIT_POLICY)
+    if revision.get("reason", "").startswith(
+        f"policy {ATOMIC_UPLOAD_BATCH_SUBMIT_POLICY}:"
+    ):
+        policies.append(ATOMIC_UPLOAD_BATCH_SUBMIT_POLICY)
     if revision.get("reason", "").startswith(
         f"policy {CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}:"
     ):
@@ -685,6 +691,12 @@ def make_revision(
             "atomic transition after independently proven full SKU coverage; "
             "human confirmation remains required"
         )
+    elif event.get("_atomic_upload_batch"):
+        reason = (
+            f"policy {ATOMIC_UPLOAD_BATCH_SUBMIT_POLICY}: contiguous "
+            "same-actor completed upload sessions around the submit boundary "
+            "form one deterministic atomic submission snapshot"
+        )
     elif policy:
         reason = (
             f"policy {policy}: frozen exception-list facts matched exactly; "
@@ -717,6 +729,12 @@ def make_revision(
     if status == "finalized":
         revision["finalized_at"] = event["created_at"]
     if inherited is None and len(sources) > 1:
+        revision["source_bundle_candidate"] = {
+            "ordered_member_task_asset_ids": [
+                int(asset["id"]) for asset in sources
+            ],
+            "ordering": "completion_time_then_task_asset_id",
+        }
         add_blocker(revision, "multiple source assets require a reviewed deterministic ZIP bundle")
     for blocker in selection_blockers or []:
         add_blocker(revision, blocker)
@@ -724,8 +742,13 @@ def make_revision(
         inherited is None
         and scope["scope_kind"] != "retouch_requirement"
         and not revision.get("source_task_asset_id")
-        and len(final_ids) == 1
+        and final_ids
     ):
+        # Legacy submissions frequently used one completed session as the
+        # state-transition trigger while several delivery files formed the
+        # atomic final set. In the absence of an independent source file, the
+        # first event-ordered delivery is the deterministic immutable source
+        # alias; the complete ordered delivery set remains intact.
         revision["source_alias_from_task_asset_id"] = final_ids[0]
     if status in {"submitted", "finalized"} and scope["scope_kind"] != "retouch_requirement" and not revision.get("source_task_asset_id") and not revision.get("source_alias_from_task_asset_id"):
         add_blocker(revision, "design revision has no uniquely evidenced source asset")
@@ -793,6 +816,11 @@ def boundary_membership_time(
         payload.get("repair_reason")
         and event_precedes_boundary(completion, boundary)
     ):
+        return max(
+            str(boundary.get("created_at") or ""),
+            str(completion.get("created_at") or ""),
+        )
+    if boundary.get("_atomic_upload_batch"):
         return max(
             str(boundary.get("created_at") or ""),
             str(completion.get("created_at") or ""),
@@ -874,6 +902,8 @@ def resolve_submission_assets(scope, submit_event, all_events, assets):
     blockers: list[str] = []
     if not session_id:
         return [], [], ["design submission lacks an explicit upload_session_id"]
+    by_version_id = {int(asset["id"]): asset for asset in assets}
+    expected_modules = expected_submit_modules(scope, submit_event)
     completions = []
     for event in all_events:
         if str(event.get("event_type") or "").lower() not in UPLOAD_SESSION_COMPLETED_EVENTS:
@@ -885,8 +915,73 @@ def resolve_submission_assets(scope, submit_event, all_events, assets):
             completions.append(event)
     if not completions:
         return [], [], [f"upload session {session_id} has no completed event before submission"]
-    by_version_id = {int(asset["id"]): asset for asset in assets}
-    expected_modules = expected_submit_modules(scope, submit_event)
+    submit_actor = int(submit_event.get("actor_id") or 0)
+    try:
+        submit_time = parse_utc_timestamp(str(submit_event.get("created_at") or ""))
+    except (TypeError, ValueError):
+        submit_time = None
+    explicit_completion_ids = {
+        stable_event_id(event) for event in completions
+    }
+    if submit_actor > 0 and submit_time is not None:
+        for sibling in all_events:
+            if (
+                str(sibling.get("event_type") or "").lower()
+                not in UPLOAD_SESSION_COMPLETED_EVENTS
+                or int(sibling.get("actor_id") or 0) != submit_actor
+                or stable_event_id(sibling) in explicit_completion_ids
+            ):
+                continue
+            try:
+                sibling_time = parse_utc_timestamp(
+                    str(sibling.get("created_at") or "")
+                )
+            except (TypeError, ValueError):
+                continue
+            if abs((sibling_time - submit_time).total_seconds()) > 15 * 60:
+                continue
+            sibling_version_ids = payload_asset_version_ids(
+                event_payload(sibling)
+            )
+            sibling_assets = [
+                by_version_id.get(version_id)
+                for version_id in sibling_version_ids
+            ]
+            if (
+                not sibling_assets
+                or any(asset is None for asset in sibling_assets)
+                or any(
+                    asset.get("asset_type") not in {"source", "delivery"}
+                    or int(asset.get("task_id") or 0)
+                    != int(scope["task_id"])
+                    or not scope_matches(scope, asset)
+                    or str(
+                        asset.get("source_module_key") or ""
+                    ).strip().lower()
+                    not in expected_modules
+                    for asset in sibling_assets
+                )
+            ):
+                continue
+            lower = min(
+                str(sibling.get("created_at") or ""),
+                str(submit_event.get("created_at") or ""),
+            )
+            upper = max(
+                str(sibling.get("created_at") or ""),
+                str(submit_event.get("created_at") or ""),
+            )
+            if any(
+                boundary is not submit_event
+                and event_kind(boundary) is not None
+                and lower
+                < str(boundary.get("created_at") or "")
+                < upper
+                for boundary in all_events
+            ):
+                continue
+            completions.append(sibling)
+            submit_event["_atomic_upload_batch"] = True
     selected, evidence = [], []
     referenced_version_ids: list[int] = []
     for completion in sorted(completions, key=lambda event: (event["created_at"], int(event.get("sequence") or 0), str(event["id"]))):
@@ -1080,13 +1175,15 @@ def apply_explicit_audit_change(scope, event, assets, revision):
 
 
 def apply_proven_successor_audit_change(scope, event, events, assets, revision):
-    """Apply an immutable one-hop version replacement proven by legacy links.
+    """Apply an immutable version replacement chain proven by legacy links.
 
     Some reviewer uploads do not repeat replace/append semantics in the
     approval payload, but task_assets.superseded_by_version_id is an explicit
-    version-root edge.  It is usable only when the successor is same-scope,
-    same-role, present before approval, and has exactly one completed upload
-    session membership event before approval.
+    version-root edge. A reviewer can upload more than one replacement before
+    approving, so replay follows the complete acyclic chain to the version
+    eligible at approval. Every hop must be same-scope, same-role, present
+    before approval, and have exactly one completed upload-session membership
+    event before approval.
     """
     asset_by_id = {int(asset["id"]): asset for asset in assets}
     member_ids = list(revision["final_task_asset_ids"])
@@ -1100,40 +1197,66 @@ def apply_proven_successor_audit_change(scope, event, events, assets, revision):
         eligible, _ = revision_asset_eligible(old or {}, set(), event["created_at"])
         if eligible:
             continue
-        successor_id = int((old or {}).get("superseded_by_version_id") or 0)
-        successor = asset_by_id.get(successor_id)
-        if not old or not successor:
-            add_blocker(revision, f"asset_version_id {old_id} is ineligible at approval without a resolvable successor")
-            return False
-        same_root = not old.get("asset_id") or not successor.get("asset_id") or int(old["asset_id"]) == int(successor["asset_id"])
-        successor_ok, successor_reason = revision_asset_eligible(successor, {"audit", "customization"}, event["created_at"])
-        if (
-            int(successor["task_id"]) != int(scope["task_id"])
-            or not scope_matches(scope, successor)
-            or successor.get("asset_type") != old.get("asset_type")
-            or not same_root
-            or not at_or_before(successor, event["created_at"])
-            or not successor_ok
-        ):
+        if not old:
             add_blocker(
                 revision,
-                f"asset_version_id {old_id} successor {successor_id} is not a same-root/scope/role approval-time replacement: {successor_reason}",
+                f"asset_version_id {old_id} is ineligible at approval without a resolvable successor",
             )
             return False
-        completions = [
-            candidate for candidate in events
-            if str(candidate.get("event_type") or "").lower() in UPLOAD_SESSION_COMPLETED_EVENTS
-            and candidate.get("created_at", "") <= event["created_at"]
-            and successor_id in payload_asset_version_ids(event_payload(candidate))
-        ]
-        if len(completions) != 1:
-            add_blocker(
-                revision,
-                f"asset_version_id {old_id} successor {successor_id} has {len(completions)} completed upload membership events before approval",
+        current = old
+        visited = {old_id}
+        while True:
+            successor_id = int(current.get("superseded_by_version_id") or 0)
+            successor = asset_by_id.get(successor_id)
+            if not successor or successor_id in visited:
+                add_blocker(
+                    revision,
+                    f"asset_version_id {old_id} is ineligible at approval without an acyclic resolvable successor chain",
+                )
+                return False
+            visited.add(successor_id)
+            same_root = (
+                not old.get("asset_id")
+                or not successor.get("asset_id")
+                or int(old["asset_id"]) == int(successor["asset_id"])
             )
-            return False
-        replacements[old_id] = successor_id
-        completion_evidence.extend(event_evidence_ids(completions[0]))
+            successor_ok, successor_reason = revision_asset_eligible(
+                successor,
+                {"audit", "customization", "design"},
+                event["created_at"],
+            )
+            if (
+                int(successor["task_id"]) != int(scope["task_id"])
+                or not scope_matches(scope, successor)
+                or successor.get("asset_type") != old.get("asset_type")
+                or not same_root
+                or not at_or_before(successor, event["created_at"])
+            ):
+                add_blocker(
+                    revision,
+                    f"asset_version_id {old_id} successor {successor_id} is not a same-root/scope/role approval-time replacement: {successor_reason}",
+                )
+                return False
+            completions = [
+                candidate
+                for candidate in events
+                if str(candidate.get("event_type") or "").lower()
+                in UPLOAD_SESSION_COMPLETED_EVENTS
+                and candidate.get("created_at", "") <= event["created_at"]
+                and successor_id
+                in payload_asset_version_ids(event_payload(candidate))
+            ]
+            if len(completions) != 1:
+                add_blocker(
+                    revision,
+                    f"asset_version_id {old_id} successor {successor_id} has {len(completions)} completed upload membership events before approval",
+                )
+                return False
+            completion_evidence.extend(event_evidence_ids(completions[0]))
+            if successor_ok:
+                replacements[old_id] = successor_id
+                break
+            current = successor
     if not replacements:
         return False
     if revision.get("source_task_asset_id") in replacements:
@@ -1171,15 +1294,26 @@ def apply_proven_legacy_audit_stage_snapshot(
     actor_id = int(event.get("actor_id") or 0)
     if not submitted_at or not approval_at or actor_id <= 0:
         return False
-    late_assets = assets_created_between(scope, assets, submitted_at, approval_at)
-    if not late_assets or any(
-        str(asset.get("source_module_key") or "").strip().lower() != "audit"
-        for asset in late_assets
-    ):
-        return False
-    completion_evidence = []
+    # Legacy review uploads were not consistently tagged with source_module_key
+    # "audit". Membership is therefore proven by the approval actor/time,
+    # completed upload sessions, and exact task/scope instead of that mutable
+    # label. Unrelated late uploads are ignored unless they join the accepted
+    # short review batch below.
+    candidates = []
     completion_by_asset: dict[int, dict[str, Any]] = {}
-    for asset in late_assets:
+    for asset in assets:
+        stamp = str(asset.get("created_at") or "")
+        eligible, _ = revision_asset_eligible(
+            asset,
+            {"audit", "customization", "design"},
+            approval_at,
+        )
+        if not (
+            eligible
+            and scope_matches(scope, asset)
+            and submitted_at < stamp <= approval_at
+        ):
+            continue
         asset_id = int(asset["id"])
         completions = [
             candidate
@@ -1191,28 +1325,22 @@ def apply_proven_legacy_audit_stage_snapshot(
             and asset_id in payload_asset_version_ids(event_payload(candidate))
         ]
         if len(completions) != 1:
-            return False
+            continue
+        candidates.append(asset)
         completion_by_asset[asset_id] = completions[0]
-        completion_evidence.extend(event_evidence_ids(completions[0]))
 
-    source_ids = [
-        int(asset["id"])
-        for asset in late_assets
-        if asset.get("asset_type") == "source"
-    ]
-    final_ids = [
-        int(asset["id"])
-        for asset in late_assets
-        if asset.get("asset_type") == "delivery"
-    ]
+    if not candidates:
+        return False
     try:
         approval_time = parse_utc_timestamp(approval_at)
     except (TypeError, ValueError):
         return False
 
     approved_delivery_ids = set()
-    for asset_id in final_ids:
-        asset = next(asset for asset in late_assets if int(asset["id"]) == asset_id)
+    for asset in candidates:
+        if asset.get("asset_type") != "delivery":
+            continue
+        asset_id = int(asset["id"])
         completion = completion_by_asset[asset_id]
         approved_at = str(asset.get("approved_at") or "")
         approved_by = int(asset.get("approved_by") or 0)
@@ -1243,21 +1371,36 @@ def apply_proven_legacy_audit_stage_snapshot(
         except (TypeError, ValueError):
             pass
         if not metadata_match and not legacy_immediate_match:
-            return False
+            continue
         approved_delivery_ids.add(asset_id)
 
-    for source_id in source_ids:
+    source_ids = []
+    for asset in candidates:
+        if asset.get("asset_type") != "source":
+            continue
+        source_id = int(asset["id"])
         source_completion = completion_by_asset[source_id]
         source_actor = int(source_completion.get("actor_id") or 0)
-        if source_actor == actor_id:
-            continue
         try:
             source_time = parse_utc_timestamp(
                 str(source_completion.get("created_at") or "")
             )
         except (TypeError, ValueError):
-            return False
-        paired = any(
+            continue
+        reviewer_upload = (
+            source_actor == actor_id
+            and (
+                abs((approval_time - source_time).total_seconds()) <= 15 * 60
+                or (
+                    not approved_delivery_ids
+                    and str(
+                        asset.get("source_module_key") or ""
+                    ).strip().lower()
+                    == "audit"
+                )
+            )
+        )
+        paired_upload = any(
             int(completion_by_asset[final_id].get("actor_id") or 0)
             == source_actor
             and abs(
@@ -1274,12 +1417,83 @@ def apply_proven_legacy_audit_stage_snapshot(
             <= 15 * 60
             for final_id in approved_delivery_ids
         )
-        if not paired:
-            return False
+        if reviewer_upload or paired_upload:
+            source_ids.append(source_id)
+
+    final_ids = sorted(
+        approved_delivery_ids,
+        key=lambda asset_id: (
+            str(next(
+                asset["created_at"]
+                for asset in candidates
+                if int(asset["id"]) == asset_id
+            )),
+            asset_id,
+        ),
+    )
+    if source_ids and not final_ids:
+        # A source-only review inherits finals. When several historical
+        # source-only batches exist between submit and approve, only the most
+        # recent atomic batch can represent the approval-time working source;
+        # older batches remain preserved assets but are not merged together.
+        anchor_id = max(
+            source_ids,
+            key=lambda asset_id: (
+                str(completion_by_asset[asset_id].get("created_at") or ""),
+                asset_id,
+            ),
+        )
+        anchor_event = completion_by_asset[anchor_id]
+        anchor_actor = int(anchor_event.get("actor_id") or 0)
+        anchor_time = parse_utc_timestamp(
+            str(anchor_event.get("created_at") or "")
+        )
+        source_ids = [
+            asset_id
+            for asset_id in source_ids
+            if int(
+                completion_by_asset[asset_id].get("actor_id") or 0
+            )
+            == anchor_actor
+            and abs(
+                (
+                    parse_utc_timestamp(
+                        str(
+                            completion_by_asset[asset_id].get("created_at")
+                            or ""
+                        )
+                    )
+                    - anchor_time
+                ).total_seconds()
+            )
+            <= 15 * 60
+        ]
+    if not source_ids and not final_ids:
+        return False
+
+    completion_evidence = []
+    for asset_id in source_ids + final_ids:
+        completion_evidence.extend(
+            event_evidence_ids(completion_by_asset[asset_id])
+        )
 
     if len(source_ids) > 1:
+        source_ids = sorted(
+            source_ids,
+            key=lambda asset_id: (
+                str(
+                    completion_by_asset[asset_id].get("created_at")
+                    or ""
+                ),
+                asset_id,
+            ),
+        )
         revision.pop("source_task_asset_id", None)
         revision.pop("source_alias_from_task_asset_id", None)
+        revision["source_bundle_candidate"] = {
+            "ordered_member_task_asset_ids": list(source_ids),
+            "ordering": "completion_time_then_task_asset_id",
+        }
         add_blocker(
             revision,
             "multiple source assets require a reviewed deterministic ZIP bundle",
@@ -3033,7 +3247,10 @@ def assignment_evidence_key(row: dict[str, Any]) -> tuple[str, str, str, int]:
     )
 
 
-def build_access_decisions(rows: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def build_access_decisions(
+    rows: dict[str, Any],
+    organization_mappings: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     active_users = {
         int(row["id"]): row
         for row in rows.get("users_org", [])
@@ -3051,6 +3268,15 @@ def build_access_decisions(rows: dict[str, Any]) -> tuple[list[dict[str, Any]], 
         )
     for user_id in assignments_by_user:
         assignments_by_user[user_id].sort(key=assignment_evidence_key)
+    resolved_user_org = {
+        int(item["subject_id"]): (
+            positive_or_none(item.get("target_department_id")),
+            positive_or_none(item.get("target_team_id")),
+        )
+        for item in organization_mappings or []
+        if item.get("subject_type") == "user"
+        and item.get("confidence") != "hard_blocked"
+    }
 
     decisions: list[dict[str, Any]] = []
     manual: list[dict[str, Any]] = []
@@ -3063,8 +3289,14 @@ def build_access_decisions(rows: dict[str, Any]) -> tuple[list[dict[str, Any]], 
         user = active_users.get(user_id)
         if user is None:
             continue
-        department_id = positive_or_none(user.get("department_id"))
-        team_id = positive_or_none(user.get("team_id"))
+        resolved_department_id, resolved_team_id = resolved_user_org.get(
+            user_id, (None, None)
+        )
+        department_id = (
+            positive_or_none(user.get("department_id"))
+            or resolved_department_id
+        )
+        team_id = positive_or_none(user.get("team_id")) or resolved_team_id
         is_issue = (
             legacy_role not in KNOWN_ACCESS_ROLES
             or (legacy_role in {"DepartmentAdmin", "DesignDirector"} and department_id is None)
@@ -3112,7 +3344,11 @@ def build_access_decisions(rows: dict[str, Any]) -> tuple[list[dict[str, Any]], 
             blockers.append(
                 "legacy role lacks a complete stable organization scope or explicit V8 replacement"
             )
-        if not evidence:
+        # A no-new-grant decision is complete precisely because it contributes
+        # no V8 authority. Requiring an existing assignment here made newly
+        # created retired Warehouse users impossible to migrate despite the
+        # approved least-privilege policy.
+        if not evidence and action != "no_new_grant":
             blockers.append("user has no explicit V8 assignment evidence")
         confidence = "hard_blocked" if blockers else "proposed_review"
         decision = {
@@ -3272,7 +3508,7 @@ def build_deleted_asset_recoveries(
             "strategy": (
                 "historical_unavailable_tombstone_v1"
                 if historical_unavailable
-                else "clone_b_prematerialized_storage_ref_v1"
+                else "verified_oss_recovery_v1"
             ),
             "original_storage_ref_id": evidence["original_storage_ref_id"],
             **(
@@ -3687,6 +3923,12 @@ def generate(rows):
                                 probe.get("_review_policy_ids", [])
                             ),
                         })
+                        if probe.get("source_bundle_candidate") is not None:
+                            revision["source_bundle_candidate"] = dict(
+                                probe["source_bundle_candidate"]
+                            )
+                        else:
+                            revision.pop("source_bundle_candidate", None)
                         if revision.get("source_task_asset_id") is None:
                             revision.pop("source_task_asset_id", None)
                         if probe.get("source_alias_from_task_asset_id") is not None:
@@ -4189,7 +4431,9 @@ def generate(rows):
             evidence = "|".join(stable_event_id(event) for event in warehouse_events)
         manual.append({"task_id": task_id, "scope_kind": "task_state_decision", "scope_ref_id": 0, "revision_no": "", "confidence": confidence, "reason": reason, "evidence_event_ids": evidence, "candidate_source_ids": "", "candidate_final_ids": "", "reviewer_id": "", "reviewed_at": "", "decision": "", "review_note": ""})
     organization_mappings, organization_manual = build_organization_mappings(rows)
-    access_decisions, access_manual = build_access_decisions(rows)
+    access_decisions, access_manual = build_access_decisions(
+        rows, organization_mappings
+    )
     asset_recoveries, asset_recovery_manual = build_deleted_asset_recoveries(
         rows
     )
@@ -4226,7 +4470,7 @@ SELECT CONCAT('timezone_truth\t',JSON_OBJECT(
 ))
 FROM (
  SELECT COUNT(*) matched_count,
-        SUM(TIMESTAMPDIFF(SECOND,ta.created_at,e.created_at) BETWEEN 28798 AND 28802) near_eight_hour_count,
+        SUM(TIMESTAMPDIFF(SECOND,ta.created_at,e.created_at) BETWEEN 28790 AND 28810) near_eight_hour_count,
         MIN(TIMESTAMPDIFF(SECOND,ta.created_at,e.created_at)) min_delta_seconds,
         MAX(TIMESTAMPDIFF(SECOND,ta.created_at,e.created_at)) max_delta_seconds
  FROM task_event_logs e
@@ -4281,7 +4525,13 @@ def validate_legacy_timezone_truth(result):
     truth = rows[0]
     if str(truth.get("system_time_zone") or "").upper() != "UTC":
         raise RuntimeError("clone MySQL system_time_zone must be UTC for legacy timestamp normalization")
-    for prefix, tolerance in (("asset_created", (28798, 28802)), ("superseded", (28797, 28803))):
+    # The task asset row and its immutable event are committed by adjacent
+    # statements, not by one database timestamp expression. Production request
+    # latency can therefore add a few seconds while both values still prove the
+    # same legacy UTC+8 wall-clock cohort. Keep the bound deliberately tight:
+    # ten seconds accepts the observed transaction latency but still rejects a
+    # mixed timezone population.
+    for prefix, tolerance in (("asset_created", (28790, 28810)), ("superseded", (28790, 28810))):
         count_key = "matched_asset_created_events" if prefix == "asset_created" else "superseded_pairs"
         near_key = "near_eight_hour_asset_created_events" if prefix == "asset_created" else "near_eight_hour_superseded_pairs"
         matched = int(truth.get(count_key) or 0)

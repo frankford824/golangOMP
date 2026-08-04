@@ -271,10 +271,11 @@ func TestValidatePlanRequiresMaterializedExactFixture(t *testing.T) {
 	root := t.TempDir()
 	entry := testEntry(t, root)
 	plan := recoveryPlan{
-		Version: planVersion,
-		Status:  "MATERIALIZED",
-		RunID:   "run-test",
-		Entries: []recoveryEntry{entry, entry, entry},
+		Version:           planVersion,
+		Status:            "MATERIALIZED",
+		RunID:             "run-test",
+		TargetEnvironment: guardEnvironment,
+		Entries:           []recoveryEntry{entry, entry, entry},
 	}
 	if err := validatePlan(plan, "run-test", root); err == nil {
 		t.Fatal("expected duplicate recovery rejection")
