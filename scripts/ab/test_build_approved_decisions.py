@@ -152,6 +152,48 @@ class BuildApprovedDecisionsTest(unittest.TestCase):
         )
         self.assertEqual(document["reviewed_mapping_sha256"], digest(self.mapping))
 
+    def test_accepts_hash_bound_automatic_policy_decision(self) -> None:
+        decision = json.loads(self.admin.read_text(encoding="utf-8"))
+        decision.update(
+            {
+                "decision_mode": "automatic_policy_engine",
+                "manual_row_review_performed": False,
+                "eligible_row_count": 1,
+                "authorization_boundary": (
+                    "Only eligible rows in this frozen ledger are approved."
+                ),
+            }
+        )
+        self.admin.write_text(
+            json.dumps(
+                decision,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        evidence = json.loads(
+            self.apply_evidence.read_text(encoding="utf-8")
+        )
+        evidence["decision_sha256"] = digest(self.admin)
+        self.apply_evidence.write_text(
+            json.dumps(
+                evidence,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        document = approved.build(self.args())
+
+        self.assertEqual(document["decision"], "confirmed")
+        self.assertEqual(document["promoted_review_count"], 1)
+
     def test_refuses_to_overwrite_existing_output(self) -> None:
         self.output.write_text("owner data", encoding="utf-8")
         with self.assertRaisesRegex(FileExistsError, "refusing to overwrite"):

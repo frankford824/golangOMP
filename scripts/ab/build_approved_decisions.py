@@ -35,6 +35,12 @@ TEMPLATE_FIELDS = {
     "note",
     "approved_policies",
 }
+AUTOMATIC_DECISION_FIELDS = TEMPLATE_FIELDS | {
+    "decision_mode",
+    "manual_row_review_performed",
+    "eligible_row_count",
+    "authorization_boundary",
+}
 CATEGORY_FIELDS = {
     "revision": ("resources", "promoted_revision_count", "remaining_revision_confidence_counts"),
     "planning": ("planning_tasks", "promoted_planning_count", "remaining_planning_confidence_counts"),
@@ -135,7 +141,12 @@ def validate_admin_decision(
     cohort_digest: str,
     ledger_sha256: str,
 ) -> tuple[int, str, list[str]]:
-    if set(decision) != TEMPLATE_FIELDS:
+    fields = set(decision)
+    frozen_fields = frozenset(fields)
+    if frozen_fields not in {
+        frozenset(TEMPLATE_FIELDS),
+        frozenset(AUTOMATIC_DECISION_FIELDS),
+    }:
         raise ValueError("admin decision has an unexpected field set")
     if (
         decision.get("schema_version") != 1
@@ -161,6 +172,19 @@ def validate_admin_decision(
         raise ValueError(f"admin decision contains unknown policies: {unknown}")
     if not policies:
         raise ValueError("admin decision must approve at least one policy")
+    if fields == AUTOMATIC_DECISION_FIELDS:
+        if (
+            decision.get("decision_mode") != "automatic_policy_engine"
+            or decision.get("manual_row_review_performed") is not False
+            or isinstance(decision.get("eligible_row_count"), bool)
+            or not isinstance(decision.get("eligible_row_count"), int)
+            or decision["eligible_row_count"] <= 0
+            or not isinstance(decision.get("authorization_boundary"), str)
+            or not decision["authorization_boundary"].strip()
+        ):
+            raise ValueError(
+                "automatic admin decision metadata is incomplete"
+            )
     canonical_policies = [policy for policy in review.POLICIES if policy in set(policies)]
     return reviewer_id, confirmed_at, canonical_policies
 
