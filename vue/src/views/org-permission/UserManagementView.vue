@@ -1081,7 +1081,8 @@ function accessRoleDescription(code: string, fallback: string): string {
 }
 
 function defaultAccessScope(code: string): ScopeMode {
-  if (['super_admin', 'access_admin', 'operations', 'auditor', 'asset_manager', 'erp_operator'].includes(code)) {
+  // 设计师需要看到全部任务才能协作排期，与运营、审核同为全局范围。
+  if (['super_admin', 'access_admin', 'operations', 'auditor', 'asset_manager', 'erp_operator', 'designer'].includes(code)) {
     return 'global'
   }
   if (['department_admin', 'design_director'].includes(code)) return 'own_department'

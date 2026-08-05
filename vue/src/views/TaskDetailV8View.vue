@@ -50,6 +50,49 @@
         @open-attachments="openWorkspace('attachments')"
         @open-workflow="openWorkspace('workflow')"
       />
+      <section v-if="bundle && !bundleHasCurrentRevision && legacyAssetRows.length" class="legacy-resource-bridge" role="status">
+        <div>
+          <p class="eyebrow">迁移前文件</p>
+          <h2>这张未完成任务的历史文件仍可使用</h2>
+          <p>它们创建于资源修订流程启用前，因此不会伪装成一次新的设计提交；后续提交后会进入正式修订。</p>
+        </div>
+        <div class="legacy-assets">
+          <p class="legacy-assets-title">历史源文件与成品（{{ legacyDownloadableCount }}/{{ legacyAssetRows.length }} 份可下载）</p>
+          <ul>
+            <li v-for="asset in legacyAssetRows" :key="asset.id">
+              <span class="legacy-asset-name">{{ asset.name }}</span>
+              <span class="legacy-asset-role">{{ asset.roleLabel }}</span>
+              <a v-if="asset.downloadUrl" :href="asset.downloadUrl" target="_blank" rel="noopener">下载</a>
+              <span v-else class="legacy-asset-missing">文件已不可用</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+      <section v-else-if="bundleError" class="bundle-unavailable" role="alert">
+        <div>
+          <p class="eyebrow">资源区暂不可用</p>
+          <h2>源文件与成品这次没能打开</h2>
+          <p>{{ bundleError }}</p>
+          <p class="bundle-unavailable-hint">任务信息、历史记录和下面的参考附件都还在，可以先照常查看。</p>
+          <p v-if="legacyAssetsLoading" class="bundle-unavailable-hint">正在找这个任务已经存档的文件…</p>
+          <div v-else-if="legacyAssetRows.length" class="legacy-assets">
+            <p class="legacy-assets-title">已存档的源文件与成品（{{ legacyDownloadableCount }}/{{ legacyAssetRows.length }} 份可下载）</p>
+            <ul>
+              <li v-for="asset in legacyAssetRows" :key="asset.id">
+                <span class="legacy-asset-name">{{ asset.name }}</span>
+                <span class="legacy-asset-role">{{ asset.roleLabel }}</span>
+                <a v-if="asset.downloadUrl" :href="asset.downloadUrl" target="_blank" rel="noopener">下载</a>
+                <span v-else class="legacy-asset-missing">文件已不可用</span>
+              </li>
+            </ul>
+          </div>
+          <p v-else class="bundle-unavailable-hint">没有找到这个任务已存档的源文件或成品。</p>
+        </div>
+        <div class="bundle-unavailable-actions">
+          <button class="primary-button" :disabled="loading" @click="load"><RefreshCw :size="16" aria-hidden="true" />重新加载</button>
+          <button class="secondary-button" @click="openWorkspace('attachments')"><FileText :size="16" aria-hidden="true" />查看参考附件</button>
+        </div>
+      </section>
 
       <section class="command-strip" :class="{ 'is-complete': isTerminal }" aria-label="当前阶段操作">
         <div class="stage-summary">
@@ -63,7 +106,7 @@
         <div class="command-actions">
           <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
           <button v-if="canEditTaskBusinessInfo" class="primary-button" @click="openTaskEditor"><PencilLine :size="16" aria-hidden="true" />编辑任务信息</button>
-          <button v-if="canTerminateTask" class="secondary-button danger-button" :disabled="cancelLoading" @click="cancelTask"><Ban :size="16" aria-hidden="true" />{{ cancelLoading ? '正在作废…' : '作废任务' }}</button>
+          <button v-if="canTerminateTask" class="secondary-button danger-button" :disabled="cancelLoading" @click="openTerminateDialog"><Ban :size="16" aria-hidden="true" />{{ cancelLoading ? '正在终止…' : '终止任务' }}</button>
           <button class="secondary-button" @click="openWorkspace('details')"><FileText :size="16" aria-hidden="true" />完整任务信息</button>
         </div>
       </section>
@@ -240,6 +283,41 @@
         :has-design-output-hint="Boolean(bundle?.groups.some((group) => group.working_revision || group.finalized_revision))"
         @confirm="submitAssign"
       />
+      <Teleport to="body">
+        <div v-if="terminateDialogOpen" class="terminate-backdrop" @click.self="closeTerminateDialog">
+          <section
+            ref="terminateDialog"
+            class="terminate-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="terminate-dialog-title"
+            tabindex="-1"
+            @keydown.esc.prevent="closeTerminateDialog"
+          >
+            <span class="terminate-icon" aria-hidden="true"><Ban :size="20" /></span>
+            <h2 id="terminate-dialog-title">终止任务 {{ task.task_no }}？</h2>
+            <p>终止后任务不再流转，未完成的环节会一并关闭。原因会写入任务历史，方便后续查证。</p>
+            <label class="terminate-field">
+              <span>终止原因</span>
+              <textarea
+                ref="terminateReasonInput"
+                v-model.trim="terminateReason"
+                maxlength="500"
+                rows="3"
+                placeholder="例如：客户取消需求"
+              />
+            </label>
+            <p v-if="needForceConfirm" class="terminate-warning">这个任务已经有人领取或已经开始处理，继续会强制关闭所有未完成模块。</p>
+            <p v-if="terminateError" class="terminate-error" role="alert">{{ terminateError }}</p>
+            <div class="terminate-actions">
+              <button type="button" class="secondary-button" :disabled="cancelLoading" @click="closeTerminateDialog">先不终止</button>
+              <button type="button" class="primary-button danger-button" :disabled="cancelLoading || !terminateReason" @click="confirmTerminate">
+                {{ cancelLoading ? '正在终止…' : needForceConfirm ? '仍然强制终止' : '确认终止' }}
+              </button>
+            </div>
+          </section>
+        </div>
+      </Teleport>
       <input v-if="canManageReferences" ref="referenceInput" class="sr-only" type="file" accept="image/*,.pdf,.zip" multiple aria-label="补充任务参考附件" @change="uploadReferenceFiles" />
     </template>
   </main>
@@ -286,6 +364,10 @@ import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { planningSkuApi, type PlanningSKUCreateResult } from '@/services/api/planningSkuApi'
 import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detail-display'
 import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
+import { assetKindLabelCn } from '@/domain/mappers/read-model-labels-cn'
+import { assetsApi } from '@/services/api/assetsApi'
+import type { BackendAsset } from '@/services/apiTypes'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { formatTaskRecordDateBeijing } from '@/utils/date'
 
 interface V8Task extends Record<string, unknown> {
@@ -313,6 +395,19 @@ const task = ref<V8Task | null>(null)
 const isCustomization = computed(() => task.value?.business_lane === 'customization' || ['regular_customization', 'customer_customization'].includes(task.value?.task_type || ''))
 const aggregate = ref<Record<string, unknown>>({})
 const bundle = ref<ResourceBundle | null>(null)
+const bundleHasCurrentRevision = computed(() => Boolean(bundle.value?.groups.some((group) => group.working_revision || group.finalized_revision)))
+const bundleError = ref('')
+const legacyAssets = ref<BackendAsset[]>([])
+const legacyAssetsLoading = ref(false)
+const legacyAssetRows = computed(() => legacyAssets.value
+  .filter((asset) => ['source', 'delivery'].includes(String(asset.file_role || asset.asset_kind || asset.asset_type || '').toLowerCase()))
+  .map((asset) => ({
+  id: String(asset.id),
+  name: asset.file_name || asset.original_filename || `资源 ${asset.id}`,
+  roleLabel: assetKindLabelCn(asset.asset_kind || asset.asset_type || asset.file_role),
+  downloadUrl: typeof asset.download_url === 'string' ? asset.download_url : '',
+})))
+const legacyDownloadableCount = computed(() => legacyAssetRows.value.filter((asset) => asset.downloadUrl).length)
 const loading = ref(false)
 const error = ref('')
 const events = ref<TaskEvent[]>([])
@@ -322,6 +417,11 @@ const handoverReason = ref('')
 const handoverBusy = ref(false)
 const assignDialogOpen = ref(false)
 const assignSubmitting = ref(false)
+const terminateDialogOpen = ref(false)
+const terminateDialog = ref<HTMLElement | null>(null)
+const terminateReasonInput = ref<HTMLTextAreaElement | null>(null)
+const terminateReason = ref('')
+const terminateError = ref('')
 const referenceInput = ref<HTMLInputElement | null>(null)
 const referenceUploading = ref(false)
 const planningExporting = ref(false)
@@ -615,7 +715,8 @@ function eventActor(item: TaskEvent) { return item.operator_name || item.actor_n
 
 async function load() {
   if (!Number.isInteger(taskId.value) || taskId.value <= 0) { error.value = '任务 ID 无效。'; return }
-  loading.value = true; error.value = ''
+  loading.value = true; error.value = ''; bundleError.value = ''
+  legacyAssets.value = []
   planningResult.value = null
   try {
     const [detailResponse, taskResponse] = await Promise.all([
@@ -631,13 +732,23 @@ async function load() {
     }
     task.value = merged as V8Task
     const aggregateEvents = Array.isArray(envelope.events) ? envelope.events as TaskEvent[] : []
+    // 资源组接口对历史任务会 fail-closed，单独兜住它，避免连带丢掉事件与协作数据。
     const [nextBundle,eventResponse,handoverResponse,nextPlanningResult] = await Promise.all([
-      task.value.task_type === 'sku_planning' ? Promise.resolve(null) : resourceGroupsApi.taskBundle(taskId.value),
+      task.value.task_type === 'sku_planning'
+        ? Promise.resolve(null)
+        : resourceGroupsApi.taskBundle(taskId.value).catch((cause) => {
+          bundleError.value = resolveApiUserMessage(cause, { fallback: '任务资源区暂时打不开，请稍后刷新重试。' })
+          void loadLegacyAssets()
+          return null
+        }),
       tasksApi.listTaskEvents(String(taskId.value)).catch(() => null),
       supportsAuditCollaboration.value ? tasksApi.listAuditHandovers(String(taskId.value)).catch(() => null) : Promise.resolve(null),
       task.value.task_type === 'sku_planning' ? planningSkuApi.getTask(taskId.value) : Promise.resolve(null),
     ])
     bundle.value = nextBundle
+    if (nextBundle && !nextBundle.groups.some((group) => group.working_revision || group.finalized_revision)) {
+      await loadLegacyAssets()
+    }
     planningResult.value = nextPlanningResult
     events.value = unwrapCollection<TaskEvent>(eventResponse, aggregateEvents)
     handovers.value = unwrapCollection<AuditHandover>(handoverResponse)
@@ -702,21 +813,45 @@ async function downloadPlanningResult() {
     planningExporting.value = false
   }
 }
-async function cancelTask() {
-  if (!task.value || cancelLoading.value) return
-  const reason = window.prompt('请输入作废原因（会写入任务历史）：')?.trim()
-  if (!reason) return
-  error.value = ''
+// 资源组读取失败，或迁移前未完成任务只有空壳组时，退回任务资产列表。它直接查
+// design_assets，不伪造修订历史，同时确保历史源文件与成品仍可见、可下载。
+async function loadLegacyAssets() {
+  legacyAssetsLoading.value = true
   try {
-    await cancel(String(task.value.id), { reason, force: false })
-    if (needForceConfirm.value) {
-      const confirmed = window.confirm('该任务已经被领取或处理。确认强制作废并关闭所有未完成模块吗？')
-      if (!confirmed) return
-      await cancel(String(task.value.id), { reason, force: true })
-    }
-    if (!needForceConfirm.value) await load()
+    const response = await assetsApi.list(String(taskId.value))
+    const payload = unwrap<BackendAsset[]>(response)
+    legacyAssets.value = Array.isArray(payload) ? payload : []
+  } catch {
+    legacyAssets.value = []
+  } finally {
+    legacyAssetsLoading.value = false
+  }
+}
+function openTerminateDialog() {
+  if (!task.value || cancelLoading.value) return
+  terminateReason.value = ''
+  terminateError.value = ''
+  needForceConfirm.value = false
+  terminateDialogOpen.value = true
+  void nextTick(() => { (terminateReasonInput.value || terminateDialog.value)?.focus() })
+}
+function closeTerminateDialog() {
+  if (cancelLoading.value) return
+  terminateDialogOpen.value = false
+  needForceConfirm.value = false
+}
+async function confirmTerminate() {
+  if (!task.value || cancelLoading.value || !terminateReason.value) return
+  // 第一次请求命中 409 时只标记需要强制确认，把二次确认留在同一个对话框里完成。
+  const force = needForceConfirm.value
+  terminateError.value = ''
+  try {
+    await cancel(String(task.value.id), { reason: terminateReason.value, force })
+    if (needForceConfirm.value) return
+    terminateDialogOpen.value = false
+    await load()
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '任务作废失败，请稍后重试。'
+    terminateError.value = cause instanceof Error ? cause.message : '任务终止失败，请稍后重试。'
   }
 }
 async function submitAssign(payload: { mode: 'reassign' | 'clear'; assigneeId: string | null; assigneeName: string | null; reasonLabel: string; reasonNote: string }) {
@@ -881,6 +1016,35 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .primary-button,.secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;border-radius:9px;font-size:12px;font-weight:720}
 .primary-button{box-shadow:0 4px 12px rgb(var(--yb-brand)/.16)}
 .danger-button{border-color:rgb(var(--yb-danger-border));background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}
+.bundle-unavailable{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;padding:15px 17px;border:1px solid rgb(var(--yb-warning-border,var(--yb-border)));border-radius:15px;background:rgb(var(--yb-warning-soft))}
+.legacy-resource-bridge{display:grid;grid-template-columns:minmax(15rem,.8fr) minmax(18rem,1.2fr);gap:14px;padding:15px 17px;border:1px solid rgb(var(--yb-border-context));border-radius:15px;background:rgb(var(--yb-surface-muted))}
+.legacy-resource-bridge>div:first-child{display:grid;align-content:start;gap:4px}.legacy-resource-bridge h2,.legacy-resource-bridge p{margin:0}.legacy-resource-bridge h2{font-size:15px}.legacy-resource-bridge>div:first-child>p:last-child{color:rgb(var(--yb-text-secondary));font-size:12px;line-height:1.6}
+.bundle-unavailable>div:first-child{display:grid;gap:4px;min-width:min(28rem,100%)}
+.bundle-unavailable h2{margin:0;font-size:15px;letter-spacing:-.01em}
+.bundle-unavailable p{margin:0;color:rgb(var(--yb-text-secondary));font-size:12px;line-height:1.6}
+.bundle-unavailable-hint{color:rgb(var(--yb-text-muted))}
+.bundle-unavailable-actions{display:flex;flex-wrap:wrap;gap:8px}
+.legacy-assets{display:grid;gap:5px;margin-top:6px;padding:9px 11px;border-radius:11px;background:rgb(var(--yb-surface))}
+.legacy-assets-title{margin:0;color:rgb(var(--yb-text-muted));font-size:11px;font-weight:700}
+.legacy-assets ul{display:grid;gap:4px;margin:0;padding:0;max-height:13rem;overflow:auto;list-style:none}
+.legacy-assets li{display:flex;align-items:center;gap:9px;font-size:12px}
+.legacy-asset-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legacy-asset-role{flex:0 0 auto;color:rgb(var(--yb-text-muted));font-size:11px}
+.legacy-assets a{flex:0 0 auto;color:rgb(var(--yb-brand));font-weight:700;text-decoration:none}
+.legacy-asset-missing{flex:0 0 auto;color:rgb(var(--yb-text-muted));font-size:11px}
+.terminate-backdrop{position:fixed;inset:0;z-index:8600;display:grid;place-items:center;padding:19px;background:rgb(var(--yb-overlay-night)/.5);backdrop-filter:blur(6px)}
+.terminate-dialog{width:min(27rem,100%);display:grid;gap:9px;padding:22px;border:1px solid rgb(var(--yb-border-context));border-radius:17px;background:rgb(var(--yb-surface));box-shadow:0 26px 64px rgb(var(--yb-shadow)/.28)}
+.terminate-dialog h2{margin:0;font-size:17px;letter-spacing:-.02em}
+.terminate-dialog>p{margin:0;color:rgb(var(--yb-text-secondary));font-size:12px;line-height:1.6}
+.terminate-icon{display:grid;place-items:center;width:41px;height:41px;border-radius:13px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}
+.terminate-field{display:grid;gap:5px;margin-top:3px}
+.terminate-field span{color:rgb(var(--yb-text-muted));font-size:11px;font-weight:700}
+.terminate-field textarea{width:100%;padding:9px 11px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface-muted));color:inherit;font:inherit;font-size:12px;line-height:1.6;resize:vertical}
+.terminate-field textarea:focus-visible{outline:2px solid rgb(var(--yb-brand));outline-offset:1px}
+.terminate-warning{margin:0;padding:9px 11px;border-radius:9px;background:rgb(var(--yb-warning-soft));color:rgb(var(--yb-warning-strong));font-size:11px;line-height:1.55}
+.terminate-error{margin:0;color:rgb(var(--yb-danger-text));font-size:11px}
+.terminate-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:3px}
+.terminate-actions button{min-height:36px;padding:0 13px}
 .sku-visibility-strip{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;padding:11px 14px;border:1px solid rgb(var(--yb-border));border-radius:13px;background:rgb(var(--yb-surface))}
 .sku-visibility-strip>div{display:grid;gap:2px;white-space:nowrap}.sku-visibility-strip>div span{color:rgb(var(--yb-text-muted));font-size:10px}.sku-visibility-strip>div strong{font-size:13px}
 .sku-visibility-strip ol{display:flex;gap:6px;margin:0;padding:0;overflow:auto;list-style:none}.sku-visibility-strip li{flex:0 0 auto;padding:5px 8px;border-radius:7px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font:750 11px var(--yb-font-data)}
@@ -907,6 +1071,6 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .workspace-head h2{font-size:19px}
 .close-button{display:grid;width:36px;height:36px;place-items:center;border-radius:9px;font-size:21px}
 @media(max-width:1160px){.hero-facts{flex-basis:auto}.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-card{grid-column:1/-1}}
-@media(max-width:760px){.task-page{padding:0 0 22px;gap:10px}.task-hero{min-height:0;border-radius:14px}.hero-content{min-height:0;padding:12px}.hero-nav{align-items:center}.back-button span,.refresh-button span{display:none}.back-button,.refresh-button{width:36px;padding:0}.hero-main{gap:12px}.hero-identity h1{font-size:26px;line-height:1.12}.identity-badges{margin-top:10px}.identity-badge{min-height:26px;padding-inline:8px}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-progress{padding-bottom:2px;overflow:visible}.sku-visibility-strip{grid-template-columns:1fr}.command-strip{padding:12px}.overview-grid{grid-template-columns:1fr;gap:10px}.mission-card{grid-column:auto}.card-actions{flex-wrap:wrap;justify-content:flex-end}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border-radius:0}}
+@media(max-width:760px){.task-page{padding:0 0 22px;gap:10px}.task-hero{min-height:0;border-radius:14px}.hero-content{min-height:0;padding:12px}.hero-nav{align-items:center}.back-button span,.refresh-button span{display:none}.back-button,.refresh-button{width:36px;padding:0}.hero-main{gap:12px}.hero-identity h1{font-size:26px;line-height:1.12}.identity-badges{margin-top:10px}.identity-badge{min-height:26px;padding-inline:8px}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-progress{padding-bottom:2px;overflow:visible}.sku-visibility-strip,.legacy-resource-bridge{grid-template-columns:1fr}.command-strip{padding:12px}.overview-grid{grid-template-columns:1fr;gap:10px}.mission-card{grid-column:auto}.card-actions{flex-wrap:wrap;justify-content:flex-end}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border-radius:0}}
 @media(prefers-reduced-motion:no-preference){@keyframes task-refresh-spin{to{transform:rotate(360deg)}}}
 </style>

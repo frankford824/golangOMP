@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"workflow/domain"
@@ -84,5 +85,38 @@ func TestValidatePlanningSKUItemRequiresCategoryAndValidCodeType(t *testing.T) {
 	base.SKUCodeType = domain.TaskSKUCodeTypeCustomization
 	if appErr := validatePlanningSKUItem(base, domain.PlanningSKUERPSyncNone, 0, true); appErr != nil {
 		t.Fatalf("valid planning row rejected: %v", appErr)
+	}
+}
+
+func TestPlanningSKUDerivesERPProductNameFromDescription(t *testing.T) {
+	item := domain.PlanningSKUItemInput{
+		CategoryCode:    "HZS",
+		DescriptionSpec: "亚克力立牌 20cm",
+		Quantity:        1,
+		ERPProductIID:   "HQT",
+	}
+	item.ERPProductName = planningERPProductName(item)
+
+	if appErr := validatePlanningSKUItem(item, domain.PlanningSKUERPSyncAsync, 0, true); appErr != nil {
+		t.Fatalf("derived ERP product name was rejected: %v", appErr)
+	}
+	if item.ERPProductName != item.DescriptionSpec {
+		t.Fatalf("ERPProductName = %q, want description fallback %q", item.ERPProductName, item.DescriptionSpec)
+	}
+	headers := planningExcelHeaders(true)
+	if got := headers[len(headers)-1]; got != "ERP 款式编码 i_id" {
+		t.Fatalf("last ERP template header = %q, want ERP style i_id", got)
+	}
+	for _, header := range headers {
+		if header == "ERP 产品名称" {
+			t.Fatal("new planning template still asks users to repeat the ERP product name")
+		}
+	}
+}
+
+func TestPlanningSKUERPProductNameFallbackRespectsERPMaxLength(t *testing.T) {
+	item := domain.PlanningSKUItemInput{DescriptionSpec: strings.Repeat("长", ERPProductNameMaxLength+8)}
+	if got := erpProductNameLength(planningERPProductName(item)); got != ERPProductNameMaxLength {
+		t.Fatalf("fallback ERP product name length = %d, want %d", got, ERPProductNameMaxLength)
 	}
 }

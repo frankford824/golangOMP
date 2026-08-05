@@ -121,6 +121,9 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "client_item_id must be unique", map[string]interface{}{"index": i})
 		}
 		seenClientItems[request.Items[i].ClientItemID] = struct{}{}
+		if request.ERPSyncMode == domain.PlanningSKUERPSyncAsync && strings.TrimSpace(request.Items[i].ERPProductName) == "" {
+			request.Items[i].ERPProductName = planningERPProductName(request.Items[i])
+		}
 		if appErr := validatePlanningSKUItem(request.Items[i], request.ERPSyncMode, i, true); appErr != nil {
 			return nil, appErr
 		}
@@ -419,7 +422,12 @@ func (s *planningSKUService) ParseExcel(_ context.Context, reader io.Reader, inc
 		item.ReferenceURL = excelCell(row, 6)
 		if includeERP {
 			item.ERPProductIID = excelCell(row, 7)
+			// Keep the former ninth column readable for old workbooks, while new
+			// templates derive the ERP name from the already-required description.
 			item.ERPProductName = excelCell(row, 8)
+			if item.ERPProductName == "" {
+				item.ERPProductName = planningERPProductName(item)
+			}
 		}
 		if pictures, pictureErr := f.GetPictures(sheet, fmt.Sprintf("A%d", rowIndex+1)); pictureErr == nil && len(pictures) > 1 {
 			result.Errors = append(result.Errors, domain.PlanningSKUExcelParseError{Row: rowIndex + 1, Field: "product_image", Reason: "each row may contain at most one embedded image"})
@@ -756,8 +764,11 @@ func validatePlanningSKUItem(item domain.PlanningSKUItemInput, mode domain.Plann
 			return planningRowError(index, "reference_url", "must be an HTTP or HTTPS URL")
 		}
 	}
-	if mode == domain.PlanningSKUERPSyncAsync && (strings.TrimSpace(item.ERPProductIID) == "" || strings.TrimSpace(item.ERPProductName) == "") {
-		return planningRowError(index, "erp_product_i_id", "erp_product_i_id and erp_product_name are required for async ERP sync")
+	if mode == domain.PlanningSKUERPSyncAsync && strings.TrimSpace(item.ERPProductIID) == "" {
+		return planningRowError(index, "erp_product_i_id", "erp_product_i_id is required for async ERP sync")
+	}
+	if mode == domain.PlanningSKUERPSyncAsync && erpProductNameTooLong(item.ERPProductName) {
+		return planningRowError(index, "erp_product_name", erpProductNameLimitMessage())
 	}
 	return nil
 }
@@ -810,6 +821,15 @@ func planningProductName(item domain.PlanningSKUItemInput) string {
 	return string(runes)
 }
 
+func planningERPProductName(item domain.PlanningSKUItemInput) string {
+	value := planningProductName(item)
+	runes := []rune(value)
+	if len(runes) > ERPProductNameMaxLength {
+		runes = runes[:ERPProductNameMaxLength]
+	}
+	return string(runes)
+}
+
 func totalPlanningQuantity(items []domain.PlanningSKUItemInput) int64 {
 	var total int64
 	for _, item := range items {
@@ -823,7 +843,7 @@ func pointerInt64(value int64) *int64 { return &value }
 func planningExcelHeaders(includeERP bool) []string {
 	headers := []string{"产品图片", "SKU 类目", "产品描述/规格", "数量", "目标价", "备注", "参考链接"}
 	if includeERP {
-		headers = append(headers, "ERP 产品 i_id", "ERP 产品名称")
+		headers = append(headers, "ERP 款式编码 i_id")
 	}
 	return headers
 }

@@ -272,6 +272,37 @@ describe('UserManagementView role governance', () => {
     ], 7, '在用户详情中更新工作角色')
   })
 
+  it('grants designers a global task scope by default', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { defaultAccessScope: (code: string) => string }
+
+    expect(vm.defaultAccessScope('designer')).toBe('global')
+    expect(vm.defaultAccessScope('member')).toBe('self')
+  })
+
+  it('persists a newly assigned designer role with global scope', async () => {
+    vi.mocked(accessPolicyApi.roles).mockResolvedValue([
+      { id: 1, code: 'member', name: '成员', description: '基础身份', system_protected: true, version: 1, permissions: [] },
+      { id: 2, code: 'operations', name: '运营', description: '任务创建和运营处理', system_protected: false, version: 1, permissions: [] },
+      { id: 6, code: 'designer', name: '设计师', description: '设计任务处理', system_protected: false, version: 1, permissions: [] },
+    ])
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      openDetail: (row: unknown) => Promise<void>
+      selectedAccessRoleCodes: string[]
+      submitRoleReplace: () => Promise<void>
+    }
+    await vm.openDetail({ id: '2', username: 'target', roles: [] })
+    vm.selectedAccessRoleCodes.push('designer')
+    await vm.submitRoleReplace()
+
+    expect(accessPolicyApi.replaceUserAssignments).toHaveBeenCalledWith(2, expect.arrayContaining([
+      { role_id: 6, scope_mode: 'global', subjects: [] },
+    ]), 7, '在用户详情中更新工作角色')
+  })
+
   it('uses a compact organization role dialog instead of a separate permission workspace', async () => {
     const wrapper = mountView()
     await flushPromises()

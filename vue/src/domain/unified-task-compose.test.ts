@@ -4,7 +4,10 @@ import {
   applyBackendViolations,
   buildPlanningInputs,
   buildTaskSubmissionUnits,
+  composeColumns,
+  composeIdempotencyKey,
   createComposeRow,
+  defaultErpSyncMode,
   validateCompose,
   type ComposeCommonInfo,
 } from './unified-task-compose'
@@ -18,6 +21,37 @@ const common: ComposeCommonInfo = {
 }
 
 describe('unified task compose domain', () => {
+  it('keeps the pre-workbench ERP sync defaults per intent', () => {
+    expect(defaultErpSyncMode('new_design')).toBe('async')
+    expect(buildTaskSubmissionUnits('new_design', { ...common, erp_sync_mode: defaultErpSyncMode('new_design') }, [
+      createComposeRow({ id: 'row-1', product_i_id: 'HZS001', product_name: '亚克力立牌', design_requirement: '按参考图设计' }),
+    ])[0].task).toMatchObject({ syncErpOnCreate: true })
+
+    expect(defaultErpSyncMode('planning_sku')).toBe('async')
+    expect(validateCompose('planning_sku', { ...common, erp_sync_mode: defaultErpSyncMode('planning_sku') }, [
+      createComposeRow({ id: 'row-1', category_code: 'HZS', description_spec: '亚克力立牌 20cm', quantity: 2, product_i_id: 'HQT' }),
+    ])).toEqual([])
+  })
+
+  it('keeps planning numbering identity separate from ERP identity and derives the ERP name', () => {
+    const row = createComposeRow({
+      id: 'row-1',
+      category_code: 'HZS',
+      description_spec: '亚克力立牌 20cm',
+      quantity: 2,
+      product_i_id: 'HQT',
+    })
+
+    expect(composeColumns('planning_sku').map((column) => column.key)).toContain('category_code')
+    expect(composeColumns('planning_sku').map((column) => column.key)).toContain('product_i_id')
+    expect(composeColumns('planning_sku').map((column) => column.key)).not.toContain('product_name')
+    expect(buildPlanningInputs([row])[0]).toMatchObject({
+      category_code: 'HZS',
+      erp_product_i_id: 'HQT',
+      erp_product_name: '亚克力立牌 20cm',
+    })
+  })
+
   it('maps one new-design row and keeps the operations set hint non-authoritative', () => {
     const row = createComposeRow({
       id: 'row-1',
@@ -139,6 +173,24 @@ describe('unified task compose domain', () => {
 
     const [unit] = buildTaskSubmissionUnits('new_design', common, [row])
     expect(unit.task).toMatchObject({ width: 1.2, height: 0.8, area: 0.96, note: '运营备注\n注意出血位' })
+  })
+
+  it('keeps the create idempotency key inside the 128-character backend limit for large batches', () => {
+    const sessionId = crypto.randomUUID()
+    const rowIds = Array.from({ length: 100 }, () => crypto.randomUUID())
+
+    expect(composeIdempotencyKey(sessionId, rowIds.slice(0, 1)).length).toBeLessThanOrEqual(128)
+    expect(composeIdempotencyKey(sessionId, rowIds.slice(0, 3)).length).toBeLessThanOrEqual(128)
+    expect(composeIdempotencyKey(sessionId, rowIds).length).toBeLessThanOrEqual(128)
+  })
+
+  it('derives a stable key per row set so retrying only the failed rows is not treated as a replay', () => {
+    const sessionId = 'session-1'
+    const allRows = ['row-a', 'row-b', 'row-c']
+
+    expect(composeIdempotencyKey(sessionId, allRows)).toBe(composeIdempotencyKey(sessionId, [...allRows].reverse()))
+    expect(composeIdempotencyKey(sessionId, allRows)).not.toBe(composeIdempotencyKey(sessionId, ['row-b', 'row-c']))
+    expect(composeIdempotencyKey(sessionId, allRows)).not.toBe(composeIdempotencyKey('session-2', allRows))
   })
 
   it('maps backend indexed violations back to the originating row', () => {

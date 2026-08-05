@@ -133,20 +133,27 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'special_note', label: '补充说明', width: 220 },
   ],
   planning_sku: [
-  { key: 'category_code', label: 'SKU 类目', width: 150, required: true, help: '用于计算兼容编号中的类目短码' },
+    { key: 'category_code', label: '编号类目（非 ERP 款式）', width: 190, required: true, help: '只用于计算 CG/DZ 编号中的 1 位类目短码，不会同步成 ERP 商品编码' },
     { key: 'description_spec', label: '产品描述 / 规格', width: 310, required: true },
     { key: 'quantity', label: '数量', width: 96, required: true, kind: 'number' },
     { key: 'target_price', label: '目标价', width: 110 },
     { key: 'note', label: '备注', width: 210 },
     { key: 'reference_url', label: '参考链接', width: 220 },
     { key: 'reference_assets', label: '产品图片', width: 140, kind: 'asset' },
-    { key: 'product_i_id', label: 'ERP i_id', width: 140 },
-    { key: 'product_name', label: 'ERP 产品名称', width: 180 },
+    { key: 'product_i_id', label: 'ERP 款式编码 i_id', width: 170, help: '仅用于 ERP 建档；ERP 商品名称直接取“产品描述 / 规格”，无需重复填写' },
   ],
 }
 
 export function composeColumns(intent: ComposeIntent): ComposeColumn[] {
   return columns[intent]
+}
+
+/**
+ * 与统一工作台之前的两个入口保持一致：新款设计与策划 SKU 都默认同步 ERP。
+ * 策划 SKU 只要求填写 ERP 款式编码，商品名称直接复用已经必填的产品描述 / 规格。
+ */
+export function defaultErpSyncMode(intent: ComposeIntent): ComposeCommonInfo['erp_sync_mode'] {
+  return intent === 'new_design' || intent === 'planning_sku' ? 'async' : 'none'
 }
 
 export function createComposeRow(seed: Partial<ComposeRow> = {}): ComposeRow {
@@ -216,7 +223,6 @@ export function validateCompose(
       if ((row.note?.length ?? 0) > 2000) add('note', '备注不能超过 2000 字')
       if (row.reference_url && !/^https?:\/\//i.test(row.reference_url)) add('reference_url', '参考链接仅支持 HTTP / HTTPS')
       if (common.erp_sync_mode === 'async' && !row.product_i_id?.trim()) add('product_i_id', '开启 ERP 同步时 i_id 必填')
-      if (common.erp_sync_mode === 'async' && !row.product_name?.trim()) add('product_name', '开启 ERP 同步时产品名称必填')
     }
     for (const [field, assets] of [['reference_assets', row.reference_assets], ['source_assets', row.source_assets]] as const) {
       for (const asset of assets) {
@@ -261,6 +267,22 @@ function commonTask(common: ComposeCommonInfo): Partial<Task> {
 function rowTaskNote(commonNote: string, specialNote?: string): string {
   const parts = [commonNote.trim(), specialNote?.trim() ?? ''].filter(Boolean)
   return parts.join('\n')
+}
+
+/**
+ * POST /v1/tasks 的 `client_create_id` 上限是 128 字符（openapi.yaml CreateTaskRequest，
+ * 且 task_create_requests.client_create_id 为 VARCHAR(128)）。行 id 是 36 字符 UUID，
+ * 直接拼接会在 3 行起越界并让后端在预留幂等记录时报 500，所以这里压成定长摘要。
+ * 摘要覆盖行集合本身，"只重试失败行"会得到不同的键，不会被误判为重放。
+ */
+export function composeIdempotencyKey(sessionId: string, rowIds: string[]): string {
+  const canonical = [...rowIds].sort().join(',')
+  let hash = 0xcbf29ce484222325n
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash ^= BigInt(canonical.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return `compose:${sessionId}:${rowIds.length}-${hash.toString(16).padStart(16, '0')}`
 }
 
 export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'planning_sku'>, common: ComposeCommonInfo, rows: ComposeRow[]): TaskSubmissionUnit[] {
@@ -362,7 +384,7 @@ export function buildPlanningInputs(rows: ComposeRow[], customizationRequired = 
     reference_url: row.reference_url?.trim() || undefined,
     image_upload_ref: typeof row.reference_assets[0]?.upload_ref === 'string' ? row.reference_assets[0].upload_ref : undefined,
     erp_product_i_id: row.product_i_id?.trim() || undefined,
-    erp_product_name: row.product_name?.trim() || undefined,
+    erp_product_name: row.product_name?.trim() || row.description_spec?.trim() || undefined,
   }))
 }
 

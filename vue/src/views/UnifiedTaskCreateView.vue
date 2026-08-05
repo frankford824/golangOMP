@@ -51,7 +51,7 @@
       </div>
       <label v-if="intent === 'new_design' || intent === 'planning_sku'" class="field">
         <span class="field-name">创建后自动同步 ERP</span>
-        <span class="switch-row"><input v-model="erpSync" type="checkbox" aria-label="创建成功后自动同步 ERP" /><small>{{ erpSync ? '已开启：创建成功后自动同步' : '未开启：本次只创建任务与 SKU' }}</small></span>
+        <span class="switch-row"><input v-model="erpSync" type="checkbox" aria-label="创建成功后自动同步 ERP" /><small>{{ erpSync ? (intent === 'planning_sku' ? '已开启：填写 ERP 款式编码；商品名称直接取产品描述/规格' : '已开启：创建成功后自动同步') : '未开启：本次只创建任务与 SKU' }}</small></span>
       </label>
       <label class="field note-field">
         <span class="field-name">备注（选填）</span>
@@ -161,7 +161,10 @@
             <button v-for="item in erpSearchResults" :key="String(item.product_id || item.sku_code)" type="button" class="erp-result" @click="chooseERP(item)"><strong>{{ item.product_name || item.name || '未命名商品' }}</strong><span>{{ item.sku_code || item.sku || item.product_code || item.product_id }}</span></button>
             <p v-if="selectedRow.erp_sku" class="selected-erp">已选择：{{ selectedRow.product_name }} · {{ selectedRow.erp_sku }}</p>
           </section>
-          <section v-if="intent === 'new_design' || (intent === 'planning_sku' && erpSync)" class="drawer-section"><IIdSelector :model-value="selectedRow.product_i_id" label="款式编码 i_id" @update:model-value="updateSelected('product_i_id', $event)" /></section>
+          <section v-if="intent === 'new_design' || (intent === 'planning_sku' && erpSync)" class="drawer-section">
+            <IIdSelector :model-value="selectedRow.product_i_id" :label="intent === 'planning_sku' ? 'ERP 款式编码 i_id' : '款式编码 i_id'" @update:model-value="updateSelected('product_i_id', $event)" />
+            <p v-if="intent === 'planning_sku'" class="drawer-field-hint">编号类目只生成 CG/DZ SKU；这里选择的是 ERP 款式编码。ERP 商品名称会直接采用“产品描述 / 规格”，无需再填一列。</p>
+          </section>
           <section v-if="showSetHint" class="drawer-section hint-section">
             <div><h4>建议做成套装</h4><p>给设计师的参考：最终做单图还是套装，由设计师在设计时决定。</p></div>
             <input v-model="selectedRow.set_mode_hint" type="checkbox" aria-label="建议按套装设计" />
@@ -221,7 +224,9 @@ import {
   buildTaskSubmissionUnits,
   COMPOSE_INTENT_META,
   composeColumns,
+  composeIdempotencyKey,
   createComposeRow,
+  defaultErpSyncMode,
   validateCompose,
   type ComposeAssetDraft,
   type ComposeColumnKey,
@@ -267,7 +272,7 @@ function defaultDueAt(): string {
 }
 
 const intent = ref<ComposeIntent>(initialIntent())
-const common = reactive<ComposeCommonInfo>({ due_at: defaultDueAt(), priority: 'normal', note: '', customization_required: false, customization_source_type: undefined, erp_sync_mode: 'none' })
+const common = reactive<ComposeCommonInfo>({ due_at: defaultDueAt(), priority: 'normal', note: '', customization_required: false, customization_source_type: undefined, erp_sync_mode: defaultErpSyncMode(intent.value) })
 const rows = ref<ComposeRow[]>([createComposeRow()])
 const selectedRowId = ref(rows.value[0].id)
 const selectedRowIds = ref<string[]>([rows.value[0].id])
@@ -395,7 +400,7 @@ function resetComposeState() {
   common.note = ''
   common.customization_required = false
   common.customization_source_type = undefined
-  common.erp_sync_mode = 'none'
+  common.erp_sync_mode = defaultErpSyncMode(intent.value)
   common.designer_id = undefined
   rows.value = [createComposeRow()]
   selectRow(rows.value[0].id)
@@ -717,7 +722,7 @@ async function submit(retryOnly: boolean) {
       const unitRows = rows.value.filter((row) => unit.row_ids.includes(row.id))
       unitRows.forEach((row) => { row.status = 'submitting'; row.error = '' })
       try {
-        const created = await tasksStore.addTask(unit.task, `compose:${clientCreateId.value}:${unit.row_ids.join(',')}`)
+        const created = await tasksStore.addTask(unit.task, composeIdempotencyKey(clientCreateId.value, unit.row_ids))
         unitRows.forEach((row) => { row.status = 'created'; row.result_task_id = created.id })
         if (intent.value === 'retouch') {
           const loaded = tasksStore.getById(created.id) ?? created

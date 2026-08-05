@@ -7,9 +7,13 @@ import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(), cancel: vi.fn(),
-  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
+  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
+vi.mock('@/services/api/assetsApi', async (loadOriginal) => ({
+  ...(await loadOriginal<typeof import('@/services/api/assetsApi')>()),
+  assetsApi: { list: mocks.listAssets },
+}))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
   ...(await loadOriginal<typeof import('@/services/api/resourceGroupsApi')>()),
   resourceGroupsApi: { taskBundle: mocks.taskBundle },
@@ -86,6 +90,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.patchSkuItem.mockResolvedValue({})
     mocks.patchSkuItemCostInfo.mockResolvedValue({})
     mocks.cancel.mockResolvedValue({})
+    mocks.listAssets.mockResolvedValue({ data: { data: [] } })
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
     mocks.getPlanning.mockResolvedValue({ task_id: 41, task_no: 'RW-041', task_status: 'Completed', workflow_revision: 3, items: [] })
     mocks.downloadPlanning.mockResolvedValue(undefined)
@@ -481,20 +486,127 @@ describe('TaskDetailV8View business context', () => {
     expect(strip.text()).toContain('SKU-BATCH-003')
   })
 
+  it('explains an unavailable resource area without dropping the rest of the task', async () => {
+    mocks.taskBundle.mockRejectedValue({
+      status: 409,
+      responseData: {
+        error: { code: 'INVALID_STATE_TRANSITION', details: { migration_incomplete: true, expected_groups: 2, actual_groups: 1 } },
+      },
+    })
+    mocks.listAssets.mockResolvedValue({ data: { data: [
+      { id: '71', file_role: 'source', asset_kind: 'source', file_name: '历史源文件.psd', download_url: 'https://files/legacy-source' },
+      { id: '72', file_role: 'delivery', asset_kind: 'delivery', file_name: '历史成品.jpg' },
+      { id: '73', file_role: 'reference', asset_kind: 'reference', file_name: '历史参考图.jpg', download_url: 'https://files/reference' },
+    ] } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.bundle-unavailable').exists()).toBe(true)
+    expect(wrapper.get('.bundle-unavailable').text()).toContain('任务资源迁移尚未完成')
+    expect(wrapper.text()).toContain(baseTask.task_no)
+    expect(mocks.listTaskEvents).toHaveBeenCalled()
+
+    expect(mocks.listAssets).toHaveBeenCalledWith('41')
+    const legacy = wrapper.get('.legacy-assets')
+    expect(legacy.text()).toContain('历史源文件.psd')
+    expect(legacy.get('a').attributes('href')).toBe('https://files/legacy-source')
+    expect(legacy.text()).toContain('文件已不可用')
+    expect(legacy.text()).not.toContain('历史参考图.jpg')
+    expect(legacy.text()).toContain('1/2 份可下载')
+    wrapper.unmount()
+  })
+
+  it('bridges legacy files when migration created an empty resource-group shell', async () => {
+    mocks.taskBundle.mockResolvedValue({
+      task_id: 41,
+      workflow_revision: 3,
+      groups: [{
+        id: 5495,
+        scope_kind: 'retouch_requirement',
+        scope_ref_id: 292,
+        working_revision: null,
+        finalized_revision: null,
+      }],
+    })
+    mocks.listAssets.mockResolvedValue({ data: { data: [
+      { id: '32987', file_role: 'source', asset_kind: 'source', file_name: '历史修图源文件.zip', download_url: 'https://files/32987' },
+    ] } })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(mocks.listAssets).toHaveBeenCalledWith('41')
+    expect(wrapper.find('.bundle-unavailable').exists()).toBe(false)
+    const bridge = wrapper.get('.legacy-resource-bridge')
+    expect(bridge.text()).toContain('历史修图源文件.zip')
+    expect(bridge.text()).toContain('不会伪装成一次新的设计提交')
+    expect(bridge.get('a').attributes('href')).toBe('https://files/32987')
+    wrapper.unmount()
+  })
+
   it('exposes the explicit task termination action and records a reason', async () => {
     const activeTask = { ...baseTask, task_status: 'InProgress', allowed_actions: ['task.terminate'] }
     mocks.getById.mockResolvedValue({ data: { data: activeTask } })
     mocks.getDetail.mockResolvedValue({ data: { data: { task: activeTask, task_detail: {}, reference_file_refs: [] } } })
-    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('业务需求取消')
+    const prompt = vi.spyOn(window, 'prompt')
     const wrapper = mountView()
     await flushPromises()
 
-    const terminate = wrapper.findAll('button').find((item) => item.text() === '作废任务')
+    const terminate = wrapper.findAll('button').find((item) => item.text() === '终止任务')
     expect(terminate).toBeDefined()
     await terminate?.trigger('click')
     await flushPromises()
+
+    const dialog = document.querySelector('.terminate-dialog')
+    expect(dialog).not.toBeNull()
+    const confirm = () => Array.from(dialog!.querySelectorAll('button')).find((item) => item.textContent?.includes('确认终止'))
+    expect(confirm()?.disabled).toBe(true)
+
+    const reason = dialog!.querySelector('textarea') as HTMLTextAreaElement
+    reason.value = '业务需求取消'
+    reason.dispatchEvent(new Event('input'))
+    await flushPromises()
+
+    confirm()?.click()
+    await flushPromises()
     expect(mocks.cancel).toHaveBeenCalledWith('41', { reason: '业务需求取消', force: false })
+    expect(prompt).not.toHaveBeenCalled()
     prompt.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('requires a second explicit confirmation before force-terminating claimed work', async () => {
+    const activeTask = { ...baseTask, task_status: 'InProgress', allowed_actions: ['task.terminate'] }
+    mocks.getById.mockResolvedValue({ data: { data: activeTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: activeTask, task_detail: {}, reference_file_refs: [] } } })
+    mocks.cancel
+      .mockRejectedValueOnce({ status: 409, denyCode: 'task_already_claimed' })
+      .mockResolvedValueOnce({})
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.findAll('button').find((item) => item.text() === '终止任务')?.trigger('click')
+    await flushPromises()
+    const terminateDialog = document.querySelector('.terminate-dialog')!
+    const reason = terminateDialog.querySelector('textarea') as HTMLTextAreaElement
+    reason.value = '客户取消已开工任务'
+    reason.dispatchEvent(new Event('input'))
+    await flushPromises()
+
+    const findConfirm = () => Array.from(terminateDialog.querySelectorAll('button'))
+      .find((item) => item.classList.contains('primary-button'))
+    findConfirm()?.click()
+    await flushPromises()
+
+    expect(terminateDialog.textContent).toContain('继续会强制关闭所有未完成模块')
+    expect(terminateDialog.textContent).toContain('仍然强制终止')
+    expect(mocks.cancel).toHaveBeenNthCalledWith(1, '41', { reason: '客户取消已开工任务', force: false })
+
+    findConfirm()?.click()
+    await flushPromises()
+    expect(mocks.cancel).toHaveBeenNthCalledWith(2, '41', { reason: '客户取消已开工任务', force: true })
+    expect(document.querySelector('.terminate-dialog')).toBeNull()
+    wrapper.unmount()
   })
 
   it('keeps creator-owned terminal tasks immutable', async () => {

@@ -932,7 +932,7 @@ func TestPreviewInfoQueuesDerivedPreviewInsteadOfReturningBFFURL(t *testing.T) {
 	}
 }
 
-func TestSearchReturnsCacheAndSchedulesKeywordRefresh(t *testing.T) {
+func TestSearchRefreshesKeywordCacheMissBeforeReturning(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/search":
@@ -996,15 +996,17 @@ func TestSearchReturnsCacheAndSchedulesKeywordRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
-	if total != 0 || len(rows) != 0 {
-		t.Fatalf("Search() rows=%+v total=%d, want immediate cached empty result", rows, total)
+	if total != 1 || len(rows) != 1 || rows[0].OriginPath != "/p3/designs/fresh.png" {
+		t.Fatalf("Search() rows=%+v total=%d, want the freshly indexed non-system result", rows, total)
 	}
-	if len(jobs) != 1 {
-		t.Fatalf("scheduled jobs=%d, want 1", len(jobs))
+	if len(jobs) != 0 {
+		t.Fatalf("scheduled jobs=%d, want the cache-miss refresh to finish inline", len(jobs))
 	}
-	jobs[0]()
 	if len(repo.upserts) != 1 || repo.upserts[0].OriginPath != "/p3/designs/fresh.png" {
 		t.Fatalf("upserts=%+v, want only non-system BFF result", repo.upserts)
+	}
+	if len(repo.searchQueries) != 2 {
+		t.Fatalf("search queries=%d, want initial read plus one post-refresh read", len(repo.searchQueries))
 	}
 }
 
@@ -1174,7 +1176,9 @@ func TestSearchSchedulesBackgroundKeywordRefreshWithCooldown(t *testing.T) {
 	}))
 	defer server.Close()
 
-	repo := &externalAssetRepoStub{}
+	repo := &externalAssetRepoStub{searchRows: []*domain.ExternalAssetRecord{
+		{ID: 8, ResourceID: "ext-8", FileName: "same-keyword.jpg"},
+	}}
 	svc := NewService(repo, Config{
 		Enabled:    true,
 		BFFBaseURL: server.URL,

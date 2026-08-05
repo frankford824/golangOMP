@@ -112,9 +112,10 @@ type Service struct {
 
 	keywordRefreshMu       sync.Mutex
 	keywordRefreshLast     map[string]time.Time
-	keywordRefreshActive   map[string]struct{}
+	keywordRefreshActive   map[string]chan struct{}
 	keywordRefreshCooldown time.Duration
 	keywordRefreshTimeout  time.Duration
+	keywordMissTimeout     time.Duration
 	keywordRefreshAsyncFn  func(func())
 	previewPrepareAsyncFn  func(func())
 	ossPrepareWake         chan struct{}
@@ -213,9 +214,10 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 		recent:    map[string]time.Time{},
 
 		keywordRefreshLast:     map[string]time.Time{},
-		keywordRefreshActive:   map[string]struct{}{},
+		keywordRefreshActive:   map[string]chan struct{}{},
 		keywordRefreshCooldown: 10 * time.Minute,
 		keywordRefreshTimeout:  2 * time.Minute,
+		keywordMissTimeout:     8 * time.Second,
 		keywordRefreshAsyncFn: func(fn func()) {
 			go fn()
 		},
@@ -420,17 +422,26 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 		return []*domain.ExternalAssetRecord{}, 0, nil
 	}
 	query.OriginPrefixes = visiblePrefixes
+	refreshableKeyword := query.Keyword != "" && s.searchBackendReady() && shouldScheduleKeywordRefresh(query.Keyword)
 	if query.Keyword != "" && s.searchBackendReady() {
 		s.recordRecentKeyword(query.Keyword)
-		if shouldScheduleKeywordRefresh(query.Keyword) {
-			s.scheduleKeywordRefresh(query.Keyword, 50)
-		}
 	}
 	rows, total, err := s.repo.Search(ctx, query)
-	if err == nil {
-		s.schedulePreviewPrepare(rows)
+	if err != nil {
+		return rows, total, err
 	}
-	return rows, total, err
+	if refreshableKeyword && total == 0 && len(rows) == 0 {
+		if s.refreshKeywordOnMiss(ctx, query.Keyword, 50) {
+			rows, total, err = s.repo.Search(ctx, query)
+			if err != nil {
+				return rows, total, err
+			}
+		}
+	} else if refreshableKeyword {
+		s.scheduleKeywordRefresh(query.Keyword, 50)
+	}
+	s.schedulePreviewPrepare(rows)
+	return rows, total, nil
 }
 
 func (s *Service) ListDirectoryChildren(ctx context.Context, parentPath string, limit int, formatCategory domain.AssetFormatCategoryFilter) ([]domain.ExternalAssetDirectoryEntry, error) {
@@ -617,45 +628,21 @@ func (s *Service) scheduleKeywordRefresh(keyword string, perMountLimit int) {
 	if perMountLimit > 200 {
 		perMountLimit = 200
 	}
-	now := s.nowFn().UTC()
-	cooldown := s.keywordRefreshCooldown
-	if cooldown <= 0 {
-		cooldown = 10 * time.Minute
-	}
 	timeout := s.keywordRefreshTimeout
 	if timeout <= 0 {
 		timeout = 2 * time.Minute
 	}
-
-	s.keywordRefreshMu.Lock()
-	if s.keywordRefreshLast == nil {
-		s.keywordRefreshLast = map[string]time.Time{}
-	}
-	if s.keywordRefreshActive == nil {
-		s.keywordRefreshActive = map[string]struct{}{}
-	}
-	if _, active := s.keywordRefreshActive[keyword]; active {
-		s.keywordRefreshMu.Unlock()
+	keyword, _, owner := s.reserveKeywordRefresh(keyword)
+	if !owner {
 		return
 	}
-	if last, ok := s.keywordRefreshLast[keyword]; ok && now.Sub(last) < cooldown {
-		s.keywordRefreshMu.Unlock()
-		return
-	}
-	s.keywordRefreshActive[keyword] = struct{}{}
-	s.keywordRefreshLast[keyword] = now
 	runAsync := s.keywordRefreshAsyncFn
 	if runAsync == nil {
 		runAsync = func(fn func()) { go fn() }
 	}
-	s.keywordRefreshMu.Unlock()
 
 	runAsync(func() {
-		defer func() {
-			s.keywordRefreshMu.Lock()
-			delete(s.keywordRefreshActive, keyword)
-			s.keywordRefreshMu.Unlock()
-		}()
+		defer s.finishKeywordRefresh(keyword)
 		refreshCtx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		_ = s.SyncKeyword(refreshCtx, keyword, perMountLimit)
@@ -663,6 +650,75 @@ func (s *Service) scheduleKeywordRefresh(keyword string, perMountLimit int) {
 			_, _, _ = s.RefreshDirectURLs(refreshCtx, perMountLimit)
 		}
 	})
+}
+
+func (s *Service) refreshKeywordOnMiss(ctx context.Context, keyword string, perMountLimit int) bool {
+	if !s.Enabled() || !s.searchBackendReady() {
+		return false
+	}
+	keyword, done, owner := s.reserveKeywordRefresh(keyword)
+	if keyword == "" {
+		return false
+	}
+	if !owner {
+		if done == nil {
+			return false
+		}
+		select {
+		case <-done:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	defer s.finishKeywordRefresh(keyword)
+	timeout := s.keywordMissTimeout
+	if timeout <= 0 {
+		timeout = 8 * time.Second
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return s.SyncKeyword(refreshCtx, keyword, perMountLimit) == nil
+}
+
+func (s *Service) reserveKeywordRefresh(keyword string) (string, <-chan struct{}, bool) {
+	keyword = normalizeRecentKeyword(keyword)
+	if keyword == "" {
+		return "", nil, false
+	}
+	now := s.nowFn().UTC()
+	cooldown := s.keywordRefreshCooldown
+	if cooldown <= 0 {
+		cooldown = 10 * time.Minute
+	}
+	s.keywordRefreshMu.Lock()
+	defer s.keywordRefreshMu.Unlock()
+	if s.keywordRefreshLast == nil {
+		s.keywordRefreshLast = map[string]time.Time{}
+	}
+	if s.keywordRefreshActive == nil {
+		s.keywordRefreshActive = map[string]chan struct{}{}
+	}
+	if done, active := s.keywordRefreshActive[keyword]; active {
+		return keyword, done, false
+	}
+	if last, ok := s.keywordRefreshLast[keyword]; ok && now.Sub(last) < cooldown {
+		return keyword, nil, false
+	}
+	done := make(chan struct{})
+	s.keywordRefreshActive[keyword] = done
+	s.keywordRefreshLast[keyword] = now
+	return keyword, done, true
+}
+
+func (s *Service) finishKeywordRefresh(keyword string) {
+	s.keywordRefreshMu.Lock()
+	done, ok := s.keywordRefreshActive[keyword]
+	if ok {
+		delete(s.keywordRefreshActive, keyword)
+		close(done)
+	}
+	s.keywordRefreshMu.Unlock()
 }
 
 func (s *Service) schedulePreviewPrepare(rows []*domain.ExternalAssetRecord) {

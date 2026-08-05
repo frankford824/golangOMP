@@ -8,11 +8,14 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"workflow/domain"
 )
 
 const taskCreateIdempotencyTTL = 10 * time.Minute
+
+const taskCreateClientCreateIDMaxLen = 128
 
 type taskCreateIdempotencyReservation struct {
 	clientCreateID string
@@ -27,6 +30,16 @@ func (s *taskService) reserveTaskCreateIdempotency(ctx context.Context, p *Creat
 	p.ClientCreateID = strings.TrimSpace(p.ClientCreateID)
 	if p.ClientCreateID == "" {
 		return nil, taskCreateIdempotencyReservation{}, nil
+	}
+	// task_create_requests.client_create_id is VARCHAR(128) and OpenAPI caps the field
+	// at the same length; without this guard an over-long key fails at INSERT time and
+	// surfaces as an opaque 500 instead of naming the offending field.
+	if utf8.RuneCountInString(p.ClientCreateID) > taskCreateClientCreateIDMaxLen {
+		return nil, taskCreateIdempotencyReservation{}, taskCreateValidationError(
+			"client_create_id must not exceed 128 characters",
+			*p,
+			taskCreateViolation("client_create_id", "value_too_long", "client_create_id must not exceed 128 characters"),
+		)
 	}
 	p.CreatePayloadHash = strings.TrimSpace(p.CreatePayloadHash)
 	if p.CreatePayloadHash == "" {
