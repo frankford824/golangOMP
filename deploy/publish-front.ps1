@@ -188,8 +188,40 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Step "Remote artifact guard: main-ops staging ..."
-$remoteGuardCmd = "test -f `"$stagingPath/index.html`" && test -d `"$stagingPath/assets`" && test -f `"$stagingPath/static-artifact-manifest.json`" && test ! -f `"$stagingPath/asset.html`" && grep -q 'id=`"app`"' `"$stagingPath/index.html`" && ! grep -q 'asset-workbench-app' `"$stagingPath/index.html`" && ! grep -Eq 'src=`"/assets/asset-[^`"]+\.js`"' `"$stagingPath/index.html`" && grep -Eq '`"app`"[[:space:]]*:[[:space:]]*`"main-ops`"' `"$stagingPath/static-artifact-manifest.json`" && grep -Eq '`"entry`"[[:space:]]*:[[:space:]]*`"index.html`"' `"$stagingPath/static-artifact-manifest.json`" && grep -Eq '`"targetHost`"[[:space:]]*:[[:space:]]*`"yongbo.cloud`"' `"$stagingPath/static-artifact-manifest.json`" && grep -Eq '`"targetWebRoot`"[[:space:]]*:[[:space:]]*`"/var/www/yongbo.cloud`"' `"$stagingPath/static-artifact-manifest.json`""
-ssh $SshHost $remoteGuardCmd
+$remoteGuardScript = @'
+set -euo pipefail
+stage=__STAGING_PATH__
+expected_commit=__EXPECTED_COMMIT__
+test -f "$stage/index.html"
+test -d "$stage/assets"
+test -f "$stage/static-artifact-manifest.json"
+test ! -f "$stage/asset.html"
+grep -Fq 'id="app"' "$stage/index.html"
+! grep -Fq 'asset-workbench-app' "$stage/index.html"
+python3 - "$stage/static-artifact-manifest.json" "$expected_commit" <<'PY'
+import json
+import sys
+
+path, expected_commit = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+expected = {
+    "schema": 1,
+    "app": "main-ops",
+    "entry": "index.html",
+    "targetHost": "yongbo.cloud",
+    "targetWebRoot": "/var/www/yongbo.cloud",
+    "gitCommit": expected_commit,
+}
+actual = {key: manifest.get(key) for key in expected}
+if actual != expected:
+    raise SystemExit(f"staged artifact identity mismatch: {actual!r}")
+PY
+'@
+$expectedCommit = (Get-Content -LiteralPath (Join-Path $FrontDir "static-artifact-manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json).gitCommit
+$remoteGuardScript = $remoteGuardScript.Replace("__STAGING_PATH__", $stagingPath).Replace("__EXPECTED_COMMIT__", $expectedCommit)
+$remoteGuardScript = $remoteGuardScript -replace "`r", ""
+$remoteGuardScript | ssh $SshHost "tr -d '\r' | bash -s"
 if ($LASTEXITCODE -ne 0) {
     throw "staged artifact failed the main-ops identity guard"
 }
