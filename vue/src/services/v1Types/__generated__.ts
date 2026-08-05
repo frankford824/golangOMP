@@ -18221,7 +18221,7 @@ export interface components {
             workflow_revision: number;
             /** @enum {integer} */
             workflow_contract_version?: 2;
-            /** @description Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. */
+            /** @description Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.business_info.edit` authorizes non-governed task-field editing, while `task.terminate` authorizes the explicit task cancellation flow. */
             allowed_actions: string[];
             /** @enum {string} */
             priority?: "low" | "normal" | "high" | "critical";
