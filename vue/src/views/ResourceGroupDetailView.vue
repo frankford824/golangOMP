@@ -84,7 +84,7 @@ const dimensionDetail = computed(() => {
 const syncLabel = computed(() => ({ synced: 'ERP 已同步', queued: '等待同步', syncing: '正在同步', failed: '同步失败', cooling_down: '稍后重试', pending_sync: '待同步' }[profile.value?.erp_sync_status || ''] || 'ERP 待关联'))
 const syncTone = computed(() => profile.value?.erp_sync_status === 'synced' ? 'is-synced' : profile.value?.erp_sync_status === 'failed' ? 'is-failed' : 'is-pending')
 const costPreviewSeed = computed(() => ({
-  categoryCode: profile.value?.category_name || '',
+  categoryCode: '',
   productIID: profile.value?.product_i_id || '',
   erpIID: profile.value?.erp_i_id || '',
   width: profile.value?.area_trace?.width_m,

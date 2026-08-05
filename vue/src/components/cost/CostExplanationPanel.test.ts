@@ -109,7 +109,7 @@ describe('CostExplanationPanel', () => {
 
     expect(mocks.preview).not.toHaveBeenCalled()
     expect(wrapper.get('[role="alert"]').text()).toBe(
-      '当前规则快照缺少可复算的 ERP 商品编码或规则分组，请先补充后再试算。',
+      '当前规则快照缺少可复算的规则分组 / 类目编码，请先补充后再试算。',
     )
   })
 })

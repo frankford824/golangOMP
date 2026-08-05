@@ -552,7 +552,7 @@ function numberValue(value: unknown) {
 function skuCostPreviewSeed(item: Record<string, unknown>) {
   const trace = item.cost_trace && typeof item.cost_trace === 'object' ? item.cost_trace as Record<string, unknown> : {}
   return {
-    categoryCode: String(itemValue(item, 'category_code') || itemValue(item, 'rule_group') || ''),
+    categoryCode: String(itemValue(item, 'category_code') || ''),
     productIID: String(item.product_i_id || ''),
     erpIID: String(item.erp_i_id || ''),
     width: itemValue(item, 'width') as number | string | null,
