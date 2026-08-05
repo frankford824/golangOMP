@@ -371,6 +371,45 @@ class FakeRemoteOpener:
         return FakeResponse(self.body, self.mime)
 
 
+class FakeRangeResponse(FakeResponse):
+    def __init__(self, body, mime, *, code, content_range=""):
+        super().__init__(body, mime)
+        self.code = code
+        if content_range:
+            self.headers["Content-Range"] = content_range
+
+    def getcode(self):
+        return self.code
+
+
+class TruncatedRemoteOpener:
+    def __init__(self, body, truncate_at, mime="application/octet-stream"):
+        self.body = body
+        self.truncate_at = truncate_at
+        self.mime = mime
+        self.requests = []
+
+    def open(self, request, timeout):
+        self.requests.append((request, timeout))
+        range_header = request.headers.get("Range", "")
+        if not range_header:
+            return FakeResponse(
+                self.body[:self.truncate_at],
+                self.mime,
+                declared_size=len(self.body),
+            )
+        prefix = "bytes="
+        start_raw, end_raw = range_header.removeprefix(prefix).split("-", 1)
+        start = int(start_raw)
+        end = min(int(end_raw), len(self.body) - 1)
+        return FakeRangeResponse(
+            self.body[start:end + 1],
+            self.mime,
+            code=206,
+            content_range=f"bytes {start}-{end}/{len(self.body)}",
+        )
+
+
 class HydrateObjectManifestTest(unittest.TestCase):
     def row(self, owner_id, object_key, *, sha256="", size=0, mime="unknown/unknown"):
         return {
@@ -1764,7 +1803,7 @@ class HydrateObjectManifestTest(unittest.TestCase):
                         "jst_ecs", "/root/main.env", 5, value
                     )
 
-    def execute_direct_oss_helper(self, env_text, endpoint_override):
+    def execute_direct_oss_helper(self, env_text, endpoint_override, opener=None):
         request = json.dumps(
             {
                 "max_object_bytes": 1024,
@@ -1779,10 +1818,11 @@ class HydrateObjectManifestTest(unittest.TestCase):
             + struct.pack("!I", 0)
         )
         stdout = io.BytesIO()
-        opener = FakeRemoteOpener(
-            body=b"direct-body",
-            mime="application/octet-stream",
-        )
+        if opener is None:
+            opener = FakeRemoteOpener(
+                body=b"direct-body",
+                mime="application/octet-stream",
+            )
         with (
             mock.patch.object(
                 pathlib.Path,
@@ -1820,6 +1860,34 @@ class HydrateObjectManifestTest(unittest.TestCase):
             )
             offset += length
         return opener, frames, output
+
+    def test_direct_oss_helper_resumes_cleanly_truncated_get_with_ranges(self):
+        env_text = (
+            "OSS_ACCESS_KEY_ID=id\n"
+            "OSS_ACCESS_KEY_SECRET=secret\n"
+            "OSS_BUCKET=bucket\n"
+            "OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com\n"
+            "UPLOAD_STORAGE_PROVIDER=oss\n"
+        )
+        body = b"direct-body-with-a-truncated-prefix"
+        opener = TruncatedRemoteOpener(body, truncate_at=7)
+        used_opener, frames, _output = self.execute_direct_oss_helper(
+            env_text,
+            "",
+            opener,
+        )
+        self.assertIs(used_opener, opener)
+        self.assertEqual(frames[1]["status"], 200)
+        self.assertEqual(frames[1]["size"], len(body))
+        self.assertEqual(
+            frames[1]["sha256"],
+            hashlib.sha256(body).hexdigest(),
+        )
+        self.assertGreaterEqual(len(opener.requests), 2)
+        self.assertEqual(
+            opener.requests[1][0].headers.get("Range"),
+            f"bytes=7-{len(body) - 1}",
+        )
 
     def test_direct_oss_helper_uses_only_same_region_internal_route(self):
         env_text = (

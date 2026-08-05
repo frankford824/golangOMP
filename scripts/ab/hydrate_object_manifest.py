@@ -255,6 +255,7 @@ import urllib.request
 MAX_FRAME = 131072
 MAX_KEY = 65536
 CHUNK = 1024 * 1024
+RANGE_CHUNK = 8 * 1024 * 1024
 PROTOCOL = "direct-oss-sha256-v1"
 SAFE_DETAILS = {
     "connection_error",
@@ -405,6 +406,28 @@ def error_frame(status, detail):
         "status": status,
     })
 
+def signed_request(method, object_key, escaped_key, range_value=""):
+    date_value = email.utils.formatdate(usegmt=True)
+    canonical_resource = "/" + bucket + "/" + object_key
+    string_to_sign = method + "\n\n\n" + date_value + "\n" + canonical_resource
+    signature = base64.b64encode(hmac.new(
+        access_key_secret.encode("utf-8"),
+        string_to_sign.encode("utf-8"),
+        hashlib.sha1,
+    ).digest()).decode("ascii")
+    headers = {
+        "Accept-Encoding": "identity",
+        "Authorization": "OSS " + access_key_id + ":" + signature,
+        "Date": date_value,
+    }
+    if range_value:
+        headers["Range"] = range_value
+    return urllib.request.Request(
+        origin + "/" + escaped_key,
+        method=method,
+        headers=headers,
+    )
+
 env_path = sys.argv[1]
 timeout = float(sys.argv[2])
 endpoint_override = sys.argv[3]
@@ -467,23 +490,7 @@ while True:
     escaped_key = "/".join(
         urllib.parse.quote(part, safe="") for part in object_key.split("/")
     )
-    date_value = email.utils.formatdate(usegmt=True)
-    canonical_resource = "/" + bucket + "/" + object_key
-    string_to_sign = "GET\n\n\n" + date_value + "\n" + canonical_resource
-    signature = base64.b64encode(hmac.new(
-        access_key_secret.encode("utf-8"),
-        string_to_sign.encode("utf-8"),
-        hashlib.sha1,
-    ).digest()).decode("ascii")
-    request = urllib.request.Request(
-        origin + "/" + escaped_key,
-        method="GET",
-        headers={
-            "Accept-Encoding": "identity",
-            "Authorization": "OSS " + access_key_id + ":" + signature,
-            "Date": date_value,
-        },
-    )
+    request = signed_request("GET", object_key, escaped_key)
     try:
         response = opener.open(request, timeout=timeout)
     except urllib.error.HTTPError as exc:
@@ -540,6 +547,71 @@ while True:
         if failed:
             error_frame(413 if failed == "stream_size_exceeds_limit" else 599, failed)
             continue
+        if total < declared_size:
+            # A small set of large multipart objects can end a long-lived
+            # urllib response cleanly before Content-Length is exhausted.
+            # Resume only the missing suffix through bounded OSS Range GETs.
+            # Each range is buffered before it mutates the digest, so a short
+            # range response can be retried without double-hashing bytes.
+            while total < declared_size:
+                range_start = total
+                range_end = min(
+                    declared_size - 1,
+                    range_start + RANGE_CHUNK - 1,
+                )
+                expected_range_size = range_end - range_start + 1
+                range_bytes = None
+                for _attempt in range(3):
+                    range_request = signed_request(
+                        "GET",
+                        object_key,
+                        escaped_key,
+                        "bytes=" + str(range_start) + "-" + str(range_end),
+                    )
+                    try:
+                        range_response = opener.open(
+                            range_request, timeout=timeout
+                        )
+                    except Exception:
+                        continue
+                    with range_response:
+                        content_range = (
+                            range_response.headers.get("Content-Range") or ""
+                        ).strip().lower()
+                        expected_content_range = (
+                            "bytes "
+                            + str(range_start)
+                            + "-"
+                            + str(range_end)
+                            + "/"
+                            + str(declared_size)
+                        )
+                        if (
+                            range_response.getcode() != 206
+                            or content_range != expected_content_range
+                        ):
+                            continue
+                        buffer = bytearray()
+                        try:
+                            while len(buffer) < expected_range_size:
+                                chunk = range_response.read(
+                                    min(
+                                        CHUNK,
+                                        expected_range_size - len(buffer),
+                                    )
+                                )
+                                if not chunk:
+                                    break
+                                buffer.extend(chunk)
+                        except Exception:
+                            buffer.clear()
+                        if len(buffer) == expected_range_size:
+                            range_bytes = bytes(buffer)
+                            break
+                if range_bytes is None:
+                    break
+                digest.update(range_bytes)
+                total += len(range_bytes)
         if total != declared_size:
             error_frame(502, "content_length_differs_from_stream")
             continue
