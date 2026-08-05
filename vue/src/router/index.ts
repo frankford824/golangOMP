@@ -109,19 +109,19 @@ const routes: RouteRecordRaw[] = [
         path: 'asset-center',
         name: 'AssetsIndex',
         component: () => import('@/views/ResourceGroupsView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
+        meta: { requiresAuth: true, requiredMenuKey: 'resource_management' },
       },
       {
         path: 'asset-center/:id(ext-[^/]+)',
         name: 'ExternalAssetDetail',
         component: () => import('@/views/AssetDetailView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
+        meta: { requiresAuth: true, requiredMenuKey: 'resource_management' },
       },
       {
         path: 'asset-center/:id(\\d+)',
         name: 'AssetDetail',
         component: () => import('@/views/ResourceGroupDetailView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
+        meta: { requiresAuth: true, requiredMenuKey: 'resource_management' },
       },
       {
         path: 'cost-rules',

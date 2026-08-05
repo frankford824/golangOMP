@@ -52,7 +52,6 @@ import { computed, reactive, ref, watch } from 'vue'
 import { NButton, NCheckbox, NDatePicker, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
 import type { ActiveTaskStatus as TaskStatus } from '@/domain/types/task'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
-import { useOrgOwnershipFilterOptions } from '@/composables/useOrgOwnershipFilterOptions'
 
 export interface TaskListFilters { status: TaskStatus[]; taskCategory: string; taskType: string; priority: string; creatorId: string; assigneeId: string; dateFrom: string; dateTo: string; overdueOnly: boolean; ownerDepartment: string; ownerOrgTeam: string }
 const emptyFilters = (): TaskListFilters => ({ status: [], taskCategory: '', taskType: '', priority: '', creatorId: '', assigneeId: '', dateFrom: '', dateTo: '', overdueOnly: false, ownerDepartment: '', ownerOrgTeam: '' })
@@ -76,10 +75,14 @@ const statusOptions = [{ value: 'Draft', label: '草稿' }, { value: 'PendingAss
 const taskCategoryOptions = [{ label: '常规任务', value: 'normal' }, { label: '定制任务', value: 'customization' }]
 const taskTypeOptions = [{ label: '原有产品开发', value: 'ORIGINAL_PRODUCT_DEV' }, { label: '新品开发', value: 'NEW_PRODUCT_DEV' }, { label: '策划 SKU', value: 'SKU_PLANNING' }, { label: 'P 图任务', value: 'RETOUCH_TASK' }, { label: '客户定制', value: 'CUSTOMER_CUSTOMIZATION' }, { label: '常规定制', value: 'REGULAR_CUSTOMIZATION' }]
 const priorityOptions = [{ label: '低', value: 'low' }, { label: '普通', value: 'normal' }, { label: '高', value: 'high' }, { label: '加急', value: 'critical' }]
-const { departmentOptions, teamOptions } = useOrgOwnershipFilterOptions(() => draft.ownerDepartment ?? '')
-const { creatorOptions, assigneeOptions } = useTaskFilterOptions(true, '全部')
-const departmentSelectOptions = computed(() => departmentOptions.value.map((item) => ({ label: item.label, value: item.value })))
-const teamSelectOptions = computed(() => teamOptions.value.map((item) => ({ label: item.label, value: item.value })))
+const {
+  creatorOptions,
+  assigneeOptions,
+  ownerDepartmentOptions,
+  ownerTeamOptions,
+} = useTaskFilterOptions(true, '全部', () => draft.ownerDepartment ?? '')
+const departmentSelectOptions = computed(() => ownerDepartmentOptions.value.map((item) => ({ label: item.label, value: item.value })))
+const teamSelectOptions = computed(() => ownerTeamOptions.value.map((item) => ({ label: item.label, value: item.value })))
 const creatorSelectOptions = computed(() => creatorOptions.value.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })))
 const assigneeSelectOptions = computed(() => assigneeOptions.value.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })))
 function apply() { emit('apply', cloneFilters(draft), draftKeyword.value.trim()) }

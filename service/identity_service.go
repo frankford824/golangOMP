@@ -1249,17 +1249,17 @@ func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *do
 		return nil, infraError("list assignable candidates", fmt.Errorf("effective access reader is not configured"))
 	}
 	status := domain.UserStatusActive
-	count, err := s.userRepo.Count(ctx)
-	if err != nil {
-		return nil, infraError("count assignable candidates", err)
-	}
-	pageSize := int(count)
-	if pageSize < 1 {
-		return []*domain.User{}, nil
-	}
-	users, _, err := s.userRepo.List(ctx, repo.UserListFilter{Status: &status, Page: 1, PageSize: pageSize})
-	if err != nil {
-		return nil, infraError("list assignable candidates", err)
+	const pageSize = 100
+	users := make([]*domain.User, 0, pageSize)
+	for page := 1; ; page++ {
+		pageUsers, total, err := s.userRepo.List(ctx, repo.UserListFilter{Status: &status, Page: page, PageSize: pageSize})
+		if err != nil {
+			return nil, infraError("list assignable candidates", err)
+		}
+		users = append(users, pageUsers...)
+		if len(users) >= int(total) || len(pageUsers) == 0 {
+			break
+		}
 	}
 	userIDs := make([]int64, 0, len(users))
 	for _, user := range users {
@@ -1268,6 +1268,7 @@ func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *do
 		}
 	}
 	effectiveByUser := make(map[int64]*domain.EffectiveAccess, len(userIDs))
+	var err error
 	if batchReader, ok := s.effectiveAccessReader.(IdentityEffectiveAccessBatchReader); ok {
 		effectiveByUser, err = batchReader.EffectiveAccessMany(ctx, userIDs)
 		if err != nil {

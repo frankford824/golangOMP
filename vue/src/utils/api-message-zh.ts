@@ -227,6 +227,7 @@ export interface ParsedApiError {
   denyCode?: string
   message?: string
   detail?: string
+  details?: Record<string, unknown>
   traceId?: string
 }
 
@@ -274,8 +275,13 @@ export function parseApiErrorPayload(err: unknown): ParsedApiError {
   else if (root && typeof root.detail === 'string') detail = root.detail.trim()
 
   const traceId = (typeof apiErr?.trace_id === 'string' ? apiErr.trace_id : '').trim()
+  const detailsCandidate = apiErr?.details ?? root?.details
+  const details =
+    detailsCandidate && typeof detailsCandidate === 'object' && !Array.isArray(detailsCandidate)
+      ? (detailsCandidate as Record<string, unknown>)
+      : undefined
 
-  return { status, code, denyCode, message, detail, traceId }
+  return { status, code, denyCode, message, detail, details, traceId }
 }
 
 export function mapDenyCodeToZh(denyCode: string | undefined): string {
@@ -325,6 +331,18 @@ function mapDetailToZh(detail: string): string {
   if (hasChineseText(t)) return t
   const lower = t.toLowerCase()
   return API_ERROR_MESSAGE_ZH[lower] ?? API_ERROR_MESSAGE_ZH[t] ?? ''
+}
+
+function isResourceMigrationIncomplete(parsed: ParsedApiError): boolean {
+  if (parsed.code !== 'INVALID_STATE_TRANSITION') return false
+  const details = parsed.details
+  if (!details || details.migration_incomplete !== true) return false
+  return (
+    typeof details.expected_groups === 'number' &&
+    Number.isFinite(details.expected_groups) &&
+    typeof details.actual_groups === 'number' &&
+    Number.isFinite(details.actual_groups)
+  )
 }
 
 export interface ResolveApiUserMessageOptions {
@@ -382,7 +400,9 @@ export function resolveApiUserMessage(
   const shouldPreferBackendMessage = !!parsed.code && MESSAGE_FIRST_CODES.has(parsed.code)
   const hasRealMessage = !!parsed.message && !isNoiseMessage(parsed.message)
 
-  let main = ''
+  let main = isResourceMigrationIncomplete(parsed)
+    ? '任务资源迁移尚未完成，请稍后刷新；若持续出现，请联系管理员。'
+    : ''
 
   if (denyZh) {
     main = denyZh

@@ -534,7 +534,7 @@ describe('TaskDetailV8View business context', () => {
     expect(dialog().textContent).not.toContain('人员与组织')
   })
 
-  it('labels task.reopen as reopening and updated_at only as the latest update', async () => {
+  it('labels task.reopen as reopening and updated_at only as task information update time', async () => {
     const reopenTask = {
       ...baseTask,
       task_type: 'retouch_task',
@@ -549,7 +549,8 @@ describe('TaskDetailV8View business context', () => {
 
     expect(wrapper.findAll('button').some((item) => item.text() === '重开任务')).toBe(true)
     expect(wrapper.text()).not.toContain('提交修图成品')
-    expect(wrapper.get('.hero-facts').text()).toContain('最近更新')
+    expect(wrapper.get('.hero-facts').text()).toContain('任务信息更新时间')
+    expect(wrapper.get('.hero-facts').text()).toContain('2026/07/24 10:00')
     expect(wrapper.get('.hero-facts').text()).not.toContain('完成时间')
   })
 

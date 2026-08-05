@@ -120,9 +120,20 @@ type TaskFilterActorOption struct {
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 }
 
+type TaskFilterOrgOption struct {
+	ID             int64      `json:"id"`
+	Name           string     `json:"name"`
+	DepartmentID   *int64     `json:"department_id,omitempty"`
+	DepartmentName string     `json:"department_name,omitempty"`
+	TaskCount      int64      `json:"task_count"`
+	LastUsedAt     *time.Time `json:"last_used_at,omitempty"`
+}
+
 type TaskFilterOptions struct {
-	Creators  []TaskFilterActorOption `json:"creators"`
-	Designers []TaskFilterActorOption `json:"designers"`
+	Creators         []TaskFilterActorOption `json:"creators"`
+	Designers        []TaskFilterActorOption `json:"designers"`
+	OwnerDepartments []TaskFilterOrgOption   `json:"owner_departments"`
+	OwnerTeams       []TaskFilterOrgOption   `json:"owner_teams"`
 }
 
 // TaskListItem is the frontend-oriented task list projection for STEP_05.

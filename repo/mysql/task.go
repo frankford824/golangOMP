@@ -629,27 +629,38 @@ func taskActorNameJoins() string {
 			LEFT JOIN users handler_user ON handler_user.id = t.current_handler_id`
 }
 
-func (r *taskRepo) ListFilterOptions(ctx context.Context) (*domain.TaskFilterOptions, error) {
-	creators, err := r.listTaskActorFilterOptions(ctx, "creator_id")
+func (r *taskRepo) ListFilterOptions(ctx context.Context, filter repo.TaskListFilter) (*domain.TaskFilterOptions, error) {
+	creators, err := r.listTaskActorFilterOptions(ctx, "creator_id", filter)
 	if err != nil {
 		return nil, fmt.Errorf("list task creator filter options: %w", err)
 	}
-	designers, err := r.listTaskActorFilterOptions(ctx, "designer_id")
+	designers, err := r.listTaskActorFilterOptions(ctx, "designer_id", filter)
 	if err != nil {
 		return nil, fmt.Errorf("list task designer filter options: %w", err)
 	}
+	departments, err := r.listTaskDepartmentFilterOptions(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("list task department filter options: %w", err)
+	}
+	teams, err := r.listTaskTeamFilterOptions(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("list task team filter options: %w", err)
+	}
 	return &domain.TaskFilterOptions{
-		Creators:  creators,
-		Designers: designers,
+		Creators:         creators,
+		Designers:        designers,
+		OwnerDepartments: departments,
+		OwnerTeams:       teams,
 	}, nil
 }
 
-func (r *taskRepo) listTaskActorFilterOptions(ctx context.Context, actorColumn string) ([]domain.TaskFilterActorOption, error) {
+func (r *taskRepo) listTaskActorFilterOptions(ctx context.Context, actorColumn string, filter repo.TaskListFilter) ([]domain.TaskFilterActorOption, error) {
 	switch actorColumn {
 	case "creator_id", "designer_id":
 	default:
 		return nil, fmt.Errorf("unsupported task actor filter column %q", actorColumn)
 	}
+	whereSQL, scopeArgs := taskFilterOptionsScopeWhere(filter)
 	query := fmt.Sprintf(`
 		SELECT actor_id,
 		       COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), CAST(actor_id AS CHAR)) AS name,
@@ -662,13 +673,13 @@ func (r *taskRepo) listTaskActorFilterOptions(ctx context.Context, actorColumn s
 		  FROM (
 		        SELECT t.%s AS actor_id, t.updated_at
 		          FROM tasks t
-		         WHERE t.%s IS NOT NULL AND t.%s > 0
+		         WHERE t.%s IS NOT NULL AND t.%s > 0 AND %s
 		       ) actor_tasks
 		  LEFT JOIN users u ON u.id = actor_tasks.actor_id
 		 GROUP BY actor_id, u.username, u.display_name, u.department, u.team
 		 ORDER BY last_used_at DESC, task_count DESC, actor_id DESC
-		 LIMIT 500`, actorColumn, actorColumn, actorColumn)
-	rows, err := r.db.db.QueryContext(ctx, query)
+		 LIMIT 500`, actorColumn, actorColumn, actorColumn, whereSQL)
+	rows, err := r.db.db.QueryContext(ctx, query, scopeArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -709,6 +720,80 @@ func (r *taskRepo) listTaskActorFilterOptions(ctx context.Context, actorColumn s
 		return nil, err
 	}
 	return options, nil
+}
+
+func (r *taskRepo) listTaskDepartmentFilterOptions(ctx context.Context, filter repo.TaskListFilter) ([]domain.TaskFilterOrgOption, error) {
+	whereSQL, scopeArgs := taskFilterOptionsScopeWhere(filter)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT t.owner_department_id,
+		       COALESCE(NULLIF(d.name, ''), NULLIF(MAX(t.owner_department), ''), CAST(t.owner_department_id AS CHAR)) AS name,
+		       COUNT(*) AS task_count,
+		       MAX(t.updated_at) AS last_used_at
+		  FROM tasks t
+		  LEFT JOIN org_departments d ON d.id = t.owner_department_id
+		 WHERE t.owner_department_id IS NOT NULL AND t.owner_department_id > 0 AND `+whereSQL+`
+		 GROUP BY t.owner_department_id, d.name
+		 ORDER BY last_used_at DESC, task_count DESC, t.owner_department_id DESC
+		 LIMIT 500`, scopeArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	options := make([]domain.TaskFilterOrgOption, 0, 32)
+	for rows.Next() {
+		var option domain.TaskFilterOrgOption
+		var lastUsedAt sql.NullTime
+		if err := rows.Scan(&option.ID, &option.Name, &option.TaskCount, &lastUsedAt); err != nil {
+			return nil, err
+		}
+		option.LastUsedAt = fromNullTime(lastUsedAt)
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
+func (r *taskRepo) listTaskTeamFilterOptions(ctx context.Context, filter repo.TaskListFilter) ([]domain.TaskFilterOrgOption, error) {
+	whereSQL, scopeArgs := taskFilterOptionsScopeWhere(filter)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT t.owner_team_id,
+		       COALESCE(NULLIF(team.name, ''), NULLIF(MAX(t.owner_org_team), ''), CAST(t.owner_team_id AS CHAR)) AS name,
+		       COALESCE(team.department_id, MAX(t.owner_department_id)) AS department_id,
+		       COALESCE(NULLIF(department.name, ''), NULLIF(MAX(t.owner_department), '')) AS department_name,
+		       COUNT(*) AS task_count,
+		       MAX(t.updated_at) AS last_used_at
+		  FROM tasks t
+		  LEFT JOIN org_teams team ON team.id = t.owner_team_id
+		  LEFT JOIN org_departments department ON department.id = team.department_id
+		 WHERE t.owner_team_id IS NOT NULL AND t.owner_team_id > 0 AND `+whereSQL+`
+		 GROUP BY t.owner_team_id, team.name, team.department_id, department.name
+		 ORDER BY last_used_at DESC, task_count DESC, t.owner_team_id DESC
+		 LIMIT 500`, scopeArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	options := make([]domain.TaskFilterOrgOption, 0, 64)
+	for rows.Next() {
+		var option domain.TaskFilterOrgOption
+		var departmentID sql.NullInt64
+		var departmentName sql.NullString
+		var lastUsedAt sql.NullTime
+		if err := rows.Scan(&option.ID, &option.Name, &departmentID, &departmentName, &option.TaskCount, &lastUsedAt); err != nil {
+			return nil, err
+		}
+		option.DepartmentID = fromNullInt64(departmentID)
+		option.DepartmentName = departmentName.String
+		option.LastUsedAt = fromNullTime(lastUsedAt)
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
+func taskFilterOptionsScopeWhere(filter repo.TaskListFilter) (string, []interface{}) {
+	where := []string{"1=1"}
+	args := make([]interface{}, 0, 16)
+	appendTaskDataScopeWhere(&where, &args, filter)
+	return strings.Join(where, " AND "), args
 }
 
 func (r *taskRepo) hydrateTaskListSKUItems(ctx context.Context, items []*domain.TaskListItem) error {

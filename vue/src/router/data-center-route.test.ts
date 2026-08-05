@@ -13,6 +13,10 @@ describe('active main-ops route contract', () => {
     const userManagement = routes.find((route) => route.name === 'UserManagement')
     expect(userManagement?.meta.requiredMenuKey).toBe('user_admin')
 
+    for (const name of ['AssetsIndex', 'ExternalAssetDetail', 'AssetDetail']) {
+      expect(routes.find((route) => route.name === name)?.meta.requiredMenuKey).toBe('resource_management')
+    }
+
     for (const name of ['Dashboard', 'TaskList', 'AssetsIndex', 'CostRules', 'DataCenter', 'UserManagement']) {
       expect(routes.find((candidate) => candidate.name === name)).toBeDefined()
     }

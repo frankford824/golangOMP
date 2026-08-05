@@ -19,7 +19,7 @@
             <img v-if="previewable(file) && previewUrl(file) && !broken.has(fileKey(file, index))" :src="previewUrl(file)" :alt="fileName(file)" @error="markBroken(file, index)" />
             <FileText v-else :size="22" aria-hidden="true" />
           </span>
-          <span><strong>{{ fileName(file) }}</strong><small>{{ fileType(file) }}</small></span>
+          <span><strong>{{ fileName(file) }}</strong><small>{{ fileType(file) }}{{ fileUrl(file) ? '' : ' · 不可下载' }}</small></span>
         </button>
       </div>
       <p v-else class="empty-copy">暂无参考附件。运营人员补充后会显示在这里。</p>
@@ -35,7 +35,7 @@
         </header>
         <div class="preview-stage">
           <img v-if="previewable(selectedFile) && previewUrl(selectedFile) && !broken.has(fileKey(selectedFile, selectedIndex))" :src="previewUrl(selectedFile)" :alt="fileName(selectedFile)" @error="markBroken(selectedFile, selectedIndex)" />
-          <div v-else class="preview-fallback"><FileText :size="46" aria-hidden="true" /><strong>{{ fileType(selectedFile) }}</strong><p>该文件不支持网页内预览，可下载后查看。</p></div>
+          <div v-else class="preview-fallback"><FileText :size="46" aria-hidden="true" /><strong>{{ fileType(selectedFile) }}</strong><p>{{ fileUrl(selectedFile) ? '该文件不支持网页内预览，可下载后查看。' : '附件记录已保留，但当前账号没有预览或下载权限。' }}</p></div>
         </div>
         <footer><span>{{ selectedIndex + 1 }} / {{ files.length }}</span><p>参考附件仅用于理解运营需求，不会被当作最终成品。</p></footer>
       </template>

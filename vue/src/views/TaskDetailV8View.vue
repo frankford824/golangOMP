@@ -154,7 +154,7 @@
 
           <div v-else-if="workspaceMode === 'details'" class="workspace-body detail-sections">
             <TaskBusinessInfoEditor v-if="canEditTaskBusinessInfo" :task-id="task.id" :task="task" @saved="load" />
-            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>{{ isRetouch ? '运营参考图' : '任务级附件' }}</span><strong>{{ displayReferenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
+            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>{{ isRetouch ? '运营参考图' : '任务级附件' }}</span><strong>{{ displayReferenceFiles.length }} 个</strong></div><div><span>任务信息更新时间</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
             <section v-if="isPlanning" class="planning-detail-section">
               <p class="eyebrow">策划 SKU 明细</p>
               <div class="planning-detail-list">
@@ -278,6 +278,7 @@ import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { planningSkuApi, type PlanningSKUCreateResult } from '@/services/api/planningSkuApi'
 import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detail-display'
 import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
+import { formatTaskRecordDateBeijing } from '@/utils/date'
 
 interface V8Task extends Record<string, unknown> {
   id: number; task_no: string; task_type: string; task_status: string; workflow_revision: number; workflow_contract_version: 2; allowed_actions: string[]
@@ -457,14 +458,14 @@ const heroFacts = computed<Array<{ label: string; value: string; tone?: 'empty' 
   if (isPlanning.value) return [
     { label: 'SKU 数量', value: skuCount.value ? `${skuCount.value} 个` : '—' },
     { label: '创建人', value: String(task.value?.creator_name || '—') },
-    { label: '最近更新', value: displayDate(task.value?.updated_at) },
+    { label: '任务信息更新时间', value: displayDate(task.value?.updated_at) },
     { label: '归属组织', value: ownerOrg.value },
   ]
   return [
     { label: '当前处理人', value: currentOwner.value, tone: !hasOwner.value && !isTerminal.value ? 'empty' : undefined },
     { label: '截止时间', value: dueAtText.value, tone: dueSoonOrOverdue.value ? 'danger' : undefined },
     { label: '归属组织', value: ownerOrg.value },
-    { label: '最近更新', value: displayDate(task.value?.updated_at) },
+    { label: '任务信息更新时间', value: displayDate(task.value?.updated_at) },
   ]
 })
 const sortedEvents = computed(() => [...events.value].sort((left, right) => {
@@ -565,7 +566,10 @@ function unwrapCollection<T>(response: { data?: unknown } | null, fallback: T[] 
   }
   return fallback
 }
-function displayDate(value: unknown) { if (!value) return '刚刚'; const date = new Date(String(value)); return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN',{ month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit' }).format(date) }
+function displayDate(value: unknown) {
+  if (!value) return '刚刚'
+  return formatTaskRecordDateBeijing(String(value)) || String(value)
+}
 function detailValue(key: string) { return taskDetailDisplayValue(key, task.value?.[key]) }
 function formatMoney(value: unknown) { const amount = Number(value); return Number.isFinite(amount) ? `¥${amount.toFixed(2)}` : '—' }
 function eventKey(item: TaskEvent) { return String(item.id || `${item.event_type}-${item.created_at}`) }

@@ -125,9 +125,20 @@ export interface TaskFilterActorOption {
   last_used_at?: string | null
 }
 
+export interface TaskFilterOrgOption {
+  id: number
+  name: string
+  department_id?: number
+  department_name?: string
+  task_count?: number
+  last_used_at?: string | null
+}
+
 export interface TaskFilterOptionsResponse {
   creators?: TaskFilterActorOption[]
   designers?: TaskFilterActorOption[]
+  owner_departments?: TaskFilterOrgOption[]
+  owner_teams?: TaskFilterOrgOption[]
 }
 
 // ─── 任务列表 / 详情 ──────────────────────────────────────────────────────────

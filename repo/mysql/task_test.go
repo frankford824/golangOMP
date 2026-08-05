@@ -42,6 +42,39 @@ func TestBuildTaskListQuerySpecFiltersTaskCreatedAtRange(t *testing.T) {
 	}
 }
 
+func TestTaskFilterOptionsScopeWhereUsesTaskListStableScope(t *testing.T) {
+	whereSQL, args := taskFilterOptionsScopeWhere(repo.TaskListFilter{
+		ScopeUserIDs:       []int64{7},
+		ScopeDepartmentIDs: []int64{11},
+		ScopeTeamIDs:       []int64{13},
+	})
+	for _, want := range []string{
+		"t.creator_id IN (?)",
+		"t.designer_id IN (?)",
+		"t.current_handler_id IN (?)",
+		"t.owner_department_id IN (?)",
+		"t.owner_team_id IN (?)",
+	} {
+		if !strings.Contains(whereSQL, want) {
+			t.Fatalf("whereSQL missing %q: %s", want, whereSQL)
+		}
+	}
+	wantArgs := []interface{}{int64(7), int64(7), int64(7), int64(11), int64(13)}
+	if fmt.Sprint(args) != fmt.Sprint(wantArgs) {
+		t.Fatalf("args = %v, want %v", args, wantArgs)
+	}
+}
+
+func TestTaskFilterOptionsScopeWhereFailsClosedWithoutScope(t *testing.T) {
+	whereSQL, args := taskFilterOptionsScopeWhere(repo.TaskListFilter{})
+	if !strings.Contains(whereSQL, "1=0") {
+		t.Fatalf("whereSQL = %q, want fail-closed predicate", whereSQL)
+	}
+	if len(args) != 0 {
+		t.Fatalf("args = %v, want none", args)
+	}
+}
+
 func TestBuildTaskListQuerySpecOperationalBucketsMatchDashboardPredicates(t *testing.T) {
 	testCases := []struct {
 		name   string

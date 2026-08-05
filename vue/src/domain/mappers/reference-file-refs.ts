@@ -162,7 +162,17 @@ export function parseReferenceFileRefs(raw: unknown): ReferenceFileRef[] {
       if (obj.download_url && !obj.download_url_expires_at) {
         obj.download_url = toRelativeAssetUrl(obj.download_url as string) ?? obj.download_url
       }
-      return obj.download_url ? [obj] : []
+      const hasDisplayMetadata = [
+        obj.asset_id,
+        obj.ref_id,
+        obj.upload_request_id,
+        obj.filename,
+        obj.mime_type,
+        obj.file_size,
+        obj.source,
+        obj.status,
+      ].some((value) => value != null && String(value).trim() !== '')
+      return obj.download_url || hasDisplayMetadata ? [obj] : []
     }
     return []
   })

@@ -52,8 +52,13 @@ describe('parseReferenceFileRefs', () => {
     expect(result[0].download_url).toBe('/v1/assets/files/foo.jpg')
   })
 
-  it('filters out objects with no download_url', () => {
-    expect(parseReferenceFileRefs([{ asset_id: 'AST-001' }])).toHaveLength(0)
+  it('preserves attachment metadata when download_url is redacted', () => {
+    expect(parseReferenceFileRefs([{ asset_id: 'AST-001', filename: '受限参考图.jpg', mime_type: 'image/jpeg' }])).toEqual([
+      { asset_id: 'AST-001', filename: '受限参考图.jpg', mime_type: 'image/jpeg' },
+    ])
+  })
+
+  it('filters out objects without a URL or display metadata', () => {
     expect(parseReferenceFileRefs([{ download_url: '' }])).toHaveLength(0)
     expect(parseReferenceFileRefs([{ download_url: null }])).toHaveLength(0)
   })

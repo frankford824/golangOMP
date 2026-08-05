@@ -1612,12 +1612,13 @@ func (s *taskService) List(ctx context.Context, filter TaskFilter) ([]*domain.Ta
 
 func (s *taskService) ListFilterOptions(ctx context.Context) (*domain.TaskFilterOptions, *domain.AppError) {
 	lister, ok := s.taskRepo.(interface {
-		ListFilterOptions(context.Context) (*domain.TaskFilterOptions, error)
+		ListFilterOptions(context.Context, repo.TaskListFilter) (*domain.TaskFilterOptions, error)
 	})
 	if !ok {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "task filter options repo is not configured", nil)
 	}
-	options, err := lister.ListFilterOptions(ctx)
+	scopeFilter := applyTaskOrgVisibilityScope(repo.TaskListFilter{}, mainTaskReadScope(ctx))
+	options, err := lister.ListFilterOptions(ctx, scopeFilter)
 	if err != nil {
 		return nil, infraError("list task filter options", err)
 	}
@@ -1629,6 +1630,12 @@ func (s *taskService) ListFilterOptions(ctx context.Context) (*domain.TaskFilter
 	}
 	if options.Designers == nil {
 		options.Designers = []domain.TaskFilterActorOption{}
+	}
+	if options.OwnerDepartments == nil {
+		options.OwnerDepartments = []domain.TaskFilterOrgOption{}
+	}
+	if options.OwnerTeams == nil {
+		options.OwnerTeams = []domain.TaskFilterOrgOption{}
 	}
 	return options, nil
 }

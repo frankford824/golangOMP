@@ -81,6 +81,43 @@ describe('resolveApiUserMessage', () => {
     expect(message).toBe('与已有数据冲突，请更换后重试')
   })
 
+  it('explains an incomplete task-resource migration instead of suggesting different data', () => {
+    const message = resolveApiUserMessage({
+      status: 409,
+      responseData: {
+        error: {
+          code: 'INVALID_STATE_TRANSITION',
+          message: 'task resource groups are migration-incomplete',
+          details: {
+            migration_incomplete: true,
+            expected_groups: 1,
+            actual_groups: 0,
+          },
+        },
+      },
+    })
+
+    expect(message).toBe('任务资源迁移尚未完成，请稍后刷新；若持续出现，请联系管理员。')
+    expect(message).not.toContain('更换')
+  })
+
+  it('keeps unrelated invalid-state conflicts on the normal fallback path', () => {
+    const message = resolveApiUserMessage({
+      status: 409,
+      responseData: {
+        error: {
+          code: 'INVALID_STATE_TRANSITION',
+          message: 'resource group read model is inconsistent',
+          details: {
+            integrity_violation: true,
+          },
+        },
+      },
+    })
+
+    expect(message).toBe('与已有数据冲突，请更换后重试')
+  })
+
   it('maps deny_code from error.details before generic permission copy', () => {
     const message = resolveApiUserMessage({
       status: 403,

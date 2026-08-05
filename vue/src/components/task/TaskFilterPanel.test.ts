@@ -6,11 +6,14 @@ import TaskFilterPanel, { type TaskListFilters } from './TaskFilterPanel.vue'
 
 vi.mock('@/composables/useTaskFilterOptions', async () => {
   const { ref } = await import('vue')
-  return { useTaskFilterOptions: () => ({ creatorOptions: ref([]), assigneeOptions: ref([]) }) }
-})
-vi.mock('@/composables/useOrgOwnershipFilterOptions', async () => {
-  const { ref } = await import('vue')
-  return { useOrgOwnershipFilterOptions: () => ({ departmentOptions: ref([]), teamOptions: ref([]) }) }
+  return {
+    useTaskFilterOptions: () => ({
+      creatorOptions: ref([]),
+      assigneeOptions: ref([]),
+      ownerDepartmentOptions: ref([]),
+      ownerTeamOptions: ref([]),
+    }),
+  }
 })
 const filters = (): TaskListFilters => ({
   status: [], taskCategory: '', taskType: '', priority: '', creatorId: '', assigneeId: '',

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"workflow/domain"
@@ -143,6 +144,43 @@ func TestListAssignableDesignersUsesExplicitAccessForEveryLane(t *testing.T) {
 
 	if len(normal) != 1 || !containsPermissionAction(normal[0].FrontendAccess.Actions, string(domain.PermissionTaskUploadSource)) {
 		t.Fatalf("candidate frontend access was not projected from auth_*: %+v", normal[0].FrontendAccess.Actions)
+	}
+}
+
+func TestListAssignableDesignersTraversesEveryActiveUserPage(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	reader := assignableAccessReader{byUser: map[int64]*domain.EffectiveAccess{}}
+	var oldestCandidateID int64
+	for index := 0; index < 125; index++ {
+		userID := seedAssignableUser(t, userRepo, fmt.Sprintf("user-%03d", index), domain.UserStatusActive)
+		if index == 0 {
+			oldestCandidateID = userID
+			reader.byUser[userID] = assignableEffectiveAccess(userID, 11, "designer", domain.PermissionTaskUploadSource)
+		}
+	}
+	svc := NewIdentityService(
+		userRepo,
+		&identitySessionRepoStub{},
+		&identityPermissionLogRepoStub{},
+		identityTxRunner{},
+		WithIdentityEffectiveAccessReader(reader),
+	)
+
+	users, appErr := svc.ListAssignableDesigners(context.Background(), &domain.RequestActor{ID: 999}, AssignableLaneNormal)
+	if appErr != nil {
+		t.Fatalf("list candidates: %+v", appErr)
+	}
+	if oldestCandidateID <= 0 {
+		t.Fatal("oldest candidate was not seeded")
+	}
+	assertUsernamesExact(t, users, "user-000")
+	if len(userRepo.listFilters) != 2 {
+		t.Fatalf("list calls = %d, want 2", len(userRepo.listFilters))
+	}
+	for index, filter := range userRepo.listFilters {
+		if filter.Page != index+1 || filter.PageSize != 100 {
+			t.Fatalf("list filter[%d] = page %d size %d, want page %d size 100", index, filter.Page, filter.PageSize, index+1)
+		}
 	}
 }
 
