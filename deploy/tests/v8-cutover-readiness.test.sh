@@ -79,13 +79,13 @@ cat >"$WORKFLOW_APPLY_REPORT" <<'EOF'
     "legacy_planning_candidates": 0,
     "migration_incomplete_groups": 0
   },
-  "manual_task_ids": [],
-  "manual_task_issues": [],
-  "manual_resource_group_ids": [],
-  "manual_access_user_ids": [],
+  "manual_task_ids": null,
+  "manual_task_issues": null,
+  "manual_resource_group_ids": null,
+  "manual_access_user_ids": null,
   "manual_access_issues": [],
   "manual_org_issues": [],
-  "manual_resource_issues": [],
+  "manual_resource_issues": null,
   "mapping_candidate_issues": []
 }
 EOF

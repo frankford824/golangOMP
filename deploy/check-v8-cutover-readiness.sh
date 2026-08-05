@@ -155,6 +155,11 @@ for label, report, expected_mode in (
         "mapping_candidate_issues",
     ):
         value = report.get(key, [])
+        # Historical reports serialized an empty Go slice as null. Preserve
+        # that no-blocker meaning while still rejecting every non-empty list
+        # and every unexpected scalar/object value.
+        if value is None:
+            value = []
         if not isinstance(value, list) or value:
             fail(f"{label} contains blockers in {key}")
 
