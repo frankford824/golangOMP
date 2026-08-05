@@ -49,7 +49,7 @@ fi
   printf 'LISTEN_HOST=127.0.0.1\n'
 } >>"$MERGED_ENV"
 
-nohup "$BASE_DIR/scripts/run-with-env.sh" "$MERGED_ENV" "$BINARY" >"$LOG_FILE" 2>&1 &
+RUNNER_TRACKING_ID="" nohup "$BASE_DIR/scripts/run-with-env.sh" "$MERGED_ENV" "$BINARY" >"$LOG_FILE" 2>&1 &
 PID=$!
 echo "$PID" >"$BASE_DIR/run/erp_sync.pid"
 sleep 3

@@ -150,7 +150,10 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
-nohup "$RUN_WITH_ENV_SCRIPT" "$ENV_FILE" "$BINARY_PATH" >"$LOG_FILE" 2>&1 &
+# GitHub's self-hosted runner terminates post-job processes that retain its
+# tracking token. Clear only that token so the production daemon survives the
+# workflow cleanup while keeping the normal runtime environment unchanged.
+RUNNER_TRACKING_ID="" nohup "$RUN_WITH_ENV_SCRIPT" "$ENV_FILE" "$BINARY_PATH" >"$LOG_FILE" 2>&1 &
 PID=$!
 echo "$PID" >"$PID_FILE"
 DEADLINE=$((SECONDS + STARTUP_TIMEOUT_SECONDS))

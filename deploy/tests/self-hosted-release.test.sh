@@ -6,6 +6,9 @@ DEPLOY="$ROOT/deploy/deploy-on-host.sh"
 BACKUP="$ROOT/deploy/backup-production-db.sh"
 PUBLISH="$ROOT/deploy/publish-front-on-host.sh"
 V8_READINESS="$ROOT/deploy/check-v8-cutover-readiness.sh"
+START_MAIN="$ROOT/deploy/start-main.sh"
+START_BRIDGE="$ROOT/deploy/start-bridge.sh"
+START_SYNC="$ROOT/deploy/start-sync.sh"
 TMP_ROOT="$(mktemp -d)"
 PACKAGE_TEST_VERSION="v98765.4321"
 PACKAGE_TEST_NAME="ecommerce-ai-${PACKAGE_TEST_VERSION}-linux-amd64.tar.gz"
@@ -35,6 +38,11 @@ expect_failure() {
 for script in "$DEPLOY" "$BACKUP" "$PUBLISH" "$V8_READINESS"; do
   [ -x "$script" ] || fail "script is not executable: $script"
   bash -n "$script"
+done
+
+for daemon_script in "$START_MAIN" "$START_BRIDGE" "$START_SYNC"; do
+  grep -Fq 'RUNNER_TRACKING_ID="" nohup' "$daemon_script" ||
+    fail "$(basename "$daemon_script") must detach from GitHub runner cleanup"
 done
 
 bash "$DEPLOY" --mode validate

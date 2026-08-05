@@ -37,7 +37,7 @@ mkdir -p "$BASE_DIR/logs" "$BASE_DIR/run"
 PORT="${PORT:-$(read_env_value "$ENV_FILE" SERVER_PORT 8081)}"
 LOG_FILE="$BASE_DIR/logs/erp_bridge-$(date -u +%Y%m%dT%H%M%SZ).log"
 
-nohup "$BASE_DIR/scripts/run-with-env.sh" "$ENV_FILE" "$BASE_DIR/erp_bridge" >"$LOG_FILE" 2>&1 &
+RUNNER_TRACKING_ID="" nohup "$BASE_DIR/scripts/run-with-env.sh" "$ENV_FILE" "$BASE_DIR/erp_bridge" >"$LOG_FILE" 2>&1 &
 PID=$!
 echo "$PID" >"$BASE_DIR/run/erp_bridge.pid"
 sleep 3
