@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(), addTask: vi.fn(), getTaskById: vi.fn(), parseBatch: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
   permissions: new Set(['task.create', 'planning_sku.create']),
   uploadReferenceFileRef: vi.fn(),
-  uploadRetouchRequirementPendingAssets: vi.fn(),
+  uploadRetouchRequirementPendingAssets: vi.fn(), downloadPlanning: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -24,7 +24,7 @@ vi.mock('@/services/api/planningSkuApi', () => ({
   planningSkuApi: {
     create: mocks.create,
     parseExcel: vi.fn(), uploadImage: vi.fn(), retryFailedERP: vi.fn(), exportSelection: vi.fn(),
-    exportTaskURL: (id: number) => `/v1/tasks/${id}/planning-skus/export.xlsx`,
+    downloadTask: mocks.downloadPlanning,
   },
 }))
 vi.mock('@/services/api/batchSkuApi', () => ({
@@ -51,13 +51,14 @@ describe('UnifiedTaskCreateView', () => {
     mocks.create.mockResolvedValue({
       task_id: 88,
       task_no: 'RW-088',
-      items: [{ task_sku_item_id: 1, sequence_no: 1, sku_code: 'SKU-001', erp_status: 'not_filed' }],
+      items: [{ task_sku_item_id: 1, sequence_no: 1, sku_code: 'CGH000021', erp_status: 'not_filed' }],
     })
     mocks.getIids.mockResolvedValue({ data: { data: [{ i_id: 'KT_STANDARD' }] } })
     mocks.uploadReferenceFileRef.mockResolvedValue({ asset_id: 'reference-default' })
     mocks.addTask.mockResolvedValue({ id: 'task-default', retouchRequirements: [] })
     mocks.getTaskById.mockReturnValue({ id: 'task-default', retouchRequirements: [] })
     mocks.uploadRetouchRequirementPendingAssets.mockResolvedValue({ failures: [], referenceUploaded: 0, sourceUploaded: 0 })
+    mocks.downloadPlanning.mockResolvedValue(undefined)
   })
 
   it('renders the by-code ERP snapshot and clears an earlier lookup error', async () => {
@@ -117,8 +118,9 @@ describe('UnifiedTaskCreateView', () => {
     })
     expect(wrapper.get('.compose-page').attributes('data-compose-intent')).toBe('planning_sku')
     expect(wrapper.text()).toContain('只要 SKU 编码明细')
-    expect(wrapper.text()).toContain('还有 2 处需要完善')
+    expect(wrapper.text()).toContain('还有 3 处需要完善')
 
+    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('HZS')
     await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
     await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('2')
     await flushPromises()
@@ -128,10 +130,14 @@ describe('UnifiedTaskCreateView', () => {
     await flushPromises()
 
     expect(mocks.create).toHaveBeenCalledWith([
-      expect.objectContaining({ description_spec: '亚克力立牌 20cm', quantity: 2 }),
+      expect.objectContaining({ category_code: 'HZS', sku_code_type: 'regular', description_spec: '亚克力立牌 20cm', quantity: 2 }),
     ], 'none', expect.any(String))
-    expect(wrapper.text()).toContain('RW-088')
-    expect(wrapper.text()).toContain('SKU-001')
+    expect(wrapper.text()).toContain('任务 RW-088 已结单')
+    expect(wrapper.text()).toContain('CGH000021')
+    expect(wrapper.text()).toContain('以下编号已正式占用')
+    await wrapper.findAll('button').find((button) => button.text() === '导出全部')?.trigger('click')
+    await flushPromises()
+    expect(mocks.downloadPlanning).toHaveBeenCalledWith(88)
     wrapper.unmount()
   })
 
@@ -146,6 +152,7 @@ describe('UnifiedTaskCreateView', () => {
         },
       },
     })
+    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('HZS')
     await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
     await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('1')
     await wrapper.get('.validation-dock .primary-button').trigger('click')

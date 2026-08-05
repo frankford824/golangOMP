@@ -5,6 +5,8 @@ import { resolveFileMimeType } from '@/utils/mime'
 
 export interface PlanningSKUInput {
   client_item_id: string
+  category_code: string
+  sku_code_type?: 'regular' | 'customization'
   description_spec: string
   quantity: number
   target_price?: string
@@ -130,9 +132,6 @@ export const planningSkuApi = {
       await http.post(`/v1/tasks/sku-planning/image-upload-sessions/${plan.sessionId}/abort`, {}).catch(() => undefined)
       throw error
     }
-  },
-  exportTaskURL(taskId: number): string {
-    return `/v1/tasks/${taskId}/planning-skus/export.xlsx`
   },
   async downloadTask(taskId: number): Promise<void> {
     const response = await http.get(`/v1/tasks/${taskId}/planning-skus/export.xlsx`, { responseType: 'blob' })

@@ -3782,7 +3782,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 支持方法: GET, POST。
 
 - `GET`: Returns V8 task rows, stable organization IDs, workflow revision, allowed actions and current resource summaries. Organization names are display-only.
-- `POST`: Creates one task under the V8 contract. - `original_product_development` and `new_product_development` enter the unified design workflow. - `retouch_task` completes when all retouch requirements have final products. - `sku_planning` accepts 1-200 `planning_sku_items`, allocates one atomic SKU range and returns only after the task is `Completed`. - task ownership uses stable `owner_department_id` and `owner_team_id`; organization names are display-only. - planning-SKU product images must be staged through the dedicated image-upload-session API and never enter task resource groups.
+- `POST`: Creates one task under the V8 contract. - `original_product_development` and `new_product_development` enter the unified design workflow. - `retouch_task` completes when all retouch requirements have final products. - `sku_planning` accepts 1-200 `planning_sku_items`, allocates collision-safe ranges using the retired purchase-task format (`CG|DZ` + category letter + 6 digits), and returns only after the task is `Completed`. - task ownership uses stable `owner_department_id` and `owner_team_id`; organization names are display-only. - planning-SKU product images must be staged through the dedicated image-upload-session API and never enter task resource groups.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3909,7 +3909,7 @@ curl -X POST https://api.example.com/v1/tasks \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns task-derived creator and designer display options within the caller's explicit task-view scope.
+- `GET`: Returns task-derived creator, designer, owner-department, and owner-team options within the caller's explicit task-view scope. It does not expose the global organization master.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3933,6 +3933,12 @@ curl -X POST https://api.example.com/v1/tasks \
       "..."
     ],
     "designers": [
+      "..."
+    ],
+    "owner_departments": [
+      "..."
+    ],
+    "owner_teams": [
       "..."
     ]
   }

@@ -10,6 +10,7 @@ export type ComposeColumnKey =
   | 'erp_sku'
   | 'product_i_id'
   | 'product_name'
+  | 'category_code'
   | 'design_requirement'
   | 'description_spec'
   | 'quantity'
@@ -41,6 +42,7 @@ export interface ComposeRow {
   erp_product_snapshot?: Record<string, unknown>
   product_i_id?: string
   product_name?: string
+  category_code?: string
   design_requirement?: string
   description_spec?: string
   quantity?: number
@@ -131,6 +133,7 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'special_note', label: '补充说明', width: 220 },
   ],
   planning_sku: [
+    { key: 'category_code', label: 'SKU 类目', width: 150, required: true, help: '沿用旧采购任务规则，用于计算编号中的类目短码' },
     { key: 'description_spec', label: '产品描述 / 规格', width: 310, required: true },
     { key: 'quantity', label: '数量', width: 96, required: true, kind: 'number' },
     { key: 'target_price', label: '目标价', width: 110 },
@@ -204,6 +207,7 @@ export function validateCompose(
     } else if (intent === 'retouch') {
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写修图要求')
     } else {
+      if (!row.category_code?.trim()) add('category_code', '请填写 SKU 类目，用于生成旧采购口径编号')
       const description = row.description_spec?.trim() ?? ''
       if (!description) add('description_spec', '产品描述 / 规格不能为空')
       if (description.length > 4000) add('description_spec', '产品描述 / 规格不能超过 4000 字')
@@ -346,9 +350,11 @@ export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'plannin
   }]
 }
 
-export function buildPlanningInputs(rows: ComposeRow[]): PlanningSKUInput[] {
+export function buildPlanningInputs(rows: ComposeRow[], customizationRequired = false): PlanningSKUInput[] {
   return rows.map((row) => ({
     client_item_id: row.id,
+    category_code: row.category_code?.trim() ?? '',
+    sku_code_type: customizationRequired ? 'customization' : 'regular',
     description_spec: row.description_spec?.trim() ?? '',
     quantity: Number(row.quantity),
     target_price: row.target_price?.trim() || undefined,

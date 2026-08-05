@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -48,15 +50,16 @@ type PlanningSKUService interface {
 }
 
 type planningSKUService struct {
-	repo        PlanningSKURepository
-	taskRepo    repo.TaskRepo
-	eventRepo   repo.TaskEventRepo
-	txRunner    repo.TxRunner
-	finalizer   *TaskFinalizer
-	storageRefs repo.AssetStorageRefRepo
-	streams     StorageStreamOpener
-	ossDirect   *OSSDirectService
-	now         func() time.Time
+	repo                 PlanningSKURepository
+	taskRepo             repo.TaskRepo
+	eventRepo            repo.TaskEventRepo
+	txRunner             repo.TxRunner
+	finalizer            *TaskFinalizer
+	storageRefs          repo.AssetStorageRefRepo
+	streams              StorageStreamOpener
+	ossDirect            *OSSDirectService
+	productCodeSequences repo.ProductCodeSequenceRepo
+	now                  func() time.Time
 }
 
 type PlanningSKUOption func(*planningSKUService)
@@ -69,12 +72,21 @@ func WithPlanningSKUAssets(storageRefs repo.AssetStorageRefRepo, streams Storage
 	}
 }
 
+func WithPlanningSKUProductCodeSequences(sequences repo.ProductCodeSequenceRepo) PlanningSKUOption {
+	return func(service *planningSKUService) {
+		service.productCodeSequences = sequences
+	}
+}
+
 func NewPlanningSKUService(repository PlanningSKURepository, taskRepo repo.TaskRepo, eventRepo repo.TaskEventRepo, txRunner repo.TxRunner, finalizer *TaskFinalizer, opts ...PlanningSKUOption) PlanningSKUService {
 	service := &planningSKUService{repo: repository, taskRepo: taskRepo, eventRepo: eventRepo, txRunner: txRunner, finalizer: finalizer, now: time.Now}
 	for _, option := range opts {
 		if option != nil {
 			option(service)
 		}
+	}
+	if service.productCodeSequences == nil {
+		service.productCodeSequences = newVolatileProductCodeSequenceRepo()
 	}
 	return service
 }
@@ -109,7 +121,7 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "client_item_id must be unique", map[string]interface{}{"index": i})
 		}
 		seenClientItems[request.Items[i].ClientItemID] = struct{}{}
-		if appErr := validatePlanningSKUItem(request.Items[i], request.ERPSyncMode, i); appErr != nil {
+		if appErr := validatePlanningSKUItem(request.Items[i], request.ERPSyncMode, i, true); appErr != nil {
 			return nil, appErr
 		}
 	}
@@ -129,12 +141,16 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 		if err != nil {
 			return err
 		}
+		ruleConfig, appErr := parsePlanningSKUCodeRule(*skuRule)
+		if appErr != nil {
+			return appErr
+		}
 		taskRule, err := s.repo.GetUniqueActiveRuleForUpdate(ctx, tx, domain.CodeRuleTypeTaskNo)
 		if err != nil {
 			return fmt.Errorf("load task number rule: %w", err)
 		}
 		now := s.now().UTC()
-		skuStart, err := s.repo.AllocateRuleRange(ctx, tx, skuRule.ID, "", codeRulePeriodKey(*skuRule, now), len(request.Items))
+		skuCodes, err := allocatePlanningSKUCodes(ctx, tx, s.productCodeSequences, request.Items, ruleConfig)
 		if err != nil {
 			return err
 		}
@@ -152,12 +168,14 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 			if !validImage {
 				return domain.NewAppError(domain.ErrCodeInvalidRequest, "product image does not belong to this planning row", map[string]interface{}{"index": i})
 			}
-			skuCode := formatRevisionCode(*skuRule, skuStart+int64(i), "", now)
+			skuCode := skuCodes[i]
 			quantity := input.Quantity
+			skuCodeType := normalizePlanningSKUCodeType(input.SKUCodeType)
 			items = append(items, &domain.TaskSKUItem{
 				SequenceNo: i + 1, SKUCode: skuCode, SKUStatus: domain.TaskSKUStatusGenerated,
 				SKUOrigin: "native", ProductIID: strings.TrimSpace(input.ERPProductIID),
 				ProductNameSnapshot: planningProductName(input), Quantity: &quantity,
+				CategoryCode: strings.ToUpper(strings.TrimSpace(input.CategoryCode)), SKUCodeType: skuCodeType,
 			})
 		}
 		batchMode := domain.TaskBatchModeSingle
@@ -293,7 +311,7 @@ func (s *planningSKUService) Update(ctx context.Context, actor domain.RequestAct
 		DescriptionSpec: request.DescriptionSpec, Quantity: request.Quantity, TargetPrice: request.TargetPrice,
 		Note: request.Note, ReferenceURL: request.ReferenceURL, ImageUploadRef: request.ImageUploadRef,
 	}
-	if appErr := validatePlanningSKUItem(input, domain.PlanningSKUERPSyncNone, 0); appErr != nil {
+	if appErr := validatePlanningSKUItem(input, domain.PlanningSKUERPSyncNone, 0, false); appErr != nil {
 		return nil, appErr
 	}
 	var updated *domain.PlanningSKURevision
@@ -356,11 +374,13 @@ func (s *planningSKUService) Template(_ context.Context, includeERP bool) ([]byt
 		_ = f.SetCellValue(sheet, cell, header)
 	}
 	_ = f.SetCellValue(sheet, "A2", "示例：可在本单元格放置一张图片")
-	_ = f.SetCellValue(sheet, "B2", "产品描述与规格（必填）")
-	_ = f.SetCellValue(sheet, "C2", 1)
+	_ = f.SetCellValue(sheet, "B2", "HZS")
+	_ = f.SetCellValue(sheet, "C2", "产品描述与规格（必填）")
+	_ = f.SetCellValue(sheet, "D2", 1)
 	_ = f.SetColWidth(sheet, "A", "A", 18)
-	_ = f.SetColWidth(sheet, "B", "B", 42)
-	_ = f.SetColWidth(sheet, "E", "F", 30)
+	_ = f.SetColWidth(sheet, "B", "B", 18)
+	_ = f.SetColWidth(sheet, "C", "C", 42)
+	_ = f.SetColWidth(sheet, "F", "G", 30)
 	buffer, err := f.WriteToBuffer()
 	if err != nil {
 		return nil, infraError("generate planning SKU template", err)
@@ -386,24 +406,25 @@ func (s *planningSKUService) ParseExcel(_ context.Context, reader io.Reader, inc
 			continue
 		}
 		item := domain.PlanningSKUItemInput{ClientItemID: strconv.Itoa(rowIndex + 1)}
-		item.DescriptionSpec = excelCell(row, 1)
-		quantity, quantityErr := strconv.ParseInt(excelCell(row, 2), 10, 64)
+		item.CategoryCode = excelCell(row, 1)
+		item.DescriptionSpec = excelCell(row, 2)
+		quantity, quantityErr := strconv.ParseInt(excelCell(row, 3), 10, 64)
 		if quantityErr == nil {
 			item.Quantity = quantity
 		}
-		if value := excelCell(row, 3); value != "" {
+		if value := excelCell(row, 4); value != "" {
 			item.TargetPrice = &value
 		}
-		item.Note = excelCell(row, 4)
-		item.ReferenceURL = excelCell(row, 5)
+		item.Note = excelCell(row, 5)
+		item.ReferenceURL = excelCell(row, 6)
 		if includeERP {
-			item.ERPProductIID = excelCell(row, 6)
-			item.ERPProductName = excelCell(row, 7)
+			item.ERPProductIID = excelCell(row, 7)
+			item.ERPProductName = excelCell(row, 8)
 		}
 		if pictures, pictureErr := f.GetPictures(sheet, fmt.Sprintf("A%d", rowIndex+1)); pictureErr == nil && len(pictures) > 1 {
 			result.Errors = append(result.Errors, domain.PlanningSKUExcelParseError{Row: rowIndex + 1, Field: "product_image", Reason: "each row may contain at most one embedded image"})
 		}
-		if appErr := validatePlanningSKUItem(item, map[bool]domain.PlanningSKUERPSyncMode{true: domain.PlanningSKUERPSyncAsync, false: domain.PlanningSKUERPSyncNone}[includeERP], rowIndex); appErr != nil {
+		if appErr := validatePlanningSKUItem(item, map[bool]domain.PlanningSKUERPSyncMode{true: domain.PlanningSKUERPSyncAsync, false: domain.PlanningSKUERPSyncNone}[includeERP], rowIndex, true); appErr != nil {
 			details, _ := appErr.Details.(map[string]interface{})
 			result.Errors = append(result.Errors, domain.PlanningSKUExcelParseError{Row: rowIndex + 1, Field: fmt.Sprint(details["field"]), Reason: fmt.Sprint(details["reason"])})
 		}
@@ -617,7 +638,102 @@ func (s *planningSKUService) RequestERP(ctx context.Context, actor domain.Reques
 
 var planningPricePattern = regexp.MustCompile(`^[0-9]{1,10}(\.[0-9]{1,2})?$`)
 
-func validatePlanningSKUItem(item domain.PlanningSKUItemInput, mode domain.PlanningSKUERPSyncMode, index int) *domain.AppError {
+type planningSKUCodeRuleConfig struct {
+	Strategy                string            `json:"strategy"`
+	Prefixes                map[string]string `json:"prefixes"`
+	CategoryShortCodeLength int               `json:"category_short_code_length"`
+	SequenceLength          int               `json:"sequence_length"`
+}
+
+func parsePlanningSKUCodeRule(rule domain.CodeRuleRevision) (planningSKUCodeRuleConfig, *domain.AppError) {
+	var config planningSKUCodeRuleConfig
+	if err := json.Unmarshal([]byte(strings.TrimSpace(rule.ConfigJSON)), &config); err != nil {
+		return config, domain.NewAppError(domain.ErrCodeSKUPlanningRuleMissing, "策划 SKU 编号规则配置无效", map[string]interface{}{"rule_revision_id": rule.ID})
+	}
+	regularPrefix := strings.ToUpper(strings.TrimSpace(config.Prefixes[string(domain.TaskSKUCodeTypeRegular)]))
+	customizationPrefix := strings.ToUpper(strings.TrimSpace(config.Prefixes[string(domain.TaskSKUCodeTypeCustomization)]))
+	if config.Strategy != "legacy_task_product_code_v1" ||
+		rule.DimensionMode != domain.CodeRuleDimensionCategoryCode ||
+		rule.Separator != "" ||
+		rule.SequenceLength != defaultTaskProductCodeSeqLength ||
+		config.CategoryShortCodeLength != defaultTaskProductCodeShortLen ||
+		config.SequenceLength != defaultTaskProductCodeSeqLength ||
+		regularPrefix != "CG" ||
+		customizationPrefix != "DZ" {
+		return config, domain.NewAppError(domain.ErrCodeSKUPlanningRuleMissing, "策划 SKU 编号规则与旧采购任务口径不一致", map[string]interface{}{"rule_revision_id": rule.ID})
+	}
+	config.Prefixes[string(domain.TaskSKUCodeTypeRegular)] = regularPrefix
+	config.Prefixes[string(domain.TaskSKUCodeTypeCustomization)] = customizationPrefix
+	return config, nil
+}
+
+func normalizePlanningSKUCodeType(value domain.TaskSKUCodeType) domain.TaskSKUCodeType {
+	if value.Valid() {
+		return value
+	}
+	return domain.TaskSKUCodeTypeRegular
+}
+
+func allocatePlanningSKUCodes(
+	ctx context.Context,
+	tx repo.Tx,
+	sequences repo.ProductCodeSequenceRepo,
+	items []domain.PlanningSKUItemInput,
+	config planningSKUCodeRuleConfig,
+) ([]string, error) {
+	if sequences == nil {
+		return nil, fmt.Errorf("planning SKU product-code sequence repository is unavailable")
+	}
+	type allocationKey struct {
+		prefix    string
+		shortCode string
+	}
+	indexesByKey := make(map[allocationKey][]int)
+	for index, item := range items {
+		shortCode, appErr := deriveDefaultTaskProductCategoryShortCode(item.CategoryCode)
+		if appErr != nil {
+			return nil, appErr
+		}
+		codeType := normalizePlanningSKUCodeType(item.SKUCodeType)
+		key := allocationKey{
+			prefix:    config.Prefixes[string(codeType)],
+			shortCode: shortCode,
+		}
+		indexesByKey[key] = append(indexesByKey[key], index)
+	}
+	keys := make([]allocationKey, 0, len(indexesByKey))
+	for key := range indexesByKey {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].prefix == keys[j].prefix {
+			return keys[i].shortCode < keys[j].shortCode
+		}
+		return keys[i].prefix < keys[j].prefix
+	})
+	codes := make([]string, len(items))
+	for _, key := range keys {
+		indexes := indexesByKey[key]
+		start, err := sequences.AllocateRange(ctx, tx, key.prefix, key.shortCode, len(indexes))
+		if err != nil {
+			return nil, err
+		}
+		for offset, index := range indexes {
+			codes[index] = key.prefix + key.shortCode + fmt.Sprintf("%0*d", config.SequenceLength, start+int64(offset))
+		}
+	}
+	return codes, nil
+}
+
+func validatePlanningSKUItem(item domain.PlanningSKUItemInput, mode domain.PlanningSKUERPSyncMode, index int, requireCodeIdentity bool) *domain.AppError {
+	if requireCodeIdentity {
+		if _, appErr := normalizeDefaultTaskProductCategoryCode(item.CategoryCode); appErr != nil {
+			return planningRowError(index, "category_code", "is required")
+		}
+		if item.SKUCodeType != "" && !item.SKUCodeType.Valid() {
+			return planningRowError(index, "sku_code_type", "must be regular or customization")
+		}
+	}
 	description := strings.TrimSpace(item.DescriptionSpec)
 	if len([]rune(description)) < 1 || len([]rune(description)) > 4000 {
 		return planningRowError(index, "description_spec", "must contain 1 to 4000 characters")
@@ -705,7 +821,7 @@ func totalPlanningQuantity(items []domain.PlanningSKUItemInput) int64 {
 func pointerInt64(value int64) *int64 { return &value }
 
 func planningExcelHeaders(includeERP bool) []string {
-	headers := []string{"产品图片", "产品描述/规格", "数量", "目标价", "备注", "参考链接"}
+	headers := []string{"产品图片", "SKU 类目", "产品描述/规格", "数量", "目标价", "备注", "参考链接"}
 	if includeERP {
 		headers = append(headers, "ERP 产品 i_id", "ERP 产品名称")
 	}

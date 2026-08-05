@@ -21,5 +21,6 @@ type CodeRuleRevision struct {
 	SequenceLength int                   `json:"seq_length"`
 	ResetCycle     ResetCycle            `json:"reset_cycle"`
 	DimensionMode  CodeRuleDimensionMode `json:"dimension_mode"`
+	ConfigJSON     string                `json:"config_json"`
 	CreatedAt      time.Time             `json:"created_at"`
 }

@@ -10,15 +10,17 @@ const (
 )
 
 type PlanningSKUItemInput struct {
-	ClientItemID    string  `json:"client_item_id"`
-	DescriptionSpec string  `json:"description_spec"`
-	Quantity        int64   `json:"quantity"`
-	TargetPrice     *string `json:"target_price,omitempty"`
-	Note            string  `json:"note,omitempty"`
-	ReferenceURL    string  `json:"reference_url,omitempty"`
-	ImageUploadRef  string  `json:"image_upload_ref,omitempty"`
-	ERPProductIID   string  `json:"erp_product_i_id,omitempty"`
-	ERPProductName  string  `json:"erp_product_name,omitempty"`
+	ClientItemID    string          `json:"client_item_id"`
+	CategoryCode    string          `json:"category_code"`
+	SKUCodeType     TaskSKUCodeType `json:"sku_code_type,omitempty"`
+	DescriptionSpec string          `json:"description_spec"`
+	Quantity        int64           `json:"quantity"`
+	TargetPrice     *string         `json:"target_price,omitempty"`
+	Note            string          `json:"note,omitempty"`
+	ReferenceURL    string          `json:"reference_url,omitempty"`
+	ImageUploadRef  string          `json:"image_upload_ref,omitempty"`
+	ERPProductIID   string          `json:"erp_product_i_id,omitempty"`
+	ERPProductName  string          `json:"erp_product_name,omitempty"`
 }
 
 type CreatePlanningSKUTaskRequest struct {

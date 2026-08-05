@@ -105,6 +105,7 @@ describe('unified task compose domain', () => {
 
     const planning = createComposeRow({
       id: 'p1',
+      category_code: 'HZS',
       description_spec: '亚克力立牌 20cm',
       quantity: 3,
       target_price: '12.50',
@@ -113,10 +114,13 @@ describe('unified task compose domain', () => {
     expect(validateCompose('planning_sku', { ...common, due_at: '' }, [planning], new Date('2026-07-16T00:00:00Z'))).toEqual([])
     expect(buildPlanningInputs([planning])).toEqual([expect.objectContaining({
       client_item_id: 'p1',
+      category_code: 'HZS',
+      sku_code_type: 'regular',
       description_spec: '亚克力立牌 20cm',
       quantity: 3,
       target_price: '12.50',
     })])
+    expect(buildPlanningInputs([planning], true)[0]?.sku_code_type).toBe('customization')
   })
 
   it('rejects expired deadlines and preserves single-task dimensions and row notes', () => {

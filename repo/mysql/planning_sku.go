@@ -19,7 +19,7 @@ func (r *PlanningSKURepo) GetUniqueActiveRuleForUpdate(ctx context.Context, tx r
 	rows, err := Unwrap(tx).QueryContext(ctx, `
 		SELECT rev.id, rev.rule_id, rev.version_no, rev.prefix, rev.date_format,
 		       rev.site_code, rev.biz_code, rev.separator_text, rev.seq_length,
-		       rev.reset_cycle, rev.dimension_mode, rev.created_at
+		       rev.reset_cycle, rev.dimension_mode, CAST(rev.config_json AS CHAR), rev.created_at
 		FROM code_rules rule_row
 		JOIN code_rule_revisions rev ON rev.id = rule_row.active_revision_id AND rev.rule_id = rule_row.id
 		WHERE rule_row.rule_type = ? AND rule_row.is_enabled = 1
@@ -33,7 +33,7 @@ func (r *PlanningSKURepo) GetUniqueActiveRuleForUpdate(ctx context.Context, tx r
 		var item domain.CodeRuleRevision
 		if err := rows.Scan(&item.ID, &item.RuleID, &item.VersionNo, &item.Prefix, &item.DateFormat,
 			&item.SiteCode, &item.BizCode, &item.Separator, &item.SequenceLength,
-			&item.ResetCycle, &item.DimensionMode, &item.CreatedAt); err != nil {
+			&item.ResetCycle, &item.DimensionMode, &item.ConfigJSON, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, &item)

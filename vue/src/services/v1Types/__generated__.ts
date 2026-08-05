@@ -5051,7 +5051,7 @@ export interface paths {
          * @description Creates one task under the V8 contract.
          *     - `original_product_development` and `new_product_development` enter the unified design workflow.
          *     - `retouch_task` completes when all retouch requirements have final products.
-         *     - `sku_planning` accepts 1-200 `planning_sku_items`, allocates one atomic SKU range and returns only after the task is `Completed`.
+         *     - `sku_planning` accepts 1-200 `planning_sku_items`, allocates collision-safe ranges using the retired purchase-task format (`CG|DZ` + category letter + 6 digits), and returns only after the task is `Completed`.
          *     - task ownership uses stable `owner_department_id` and `owner_team_id`; organization names are display-only.
          *     - planning-SKU product images must be staged through the dedicated image-upload-session API and never enter task resource groups.
          */
@@ -5099,7 +5099,7 @@ export interface paths {
         };
         /**
          * Get task center filter options
-         * @description Returns task-derived creator and designer display options within the caller's explicit task-view scope.
+         * @description Returns task-derived creator, designer, owner-department, and owner-team options within the caller's explicit task-view scope. It does not expose the global organization master.
          */
         get: {
             parameters: {
@@ -19139,9 +19139,31 @@ export interface components {
             /** Format: date-time */
             last_used_at?: string | null;
         };
+        TaskFilterOrgOption: {
+            /**
+             * Format: int64
+             * @description Stable department or team identifier.
+             */
+            id: number;
+            /** @description Current organization display name. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Parent department identifier; present for team options.
+             */
+            department_id?: number | null;
+            /** @description Parent department display name; present for team options. */
+            department_name?: string;
+            /** Format: int64 */
+            task_count: number;
+            /** Format: date-time */
+            last_used_at?: string | null;
+        };
         TaskFilterOptions: {
-            creators?: components["schemas"]["TaskFilterActorOption"][];
-            designers?: components["schemas"]["TaskFilterActorOption"][];
+            creators: components["schemas"]["TaskFilterActorOption"][];
+            designers: components["schemas"]["TaskFilterActorOption"][];
+            owner_departments: components["schemas"]["TaskFilterOrgOption"][];
+            owner_teams: components["schemas"]["TaskFilterOrgOption"][];
         };
         /** @description Task list projection. Organization names are display-only; stable IDs drive authorization. The retired owner_team compatibility field is intentionally absent. */
         TaskListItem: {
@@ -21320,6 +21342,14 @@ export interface components {
         };
         PlanningSKUItemInput: {
             client_item_id: string;
+            /** @description Legacy purchase-task category identity used to derive the one-letter SKU category segment. */
+            category_code: string;
+            /**
+             * @description `regular` uses the CG prefix; `customization` uses the DZ prefix.
+             * @default regular
+             * @enum {string}
+             */
+            sku_code_type: "regular" | "customization";
             description_spec: string;
             /** Format: int64 */
             quantity: number;

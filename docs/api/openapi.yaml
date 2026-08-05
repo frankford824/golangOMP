@@ -2769,8 +2769,35 @@ components:
           type: string
           format: date-time
           nullable: true
+    TaskFilterOrgOption:
+      type: object
+      required: [id, name, task_count]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Stable department or team identifier.
+        name:
+          type: string
+          description: Current organization display name.
+        department_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Parent department identifier; present for team options.
+        department_name:
+          type: string
+          description: Parent department display name; present for team options.
+        task_count:
+          type: integer
+          format: int64
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
     TaskFilterOptions:
       type: object
+      required: [creators, designers, owner_departments, owner_teams]
       properties:
         creators:
           type: array
@@ -2780,6 +2807,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskFilterActorOption'
+        owner_departments:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskFilterOrgOption'
+        owner_teams:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskFilterOrgOption'
     TaskListItem:
       type: object
       description: Task list projection. Organization names are display-only; stable IDs drive authorization. The retired owner_team compatibility field is intentionally absent.
@@ -5703,9 +5738,18 @@ components:
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
     PlanningSKUItemInput:
       type: object
-      required: [client_item_id, description_spec, quantity]
+      required: [client_item_id, category_code, description_spec, quantity]
       properties:
         client_item_id: { type: string }
+        category_code:
+          type: string
+          minLength: 1
+          description: Legacy purchase-task category identity used to derive the one-letter SKU category segment.
+        sku_code_type:
+          type: string
+          enum: [regular, customization]
+          default: regular
+          description: "`regular` uses the CG prefix; `customization` uses the DZ prefix."
         description_spec: { type: string, minLength: 1, maxLength: 4000 }
         quantity: { type: integer, format: int64, minimum: 1 }
         target_price: { type: string, pattern: '^[0-9]{1,10}(\.[0-9]{1,2})?$' }
@@ -9722,7 +9766,7 @@ paths:
         Creates one task under the V8 contract.
         - `original_product_development` and `new_product_development` enter the unified design workflow.
         - `retouch_task` completes when all retouch requirements have final products.
-        - `sku_planning` accepts 1-200 `planning_sku_items`, allocates one atomic SKU range and returns only after the task is `Completed`.
+        - `sku_planning` accepts 1-200 `planning_sku_items`, allocates collision-safe ranges using the retired purchase-task format (`CG|DZ` + category letter + 6 digits), and returns only after the task is `Completed`.
         - task ownership uses stable `owner_department_id` and `owner_team_id`; organization names are display-only.
         - planning-SKU product images must be staged through the dedicated image-upload-session API and never enter task resource groups.
       tags: [Tasks, ReadyForFrontend]
@@ -9805,7 +9849,7 @@ paths:
   /v1/tasks/filter-options:
     get:
       summary: Get task center filter options
-      description: Returns task-derived creator and designer display options within the caller's explicit task-view scope.
+      description: Returns task-derived creator, designer, owner-department, and owner-team options within the caller's explicit task-view scope. It does not expose the global organization master.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [task.view]

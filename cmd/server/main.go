@@ -492,6 +492,7 @@ func main() {
 		mdb,
 		service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo),
 		service.WithPlanningSKUAssets(assetStorageRefRepo, service.NewStorageStreamOpener(ossDirectSvc, uploadClient), ossDirectSvc),
+		service.WithPlanningSKUProductCodeSequences(productCodeSeqRepo),
 	)
 	taskERPOutboxProcessor := service.NewTaskERPOutboxProcessor(taskSvc, productManagementSvc, erpBridgeSvc, assetStorageRefRepo, ossDirectSvc)
 
