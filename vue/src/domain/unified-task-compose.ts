@@ -133,7 +133,7 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'special_note', label: '补充说明', width: 220 },
   ],
   planning_sku: [
-    { key: 'category_code', label: 'SKU 类目', width: 150, required: true, help: '沿用旧采购任务规则，用于计算编号中的类目短码' },
+  { key: 'category_code', label: 'SKU 类目', width: 150, required: true, help: '用于计算兼容编号中的类目短码' },
     { key: 'description_spec', label: '产品描述 / 规格', width: 310, required: true },
     { key: 'quantity', label: '数量', width: 96, required: true, kind: 'number' },
     { key: 'target_price', label: '目标价', width: 110 },

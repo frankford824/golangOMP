@@ -107,7 +107,7 @@
       <div v-if="intent === 'planning_sku'" class="sku-rule-notice" role="note">
         <Barcode :size="22" />
         <div>
-          <strong>编号规则已沿用旧采购任务口径</strong>
+          <strong>已启用兼容 SKU 编号规则</strong>
           <span>{{ common.customization_required ? '定制 DZ' : '常规 CG' }} + 每行“SKU 类目”的 1 位确定性短码 + 6 位连续序号</span>
           <small>此处展示的是格式，不预占编号；提交完成后会在结果页显式列出全部实际 SKU。</small>
         </div>
