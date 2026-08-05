@@ -73,7 +73,7 @@ cat >"$WORKFLOW_APPLY_REPORT" <<'EOF'
   "mapping_resource_count": 10,
   "mapping_planning_count": 2,
   "counts": {
-    "tasks_without_resource_groups": 0,
+    "tasks_without_resource_groups": 14,
     "tasks_without_stable_department": 0,
     "users_without_stable_department": 0,
     "legacy_planning_candidates": 0,
@@ -121,17 +121,17 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 value = json.loads(path.read_text(encoding="utf-8"))
-value["counts"]["tasks_without_resource_groups"] = 1
+value["counts"]["tasks_without_resource_groups"] = "unknown"
 path.write_text(json.dumps(value), encoding="utf-8")
 PY
 write_marker
 expect_failure \
-  "tasks_without_resource_groups must be zero" \
+  "tasks_without_resource_groups must be a non-negative integer" \
   env MYSQL_BIN="$FAKE_MYSQL" bash "$READINESS" \
     --base-dir "$BASE_DIR" \
     --expected-commit "$EXPECTED_COMMIT"
 
-sed -i 's/"tasks_without_resource_groups": 1/"tasks_without_resource_groups": 0/' "$WORKFLOW_POST_REPORT"
+sed -i 's/\"tasks_without_resource_groups\": \"unknown\"/\"tasks_without_resource_groups\": 14/' "$WORKFLOW_POST_REPORT"
 write_marker
 printf '\n' >>"$SOURCE_REPORT"
 expect_failure \

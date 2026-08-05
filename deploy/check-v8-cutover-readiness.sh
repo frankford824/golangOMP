@@ -161,8 +161,21 @@ for label, report, expected_mode in (
     counts = report.get("counts")
     if not isinstance(counts, dict):
         fail(f"{label} counts must be an object")
+    # This raw inventory count includes legacy retouch tasks with zero
+    # requirements. Such tasks correctly have zero expected groups. The live
+    # resource_group_mismatches query below is the authoritative scope-aware
+    # gate, so retain this count for audit without requiring it to be zero.
+    tasks_without_groups = counts.get("tasks_without_resource_groups")
+    if (
+        not isinstance(tasks_without_groups, int)
+        or isinstance(tasks_without_groups, bool)
+        or tasks_without_groups < 0
+    ):
+        fail(
+            f"{label} count tasks_without_resource_groups must be a "
+            f"non-negative integer, got {tasks_without_groups!r}"
+        )
     for key in (
-        "tasks_without_resource_groups",
         "tasks_without_stable_department",
         "users_without_stable_department",
         "legacy_planning_candidates",
