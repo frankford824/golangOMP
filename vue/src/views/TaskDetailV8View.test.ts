@@ -7,7 +7,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(), cancel: vi.fn(),
-  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
+  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), resolveAssetDownload: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
 vi.mock('@/services/api/assetsApi', async (loadOriginal) => ({
@@ -17,6 +17,10 @@ vi.mock('@/services/api/assetsApi', async (loadOriginal) => ({
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
   ...(await loadOriginal<typeof import('@/services/api/resourceGroupsApi')>()),
   resourceGroupsApi: { taskBundle: mocks.taskBundle },
+}))
+vi.mock('@/domain/asset-access', async (loadOriginal) => ({
+  ...(await loadOriginal<typeof import('@/domain/asset-access')>()),
+  fetchAssetDownloadMetaResolved: mocks.resolveAssetDownload,
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => mocks.route,
@@ -91,6 +95,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.patchSkuItemCostInfo.mockResolvedValue({})
     mocks.cancel.mockResolvedValue({})
     mocks.listAssets.mockResolvedValue({ data: { data: [] } })
+    mocks.resolveAssetDownload.mockResolvedValue({ status: 'not_found', message: '资源不存在' })
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
     mocks.getPlanning.mockResolvedValue({ task_id: 41, task_no: 'RW-041', task_status: 'Completed', workflow_revision: 3, items: [] })
     mocks.downloadPlanning.mockResolvedValue(undefined)
@@ -529,18 +534,24 @@ describe('TaskDetailV8View business context', () => {
       }],
     })
     mocks.listAssets.mockResolvedValue({ data: { data: [
-      { id: '32987', file_role: 'source', asset_kind: 'source', file_name: '历史修图源文件.zip', download_url: 'https://files/32987' },
+      { id: '31062', file_role: 'source', asset_kind: 'source' },
     ] } })
+    mocks.resolveAssetDownload.mockResolvedValue({
+      status: 'ok',
+      downloadUrl: '/v1/assets/files/tasks/RW-20260731-A-003319/source.zip',
+      filename: '开学掷骰子场景p图-管艳红-.zip',
+    })
 
     const wrapper = mountView()
     await flushPromises()
 
     expect(mocks.listAssets).toHaveBeenCalledWith('41')
+    expect(mocks.resolveAssetDownload).toHaveBeenCalledWith('31062')
     expect(wrapper.find('.bundle-unavailable').exists()).toBe(false)
     const bridge = wrapper.get('.legacy-resource-bridge')
-    expect(bridge.text()).toContain('历史修图源文件.zip')
+    expect(bridge.text()).toContain('开学掷骰子场景p图-管艳红-.zip')
     expect(bridge.text()).toContain('不会伪装成一次新的设计提交')
-    expect(bridge.get('a').attributes('href')).toBe('https://files/32987')
+    expect(bridge.get('a').attributes('href')).toBe('/v1/assets/files/tasks/RW-20260731-A-003319/source.zip')
     wrapper.unmount()
   })
 

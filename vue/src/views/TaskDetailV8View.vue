@@ -367,6 +367,7 @@ import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
 import { assetKindLabelCn } from '@/domain/mappers/read-model-labels-cn'
 import { assetsApi } from '@/services/api/assetsApi'
 import type { BackendAsset } from '@/services/apiTypes'
+import { fetchAssetDownloadMetaResolved } from '@/domain/asset-access'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { formatTaskRecordDateBeijing } from '@/utils/date'
 
@@ -820,7 +821,19 @@ async function loadLegacyAssets() {
   try {
     const response = await assetsApi.list(String(taskId.value))
     const payload = unwrap<BackendAsset[]>(response)
-    legacyAssets.value = Array.isArray(payload) ? payload : []
+    const assets = Array.isArray(payload) ? payload : []
+    legacyAssets.value = await Promise.all(assets.map(async (asset) => {
+      if (typeof asset.download_url === 'string' && asset.download_url.trim()) return asset
+      const assetID = String(asset.id ?? '').trim()
+      if (!/^\d+$/.test(assetID) || Number(assetID) <= 0) return asset
+      const access = await fetchAssetDownloadMetaResolved(assetID)
+      if (access.status !== 'ok') return asset
+      return {
+        ...asset,
+        download_url: access.downloadUrl,
+        file_name: asset.file_name || asset.original_filename || access.filename,
+      }
+    }))
   } catch {
     legacyAssets.value = []
   } finally {

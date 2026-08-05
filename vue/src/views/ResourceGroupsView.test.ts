@@ -104,6 +104,24 @@ describe('ResourceGroupsView', () => {
     }))
   })
 
+  it('submits an explicit asset search control used by narrow layouts', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const searchButton = wrapper.get('.search-row .primary-button')
+    expect(searchButton.element.tagName).toBe('BUTTON')
+    expect(searchButton.text()).toBe('搜索')
+
+    await wrapper.get('.search-field input').setValue('CGK001500')
+    await wrapper.get('.search-row').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({
+      q: 'CGK001500',
+      page: 1,
+    }))
+  })
+
   it('shows a single SKU cover summary card and navigates on click', async () => {
     const wrapper = mountView()
     await flushPromises()

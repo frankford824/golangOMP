@@ -366,8 +366,41 @@ onMounted(load)
     align-items: flex-start;
   }
 
+  .search-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .search-row .primary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .search-field {
+    min-width: 0;
+  }
+
+  .search-field input {
+    box-sizing: border-box;
+  }
+
   .grid:not(.flat-grid) {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 430px) {
+  .search-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .search-field {
+    grid-column: 1 / -1;
+  }
+
+  .search-row .primary-button,
+  .search-row .filter-button {
+    width: 100%;
   }
 }
 </style>
