@@ -31,6 +31,11 @@
         </div>
       </section>
 
+      <section v-if="visibleSkuCodes.length > 1" class="sku-visibility-strip" aria-label="本任务全部 SKU">
+        <div><span>本任务全部 SKU</span><strong>{{ visibleSkuCodes.length }} 个</strong></div>
+        <ol><li v-for="sku in visibleSkuCodes" :key="sku">{{ sku }}</li></ol>
+      </section>
+
       <div v-if="error" class="message error" role="alert">{{ error }}</div>
 
       <TaskResourceRail
@@ -58,6 +63,7 @@
         <div class="command-actions">
           <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
           <button v-if="canEditTaskBusinessInfo" class="primary-button" @click="openTaskEditor"><PencilLine :size="16" aria-hidden="true" />编辑任务信息</button>
+          <button v-if="canTerminateTask" class="secondary-button danger-button" :disabled="cancelLoading" @click="cancelTask"><Ban :size="16" aria-hidden="true" />{{ cancelLoading ? '正在作废…' : '作废任务' }}</button>
           <button class="secondary-button" @click="openWorkspace('details')"><FileText :size="16" aria-hidden="true" />完整任务信息</button>
         </div>
       </section>
@@ -245,6 +251,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 import {
   Activity,
   ArrowLeft,
+  Ban,
   Boxes,
   CheckCircle2,
   ClipboardList,
@@ -262,6 +269,7 @@ import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceG
 import { mergeDetailEnvelopeIntoTaskRaw } from '@/domain/mappers/task-detail-envelope'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { usePermission } from '@/composables/usePermission'
+import { useTaskCancel } from '@/composables/useTaskCancel'
 import { usePermissionsStore } from '@/stores/permissions'
 import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
 import TaskStatusTag from '@/components/task/TaskStatusTag.vue'
@@ -300,6 +308,7 @@ const backButtonLabel = computed(() => {
 })
 const { can } = usePermission()
 const permissionsStore = usePermissionsStore()
+const { loading: cancelLoading, needForceConfirm, cancel } = useTaskCancel()
 const task = ref<V8Task | null>(null)
 const isCustomization = computed(() => task.value?.business_lane === 'customization' || ['regular_customization', 'customer_customization'].includes(task.value?.task_type || ''))
 const aggregate = ref<Record<string, unknown>>({})
@@ -375,7 +384,8 @@ const isOwnCreatedTask = computed(() => {
   return actorID != null && creatorID != null && String(actorID) === String(creatorID)
 })
 const canEditOwnSKUItems = computed(() => can('task.create') && isOwnCreatedTask.value)
-const canEditTaskBusinessInfo = computed(() => (can('catalog.manage') || (can('task.create') && isOwnCreatedTask.value)) && !isTerminal.value)
+const canEditTaskBusinessInfo = computed(() => actionSet.value.has('task.business_info.edit') && !isTerminal.value)
+const canTerminateTask = computed(() => actionSet.value.has('task.terminate') && !isTerminal.value)
 const canEditSKUCosts = computed(() => can('catalog.manage') && !isTerminal.value)
 const canEditSKUItems = computed(() => (canEditSKUCosts.value || canEditOwnSKUItems.value) && !isTerminal.value)
 const skuEditAccessLabel = computed(() => {
@@ -394,6 +404,13 @@ const currentDesignerId = computed(() => task.value?.designer_id != null && task
 const isTerminal = computed(() => ['Completed', 'Archived', 'Cancelled'].includes(task.value?.task_status || ''))
 const hasOwner = computed(() => Boolean(task.value?.current_handler_name || task.value?.designer_name))
 const skuCount = computed(() => skuItems.value.length || (task.value?.primary_sku_code || task.value?.sku_code ? 1 : 0))
+const visibleSkuCodes = computed(() => {
+  const values = [
+    ...skuItems.value.map((item) => item.sku_code ?? item.skuCode),
+    ...planningItems.value.map((item) => item.sku_code),
+  ].map((value) => String(value || '').trim()).filter(Boolean)
+  return [...new Set(values)]
+})
 const skuScopeLabel = computed(() => {
   if (isRetouch.value) return `修图范围 · ${retouchRequirements.value.length || bundle.value?.groups?.length || 0} 项`
   return skuCount.value > 1 ? `批量 SKU · ${skuCount.value} 项` : '单 SKU'
@@ -685,6 +702,23 @@ async function downloadPlanningResult() {
     planningExporting.value = false
   }
 }
+async function cancelTask() {
+  if (!task.value || cancelLoading.value) return
+  const reason = window.prompt('请输入作废原因（会写入任务历史）：')?.trim()
+  if (!reason) return
+  error.value = ''
+  try {
+    await cancel(String(task.value.id), { reason, force: false })
+    if (needForceConfirm.value) {
+      const confirmed = window.confirm('该任务已经被领取或处理。确认强制作废并关闭所有未完成模块吗？')
+      if (!confirmed) return
+      await cancel(String(task.value.id), { reason, force: true })
+    }
+    if (!needForceConfirm.value) await load()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '任务作废失败，请稍后重试。'
+  }
+}
 async function submitAssign(payload: { mode: 'reassign' | 'clear'; assigneeId: string | null; assigneeName: string | null; reasonLabel: string; reasonNote: string }) {
   if (assignSubmitting.value || !task.value) return
   assignSubmitting.value = true
@@ -846,6 +880,10 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .command-actions{flex-wrap:wrap}
 .primary-button,.secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;border-radius:9px;font-size:12px;font-weight:720}
 .primary-button{box-shadow:0 4px 12px rgb(var(--yb-brand)/.16)}
+.danger-button{border-color:rgb(var(--yb-danger-border));background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}
+.sku-visibility-strip{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;padding:11px 14px;border:1px solid rgb(var(--yb-border));border-radius:13px;background:rgb(var(--yb-surface))}
+.sku-visibility-strip>div{display:grid;gap:2px;white-space:nowrap}.sku-visibility-strip>div span{color:rgb(var(--yb-text-muted));font-size:10px}.sku-visibility-strip>div strong{font-size:13px}
+.sku-visibility-strip ol{display:flex;gap:6px;margin:0;padding:0;overflow:auto;list-style:none}.sku-visibility-strip li{flex:0 0 auto;padding:5px 8px;border-radius:7px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font:750 11px var(--yb-font-data)}
 .overview-grid{grid-template-columns:minmax(0,1.2fr) minmax(300px,.95fr) minmax(285px,.82fr);gap:14px}
 .brief-card{gap:13px;padding:15px}
 .brief-card header{align-items:center}
@@ -869,6 +907,6 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .workspace-head h2{font-size:19px}
 .close-button{display:grid;width:36px;height:36px;place-items:center;border-radius:9px;font-size:21px}
 @media(max-width:1160px){.hero-facts{flex-basis:auto}.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-card{grid-column:1/-1}}
-@media(max-width:760px){.task-page{padding:0 0 22px;gap:10px}.task-hero{min-height:0;border-radius:14px}.hero-content{min-height:0;padding:12px}.hero-nav{align-items:center}.back-button span,.refresh-button span{display:none}.back-button,.refresh-button{width:36px;padding:0}.hero-main{gap:12px}.hero-identity h1{font-size:26px;line-height:1.12}.identity-badges{margin-top:10px}.identity-badge{min-height:26px;padding-inline:8px}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-progress{padding-bottom:2px;overflow:visible}.command-strip{padding:12px}.overview-grid{grid-template-columns:1fr;gap:10px}.mission-card{grid-column:auto}.card-actions{flex-wrap:wrap;justify-content:flex-end}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border-radius:0}}
+@media(max-width:760px){.task-page{padding:0 0 22px;gap:10px}.task-hero{min-height:0;border-radius:14px}.hero-content{min-height:0;padding:12px}.hero-nav{align-items:center}.back-button span,.refresh-button span{display:none}.back-button,.refresh-button{width:36px;padding:0}.hero-main{gap:12px}.hero-identity h1{font-size:26px;line-height:1.12}.identity-badges{margin-top:10px}.identity-badge{min-height:26px;padding-inline:8px}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-progress{padding-bottom:2px;overflow:visible}.sku-visibility-strip{grid-template-columns:1fr}.command-strip{padding:12px}.overview-grid{grid-template-columns:1fr;gap:10px}.mission-card{grid-column:auto}.card-actions{flex-wrap:wrap;justify-content:flex-end}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border-radius:0}}
 @media(prefers-reduced-motion:no-preference){@keyframes task-refresh-spin{to{transform:rotate(360deg)}}}
 </style>

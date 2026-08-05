@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import JSZip from 'jszip'
 
 const mocks = vi.hoisted(() => ({
   auditDecision: vi.fn(),
@@ -35,6 +36,15 @@ vi.mock('@/services/api/tasksApi', () => ({
 
 import ResourceWorkflowPanel from './ResourceWorkflowPanel.vue'
 import type { ResourceBundle } from '@/services/api/resourceGroupsApi'
+
+function arrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error)
+    reader.onload = () => resolve(reader.result as ArrayBuffer)
+    reader.readAsArrayBuffer(blob)
+  })
+}
 
 function bundle(): ResourceBundle {
   return {
@@ -110,6 +120,7 @@ describe('ResourceWorkflowPanel action contract', () => {
     mocks.reopen.mockResolvedValue(bundle())
     mocks.submitDesign.mockResolvedValue(bundle())
     mocks.triggerModuleAction.mockResolvedValue({ data: { data: { task_id: 41 } } })
+    mocks.upload.mockReset()
     mocks.upload.mockResolvedValue({ version: { id: 201 } })
   })
 
@@ -332,6 +343,73 @@ describe('ResourceWorkflowPanel action contract', () => {
       mode: 'set',
       source_task_asset_id: 101,
       final_task_asset_ids: [],
+    }])
+    wrapper.unmount()
+  })
+
+  it('packages source files selected together or in sequence into one effective source asset', async () => {
+    mocks.upload
+      .mockResolvedValueOnce({ version: { id: 301 } })
+      .mockResolvedValueOnce({ version: { id: 302 } })
+    const wrapper = mountPanel(['task.design.submit'])
+    const sourceInput = wrapper.get('.source-drop input[type="file"]')
+    const psd = new File(['psd'], '主图.psd', { type: 'application/octet-stream' })
+    Object.defineProperty(sourceInput.element, 'files', { configurable: true, value: [psd] })
+    await sourceInput.trigger('change')
+    await flushPromises()
+    expect(mocks.upload.mock.calls[0][1]).toBe(psd)
+
+    const ai = new File(['ai'], '刀版.ai', { type: 'application/octet-stream' })
+    const nextSourceInput = wrapper.get('.source-drop input[type="file"]')
+    Object.defineProperty(nextSourceInput.element, 'files', { configurable: true, value: [ai] })
+    await nextSourceInput.trigger('change')
+    await flushPromises()
+    await vi.waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(2))
+
+    const bundled = mocks.upload.mock.calls[1][1] as File
+    expect(bundled.name).toContain('设计源文件-2份.zip')
+    const zip = await JSZip.loadAsync(await arrayBuffer(bundled))
+    expect(Object.keys(zip.files)).toEqual(['001_主图.psd', '002_刀版.ai', 'manifest.json'])
+    expect(wrapper.text()).toContain('本次已打包 2 份源文件')
+    expect(wrapper.text()).toContain('主图.psd、刀版.ai')
+
+    await button(wrapper, '确认模式并提交源文件').trigger('click')
+    await flushPromises()
+    expect(mocks.submitDesign).toHaveBeenCalledWith(41, expect.anything(), [expect.objectContaining({
+      source_task_asset_id: 302,
+    })])
+    wrapper.unmount()
+  })
+
+  it('accepts one ZIP containing a complete ordered final set', async () => {
+    const setBundle = bundle()
+    if (setBundle.groups[0].working_revision) setBundle.groups[0].working_revision.mode = 'set'
+    mocks.upload
+      .mockResolvedValueOnce({ version: { id: 401 } })
+      .mockResolvedValueOnce({ version: { id: 402 } })
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: { taskId: 41, taskType: 'design', bundle: setBundle, allowedActions: ['task.audit.approve'] },
+    })
+    const zip = new JSZip()
+    zip.file('02-背面.png', 'back')
+    zip.file('01-正面.jpg', 'front')
+    const archive = new File([await zip.generateAsync({ type: 'blob' })], '套装成品.zip', { type: 'application/zip' })
+    const finalInput = wrapper.get('.final-drop input[type="file"]')
+    Object.defineProperty(finalInput.element, 'files', { configurable: true, value: [archive] })
+    await finalInput.trigger('change')
+    await flushPromises()
+    await vi.waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(2))
+
+    expect(mocks.upload.mock.calls.map((call) => (call[1] as File).name)).toEqual(['01-正面.jpg', '02-背面.png'])
+    expect(wrapper.text()).toContain('当前 2 张')
+    await button(wrapper as ReturnType<typeof mountPanel>, '确认定稿并结单').trigger('click')
+    await button(wrapper as ReturnType<typeof mountPanel>, '确认通过并结单').trigger('click')
+    await flushPromises()
+    expect(mocks.auditDecision).toHaveBeenCalledWith(41, expect.anything(), 'approve', '', [{
+      group_id: 9,
+      expected_group_lock_version: 3,
+      mode: 'set',
+      final_task_asset_ids: [401, 402],
     }])
     wrapper.unmount()
   })

@@ -10,7 +10,11 @@ import (
 func TestV8AllowedTaskActionsUsesHydratedDepartmentScope(t *testing.T) {
 	departmentID := int64(101)
 	assignment := domain.AccessAssignment{RoleID: 8, ScopeMode: domain.AccessScopeOwnDepartment}
-	actor := domain.RequestActor{ID: 9, DepartmentID: &departmentID}
+	actor := domain.RequestActor{
+		ID:           9,
+		DepartmentID: &departmentID,
+		Permissions:  []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskReassign},
+	}
 	actor.EffectiveAccess = &domain.EffectiveAccess{
 		UserID: actor.ID, Permissions: []domain.PermissionCode{domain.PermissionTaskAuditDecision, domain.PermissionTaskAuditHandover},
 		Assignments: []domain.AccessAssignment{assignment},
@@ -49,14 +53,14 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	}
 
 	managed := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskReassign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, subject)
-	if !slices.Contains(managed, "task.reference.append") || !slices.Contains(managed, "task.assign") || slices.Contains(managed, "task.design.submit") {
+	if !slices.Contains(managed, "task.reference.append") || !slices.Contains(managed, "task.assign") || !slices.Contains(managed, "task.business_info.edit") || slices.Contains(managed, "task.design.submit") {
 		t.Fatalf("task create/reassign actions = %v", managed)
 	}
 	otherCreatorsTask := subject
 	otherCreatorsTask.CreatorID = 7
 	ordinaryOperations := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, otherCreatorsTask)
-	if slices.Contains(ordinaryOperations, "task.reference.append") {
-		t.Fatalf("same-department non-creator actions = %v, want no task.reference.append", ordinaryOperations)
+	if slices.Contains(ordinaryOperations, "task.reference.append") || slices.Contains(ordinaryOperations, "task.business_info.edit") {
+		t.Fatalf("same-department non-creator actions = %v, want no task.reference.append or business edit", ordinaryOperations)
 	}
 	assetManager := v8AllowedTaskActions(actorFor(domain.PermissionAssetManage), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, otherCreatorsTask)
 	if !slices.Contains(assetManager, "task.reference.append") {
@@ -77,6 +81,44 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	blocked := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskAssign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusBlocked, subject)
 	if slices.Contains(blocked, "task.reference.append") || slices.Contains(blocked, "task.assign") {
 		t.Fatalf("blocked actions = %v", blocked)
+	}
+
+	terminator := v8AllowedTaskActions(actorFor(domain.PermissionTaskTerminate), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, subject)
+	if !slices.Contains(terminator, "task.terminate") {
+		t.Fatalf("terminator actions = %v, want task.terminate", terminator)
+	}
+	terminal := v8AllowedTaskActions(actorFor(domain.PermissionTaskTerminate), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusCompleted, subject)
+	if slices.Contains(terminal, "task.terminate") {
+		t.Fatalf("terminal actions = %v, want no task.terminate", terminal)
+	}
+}
+
+func TestV8AllowedTaskActionsUsesManagerScopeInsteadOfCreateScope(t *testing.T) {
+	departmentID := int64(101)
+	actor := domain.RequestActor{
+		ID:           9,
+		DepartmentID: &departmentID,
+		Permissions:  []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskReassign},
+	}
+	actor.EffectiveAccess = &domain.EffectiveAccess{
+		UserID:      actor.ID,
+		Permissions: []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskReassign},
+		Assignments: []domain.AccessAssignment{
+			{ID: 1, RoleID: 10, ScopeMode: domain.AccessScopeSelf},
+			{ID: 2, RoleID: 11, ScopeMode: domain.AccessScopeOwnDepartment},
+		},
+		Sources: []domain.EffectiveAccessNote{
+			{Permission: domain.PermissionTaskCreate, RoleID: 10, ScopeMode: domain.AccessScopeSelf},
+			{Permission: domain.PermissionTaskReassign, RoleID: 11, ScopeMode: domain.AccessScopeOwnDepartment},
+		},
+	}
+	subject := domain.TaskAccessSubject{
+		TaskID: 3, CreatorID: 7, OwnerDepartmentID: &departmentID,
+	}
+
+	actions := v8AllowedTaskActions(actor, domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, subject)
+	if !slices.Contains(actions, "task.business_info.edit") {
+		t.Fatalf("manager actions = %v, want task.business_info.edit", actions)
 	}
 }
 

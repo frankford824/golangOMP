@@ -141,6 +141,37 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
+  it('states ERP sync behavior explicitly and exposes per-row read-only cost preview', async () => {
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: { template: '<div class="grid-stub" />' },
+          IIdSelector: true,
+          RouterLink: true,
+          CostExplanationPanel: {
+            props: ['title', 'seed', 'open'],
+            template: '<div class="cost-preview-stub">{{ title }} · {{ seed.categoryCode }} · {{ seed.quantity }}</div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('创建后自动同步 ERP')
+    expect(wrapper.text()).toContain('未开启：本次只创建任务与 SKU')
+    const sync = wrapper.get('input[aria-label="创建成功后自动同步 ERP"]')
+    await sync.setValue(true)
+    expect(wrapper.text()).toContain('已开启：创建成功后自动同步')
+
+    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('HZS')
+    await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
+    await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('2')
+    await flushPromises()
+    expect(wrapper.get('.cost-preview-stub').text()).toContain('第 1 行 SKU 预估成本')
+    expect(wrapper.get('.cost-preview-stub').text()).toContain('HZS')
+    expect(wrapper.get('.cost-preview-stub').text()).toContain('2')
+    wrapper.unmount()
+  })
+
   it('surfaces a planning rule configuration error without leaving the workbench', async () => {
     mocks.create.mockRejectedValueOnce(new Error('唯一启用的策划 SKU 编号规则尚未配置'))
     const wrapper = mount(UnifiedTaskCreateView, {

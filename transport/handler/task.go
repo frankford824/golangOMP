@@ -999,8 +999,20 @@ func (h *TaskHandler) GetByID(c *gin.Context) {
 }
 
 func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, status domain.TaskStatus, subject domain.TaskAccessSubject) []string {
-	actions := make([]string, 0, 6)
+	actions := make([]string, 0, 9)
 	subject.TaskType = taskType
+	activeTask := status != domain.TaskStatusCompleted && status != domain.TaskStatusArchived && status != domain.TaskStatusCancelled
+	if activeTask && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskTerminate, subject) {
+		actions = append(actions, "task.terminate")
+	}
+	creatorMayEdit := actor.ID == subject.CreatorID &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject)
+	managerMayEdit := domain.ActorHasPermission(actor, domain.PermissionTaskCreate) &&
+		(domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAssign, subject) ||
+			domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, subject))
+	if activeTask && (creatorMayEdit || managerMayEdit || domain.EffectiveAccessAllowsTask(actor, domain.PermissionCatalogManage, subject)) {
+		actions = append(actions, "task.business_info.edit")
+	}
 	if taskType == domain.TaskTypeSKUPlanning {
 		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionPlanningSKUEdit, subject) {
 			actions = append(actions, "planning_sku.edit")
@@ -1016,8 +1028,7 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 		}
 		return actions
 	}
-	creatorMayAppendReference := actor.ID == subject.CreatorID &&
-		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject)
+	creatorMayAppendReference := creatorMayEdit
 	assetManagerMayAppendReference := domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, subject)
 	if (status == domain.TaskStatusDraft || status == domain.TaskStatusPendingAssign || status == domain.TaskStatusAssigned ||
 		status == domain.TaskStatusInProgress || status == domain.TaskStatusPendingAudit) &&

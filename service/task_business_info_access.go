@@ -11,8 +11,8 @@ type taskBusinessInfoUpdateAccess struct {
 }
 
 // authorizeTaskBusinessInfoUpdate keeps catalog maintenance as the broad
-// administrative capability while allowing task creators to maintain the
-// non-governed business fields of their own active tasks.
+// administrative capability while allowing task creators and scoped task
+// managers to maintain non-governed business fields on active tasks.
 func authorizeTaskBusinessInfoUpdate(ctx context.Context, task *domain.Task) (taskBusinessInfoUpdateAccess, *domain.AppError) {
 	authorizer := newTaskActionAuthorizer()
 	decision := authorizer.EvaluateTaskActionPolicy(ctx, TaskActionUpdateBusinessInfo, task, "", "")
@@ -36,6 +36,20 @@ func authorizeTaskBusinessInfoUpdate(ctx context.Context, task *domain.Task) (ta
 		decision.DenyCode = ""
 		decision.DenyReason = ""
 		decision.MatchedRule = "task_creator_own_business_info"
+		decision.ScopeSource = "explicit_access"
+		authorizer.logDecision(TaskActionUpdateBusinessInfo, decision)
+		return taskBusinessInfoUpdateAccess{}, nil
+	}
+	if ok &&
+		task != nil &&
+		actor.ID > 0 &&
+		domain.ActorHasPermission(actor, domain.PermissionTaskCreate) &&
+		(domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAssign, task.AccessSubject()) ||
+			domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, task.AccessSubject())) {
+		decision.Allowed = true
+		decision.DenyCode = ""
+		decision.DenyReason = ""
+		decision.MatchedRule = "scoped_task_manager_business_info"
 		decision.ScopeSource = "explicit_access"
 		authorizer.logDecision(TaskActionUpdateBusinessInfo, decision)
 		return taskBusinessInfoUpdateAccess{}, nil

@@ -6,7 +6,7 @@ import { DataScopeEnum, RoleEnum } from '@/types'
 import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
-  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(),
+  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(), cancel: vi.fn(),
   taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
@@ -85,6 +85,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.patchBusinessInfo.mockResolvedValue({})
     mocks.patchSkuItem.mockResolvedValue({})
     mocks.patchSkuItemCostInfo.mockResolvedValue({})
+    mocks.cancel.mockResolvedValue({})
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
     mocks.getPlanning.mockResolvedValue({ task_id: 41, task_no: 'RW-041', task_status: 'Completed', workflow_revision: 3, items: [] })
     mocks.downloadPlanning.mockResolvedValue(undefined)
@@ -380,7 +381,7 @@ describe('TaskDetailV8View business context', () => {
       creator_id: 240,
       task_type: 'new_product_development',
       task_status: 'InProgress',
-      allowed_actions: [],
+      allowed_actions: ['task.business_info.edit'],
     }
     mocks.getById.mockResolvedValue({ data: { data: ownTask } })
     mocks.getDetail.mockResolvedValue({ data: { data: {
@@ -455,6 +456,45 @@ describe('TaskDetailV8View business context', () => {
     expect(dialog().querySelector('.task-business-editor')).toBeNull()
     expect(dialog().textContent).toContain('当前账号只读')
     expect([...dialog().querySelectorAll<HTMLInputElement>('.sku-editor input')].every((input) => input.disabled)).toBe(true)
+  })
+
+  it('shows all batch SKU codes without opening the details workspace', async () => {
+    const batchTask = { ...baseTask, task_status: 'InProgress', allowed_actions: [] }
+    mocks.getById.mockResolvedValue({ data: { data: batchTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: {
+      task: batchTask,
+      task_detail: {},
+      reference_file_refs: [],
+      sku_items: [
+        { id: 71, sku_code: 'SKU-BATCH-001' },
+        { id: 72, sku_code: 'SKU-BATCH-002' },
+        { id: 73, sku_code: 'SKU-BATCH-003' },
+      ],
+    } } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const strip = wrapper.get('.sku-visibility-strip')
+    expect(strip.text()).toContain('本任务全部 SKU')
+    expect(strip.text()).toContain('SKU-BATCH-001')
+    expect(strip.text()).toContain('SKU-BATCH-002')
+    expect(strip.text()).toContain('SKU-BATCH-003')
+  })
+
+  it('exposes the explicit task termination action and records a reason', async () => {
+    const activeTask = { ...baseTask, task_status: 'InProgress', allowed_actions: ['task.terminate'] }
+    mocks.getById.mockResolvedValue({ data: { data: activeTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: activeTask, task_detail: {}, reference_file_refs: [] } } })
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('业务需求取消')
+    const wrapper = mountView()
+    await flushPromises()
+
+    const terminate = wrapper.findAll('button').find((item) => item.text() === '作废任务')
+    expect(terminate).toBeDefined()
+    await terminate?.trigger('click')
+    await flushPromises()
+    expect(mocks.cancel).toHaveBeenCalledWith('41', { reason: '业务需求取消', force: false })
+    prompt.mockRestore()
   })
 
   it('keeps creator-owned terminal tasks immutable', async () => {

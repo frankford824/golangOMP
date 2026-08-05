@@ -75,12 +75,16 @@
                 </div>
                 <div v-if="entry.row.source" class="file-tile source-file">
                   <span class="file-mark">{{ sourceExtension(entry.row.source.name) }}</span>
-                  <div><strong>{{ entry.row.source.name }}</strong><small>{{ entry.row.source.inherited ? '设计师提交 · 将作为有效源文件' : '本次上传' }}</small></div>
+                  <div>
+                    <strong>{{ entry.row.source.name }}</strong>
+                    <small>{{ entry.row.source.inherited ? '设计师提交 · 将作为有效源文件' : entry.row.sourceMemberNames.length > 1 ? `本次已打包 ${entry.row.sourceMemberNames.length} 份源文件` : '本次上传' }}</small>
+                    <small v-if="entry.row.sourceMemberNames.length > 1" class="bundle-members">{{ entry.row.sourceMemberNames.join('、') }}</small>
+                  </div>
                   <CheckCircle2 :size="18" class="file-ready" aria-label="已就绪" />
                 </div>
                 <label v-if="canUploadSource(entry.row)" class="drop-zone source-drop">
-                  <UploadCloud :size="20" aria-hidden="true" /><span>{{ entry.row.source && !replaceSourceGroups.has(entry.row.group.id) ? '替换源文件' : '选择 PSD、AI、PSB 等源文件' }}</span>
-                  <input type="file" :disabled="Boolean(entry.row.uploading)" @change="uploadSource($event, entry.row)" />
+                  <UploadCloud :size="20" aria-hidden="true" /><span>{{ entry.row.sourceMemberNames.length ? `继续添加源文件（已选 ${entry.row.sourceMemberNames.length} 份）` : entry.row.source && !replaceSourceGroups.has(entry.row.group.id) ? '替换源文件' : '选择一份或多份 PSD、AI、PSB、ZIP 等源文件' }}</span>
+                  <input type="file" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadSource($event, entry.row)" />
                 </label>
               </section>
 
@@ -95,9 +99,10 @@
                 </div>
                 <template v-else>
                   <label class="drop-zone final-drop">
-                    <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length ? `重新选择成品（当前 ${entry.row.finals.length} 张）` : '上传最终成品图' }}</span>
-                    <input type="file" accept="image/*" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
+                    <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length && entry.row.mode === 'set' ? `继续添加成品（当前 ${entry.row.finals.length} 张）` : entry.row.finals.length ? '替换单图成品' : '上传最终成品图或成品 ZIP' }}</span>
+                    <input type="file" accept="image/*,.zip,application/zip" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
                   </label>
+                  <button v-if="entry.row.finals.length" type="button" class="clear-finals" :disabled="Boolean(entry.row.uploading)" @click="clearFinals(entry.row)">清空本组成品</button>
                   <ol v-if="entry.row.finals.length" class="final-order">
                     <li
                       v-for="(file, index) in entry.row.finals"
@@ -186,9 +191,19 @@ import {
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode } from '@/services/api/resourceGroupsApi'
 import { tasksApi } from '@/services/api/tasksApi'
+import { buildSourceBundleFile, expandFinalUploadFiles } from '@/domain/resource-workflow-files'
 
 type UploadedFile = { id: number; name: string; inherited?: boolean }
-type EditorRow = { group: ResourceGroup; mode: ResourceMode; submittedSource: UploadedFile | null; source: UploadedFile | null; finals: UploadedFile[]; uploading: string }
+type EditorRow = {
+  group: ResourceGroup
+  mode: ResourceMode
+  submittedSource: UploadedFile | null
+  source: UploadedFile | null
+  sourceFiles: File[]
+  sourceMemberNames: string[]
+  finals: UploadedFile[]
+  uploading: string
+}
 
 const props = defineProps<{ taskId: number; taskType: string; businessLane?: string; bundle: ResourceBundle; referenceCount?: number; skuModeHints?: Record<string, boolean>; allowedActions: string[] }>()
 const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean] }>()
@@ -280,6 +295,8 @@ function buildRows() {
       mode: revision?.mode || 'single',
       submittedSource,
       source: submittedSource ? { ...submittedSource } : null,
+      sourceFiles: [],
+      sourceMemberNames: [],
       finals: preserveFinals ? [...(revision?.items || [])].sort((a,b) => a.sort_order - b.sort_order).map((item) => ({ id: item.task_asset_id, name: item.file?.file_name || item.item_name || `文件 ${item.task_asset_id}`, inherited: true })) : [],
       uploading: '',
     }
@@ -305,9 +322,13 @@ function toggleSourceReplacement(row: EditorRow) {
   if (next.has(row.group.id)) {
     next.delete(row.group.id)
     row.source = row.submittedSource ? { ...row.submittedSource } : null
+    row.sourceFiles = []
+    row.sourceMemberNames = []
   } else {
     next.add(row.group.id)
     row.source = null
+    row.sourceFiles = []
+    row.sourceMemberNames = []
   }
   replaceSourceGroups.value = next
   markChanged(row.group.id)
@@ -322,30 +343,51 @@ function assetVersionId(uploaded: Awaited<ReturnType<typeof uploadTaskFileViaAss
 }
 function uploadOptions(row: EditorRow) { return row.group.retouch_requirement_id ? { retouchRequirementId: row.group.retouch_requirement_id } : undefined }
 async function uploadSource(event: Event, row: EditorRow) {
-  const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return
-  row.uploading = file.name; error.value = ''
+  const input = event.target as HTMLInputElement
+  const selected = [...(input.files || [])]
+  if (!selected.length) return
+  const nextSourceFiles = [...row.sourceFiles, ...selected]
+  row.uploading = selected.length > 1 ? `${selected.length} 份源文件` : selected[0].name
+  error.value = ''
   try {
-    const uploaded = await uploadTaskFileViaAssetSession(String(props.taskId), file, { asset_kind: 'source', target_sku_code: row.group.sku_code || undefined, remark: file.name }, uploadOptions(row))
-    row.source = { id: assetVersionId(uploaded), name: file.name }; markChanged(row.group.id)
+    const uploadFile = await buildSourceBundleFile(
+      nextSourceFiles,
+      `${row.group.sku_code || `任务-${props.taskId}`}-设计源文件-${nextSourceFiles.length}份`,
+    )
+    row.uploading = uploadFile.name
+    const uploaded = await uploadTaskFileViaAssetSession(String(props.taskId), uploadFile, { asset_kind: 'source', target_sku_code: row.group.sku_code || undefined, remark: nextSourceFiles.map((file) => file.name).join('、') }, uploadOptions(row))
+    row.sourceFiles = nextSourceFiles
+    row.sourceMemberNames = nextSourceFiles.map((file) => file.name)
+    row.source = { id: assetVersionId(uploaded), name: uploadFile.name }
+    markChanged(row.group.id)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '源文件上传失败。' }
   finally { row.uploading = ''; input.value = '' }
 }
 async function uploadFinals(event: Event, row: EditorRow) {
-  const input = event.target as HTMLInputElement; const files = [...(input.files || [])]; if (!files.length) return
+  const input = event.target as HTMLInputElement
+  const selected = [...(input.files || [])]
+  if (!selected.length) return
   error.value = ''
   try {
+    row.uploading = selected.length > 1 ? `${selected.length} 个成品文件` : selected[0].name
+    const files = await expandFinalUploadFiles(selected)
+    if (row.mode === 'single' && files.length !== 1) {
+      throw new Error('单图模式恰好需要 1 张成品；如需多张，请让设计阶段选择套装。')
+    }
     const uploadedFiles: UploadedFile[] = []
     for (const file of files) {
       row.uploading = file.name
       const uploaded = await uploadTaskFileViaAssetSession(String(props.taskId), file, { asset_kind: 'delivery', target_sku_code: row.group.sku_code || undefined, remark: file.name }, uploadOptions(row))
       uploadedFiles.push({ id: assetVersionId(uploaded), name: file.name })
     }
-    row.finals = uploadedFiles; markChanged(row.group.id)
+    row.finals = row.mode === 'set' ? [...row.finals, ...uploadedFiles] : uploadedFiles
+    markChanged(row.group.id)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成品图上传失败，可重新选择该组文件。' }
   finally { row.uploading = ''; input.value = '' }
 }
 function move(row: EditorRow, index: number, delta: number) { const next = index + delta; if (next < 0 || next >= row.finals.length) return; const [item] = row.finals.splice(index,1); row.finals.splice(next,0,item); markChanged(row.group.id) }
 function removeFinal(row: EditorRow,index:number) { row.finals.splice(index,1); markChanged(row.group.id) }
+function clearFinals(row: EditorRow) { row.finals = []; markChanged(row.group.id) }
 function dragStart(groupIndex:number,index:number) { dragged = { groupIndex,index } }
 function drop(groupIndex:number,index:number) { if (!dragged || dragged.groupIndex !== groupIndex) return; const row = rows.value[groupIndex]; const [item] = row.finals.splice(dragged.index,1); row.finals.splice(index,0,item); markChanged(row.group.id); dragged = null }
 function validFinals(row: EditorRow) { return row.mode === 'single' ? row.finals.length === 1 : row.finals.length >= 2 }
@@ -419,7 +461,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetric
 .sku-head{padding-bottom:11px;border-bottom:1px solid rgb(var(--yb-border))}.sku-head>div:first-child>span{font-size:10px;font-weight:750;letter-spacing:.06em}.sku-head strong{font:800 14px var(--yb-font-data)}.sku-head .operations-hint{border-radius:7px}
 .mode-control>span{display:inline-flex;align-items:center;gap:5px;font-size:10px}.mode-control button{min-width:68px;min-height:34px}.mode-control button.selected{box-shadow:0 1px 4px rgb(var(--yb-brand)/.12)}
 .resource-columns{gap:12px}.source-column,.final-column{min-height:190px;border-radius:10px;background:rgb(var(--yb-surface))}.final-column.locked{border-style:dashed;background:rgb(var(--yb-surface-soft))}.column-title strong{font-size:13px}.replace-toggle{font-weight:650}
-.file-tile{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.file-ready{flex:0 0 auto;margin-left:auto;color:rgb(var(--yb-success-strong))}.drop-zone{grid-template-columns:auto auto;gap:8px;min-height:62px;background:rgb(var(--yb-surface));font-weight:700}.drop-zone:hover{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft)/.34)}.locked-final{min-height:104px;border:1px dashed rgb(var(--yb-border));background:rgb(var(--yb-surface-muted))}.locked-final strong{font-size:13px}.lock-symbol{border-radius:10px}
+.file-tile{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.file-tile>div{min-width:0}.bundle-members{display:block;max-width:34rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-ready{flex:0 0 auto;margin-left:auto;color:rgb(var(--yb-success-strong))}.drop-zone{grid-template-columns:auto auto;gap:8px;min-height:62px;background:rgb(var(--yb-surface));font-weight:700}.drop-zone:hover{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft)/.34)}.clear-finals{justify-self:end;margin-top:7px;border:0;background:transparent;color:rgb(var(--yb-danger-text));font-size:11px;font-weight:700;cursor:pointer}.clear-finals:disabled{opacity:.5;cursor:not-allowed}.locked-final{min-height:104px;border:1px dashed rgb(var(--yb-border));background:rgb(var(--yb-surface-muted))}.locked-final strong{font-size:13px}.lock-symbol{border-radius:10px}
 .final-order li{min-height:38px;border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}
 .command-dock{position:relative;z-index:2;min-height:72px;padding:11px 16px;border-top:1px solid rgb(var(--yb-border-strong));background:rgb(var(--yb-surface));box-shadow:0 -8px 22px rgb(var(--yb-shadow)/.05)}.dock-progress strong{font:850 14px var(--yb-font-data)}.command-dock span{font-size:10px}.primary,.quiet-button,.danger{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;border-radius:9px;font-size:12px}.primary.approve{background:rgb(var(--yb-success-strong));box-shadow:0 6px 15px rgb(var(--yb-success-strong)/.18)}.danger{border-color:rgb(var(--yb-danger-border));background:rgb(var(--yb-danger-soft)/.18);font-weight:760}
 .audit-dock>label{max-width:560px}.audit-dock input{background:rgb(var(--yb-surface-soft))}

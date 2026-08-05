@@ -1350,7 +1350,7 @@ components:
         workflow_contract_version: { type: integer, enum: [2] }
         allowed_actions:
           type: array
-          description: Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions.
+          description: Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.business_info.edit` authorizes non-governed task-field editing, while `task.terminate` authorizes the explicit task cancellation flow.
           items: { type: string }
         priority: { type: string, enum: [low, normal, high, critical] }
         deadline_at: { type: string, format: date-time, nullable: true }

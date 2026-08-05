@@ -58,6 +58,7 @@ import { useRoute, useRouter } from 'vue-router'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
 import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import { resourceGroupsApi, type ResourceGroup } from '@/services/api/resourceGroupsApi'
+import { downloadBatchAsZip } from '@/utils/batchZipDownload'
 
 const route = useRoute()
 const router = useRouter()
@@ -110,10 +111,21 @@ async function downloadAll() {
   error.value = ''
   try {
     const result = await resourceGroupsApi.batchDownload([group.value.id])
-    result.items.sort((a, b) => a.sort_order - b.sort_order).forEach((item, index) => setTimeout(() => {
-      const link = document.createElement('a'); link.href = item.download_url || ''; link.download = item.filename; link.click()
-    }, index * 120))
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '下载清单生成失败。' }
+    const items = [...result.items].sort((a, b) => a.sort_order - b.sort_order)
+    const zipResult = await downloadBatchAsZip({
+      items: items.map((item) => ({
+        key: String(item.revision_item_id),
+        filename: item.filename,
+        downloadURL: item.download_url,
+        fallbackName: `成品-${item.sort_order + 1}`,
+      })),
+      zipFilename: `${displaySKU.value}-${activeRevision.value?.mode === 'set' ? '套装成品' : '最终成品'}.zip`,
+      normalizeNestedZipFilenames: true,
+    })
+    if (zipResult.failureCount) {
+      error.value = `ZIP 已生成，但有 ${zipResult.failureCount} 个文件下载失败；失败明细已写入压缩包。`
+    }
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '成品打包下载失败。' }
   finally { downloading.value = false }
 }
 onMounted(load)

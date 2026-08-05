@@ -50,8 +50,8 @@
         <small v-else>{{ common.customization_required ? '客户定制需求，走定制流程' : '日常上新，走常规流程' }}</small>
       </div>
       <label v-if="intent === 'new_design' || intent === 'planning_sku'" class="field">
-        <span class="field-name">同步到 ERP</span>
-        <span class="switch-row"><input v-model="erpSync" type="checkbox" /><small>{{ erpSync ? '创建后自动同步' : '本次不同步' }}</small></span>
+        <span class="field-name">创建后自动同步 ERP</span>
+        <span class="switch-row"><input v-model="erpSync" type="checkbox" aria-label="创建成功后自动同步 ERP" /><small>{{ erpSync ? '已开启：创建成功后自动同步' : '未开启：本次只创建任务与 SKU' }}</small></span>
       </label>
       <label class="field note-field">
         <span class="field-name">备注（选填）</span>
@@ -166,6 +166,15 @@
             <div><h4>建议做成套装</h4><p>给设计师的参考：最终做单图还是套装，由设计师在设计时决定。</p></div>
             <input v-model="selectedRow.set_mode_hint" type="checkbox" aria-label="建议按套装设计" />
           </section>
+          <section v-if="intent === 'planning_sku'" class="drawer-section planning-cost-preview">
+            <CostExplanationPanel
+              :title="`第 ${selectedRowIndex + 1} 行 SKU 预估成本`"
+              :seed="planningCostPreviewSeed"
+              :resource-id="selectedRow.id"
+              :sku-code="selectedRow.result_sku_code || ''"
+              open
+            />
+          </section>
           <section class="drawer-section"><h4>{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</h4><div class="asset-list"><article v-for="asset in selectedRow.reference_assets" :key="asset.id"><img v-if="asset.preview_url" :src="asset.preview_url" alt="" /><FileImage v-else :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ assetStatusText(asset.status) }}</span></div><button type="button" aria-label="移除文件" @click="removeAsset(selectedRow.id, 'reference_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'reference_assets')"><ImagePlus :size="16" />添加{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</button></section>
           <section v-if="intent === 'retouch'" class="drawer-section"><h4>待修素材</h4><div class="asset-list"><article v-for="asset in selectedRow.source_assets" :key="asset.id"><FileArchive :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ asset.error || assetStatusText(asset.status) }}</span></div><button type="button" @click="removeAsset(selectedRow.id, 'source_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'source_assets')"><Paperclip :size="16" />添加 PSD / AI / ZIP 等素材</button></section>
           <section class="drawer-section"><h4>本行提示</h4><ul v-if="selectedRowViolations.length" class="drawer-errors"><li v-for="issue in selectedRowViolations" :key="`${issue.field}-${issue.message}`">{{ issue.message }}</li></ul><p v-else class="drawer-ok"><CheckCircle2 :size="15" />本行信息已完整</p></section>
@@ -205,6 +214,7 @@ import { AlertTriangle, Barcode, CheckCircle2, FileArchive, FileImage, ImagePlus
 
 import UnifiedTaskGrid from '@/components/task-create/UnifiedTaskGrid.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
+import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import {
   applyBackendViolations,
   buildPlanningInputs,
@@ -297,6 +307,15 @@ const erpSync = computed({ get: () => common.erp_sync_mode === 'async', set: (va
 const violations = computed(() => [...validateCompose(intent.value, common, rows.value), ...remoteViolations.value])
 const selectedRow = computed(() => rows.value.find((row) => row.id === selectedRowId.value))
 const selectedRowIndex = computed(() => Math.max(0, rows.value.findIndex((row) => row.id === selectedRowId.value)))
+const planningCostPreviewSeed = computed(() => ({
+  categoryCode: selectedRow.value?.category_code || '',
+  productIID: selectedRow.value?.product_i_id || '',
+  width: selectedRow.value?.width,
+  height: selectedRow.value?.height,
+  area: selectedRow.value?.area,
+  quantity: selectedRow.value?.quantity,
+  notes: [selectedRow.value?.description_spec, selectedRow.value?.special_note, selectedRow.value?.note].filter(Boolean).join(' '),
+}))
 const selectedRowViolations = computed(() => violations.value.filter((issue) => issue.row_id === selectedRowId.value))
 const failedRows = computed(() => rows.value.filter((row) => row.status === 'failed'))
 const submitLabel = computed(() => intent.value === 'planning_sku' ? `生成 ${rows.value.length} 个 SKU 并结单` : intent.value === 'modify_existing' ? `创建 ${rows.value.length} 张任务单` : '创建任务')
