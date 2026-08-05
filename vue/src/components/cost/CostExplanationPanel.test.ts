@@ -2,10 +2,10 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ preview: vi.fn(), record: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getRule: vi.fn(), preview: vi.fn(), record: vi.fn() }))
 vi.mock('@/services/api/costManagementApi', async (loadOriginal) => ({
   ...(await loadOriginal<typeof import('@/services/api/costManagementApi')>()),
-  costManagementApi: { previewCostRule: mocks.preview },
+  costManagementApi: { getCostRule: mocks.getRule, previewCostRule: mocks.preview },
 }))
 vi.mock('@/services/api/workflowTelemetryApi', () => ({
   workflowTelemetryApi: { recordEvent: mocks.record },
@@ -16,6 +16,7 @@ import CostExplanationPanel from './CostExplanationPanel.vue'
 describe('CostExplanationPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getRule.mockResolvedValue({ id: 17, category_code: 'KT_STANDARD' })
     mocks.preview.mockResolvedValue({
       matched_rule_id: 17,
       matched_rule_version: 3,
@@ -111,5 +112,32 @@ describe('CostExplanationPanel', () => {
     expect(wrapper.get('[role="alert"]').text()).toBe(
       '当前规则快照缺少可复算的规则分组 / 类目编码，请先补充后再试算。',
     )
+  })
+
+  it('uses the persisted rule id to recover the governed group from historical display text', async () => {
+    const wrapper = mount(CostExplanationPanel, {
+      props: {
+        open: true,
+        title: '历史成本解释',
+        seed: {
+          categoryCode: '常规kt板',
+          currentRuleId: 17,
+          currentCost: 9.32,
+          currentRuleName: '常规KT板基础单价',
+          width: 55,
+          height: 140,
+          area: 0.77,
+        },
+      },
+    })
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.getRule).toHaveBeenCalledWith(17)
+    expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({
+      category_code: 'KT_STANDARD',
+      area: 0.77,
+    }))
   })
 })

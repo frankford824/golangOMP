@@ -105,6 +105,13 @@ export interface CostRuleGroupOption {
   active_rule_count?: number
 }
 
+export interface CostRuleSummary {
+  id?: number
+  rule_id?: number
+  rule_name?: string
+  category_code?: string
+}
+
 function normalizeCostRuleGroupName(ruleName: string): string {
   let label = ruleName.trim()
   if (!label) return ''
@@ -355,6 +362,14 @@ export const costManagementApi = {
       }
     }
     return Array.from(groups.values()).sort((a, b) => a.display_name.localeCompare(b.display_name, 'zh-CN'))
+  },
+
+  async getCostRule(id: number | string, signal?: AbortSignal): Promise<CostRuleSummary> {
+    const { data } = await http.get<{ data?: CostRuleSummary } | CostRuleSummary>(
+      `/v1/cost-rules/${encodeURIComponent(String(id))}`,
+      { signal },
+    )
+    return ('data' in data && data.data ? data.data : data) as CostRuleSummary
   },
 
   async createCostRecalculationRun(

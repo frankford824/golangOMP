@@ -562,6 +562,7 @@ function skuCostPreviewSeed(item: Record<string, unknown>) {
     process: String(itemValue(item, 'process') || itemValue(item, 'craft_text') || ''),
     notes: String(item.design_requirement || itemValue(item, 'spec_text') || ''),
     currentCost: numberValue(item.cost_price),
+    currentRuleId: numberValue(item.cost_rule_id),
     currentRuleName: String(item.cost_rule_name || trace.rule_name || ''),
     currentRuleVersion: numberValue(item.matched_rule_version || trace.matched_rule_version),
     requiresManualReview: Boolean(item.requires_manual_review || trace.requires_manual_review),

@@ -80,6 +80,7 @@ interface CostPreviewSeed {
   process?: string
   notes?: string
   currentCost?: number | null
+  currentRuleId?: number | null
   currentRuleName?: string
   currentRuleVersion?: number | null
   requiresManualReview?: boolean
@@ -180,7 +181,7 @@ function money(value: number | null | undefined) {
 async function preview() {
   error.value = ''
   feedbackMessage.value = ''
-  if (!draft.categoryCode) {
+  if (!draft.categoryCode && !props.seed.currentRuleId) {
     error.value = props.seed.currentRuleName
       ? '当前规则快照缺少可复算的规则分组 / 类目编码，请先补充后再试算。'
       : '请先填写规则分组 / 类目编码。'
@@ -193,8 +194,15 @@ async function preview() {
   }
   previewing.value = true
   try {
+    let categoryCode = draft.categoryCode
+    if (props.seed.currentRuleId) {
+      const currentRule = await costManagementApi.getCostRule(props.seed.currentRuleId)
+      categoryCode = String(currentRule.category_code || '').trim()
+      if (!categoryCode) throw new Error('当前成本规则缺少可复算的规则分组，请联系管理员检查规则配置。')
+      draft.categoryCode = categoryCode
+    }
     result.value = await costManagementApi.previewCostRule({
-      category_code: draft.categoryCode || undefined,
+      category_code: categoryCode || undefined,
       product_i_id: draft.productIID || undefined,
       erp_i_id: draft.erpIID || undefined,
       width: optionalNumber(draft.width),
