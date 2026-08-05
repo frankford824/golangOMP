@@ -76,7 +76,7 @@ describe('CostExplanationPanel', () => {
 
   it('requires a note before recording a disputed result', async () => {
     const wrapper = mount(CostExplanationPanel, {
-      props: { open: true, title: '成本解释', seed: {} },
+      props: { open: true, title: '成本解释', seed: { categoryCode: 'cup' } },
     })
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -89,5 +89,27 @@ describe('CostExplanationPanel', () => {
       outcome: 'needs_review',
       payload: expect.objectContaining({ feedback_note: '预期成本应为 12 元，请核对类目。' }),
     }))
+  })
+
+  it('explains why a historical cost snapshot cannot be recalculated', async () => {
+    const wrapper = mount(CostExplanationPanel, {
+      props: {
+        open: true,
+        title: '历史成本解释',
+        seed: {
+          currentCost: 9.32,
+          currentRuleName: '常规KT板基础单价',
+          currentRuleVersion: 1,
+        },
+      },
+    })
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.preview).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe(
+      '当前规则快照缺少可复算的 ERP 商品编码或规则分组，请先补充后再试算。',
+    )
   })
 })

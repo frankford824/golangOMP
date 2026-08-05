@@ -180,6 +180,12 @@ function money(value: number | null | undefined) {
 async function preview() {
   error.value = ''
   feedbackMessage.value = ''
+  if (!draft.productIID && !draft.erpIID && !draft.categoryCode) {
+    error.value = props.seed.currentRuleName
+      ? '当前规则快照缺少可复算的 ERP 商品编码或规则分组，请先补充后再试算。'
+      : '请先填写 ERP 商品编码或规则分组 / 类目编码。'
+    return
+  }
   const quantity = optionalInteger(draft.quantity)
   if (draft.quantity && quantity == null) {
     error.value = '数量必须是整数。'

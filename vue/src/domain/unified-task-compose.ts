@@ -204,7 +204,6 @@ export function validateCompose(
     if (intent === 'modify_existing') {
       if (!row.erp_product_id || !row.erp_sku?.trim()) add('erp_sku', '请从 ERP 搜索结果中选择商品，不能只手填 SKU')
       if (!row.product_name?.trim()) add('product_name', '产品名称不能为空')
-      if (isErpProductNameTooLong(row.product_name)) add('product_name', '产品名称不能超过 40 个字')
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写修改要求')
     } else if (intent === 'new_design') {
       if (!row.product_i_id?.trim()) add('product_i_id', '请选择款式编码 i_id')

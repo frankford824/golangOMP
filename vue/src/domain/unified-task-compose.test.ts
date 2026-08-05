@@ -98,6 +98,27 @@ describe('unified task compose domain', () => {
     })
   })
 
+  it('accepts an existing ERP product whose historical name exceeds the new-product short-name limit', () => {
+    const historicalName = '历史 ERP 商品名称'.repeat(8)
+    const row = createComposeRow({
+      id: 'existing-long-name',
+      erp_product_id: 'ERP-LONG-001',
+      erp_sku: 'ERP-LONG-001',
+      erp_product_snapshot: {
+        product_id: 'ERP-LONG-001',
+        sku_code: 'ERP-LONG-001',
+        product_name: historicalName,
+      },
+      product_name: historicalName,
+      design_requirement: '只修改现有商品图片，不新建 ERP 商品',
+    })
+
+    expect(validateCompose('modify_existing', common, [row], new Date('2026-07-16T00:00:00Z')))
+      .not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ field: 'product_name' }),
+      ]))
+  })
+
   it('flags non-numeric text typed into number columns', () => {
     const row = createComposeRow({ id: 'n1', product_i_id: 'KT_STANDARD', product_name: '桌牌', design_requirement: '需求', width: Number.NaN, area: Number.NaN })
     const issues = validateCompose('new_design', common, [row], new Date('2026-07-16T00:00:00Z'))

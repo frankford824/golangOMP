@@ -12,6 +12,23 @@ vi.mock('@/components/media/AssetPreviewMedia.vue', () => ({
   },
 }))
 
+vi.mock('@/components/media/ImagePreviewLightbox.vue', () => ({
+  default: {
+    props: ['modelValue', 'items', 'ariaLabel', 'fallbackTitle'],
+    emits: ['update:modelValue'],
+    template: `
+      <div v-if="modelValue" class="image-preview-lightbox-stub" role="dialog" :aria-label="ariaLabel">
+        <img :src="items[0]?.src" :alt="items[0]?.alt" />
+        <button type="button" aria-label="缩小预览">−</button>
+        <button type="button" aria-label="重置缩放">100%</button>
+        <button type="button" aria-label="放大预览">+</button>
+        <button type="button" aria-label="适应窗口">适应</button>
+        <button type="button" aria-label="关闭预览" @click="$emit('update:modelValue', false)">×</button>
+      </div>
+    `,
+  },
+}))
+
 const bundle: ResourceBundle = {
   task_id: 9,
   workflow_revision: 4,
@@ -60,13 +77,13 @@ describe('SkuResourceMatrix', () => {
   it('opens a visual preview without exposing workflow revision or group ids', async () => {
     const wrapper = mount(SkuResourceMatrix, { props: { bundle }, global: { stubs: { Teleport: true } } })
     await wrapper.get('.reference-grid .asset-preview-media-stub').trigger('click')
-    expect(wrapper.get('.preview-layer img').attributes('src')).toBe('/reference')
-    const previewZIndex = Number(getComputedStyle(wrapper.get('.preview-layer').element).zIndex)
-    expect(previewZIndex).toBeGreaterThan(7400)
-    expect(previewZIndex).toBeLessThan(7600)
+    expect(wrapper.get('.image-preview-lightbox-stub img').attributes('src')).toBe('/reference')
+    expect(wrapper.get('[aria-label="缩小预览"]').attributes('aria-label')).toBe('缩小预览')
+    expect(wrapper.get('[aria-label="放大预览"]').attributes('aria-label')).toBe('放大预览')
+    expect(wrapper.get('[aria-label="适应窗口"]').attributes('aria-label')).toBe('适应窗口')
     expect(wrapper.text()).not.toContain('工作流修订')
-    await wrapper.get('.preview-close').trigger('click')
-    expect(wrapper.find('.preview-layer').exists()).toBe(false)
+    await wrapper.get('[aria-label="关闭预览"]').trigger('click')
+    expect(wrapper.find('.image-preview-lightbox-stub').exists()).toBe(false)
   })
 
   it('loads current snapshot images through immutable task-asset ids', () => {
