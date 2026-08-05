@@ -5,6 +5,7 @@ import (
 	"fmt"
 	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -303,7 +304,75 @@ func (s *Service) matchExcelPackageAssets(ctx context.Context, row ExcelPackageR
 	if setCandidates := excelPackageExternalSetCandidates(candidates, row.SKUCode); len(setCandidates) >= 2 {
 		return setCandidates, nil
 	}
+	if setCandidates := excelPackageSystemSetCandidates(candidates, row.SKUCode); len(setCandidates) > 0 {
+		return setCandidates, nil
+	}
 	return []scoredExcelAsset{candidates[0]}, nil
+}
+
+func excelPackageSystemSetCandidates(candidates []scoredExcelAsset, skuCode string) []scoredExcelAsset {
+	folder := sanitizeBatchFilename(strings.TrimSpace(skuCode))
+	if folder == "" {
+		return nil
+	}
+	for index, candidate := range candidates {
+		if candidate.system == nil || candidate.system.Asset == nil || candidate.system.Task == nil || !candidate.ready {
+			continue
+		}
+		asset := candidate.system.Asset
+		scope := strings.ToUpper(strings.TrimSpace(firstNonEmptyExcelPackage(
+			stringPtrValue(asset.ScopeSKUCode),
+			candidate.system.Task.SKUCode,
+			candidate.system.Task.PrimarySKUCode,
+		)))
+		group := make([]scoredExcelAsset, 0, 4)
+		for _, sibling := range candidates {
+			if sibling.system == nil || sibling.system.Asset == nil || sibling.system.Task == nil || !sibling.ready {
+				continue
+			}
+			siblingAsset := sibling.system.Asset
+			siblingScope := strings.ToUpper(strings.TrimSpace(firstNonEmptyExcelPackage(
+				stringPtrValue(siblingAsset.ScopeSKUCode),
+				sibling.system.Task.SKUCode,
+				sibling.system.Task.PrimarySKUCode,
+			)))
+			if sibling.system.Task.ID == candidate.system.Task.ID && siblingScope == scope {
+				sibling.packageFolder = folder
+				group = append(group, sibling)
+			}
+		}
+		if len(group) >= 2 {
+			sort.SliceStable(group, func(i, j int) bool {
+				leftOrder := excelPackageComponentOrder(group[i].system.Asset.FileName)
+				rightOrder := excelPackageComponentOrder(group[j].system.Asset.FileName)
+				if leftOrder != rightOrder {
+					return leftOrder < rightOrder
+				}
+				return strings.ToLower(group[i].system.Asset.FileName) < strings.ToLower(group[j].system.Asset.FileName)
+			})
+			return group
+		}
+		if index == 0 && productionPackageSetIntent(
+			asset.FileName,
+			stringPtrValue(asset.OriginalName),
+			candidate.system.Task.ProductNameSnapshot,
+		) {
+			candidate.packageFolder = folder
+			return []scoredExcelAsset{candidate}
+		}
+	}
+	return nil
+}
+
+var productionPackageSetPattern = regexp.MustCompile(`(?i)(?:[2-9]|[1-9][0-9]+)\s*(?:个装|件套)|套装`)
+
+func productionPackageSetIntent(values ...string) bool {
+	for _, value := range values {
+		if productionPackageSetPattern.MatchString(strings.TrimSpace(value)) {
+			return true
+		}
+	}
+	return false
 }
 
 func excelPackageExternalSetCandidates(candidates []scoredExcelAsset, skuCode string) []scoredExcelAsset {
@@ -378,8 +447,15 @@ func excelPackageComponentOrder(filename string) int {
 			return index + 1
 		}
 	}
-	return 1000
+	if match := productionPackageComponentSuffixPattern.FindStringSubmatch(strings.TrimSpace(filename)); len(match) == 2 {
+		if value, err := strconv.Atoi(match[1]); err == nil && value > 0 {
+			return value
+		}
+	}
+	return 1
 }
+
+var productionPackageComponentSuffixPattern = regexp.MustCompile(`(?i)-([1-9][0-9]*)(?:\.[^.]+)?$`)
 
 func firstExcelPackageKeyword(skuCode, skuName string) string {
 	if strings.TrimSpace(skuCode) != "" {

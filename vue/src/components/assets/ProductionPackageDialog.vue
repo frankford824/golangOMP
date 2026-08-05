@@ -157,11 +157,20 @@ async function downloadBatch() {
     const response = await assetsApi.batchDownload(selectedRefs.value, { namingMode: 'business' })
     const manifest = unwrap(response)
     if (!manifest?.items?.length) throw new Error('没有可下载的资源。')
+    const packageFolders = new Map<string, string>()
+    batchRows.value.forEach((row) => {
+      if (!row.package_folder) return
+      ;(row.assets || []).forEach((asset) => {
+        const ref = assetRef(asset)
+        if (ref) packageFolders.set(ref, row.package_folder || '')
+      })
+    })
     const result = await downloadBatchAsZip({
       zipFilename: buildTimestampedZipFilename('生产打包'),
       items: manifest.items.map((item) => ({
         key: item.resource_id || String(item.asset_id),
         filename: item.filename,
+        zipPath: packageFolders.get(item.resource_id || String(item.asset_id)) || undefined,
         downloadURL: item.download_url,
       })),
       serverFailures: (manifest.failures || []).map((item) => `${item.resource_id || item.asset_id}: ${item.reason}`),
@@ -257,6 +266,7 @@ function exportBatchReport() {
       资源ID: asset ? assetRef(asset) : '',
       文件名: asset?.file_name || asset?.original_filename || '',
       来源: asset?.source_type || '',
+      套装目录: row.package_folder || '',
     })),
   ))
 }

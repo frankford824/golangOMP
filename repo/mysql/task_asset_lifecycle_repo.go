@@ -50,6 +50,36 @@ func (r *taskAssetLifecycleRepo) ListSupersededEligibleForCleanup(ctx context.Co
 		           AND newer.deleted_at IS NULL
 		           AND newer.cleaned_at IS NULL
 		   )
+		   AND NOT EXISTS (
+		        SELECT 1
+		          FROM task_asset_group_revisions revision_ref
+		         WHERE revision_ref.source_task_asset_id = ta.id
+		            OR revision_ref.source_task_asset_id IN (
+		                 SELECT derived_ref.id
+		                   FROM task_assets derived_ref
+		                  WHERE derived_ref.source_asset_version_id = ta.id
+		            )
+		   )
+		   AND NOT EXISTS (
+		        SELECT 1
+		          FROM task_asset_group_revision_items item_ref
+		         WHERE item_ref.task_asset_id = ta.id
+		            OR item_ref.task_asset_id IN (
+		                 SELECT derived_ref.id
+		                   FROM task_assets derived_ref
+		                  WHERE derived_ref.source_asset_version_id = ta.id
+		            )
+		   )
+		   AND NOT EXISTS (
+		        SELECT 1
+		          FROM task_asset_group_revision_references frozen_ref
+		         WHERE frozen_ref.formal_task_asset_id = ta.id
+		            OR frozen_ref.formal_task_asset_id IN (
+		                 SELECT derived_ref.id
+		                   FROM task_assets derived_ref
+		                  WHERE derived_ref.source_asset_version_id = ta.id
+		            )
+		   )
 		 GROUP BY ta.asset_id, ta.id, ta.task_id, ta.source_task_module_id, ta.storage_key, ta.source_module_key, t.updated_at
 		 ORDER BY ta.cleanup_after_at ASC, ta.id ASC
 		 LIMIT ?`,
@@ -268,7 +298,6 @@ func (r *taskAssetLifecycleRepo) LockCleanupObjectIDs(ctx context.Context, tx re
 	if err != nil {
 		return nil, fmt.Errorf("lock cleanup object versions: %w", err)
 	}
-	defer rows.Close()
 	ids := make([]int64, 0, 4)
 	rootFound := false
 	for rows.Next() {
@@ -280,12 +309,53 @@ func (r *taskAssetLifecycleRepo) LockCleanupObjectIDs(ctx context.Context, tx re
 		rootFound = rootFound || id == versionID
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
 		return nil, err
 	}
 	if !rootFound {
 		return nil, repo.ErrConflict
 	}
+	referenced, err := cleanupObjectSetHasRevisionReferences(ctx, Unwrap(tx), ids)
+	if err != nil {
+		return nil, err
+	}
+	if referenced {
+		return nil, repo.ErrConflict
+	}
 	return ids, nil
+}
+
+func cleanupObjectSetHasRevisionReferences(ctx context.Context, sqlTx *sql.Tx, taskAssetIDs []int64) (bool, error) {
+	marks, args := int64MutationArgs(taskAssetIDs)
+	if marks == "" {
+		return false, nil
+	}
+	queryArgs := make([]interface{}, 0, len(args)*3)
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, args...)
+	var referenced bool
+	err := sqlTx.QueryRowContext(ctx, `
+		SELECT
+		  EXISTS (
+		    SELECT 1 FROM task_asset_group_revisions
+		     WHERE source_task_asset_id IN (`+marks+`)
+		  )
+		  OR EXISTS (
+		    SELECT 1 FROM task_asset_group_revision_items
+		     WHERE task_asset_id IN (`+marks+`)
+		  )
+		  OR EXISTS (
+		    SELECT 1 FROM task_asset_group_revision_references
+		     WHERE formal_task_asset_id IN (`+marks+`)
+		  )`, queryArgs...).Scan(&referenced)
+	if err != nil {
+		return false, fmt.Errorf("check cleanup revision references: %w", err)
+	}
+	return referenced, nil
 }
 
 func enqueueTaskAssetObjectDeletions(ctx context.Context, sqlTx *sql.Tx, taskAssetIDs []int64) error {

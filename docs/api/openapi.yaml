@@ -3726,6 +3726,7 @@ components:
         status: { type: string, enum: [matched, not_found, error] }
         message: { type: string }
         candidates: { type: integer }
+        package_folder: { type: string, description: Folder retained in the generated ZIP when the matched system resources form a set or are explicitly marked as a set. }
         asset: { $ref: '#/components/schemas/AssetDetail' }
         assets: { type: array, items: { $ref: '#/components/schemas/AssetDetail' } }
     AssetBatchSearchResponse:

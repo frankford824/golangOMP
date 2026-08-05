@@ -96,6 +96,9 @@ func TestLockCleanupObjectIDsLocksRootAndDerivedVersions(t *testing.T) {
 	mock.ExpectQuery("SELECT id\\s+FROM task_assets").WithArgs(int64(101), int64(101)).WillReturnRows(
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(101)).AddRow(int64(102)),
 	)
+	mock.ExpectQuery(`SELECT EXISTS[\s\S]+task_asset_group_revisions`).
+		WithArgs(int64(101), int64(102), int64(101), int64(102), int64(101), int64(102)).
+		WillReturnRows(sqlmock.NewRows([]string{"referenced"}).AddRow(false))
 	mock.ExpectCommit()
 	var ids []int64
 	err = New(db).RunInTx(context.Background(), func(tx repo.Tx) error {
@@ -108,6 +111,34 @@ func TestLockCleanupObjectIDsLocksRootAndDerivedVersions(t *testing.T) {
 	}
 	if len(ids) != 2 || ids[0] != 101 || ids[1] != 102 {
 		t.Fatalf("locked ids = %v", ids)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLockCleanupObjectIDsRejectsRevisionReferencedAssets(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repository := NewTaskAssetLifecycleRepo(New(db))
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id\\s+FROM task_assets").WithArgs(int64(201), int64(201)).WillReturnRows(
+		sqlmock.NewRows([]string{"id"}).AddRow(int64(201)).AddRow(int64(202)),
+	)
+	mock.ExpectQuery(`SELECT EXISTS[\s\S]+task_asset_group_revisions`).
+		WithArgs(int64(201), int64(202), int64(201), int64(202), int64(201), int64(202)).
+		WillReturnRows(sqlmock.NewRows([]string{"referenced"}).AddRow(true))
+	mock.ExpectRollback()
+
+	err = New(db).RunInTx(context.Background(), func(tx repo.Tx) error {
+		_, lockErr := repository.LockCleanupObjectIDs(context.Background(), tx, 201)
+		return lockErr
+	})
+	if err != repo.ErrConflict {
+		t.Fatalf("LockCleanupObjectIDs() error = %v, want conflict", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

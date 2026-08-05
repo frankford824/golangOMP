@@ -269,6 +269,7 @@ export interface AssetBatchSearchResult {
   status: AssetBatchSearchStatus
   message: string
   candidates: number
+  package_folder?: string
   asset?: BackendAsset
   assets?: BackendAsset[]
 }

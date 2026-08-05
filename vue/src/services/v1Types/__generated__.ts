@@ -20024,6 +20024,8 @@ export interface components {
             status: "matched" | "not_found" | "error";
             message: string;
             candidates: number;
+            /** @description Folder retained in the generated ZIP when the matched system resources form a set or are explicitly marked as a set. */
+            package_folder?: string;
             asset?: components["schemas"]["AssetDetail"];
             assets?: components["schemas"]["AssetDetail"][];
         };

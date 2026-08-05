@@ -110,6 +110,78 @@ func TestExcelPackageAcceptsTIFAndRejectsPSD(t *testing.T) {
 	}
 }
 
+func TestExcelPackageSystemSetCandidatesPreserveFolderAndComponentOrder(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scope := "GK000804"
+	jpgMime := "image/jpeg"
+	task := &domain.Task{ID: 2290, SKUCode: scope, ProductNameSnapshot: "生日小熊凯蒂猫5个装"}
+	makeCandidate := func(id int64, filename string) scoredExcelAsset {
+		key := "tasks/2290/" + filename
+		return scoredExcelAsset{
+			ready: true,
+			system: &repo.TaskAssetSearchRow{
+				Asset: &domain.TaskAsset{
+					ID:           id,
+					TaskID:       task.ID,
+					AssetID:      int64PtrExcelPkg(id),
+					ScopeSKUCode: &scope,
+					AssetType:    domain.TaskAssetTypeDelivery,
+					FileName:     filename,
+					MimeType:     &jpgMime,
+					StorageKey:   &key,
+					UploadStatus: &uploaded,
+				},
+				Task: task,
+			},
+		}
+	}
+	candidates := []scoredExcelAsset{
+		makeCandidate(3, "GK000804-3.jpg"),
+		makeCandidate(1, "GK000804.jpg"),
+		makeCandidate(2, "GK000804-2.jpg"),
+	}
+
+	got := excelPackageSystemSetCandidates(candidates, scope)
+	if len(got) != 3 {
+		t.Fatalf("set candidates = %d, want 3", len(got))
+	}
+	if got[0].system.Asset.ID != 1 || got[1].system.Asset.ID != 2 || got[2].system.Asset.ID != 3 {
+		t.Fatalf("component order = %d, %d, %d", got[0].system.Asset.ID, got[1].system.Asset.ID, got[2].system.Asset.ID)
+	}
+	for _, candidate := range got {
+		if candidate.packageFolder != scope {
+			t.Fatalf("package folder = %q, want %q", candidate.packageFolder, scope)
+		}
+	}
+}
+
+func TestExcelPackageSingleExplicitSetStillUsesFolder(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scope := "GK000804"
+	key := "tasks/2290/GK000804.jpg"
+	candidates := []scoredExcelAsset{{
+		ready: true,
+		system: &repo.TaskAssetSearchRow{
+			Asset: &domain.TaskAsset{
+				ID:           1,
+				TaskID:       2290,
+				AssetID:      int64PtrExcelPkg(1),
+				ScopeSKUCode: &scope,
+				AssetType:    domain.TaskAssetTypeDelivery,
+				FileName:     "GK000804.jpg",
+				StorageKey:   &key,
+				UploadStatus: &uploaded,
+			},
+			Task: &domain.Task{ID: 2290, SKUCode: scope, ProductNameSnapshot: "生日小熊凯蒂猫5个装"},
+		},
+	}}
+
+	got := excelPackageSystemSetCandidates(candidates, scope)
+	if len(got) != 1 || got[0].packageFolder != scope {
+		t.Fatalf("single explicit set = %+v, want one candidate in %q folder", got, scope)
+	}
+}
+
 func TestBuildExcelPackageManifestRequiresSuccessfulRows(t *testing.T) {
 	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
 	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{

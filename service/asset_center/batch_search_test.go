@@ -163,6 +163,9 @@ func TestBatchSearchReturnsAllMatchingDeliveryImagesForTerm(t *testing.T) {
 	if item.Asset.ID != 11697 || item.Assets[0].ID != 11697 || item.Assets[1].ID != 11696 {
 		t.Fatalf("asset ordering = primary %+v assets %+v, want all matching JPG deliveries newest first", item.Asset, item.Assets)
 	}
+	if item.PackageFolder != scopeSKU {
+		t.Fatalf("package folder = %q, want %q", item.PackageFolder, scopeSKU)
+	}
 }
 
 func TestBatchSearchMatchesExternalAssetsBySKU(t *testing.T) {

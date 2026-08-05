@@ -34,12 +34,13 @@ type BatchSearchResponse struct {
 }
 
 type BatchSearchResult struct {
-	Term       string        `json:"term"`
-	Status     string        `json:"status"`
-	Message    string        `json:"message"`
-	Candidates int           `json:"candidates"`
-	Asset      *AssetDetail  `json:"asset,omitempty"`
-	Assets     []AssetDetail `json:"assets,omitempty"`
+	Term          string        `json:"term"`
+	Status        string        `json:"status"`
+	Message       string        `json:"message"`
+	Candidates    int           `json:"candidates"`
+	PackageFolder string        `json:"package_folder,omitempty"`
+	Asset         *AssetDetail  `json:"asset,omitempty"`
+	Assets        []AssetDetail `json:"assets,omitempty"`
 }
 
 type scoredBatchSearchAsset struct {
@@ -152,13 +153,43 @@ func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetK
 		}
 	}
 	return BatchSearchResult{
-		Term:       term,
-		Status:     BatchSearchStatusMatched,
-		Message:    "已匹配",
-		Candidates: len(assets),
-		Asset:      &assets[0],
-		Assets:     assets,
+		Term:          term,
+		Status:        BatchSearchStatusMatched,
+		Message:       "已匹配",
+		Candidates:    len(assets),
+		PackageFolder: batchSearchPackageFolder(candidates, term),
+		Asset:         &assets[0],
+		Assets:        assets,
 	}
+}
+
+func batchSearchPackageFolder(candidates []scoredBatchSearchAsset, term string) string {
+	folder := sanitizeBatchFilename(strings.TrimSpace(term))
+	if folder == "" {
+		return ""
+	}
+	systemByScope := map[string]int{}
+	for _, candidate := range candidates {
+		if candidate.detail == nil {
+			continue
+		}
+		detail := candidate.detail
+		if detail.SourceType == string(domain.AssetResourceSourceExternal) {
+			continue
+		}
+		scope := firstNonEmptyExcelPackage(detail.ScopeSKUCode, detail.SKUCode, detail.PrimarySKUCode)
+		key := strconv.FormatInt(detail.TaskID, 10) + "|" + strings.ToUpper(strings.TrimSpace(scope))
+		systemByScope[key]++
+		if productionPackageSetIntent(detail.FileName, detail.OriginalFilename, detail.ProductName) {
+			return folder
+		}
+	}
+	for _, count := range systemByScope {
+		if count >= 2 {
+			return folder
+		}
+	}
+	return ""
 }
 
 func (s *Service) batchSearchRows(ctx context.Context, term, formatFilter string) ([]*repo.TaskAssetSearchRow, error) {
