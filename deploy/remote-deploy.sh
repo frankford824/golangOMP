@@ -274,6 +274,19 @@ else
       RESULT_STATUS="deployed_waiting_for_env"
     else
       "$RELEASE_DIR/deploy/run-pending-migrations.sh" --base-dir "$REMOTE_BASE_DIR"
+      PACKAGE_COMMIT="$(
+        python3 - "$RELEASE_DIR/PACKAGE_INFO.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(value.get("git_commit", ""))
+PY
+      )"
+      "$RELEASE_DIR/deploy/check-v8-cutover-readiness.sh" \
+        --base-dir "$REMOTE_BASE_DIR" \
+        --expected-commit "$PACKAGE_COMMIT"
       "$REMOTE_BASE_DIR/scripts/stop-main.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
       "$REMOTE_BASE_DIR/scripts/stop-bridge.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
       "$REMOTE_BASE_DIR/scripts/start-main.sh" --base-dir "$REMOTE_BASE_DIR" --env-file "$RUNTIME_ENV_PATH" >/dev/null

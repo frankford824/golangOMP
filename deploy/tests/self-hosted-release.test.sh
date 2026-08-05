@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPLOY="$ROOT/deploy/deploy-on-host.sh"
 BACKUP="$ROOT/deploy/backup-production-db.sh"
 PUBLISH="$ROOT/deploy/publish-front-on-host.sh"
+V8_READINESS="$ROOT/deploy/check-v8-cutover-readiness.sh"
 TMP_ROOT="$(mktemp -d)"
 PACKAGE_TEST_VERSION="v98765.4321"
 PACKAGE_TEST_NAME="ecommerce-ai-${PACKAGE_TEST_VERSION}-linux-amd64.tar.gz"
@@ -31,7 +32,7 @@ expect_failure() {
     fail "missing failure message '$expected' from: $*"
 }
 
-for script in "$DEPLOY" "$BACKUP" "$PUBLISH"; do
+for script in "$DEPLOY" "$BACKUP" "$PUBLISH" "$V8_READINESS"; do
   [ -x "$script" ] || fail "script is not executable: $script"
   bash -n "$script"
 done

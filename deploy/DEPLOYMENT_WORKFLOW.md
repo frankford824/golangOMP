@@ -75,16 +75,34 @@ Run **Production self-hosted release** manually from GitHub Actions and select:
   `/root/ecommerce_ai/shared/v8-cutover-approved.env`, then performs the normal
   backend cutover and optionally publishes both frontends.
 
-The cutover marker must contain the exact reviewed commit:
+The cutover marker is a non-executable evidence manifest. It must contain the
+exact reviewed commit plus absolute in-base paths and SHA-256 hashes for the
+three reports that authorize opening the V8 backend:
 
 ```text
+READINESS_FORMAT=v8-cutover-readiness-v1
 APPROVED_COMMIT=<40-character-git-sha>
+SOURCE_BUNDLE_APPLY_REPORT=/root/ecommerce_ai/migrations/<run>/source-bundle-apply.json
+SOURCE_BUNDLE_APPLY_SHA256=<64-character-sha256>
+WORKFLOW_APPLY_REPORT=/root/ecommerce_ai/migrations/<run>/workflow-groups-apply.json
+WORKFLOW_APPLY_SHA256=<64-character-sha256>
+WORKFLOW_POSTAPPLY_REPORT=/root/ecommerce_ai/migrations/<run>/workflow-groups-postapply.json
+WORKFLOW_POSTAPPLY_SHA256=<64-character-sha256>
 ```
 
-This marker deliberately keeps the large v8 database/data migration outside
+Do not `source` this file. `deploy/check-v8-cutover-readiness.sh` parses only
+the keys above, rejects symlinked markers and evidence outside the configured
+runtime base, verifies every hash, and requires the source-bundle apply to be a
+committed PASS. The workflow-groups apply and post-apply dry-run must use the
+same mapping hashes and counts, with zero migration blockers, missing resource
+groups, legacy planning rows, unstable organization references, or
+`migration_incomplete` groups.
+
+This marker deliberately keeps the large V8 database/data migration outside
 ordinary CI. It may be created only after the production-equivalent snapshot,
-workflow-groups dry-run/apply/rollback rehearsal, and operator review are
-complete.
+source-bundle apply, workflow-groups dry-run/apply/rollback rehearsal,
+post-apply dry-run, and operator review are complete. A commit-only marker no
+longer authorizes production startup.
 
 Immediately before a production cutover, `deploy/backup-production-db.sh`
 creates and verifies a consistent compressed MySQL dump under
@@ -319,17 +337,41 @@ backend full sync independently repair missed events.
 - The test covers occupied-port rejection, exact listener ownership, unhealthy startup cleanup, same-version parallel candidate cleanup, and foreign pidfile refusal. It uses temporary directories and local ephemeral ports only; it does not connect to or modify production.
 
 ## V8 Database Integration Readiness Check
-- After deploy, run on the server: `bash /root/ecommerce_ai/current/deploy/check-remote-db.sh`
+- Before manually opening traffic, run on the server:
+  `bash /root/ecommerce_ai/current/deploy/check-v8-cutover-readiness.sh --expected-commit <commit>`
+- `remote-deploy.sh` runs this gate automatically after pending schema
+  migrations and before stopping live MAIN or starting the new MAIN.
+- The gate calls `check-remote-db.sh` against the current database; reviewed
+  JSON evidence cannot substitute for live schema and resource-group parity.
+- For a standalone schema/data check:
+  `bash /root/ecommerce_ai/current/deploy/check-remote-db.sh`
 - Or with custom base dir: `bash deploy/check-remote-db.sh --base-dir /root/ecommerce_ai`
 - Requires: `main.env` (or `shared/main.env`) with DB_HOST, DB_USER, DB_NAME; mysql client on server
 - From local IDE: `ssh user@host "cd /root/ecommerce_ai/current && bash deploy/check-remote-db.sh"`
 
 ## V8 Migration Release Checklist
+- Keep live MAIN serving the previous release or keep the maintenance response
+  active while the following gates run. A healthy process alone is not V8
+  readiness.
 - Apply pending migrations before starting the new `cmd/server` binary. The V8 runtime requires the explicit-access, planning-SKU, resource-group, and async-outbox schema.
+- Apply the reviewed source-bundle manifest and retain its committed PASS report.
 - Run `cmd/tools/workflow-groups-migrate --dry-run` against the frozen release snapshot, resolve every blocker, then run `--apply` during the maintenance window.
+- Run the same mapping again in post-apply dry-run mode. Its mapping hashes and
+  counts must match the apply report and every blocker count must be zero.
+- Write the hash-bound `v8-cutover-approved.env`, then run
+  `check-v8-cutover-readiness.sh`. Only a PASS permits MAIN stop/start and
+  frontend publication.
 - Run `cmd/tools/search-reindex` after the cutover mapping so task resource-group search documents are rebuilt from finalized revisions. Run `cmd/tools/search-semantic-enrich` only when AI enrichment is intentionally enabled.
 - Capture pre/post `EXPLAIN` and `performance_schema.events_statements_summary_by_digest` snapshots for the changed hot queries before claiming the performance rollout complete.
   - prints postcheck SQL output for legacy-row and official-baseline verification
+
+## V8 Cutover Readiness Tests
+
+- Run `bash deploy/tests/v8-cutover-readiness.test.sh`.
+- The test uses temporary JSON reports, a fake read-only MySQL client, and a
+  temporary runtime base. It verifies commit/hash binding, post-apply
+  zero-failure enforcement, live resource-group parity, and the required
+  `schema migration -> readiness gate -> stop MAIN` ordering.
 
 ## Notes
 - **Deploy authentication**: SSH key passwordless deploy is the default and recommended. Run the matching setup helper once (`deploy/setup-ssh-key.ps1` for Windows IDE / PowerShell, `deploy/setup-ssh-key.sh` for bash); after that `deploy.sh` requires neither `DEPLOY_PASSWORD` nor `sshpass`.

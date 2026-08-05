@@ -27,11 +27,12 @@ if [ -z "${DB_HOST:-}" ] || [ -z "${DB_USER:-}" ] || [ -z "${DB_NAME:-}" ]; then
 fi
 
 DB_PORT="${DB_PORT:-3306}"
+MYSQL_BIN="${MYSQL_BIN:-mysql}"
 export MYSQL_PWD="${DB_PASS:-}"
 trap 'unset MYSQL_PWD' EXIT
 
 run_mysql() {
-  mysql -h"${DB_HOST}" -P"${DB_PORT}" -u"${DB_USER}" "${DB_NAME}" -N -e "$1"
+  "$MYSQL_BIN" -h"${DB_HOST}" -P"${DB_PORT}" -u"${DB_USER}" "${DB_NAME}" -N -e "$1"
 }
 
 require_table() {
@@ -76,9 +77,28 @@ done
 legacy_task_types="$(run_mysql "SELECT COUNT(*) FROM tasks WHERE task_type = 'purchase_task'")"
 legacy_states="$(run_mysql "SELECT COUNT(*) FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview')")"
 incomplete_groups="$(run_mysql "SELECT COUNT(*) FROM task_asset_groups WHERE migration_incomplete = 1")"
+resource_group_mismatches="$(run_mysql "
+  SELECT COUNT(*)
+  FROM (
+    SELECT
+      t.id,
+      CASE
+        WHEN t.task_type IN ('sku_planning', 'purchase_task') THEN 0
+        WHEN t.task_type = 'retouch_task' THEN (
+          SELECT COUNT(*) FROM task_retouch_requirements trr WHERE trr.task_id = t.id
+        )
+        ELSE GREATEST(1, (
+          SELECT COUNT(*) FROM task_sku_items tsi WHERE tsi.task_id = t.id
+        ))
+      END AS expected_groups,
+      (SELECT COUNT(*) FROM task_asset_groups tag WHERE tag.task_id = t.id) AS actual_groups
+    FROM tasks t
+  ) resource_counts
+  WHERE expected_groups <> actual_groups
+")"
 
-if [ "$legacy_task_types" != "0" ] || [ "$legacy_states" != "0" ] || [ "$incomplete_groups" != "0" ]; then
-  echo "V8 cutover blockers: purchase_task=${legacy_task_types}, legacy_states=${legacy_states}, migration_incomplete_groups=${incomplete_groups}" >&2
+if [ "$legacy_task_types" != "0" ] || [ "$legacy_states" != "0" ] || [ "$incomplete_groups" != "0" ] || [ "$resource_group_mismatches" != "0" ]; then
+  echo "V8 cutover blockers: purchase_task=${legacy_task_types}, legacy_states=${legacy_states}, migration_incomplete_groups=${incomplete_groups}, resource_group_mismatches=${resource_group_mismatches}" >&2
   exit 1
 fi
 

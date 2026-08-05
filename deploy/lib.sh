@@ -536,7 +536,7 @@ package_release() {
   cp "$root/deploy/docker-compose.external-asset-watcher.yml" "$deploy_root/docker-compose.external-asset-watcher.yml"
 
   local helpe
-  for helper in lib.sh remote-deploy.sh deploy-on-host.sh backup-production-db.sh publish-front-on-host.sh verify-static-artifact.mjs run-with-env.sh run-pending-migrations.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh; do
+  for helper in lib.sh remote-deploy.sh deploy-on-host.sh backup-production-db.sh publish-front-on-host.sh verify-static-artifact.mjs run-with-env.sh run-pending-migrations.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh check-v8-cutover-readiness.sh; do
     cp "$root/deploy/$helper" "$deploy_root/$helper"
   done
   # Normalize packaged shell helpers to LF to avoid CRLF parse failures on Linux.
@@ -564,6 +564,7 @@ package_release() {
   "version": "$(json_escape "$version")",
   "artifact_directory": "$(json_escape "$artifact_dir_name")",
   "artifact_archive": "$(json_escape "$(basename "$artifact_path")")",
+  "git_commit": "$(json_escape "$(git -C "$root" rev-parse HEAD)")",
   "main_binary": "ecommerce-api",
   "bridge_binary": "erp_bridge",
   "asset_preview_generator_binary": "generate_asset_previews",
