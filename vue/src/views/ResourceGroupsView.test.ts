@@ -68,24 +68,24 @@ describe('ResourceGroupsView', () => {
     await wrapper.get('.search-field input').setValue('keyword')
     await wrapper.get('.filter-button').trigger('click')
     const inputs = wrapper.findAll('.filter-drawer input')
-    await inputs[0].setValue('SKU-008')
-    await inputs[1].setValue('RW-008')
+    await inputs[0].setValue('2026-08-01')
+    await inputs[1].setValue('2026-08-05')
     const selects = wrapper.findAll('.filter-drawer select')
     await selects[0].setValue('final')
-    await selects[1].setValue('design')
-    await selects[2].setValue('customization')
-    await selects[3].setValue('12')
+    await selects[1].setValue('tif')
+    await selects[2].setValue('12')
+    await selects[3].setValue('new_product_development')
     await wrapper.get('.filter-drawer form').trigger('submit')
     await flushPromises()
 
     expect(mocks.list).toHaveBeenLastCalledWith({
       q: 'keyword',
-      sku_code: 'SKU-008',
-      task_no: 'RW-008',
-      creator_id: '12',
-      business_lane: 'customization',
       resource_role: 'final',
-      format_category: 'design',
+      file_format: 'tif',
+      created_from: '2026-08-01',
+      created_to: '2026-08-05',
+      resource_owner_id: '12',
+      task_type: 'new_product_development',
       page: 1,
       page_size: 24,
     })
@@ -94,12 +94,10 @@ describe('ResourceGroupsView', () => {
     await flushPromises()
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({
       q: 'keyword',
-      sku_code: 'SKU-008',
-      task_no: 'RW-008',
-      creator_id: '12',
-      business_lane: 'customization',
       resource_role: 'final',
-      format_category: 'design',
+      file_format: 'tif',
+      resource_owner_id: '12',
+      task_type: 'new_product_development',
       page: 2,
     }))
   })
@@ -153,9 +151,13 @@ describe('ResourceGroupsView', () => {
         group_id: 8,
         task_id: 3,
         task_no: 'RW-008',
+        task_type: 'new_product_development',
         sku_code: 'SKU-008',
         resource_role: 'reference',
         file_name: 'ref.png',
+        resource_owner_id: 12,
+        resource_owner_name: '李运营',
+        resource_created_at: '2026-08-05T10:00:00Z',
         preview_url: 'https://img/ref.png',
       }],
       page: 1,

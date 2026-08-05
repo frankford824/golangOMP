@@ -5,9 +5,12 @@
         <h1 class="yb-page-title">SKU 资产中心</h1>
         <p class="yb-page-subtitle">每张卡片就是一个可交付 SKU：图片、来源任务、规格、组合关系与当前成本保持在同一处。</p>
       </div>
-      <button class="quiet-button" :disabled="loading" @click="load">
-        {{ loading ? '刷新中…' : '刷新' }}
-      </button>
+      <div class="page-actions">
+        <button class="primary-button" @click="packageOpen = true">生产打包</button>
+        <button class="quiet-button" :disabled="loading" @click="load">
+          {{ loading ? '刷新中…' : '刷新' }}
+        </button>
+      </div>
     </header>
 
     <section class="search-workbench" aria-label="资产检索">
@@ -41,11 +44,12 @@
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
             <span class="mode-badge">{{ roleLabel(item.resource_role) }}</span>
           </span>
-          <span class="card-body">
-            <strong class="sku-code">{{ item.sku_code || '未绑定 SKU' }}</strong>
-            <span class="product-name">{{ item.file_name }}</span>
-            <span class="provenance">来源任务 · {{ item.task_no || item.task_id }}</span>
-          </span>
+            <span class="card-body">
+              <strong class="sku-code">{{ item.sku_code || '未绑定 SKU' }}</strong>
+              <span class="product-name">{{ item.file_name }}</span>
+              <span class="provenance">来源任务 · {{ item.task_no || item.task_id }}</span>
+              <span class="provenance">{{ item.resource_owner_name || '资源所属人待补充' }} · {{ formatResourceDate(item.resource_created_at) }}</span>
+            </span>
         </button>
       </section>
     </template>
@@ -109,21 +113,19 @@
           <form @submit.prevent="searchFromDrawer">
             <section class="filter-section">
               <h3>资源属性</h3>
-              <label>SKU<input v-model.trim="filters.sku_code" placeholder="输入完整 SKU" /></label>
               <label>资源类型<select v-model="filters.resource_role"><option value="">全部资源</option><option value="reference">参考图</option><option value="source">设计源文件</option><option value="final">最终成品</option></select></label>
-              <label>文件格式<select v-model="filters.format_category"><option value="">全部格式</option><option value="image">图片</option><option value="design">设计源文件</option><option value="pdf">PDF / 文档</option><option value="archive">压缩包</option></select></label>
-              <label>业务类型<select v-model="filters.business_lane"><option value="">全部</option><option value="normal">常规</option><option value="customization">定制</option></select></label>
-            </section>
-            <section class="filter-section">
-              <h3>来源信息</h3>
-              <label>来源任务号<input v-model.trim="filters.task_no" placeholder="支持模糊搜索" /></label>
-              <label>创建人<select v-model="filters.creator_id"><option value="">全部人员</option><option v-for="item in creatorOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+              <label>资源文件格式<select v-model="filters.file_format"><option value="">全部格式</option><option value="jpg">JPG</option><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="tif">TIF</option><option value="tiff">TIFF</option><option value="psd">PSD</option><option value="ai">AI</option><option value="pdf">PDF</option><option value="zip">ZIP</option></select></label>
+              <label>资源创建开始时间<input v-model="filters.created_from" type="date" /></label>
+              <label>资源创建结束时间<input v-model="filters.created_to" type="date" /></label>
+              <label>资源所属人<select v-model="filters.resource_owner_id"><option value="">全部人员</option><option v-for="item in creatorOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+              <label>对应任务类型<select v-model="filters.task_type"><option value="">全部任务类型</option><option v-for="item in taskTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
             </section>
             <footer><button type="button" class="quiet-button" @click="resetDrawer">重置</button><button class="primary-button">应用筛选</button></footer>
           </form>
         </aside>
       </div>
     </Teleport>
+    <ProductionPackageDialog :open="packageOpen" @close="packageOpen = false" />
   </main>
 </template>
 
@@ -131,24 +133,26 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import ProductionPackageDialog from '@/components/assets/ProductionPackageDialog.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import { resourceGroupsApi, type FlatResourceItem, type ResourceGroup, type ResourceRevision } from '@/services/api/resourceGroupsApi'
 
-type FilterKey = 'sku_code' | 'task_no' | 'creator_id' | 'business_lane' | 'resource_role' | 'format_category'
+type FilterKey = 'resource_role' | 'file_format' | 'created_from' | 'created_to' | 'resource_owner_id' | 'task_type'
 
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const filterDrawerOpen = ref(false)
+const packageOpen = ref(false)
 const brokenImages = ref(new Set<number>())
 const brokenFlat = ref(new Set<number>())
-const filters = reactive({ q: '', sku_code: '', task_no: '', creator_id: '', business_lane: '', resource_role: '' as '' | 'reference' | 'source' | 'final', format_category: '' })
+const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final', file_format: '', created_from: '', created_to: '', resource_owner_id: '', task_type: '' })
 const initialPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? Math.max(80, Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE || 100)) : 24
 const result = reactive({ items: [] as ResourceGroup[], flat_items: [] as FlatResourceItem[], view_mode: 'group' as 'group' | 'flat', page: 1, page_size: initialPageSize, total: 0 })
 const { creatorOptions: rawCreatorOptions } = useTaskFilterOptions(true, '全部')
 const creatorOptions = computed(() => rawCreatorOptions.value.filter((item) => item.value))
 const totalPages = computed(() => Math.max(1, Math.ceil(result.total / result.page_size)))
-const isFlatMode = computed(() => result.view_mode === 'flat' || !!filters.resource_role || !!filters.format_category)
+const isFlatMode = computed(() => result.view_mode === 'flat' || !!filters.resource_role || !!filters.file_format || !!filters.created_from || !!filters.created_to || !!filters.resource_owner_id)
 const revision = (group: ResourceGroup): ResourceRevision | null | undefined => group.finalized_revision || group.working_revision
 const finals = (group: ResourceGroup) => [...(revision(group)?.items || [])].sort((a, b) => a.sort_order - b.sort_order)
 const laneLabel = (lane?: string) => ({ normal: '常规', customization: '定制' }[lane || ''] || '')
@@ -178,11 +182,21 @@ const costRuleText = (group: ResourceGroup) => {
 const syncLabel = (group: ResourceGroup) => ({ synced: 'ERP 已同步', queued: '等待同步', syncing: '正在同步', failed: '同步失败', cooling_down: '稍后重试', pending_sync: '待同步' }[group.sku_profile?.erp_sync_status || ''] || 'ERP 待关联')
 const syncTone = (group: ResourceGroup) => group.sku_profile?.erp_sync_status === 'synced' ? 'is-synced' : group.sku_profile?.erp_sync_status === 'failed' ? 'is-failed' : 'is-pending'
 const fileInitial = (name?: string) => (name || '文件').split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'
-const filterLabels: Record<FilterKey, string> = { sku_code: 'SKU', task_no: '来源任务', creator_id: '创建人', business_lane: '业务', resource_role: '资源', format_category: '格式' }
+const formatResourceDate = (value?: string) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value)) : '时间待补充'
+const taskTypeOptions = [
+  { label: '原有产品开发', value: 'original_product_development' },
+  { label: '新品开发', value: 'new_product_development' },
+  { label: '策划 SKU', value: 'sku_planning' },
+  { label: '修图任务', value: 'retouch_task' },
+  { label: '客户定制', value: 'customer_customization' },
+  { label: '常规定制', value: 'regular_customization' },
+]
+const taskTypeLabel = (value: string) => taskTypeOptions.find((item) => item.value === value)?.label || value
+const filterLabels: Record<FilterKey, string> = { resource_role: '资源类型', file_format: '文件格式', created_from: '创建开始', created_to: '创建结束', resource_owner_id: '资源所属人', task_type: '任务类型' }
 const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).flatMap((key) => {
   const value = String(filters[key] || '')
   if (!value) return []
-  const display = key === 'creator_id' ? creatorOptions.value.find((item) => item.value === value)?.label || value : key === 'business_lane' ? laneLabel(value) : key === 'resource_role' ? roleLabel(value) : value
+  const display = key === 'resource_owner_id' ? creatorOptions.value.find((item) => item.value === value)?.label || value : key === 'task_type' ? taskTypeLabel(value) : key === 'resource_role' ? roleLabel(value) : value
   return [{ key, label: `${filterLabels[key]}：${display}` }]
 }))
 
@@ -197,8 +211,8 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const next = await resourceGroupsApi.list({ q: filters.q || undefined, sku_code: filters.sku_code || undefined, task_no: filters.task_no || undefined, creator_id: filters.creator_id || undefined, business_lane: filters.business_lane || undefined, resource_role: filters.resource_role || undefined, format_category: filters.format_category || undefined, page: result.page, page_size: result.page_size })
-    result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (filters.resource_role || filters.format_category ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
+    const next = await resourceGroupsApi.list({ q: filters.q || undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, task_type: filters.task_type || undefined, page: result.page, page_size: result.page_size })
+    result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (isFlatMode.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
     brokenImages.value = new Set(); brokenFlat.value = new Set()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '资产中心加载失败。' } finally { loading.value = false }
 }
@@ -208,7 +222,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-.groups-page{max-width:1320px;margin:0 auto;padding:28px;display:grid;gap:20px}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.page-heading h1{margin:4px 0;font-size:31px}.page-heading p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{margin:0;font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.quiet-button,.primary-button,.filter-button,.pager button,.error button,.icon-button{min-height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 14px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));cursor:pointer}.primary-button{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.search-workbench{display:grid;gap:10px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface))}.search-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.search-field{position:relative}.search-field input{width:100%;min-height:42px;border:1px solid rgb(var(--yb-border));border-radius:11px;padding:0 16px 0 40px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text))}.search-icon{position:absolute;left:14px;top:9px;color:rgb(var(--yb-text-muted));font-size:20px}.filter-button.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.active-filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.active-filters button{border:0;border-radius:999px;padding:6px 10px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));cursor:pointer}.active-filters .clear-filters{background:transparent;color:rgb(var(--yb-text-muted))}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}.resource-card{min-width:0;padding:0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));text-align:left;cursor:pointer;transition:transform .18s,border-color .18s,box-shadow .18s}.resource-card:hover,.resource-card:focus-visible{transform:translateY(-3px);border-color:rgb(var(--yb-brand-border));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.1);outline:2px solid rgb(var(--yb-brand-soft));outline-offset:2px}.cover{position:relative;display:block;aspect-ratio:16/11;background:rgb(var(--yb-surface-muted))}.cover img,.preview-fallback{width:100%;height:100%;object-fit:cover}.preview-fallback{display:grid;place-items:center;align-content:center;gap:6px;color:rgb(var(--yb-text-muted))}.file-mark{font-size:18px;font-weight:900}.preview-fallback small{font-size:11px}.mode-badge,.item-count{position:absolute;top:10px;padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface)/.94);font-size:11px;font-weight:800}.mode-badge{left:10px;color:rgb(var(--yb-brand))}.item-count{right:10px;color:rgb(var(--yb-text))}.card-body{display:grid;gap:7px;padding:14px}.sku-code{font-size:13px;color:rgb(var(--yb-brand))}.product-name{min-height:22px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.card-meta{display:flex;gap:8px;font-size:12px;color:rgb(var(--yb-text-muted))}.card-meta span+span::before{content:'·';margin-right:8px}.provenance{font-size:11px;color:rgb(var(--yb-text-faint))}.warn{font-size:12px;color:rgb(var(--yb-warning-text))}.pager{display:flex;align-items:center;justify-content:center;gap:14px}.empty,.error{padding:38px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:16px;color:rgb(var(--yb-text-muted))}.error{display:flex;align-items:center;justify-content:center;gap:12px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.drawer-layer{position:fixed;inset:0;z-index:90;display:flex;justify-content:flex-end}.drawer-backdrop{position:absolute;inset:0;border:0;background:rgb(var(--yb-overlay-night)/.42)}.filter-drawer{position:relative;width:min(420px,100vw);height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));box-shadow:-18px 0 48px rgb(var(--yb-shadow)/.18)}.filter-drawer>header{display:flex;align-items:center;justify-content:space-between;padding:22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-drawer h2{margin:3px 0 0}.icon-button{width:40px;padding:0;font-size:24px}.filter-drawer form{min-height:0;display:grid;grid-template-rows:1fr auto;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:22px}.filter-section+.filter-section{border-top:1px solid rgb(var(--yb-border))}.filter-section h3{grid-column:1/-1;margin:0;font-size:14px}.filter-section label{display:grid;gap:6px;font-size:12px;color:rgb(var(--yb-text-muted))}.filter-section input,.filter-section select{width:100%;min-height:41px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 11px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-drawer footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}@media(max-width:700px){.groups-page{padding:16px}.page-heading{align-items:stretch;flex-direction:column}.search-row{grid-template-columns:1fr auto}.search-row .primary-button{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card-body{padding:11px}.product-name{font-size:13px}.filter-section{grid-template-columns:1fr}.filter-section h3{grid-column:auto}}@media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.mode-badge,.item-count{top:7px}.mode-badge{left:7px}.item-count{right:7px}.provenance,.card-meta{font-size:10px}}
+.groups-page{max-width:1320px;margin:0 auto;padding:28px;display:grid;gap:20px}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.page-actions{display:flex;gap:10px;flex-wrap:wrap}.page-heading h1{margin:4px 0;font-size:31px}.page-heading p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{margin:0;font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.quiet-button,.primary-button,.filter-button,.pager button,.error button,.icon-button{min-height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 14px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));cursor:pointer}.primary-button{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.search-workbench{display:grid;gap:10px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface))}.search-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.search-field{position:relative}.search-field input{width:100%;min-height:42px;border:1px solid rgb(var(--yb-border));border-radius:11px;padding:0 16px 0 40px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text))}.search-icon{position:absolute;left:14px;top:9px;color:rgb(var(--yb-text-muted));font-size:20px}.filter-button.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.active-filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.active-filters button{border:0;border-radius:999px;padding:6px 10px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));cursor:pointer}.active-filters .clear-filters{background:transparent;color:rgb(var(--yb-text-muted))}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}.resource-card{min-width:0;padding:0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));text-align:left;cursor:pointer;transition:transform .18s,border-color .18s,box-shadow .18s}.resource-card:hover,.resource-card:focus-visible{transform:translateY(-3px);border-color:rgb(var(--yb-brand-border));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.1);outline:2px solid rgb(var(--yb-brand-soft));outline-offset:2px}.cover{position:relative;display:block;aspect-ratio:16/11;background:rgb(var(--yb-surface-muted))}.cover img,.preview-fallback{width:100%;height:100%;object-fit:cover}.preview-fallback{display:grid;place-items:center;align-content:center;gap:6px;color:rgb(var(--yb-text-muted))}.file-mark{font-size:18px;font-weight:900}.preview-fallback small{font-size:11px}.mode-badge,.item-count{position:absolute;top:10px;padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface)/.94);font-size:11px;font-weight:800}.mode-badge{left:10px;color:rgb(var(--yb-brand))}.item-count{right:10px;color:rgb(var(--yb-text))}.card-body{display:grid;gap:7px;padding:14px}.sku-code{font-size:13px;color:rgb(var(--yb-brand))}.product-name{min-height:22px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.card-meta{display:flex;gap:8px;font-size:12px;color:rgb(var(--yb-text-muted))}.card-meta span+span::before{content:'·';margin-right:8px}.provenance{font-size:11px;color:rgb(var(--yb-text-faint))}.warn{font-size:12px;color:rgb(var(--yb-warning-text))}.pager{display:flex;align-items:center;justify-content:center;gap:14px}.empty,.error{padding:38px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:16px;color:rgb(var(--yb-text-muted))}.error{display:flex;align-items:center;justify-content:center;gap:12px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.drawer-layer{position:fixed;inset:0;z-index:90;display:flex;justify-content:flex-end}.drawer-backdrop{position:absolute;inset:0;border:0;background:rgb(var(--yb-overlay-night)/.42)}.filter-drawer{position:relative;width:min(390px,100vw);height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));box-shadow:-18px 0 48px rgb(var(--yb-shadow)/.18)}.filter-drawer>header{display:flex;align-items:center;justify-content:space-between;padding:22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-drawer h2{margin:3px 0 0}.icon-button{width:40px;padding:0;font-size:24px}.filter-drawer form{min-height:0;display:grid;grid-template-rows:1fr auto;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr;gap:14px;padding:22px}.filter-section h3{margin:0;font-size:14px}.filter-section label{display:grid;gap:6px;font-size:12px;color:rgb(var(--yb-text-muted))}.filter-section input,.filter-section select{box-sizing:border-box;width:100%;height:42px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 11px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-drawer footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}@media(max-width:700px){.groups-page{padding:16px}.page-heading{align-items:stretch;flex-direction:column}.search-row{grid-template-columns:1fr auto}.search-row .primary-button{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card-body{padding:11px}.product-name{font-size:13px}}@media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.mode-badge,.item-count{top:7px}.mode-badge{left:7px}.item-count{right:7px}.provenance,.card-meta{font-size:10px}}
 </style>
 <style scoped>
 .groups-page {

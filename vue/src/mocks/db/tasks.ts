@@ -13,7 +13,7 @@ export interface MockTask {
   task_no: string
   task_type: string
   title: string
-  priority: 'normal' | 'critical' | 'low' | 'high'
+  priority: 'normal' | 'high' | 'drawing'
   status: MockTaskStatus
   created_by: string
   designer_id?: string | number | null

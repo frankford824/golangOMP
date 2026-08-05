@@ -379,7 +379,8 @@ export interface paths {
         /**
          * Search the current working and finalized resource-group read model
          * @description Default response uses `view_mode=group` (one SKU resource-group card).
-         *     When `resource_role` or a non-all `format_category` is supplied, the service returns `view_mode=flat` with matching `flat_items`.
+         *     Resource role, exact file format, resource owner, or resource creation-time filters return
+         *     `view_mode=flat` with matching `flat_items`. The top-level `q` remains the only keyword search.
          */
         get: operations["listTaskResourceGroups"];
         put?: never;
@@ -4256,6 +4257,186 @@ export interface paths {
                 };
                 /** @description Authentication required */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/search/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch search production assets
+         * @description Returns every ranked system and external candidate for each SKU, task number, or filename term. External resources remain read-only and retain their external resource identity.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetBatchSearchRequest"];
+                };
+            };
+            responses: {
+                /** @description Batch search results */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["AssetBatchSearchResponse"];
+                        };
+                    };
+                };
+                /** @description Invalid search request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Asset view denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/excel-package/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build a production package manifest from normalized Excel rows
+         * @description Matches system and OSS-ready external JPG, PNG, TIF, and TIFF resources. Complete multi-file sets include package_folder so the frontend preserves the set as one folder.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetExcelPackagePreviewRequest"];
+                };
+            };
+            responses: {
+                /** @description Production package manifest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["AssetExcelPackageManifest"];
+                        };
+                    };
+                };
+                /** @description Invalid rows */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Asset download denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/excel-package/preview-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Parse XLS or XLSX and build a production package manifest */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description XLS or XLSX file up to 10 MiB.
+                         */
+                        file: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Production package manifest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["AssetExcelPackageManifest"];
+                        };
+                    };
+                };
+                /** @description Invalid file or template */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Asset download denied */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -18224,7 +18405,7 @@ export interface components {
             /** @description Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.business_info.edit` authorizes non-governed task-field editing, while `task.terminate` authorizes the explicit task cancellation flow. */
             allowed_actions: string[];
             /** @enum {string} */
-            priority?: "low" | "normal" | "high" | "critical";
+            priority?: "normal" | "high" | "drawing";
             /** Format: date-time */
             deadline_at?: string | null;
             /** @enum {string} */
@@ -19186,7 +19367,7 @@ export interface components {
             /** Format: int64 */
             owner_team_id?: number | null;
             /** @enum {string} */
-            priority?: "low" | "normal" | "high" | "critical";
+            priority?: "normal" | "high" | "drawing";
             /** Format: int64 */
             creator_id?: number;
             /** Format: int64 */
@@ -19375,7 +19556,7 @@ export interface components {
              * @default normal
              * @enum {string}
              */
-            priority: "low" | "normal" | "high" | "critical";
+            priority: "normal" | "high" | "drawing";
             reference_file_refs?: components["schemas"]["ReferenceFileRef"][];
             remark?: string;
             /**
@@ -19566,7 +19747,7 @@ export interface components {
              * @description Task priority. When provided, updates `tasks.priority` without requiring other business-info fields.
              * @enum {string}
              */
-            priority?: "low" | "normal" | "high" | "critical";
+            priority?: "normal" | "high" | "drawing";
             remark?: string;
         };
         CreateCategoryRequest: {
@@ -19819,6 +20000,91 @@ export interface components {
             failures?: components["schemas"]["AssetBatchDownloadFailure"][];
             success_count: number;
             failure_count: number;
+            /** Format: int64 */
+            total_size: number;
+            /** Format: date-time */
+            expires_at?: string | null;
+        };
+        AssetBatchSearchRequest: {
+            terms: string[];
+            /**
+             * @default image
+             * @enum {string}
+             */
+            format_filter: "jpg_png" | "jpg" | "png" | "webp" | "image" | "design" | "pdf" | "archive" | "all";
+            /**
+             * @default delivery
+             * @enum {string}
+             */
+            asset_kind: "auto" | "all" | "delivery" | "reference" | "source" | "preview" | "other";
+        };
+        AssetBatchSearchResult: {
+            term: string;
+            /** @enum {string} */
+            status: "matched" | "not_found" | "error";
+            message: string;
+            candidates: number;
+            asset?: components["schemas"]["AssetDetail"];
+            assets?: components["schemas"]["AssetDetail"][];
+        };
+        AssetBatchSearchResponse: {
+            results: components["schemas"]["AssetBatchSearchResult"][];
+            matched_count: number;
+            failed_count: number;
+        };
+        AssetExcelPackageRow: {
+            row_number?: number;
+            order_no: string;
+            sku_code?: string;
+            sku_name?: string;
+            quantity: number;
+            address?: string;
+            keyword?: string;
+        };
+        AssetExcelPackagePreviewRequest: {
+            rows: components["schemas"]["AssetExcelPackageRow"][];
+        };
+        AssetExcelPackageItem: {
+            row_number?: number;
+            order_no: string;
+            sku_code: string;
+            sku_name?: string;
+            quantity: number;
+            asset_id: number;
+            resource_id?: string;
+            /** @enum {string} */
+            source_type?: "system" | "external";
+            task_id: number;
+            task_no?: string;
+            filename: string;
+            /** Format: int64 */
+            file_size: number;
+            mime_type?: string;
+            /** Format: uri */
+            download_url: string;
+            address?: string;
+            origin_path?: string;
+            /** @description Complete multi-image set folder retained in the generated ZIP. */
+            package_folder?: string;
+            /** Format: date-time */
+            expires_at?: string | null;
+        };
+        AssetExcelPackageFailure: {
+            row_number?: number;
+            order_no?: string;
+            sku_code?: string;
+            sku_name?: string;
+            quantity?: number;
+            address?: string;
+            reason: string;
+            message: string;
+        };
+        AssetExcelPackageManifest: {
+            items: components["schemas"]["AssetExcelPackageItem"][];
+            failures?: components["schemas"]["AssetExcelPackageFailure"][];
+            success_count: number;
+            failure_count: number;
+            total_files: number;
             /** Format: int64 */
             total_size: number;
             /** Format: date-time */
@@ -20689,7 +20955,7 @@ export interface components {
                 title?: string | null;
                 /** @description Derived task status (see V1_MODULE_ARCHITECTURE §5). */
                 task_status?: string | null;
-                /** @description One of `low` / `normal` / `high` / `critical`. */
+                /** @description One of `normal` / `high` / `drawing` (普通 / 加急 / 出单画图). */
                 priority?: string | null;
                 /** @description Task business type, such as `new_product_development`. */
                 task_type?: string | null;
@@ -21522,18 +21788,25 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        /** @description One matched resource row used when asset-center list filters by resource_role or format_category. */
+        /** @description One matched resource row used by the five-dimensional asset-center filter. */
         FlatResourceItem: {
             /** Format: int64 */
             group_id: number;
             /** Format: int64 */
             task_id: number;
             task_no?: string;
+            /** @enum {string} */
+            task_type: "original_product_development" | "new_product_development" | "sku_planning" | "retouch_task" | "customer_customization" | "regular_customization";
             sku_code?: string;
             /** @enum {string} */
             resource_role: "reference" | "source" | "final";
             file_name: string;
             mime_type?: string;
+            /** Format: int64 */
+            resource_owner_id?: number;
+            resource_owner_name?: string;
+            /** Format: date-time */
+            resource_created_at: string;
             preview_url?: string;
             download_url?: string;
         };
@@ -22278,9 +22551,14 @@ export interface operations {
                 resource_role?: "reference" | "source" | "final";
                 /** @description Searches task number */
                 q?: string;
-                /** @description document is accepted as an alias of pdf. */
-                format_category?: "all" | "image" | "design" | "pdf" | "document" | "video" | "archive";
-                business_lane?: "normal" | "customization";
+                /** @description Exact lowercase file extension without a dot */
+                file_format?: string;
+                /** @description Resource creation-time lower bound as RFC3339 or YYYY-MM-DD. */
+                created_from?: string;
+                /** @description Resource creation-time upper bound as RFC3339 or YYYY-MM-DD. */
+                created_to?: string;
+                resource_owner_id?: number;
+                task_type?: "original_product_development" | "new_product_development" | "sku_planning" | "retouch_task" | "customer_customization" | "regular_customization";
                 page?: number;
                 page_size?: number;
             };
@@ -22822,7 +23100,7 @@ export interface operations {
                 designer_id?: number;
                 owner_department_id?: number;
                 owner_team_id?: number;
-                priority?: "low" | "normal" | "high" | "critical";
+                priority?: "normal" | "high" | "drawing";
                 overdue?: boolean;
                 /** @description Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. */
                 operational_bucket?: "active_tasks" | "design_pending" | "pending_audit" | "handover" | "customization_in_progress" | "overdue" | "due_today" | "today_created";

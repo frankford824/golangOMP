@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,6 +23,8 @@ func (h *TaskResourceWorkflowHandler) ListResourceGroups(c *gin.Context) {
 		ResourceRole:   domain.ResourceRoleFilter(c.Query("resource_role")),
 		FormatCategory: domain.AssetFormatCategoryFilter(c.Query("format_category")),
 		BusinessLane:   domain.TaskBusinessLane(c.Query("business_lane")),
+		FileFormat:     strings.ToLower(strings.TrimPrefix(strings.TrimSpace(c.Query("file_format")), ".")),
+		TaskType:       domain.TaskType(strings.TrimSpace(c.Query("task_type"))),
 		Page:           page, PageSize: pageSize,
 	}
 	if !params.ResourceRole.Valid() {
@@ -36,6 +39,37 @@ func (h *TaskResourceWorkflowHandler) ListResourceGroups(c *gin.Context) {
 		}
 		params.CreatorID = &creatorID
 	}
+	if raw := c.Query("resource_owner_id"); raw != "" {
+		ownerID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || ownerID <= 0 {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "resource_owner_id must be a positive integer", nil))
+			return
+		}
+		params.ResourceOwnerID = &ownerID
+	}
+	if params.FileFormat != "" && !validResourceFileFormat(params.FileFormat) {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_format must be an extension such as jpg, psd, or tif", nil))
+		return
+	}
+	var appErr *domain.AppError
+	params.ResourceCreatedFrom, appErr = parseTaskCreatedDateBoundary(c.Query("created_from"), false)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	params.ResourceCreatedTo, appErr = parseTaskCreatedDateBoundary(c.Query("created_to"), true)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	if params.ResourceCreatedFrom != nil && params.ResourceCreatedTo != nil && params.ResourceCreatedFrom.After(*params.ResourceCreatedTo) {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "created_from must not be after created_to", nil))
+		return
+	}
+	if params.TaskType != "" && !params.TaskType.Valid() {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_type is invalid", nil))
+		return
+	}
 	if params.BusinessLane != "" && !params.BusinessLane.Valid() {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_lane must be normal or customization", nil))
 		return
@@ -46,6 +80,18 @@ func (h *TaskResourceWorkflowHandler) ListResourceGroups(c *gin.Context) {
 		return
 	}
 	respondOK(c, result)
+}
+
+func validResourceFileFormat(value string) bool {
+	if len(value) > 16 {
+		return false
+	}
+	for _, ch := range value {
+		if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') {
+			return false
+		}
+	}
+	return value != ""
 }
 
 func (h *TaskResourceWorkflowHandler) ResourceGroup(c *gin.Context) {

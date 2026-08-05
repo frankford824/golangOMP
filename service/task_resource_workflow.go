@@ -195,7 +195,8 @@ func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, ac
 }
 
 func resourceGroupListShouldFlatten(params domain.ResourceGroupListParams) bool {
-	if params.ResourceRole != "" {
+	if params.ResourceRole != "" || params.FileFormat != "" || params.ResourceOwnerID != nil ||
+		params.ResourceCreatedFrom != nil || params.ResourceCreatedTo != nil {
 		return true
 	}
 	return normalizeResourceListFormatCategory(params.FormatCategory) != domain.AssetFormatCategoryAll

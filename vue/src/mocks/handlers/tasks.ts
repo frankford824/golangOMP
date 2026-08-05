@@ -28,7 +28,7 @@ function largeSurfaceTasks(q: Record<string, unknown>): { items: MockTask[]; tot
   const pageSize = largeSurfacePageSize(q.page_size)
   const total = Number.isFinite(LARGE_SURFACE_AUDIT_TOTAL) ? LARGE_SURFACE_AUDIT_TOTAL : 5000
   const statuses: MockTaskStatus[] = ['pending_claim', 'in_progress', 'submitted', 'approved', 'completed']
-  const priorities: MockTask['priority'][] = ['normal', 'high', 'low', 'critical']
+  const priorities: MockTask['priority'][] = ['normal', 'high', 'drawing']
   const start = (page - 1) * pageSize
   const items = Array.from({ length: pageSize }, (_, index) => {
     const seq = start + index + 1

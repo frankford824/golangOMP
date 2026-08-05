@@ -1352,7 +1352,7 @@ components:
           type: array
           description: Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.business_info.edit` authorizes non-governed task-field editing, while `task.terminate` authorizes the explicit task cancellation flow.
           items: { type: string }
-        priority: { type: string, enum: [low, normal, high, critical] }
+        priority: { type: string, enum: [normal, high, drawing] }
         deadline_at: { type: string, format: date-time, nullable: true }
         business_lane: { type: string, enum: [normal, customization] }
         customization_required: { type: boolean }
@@ -2832,7 +2832,7 @@ components:
         owner_department_id: { type: integer, format: int64, nullable: true }
         owner_org_team: { type: string }
         owner_team_id: { type: integer, format: int64, nullable: true }
-        priority: { type: string, enum: [low, normal, high, critical] }
+        priority: { type: string, enum: [normal, high, drawing] }
         creator_id: { type: integer, format: int64 }
         requester_id: { type: integer, format: int64, nullable: true }
         designer_id: { type: integer, format: int64, nullable: true }
@@ -3047,7 +3047,7 @@ components:
         due_at: { type: string, format: date-time, nullable: true }
         deadline_at: { type: string, format: date-time, nullable: true }
         designer_id: { type: integer, format: int64, nullable: true }
-        priority: { type: string, enum: [low, normal, high, critical], default: normal }
+        priority: { type: string, enum: [normal, high, drawing], default: normal }
         reference_file_refs:
           type: array
           items: { $ref: '#/components/schemas/ReferenceFileRef' }
@@ -3280,7 +3280,7 @@ components:
           description: Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source.
         priority:
           type: string
-          enum: [low, normal, high, critical]
+          enum: [normal, high, drawing]
           description: Task priority. When provided, updates `tasks.priority` without requiring other business-info fields.
         remark: { type: string }
     CreateCategoryRequest:
@@ -3711,6 +3711,91 @@ components:
           type: string
           format: date-time
           nullable: true
+    AssetBatchSearchRequest:
+      type: object
+      required: [terms]
+      properties:
+        terms: { type: array, minItems: 1, maxItems: 200, items: { type: string } }
+        format_filter: { type: string, enum: [jpg_png, jpg, png, webp, image, design, pdf, archive, all], default: image }
+        asset_kind: { type: string, enum: [auto, all, delivery, reference, source, preview, other], default: delivery }
+    AssetBatchSearchResult:
+      type: object
+      required: [term, status, message, candidates]
+      properties:
+        term: { type: string }
+        status: { type: string, enum: [matched, not_found, error] }
+        message: { type: string }
+        candidates: { type: integer }
+        asset: { $ref: '#/components/schemas/AssetDetail' }
+        assets: { type: array, items: { $ref: '#/components/schemas/AssetDetail' } }
+    AssetBatchSearchResponse:
+      type: object
+      required: [results, matched_count, failed_count]
+      properties:
+        results: { type: array, items: { $ref: '#/components/schemas/AssetBatchSearchResult' } }
+        matched_count: { type: integer }
+        failed_count: { type: integer }
+    AssetExcelPackageRow:
+      type: object
+      required: [order_no, quantity]
+      properties:
+        row_number: { type: integer }
+        order_no: { type: string }
+        sku_code: { type: string }
+        sku_name: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        address: { type: string }
+        keyword: { type: string }
+    AssetExcelPackagePreviewRequest:
+      type: object
+      required: [rows]
+      properties:
+        rows: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/AssetExcelPackageRow' } }
+    AssetExcelPackageItem:
+      type: object
+      required: [order_no, sku_code, quantity, asset_id, task_id, filename, file_size, download_url]
+      properties:
+        row_number: { type: integer }
+        order_no: { type: string }
+        sku_code: { type: string }
+        sku_name: { type: string }
+        quantity: { type: integer }
+        asset_id: { type: integer }
+        resource_id: { type: string }
+        source_type: { type: string, enum: [system, external] }
+        task_id: { type: integer }
+        task_no: { type: string }
+        filename: { type: string }
+        file_size: { type: integer, format: int64 }
+        mime_type: { type: string }
+        download_url: { type: string, format: uri }
+        address: { type: string }
+        origin_path: { type: string }
+        package_folder: { type: string, description: Complete multi-image set folder retained in the generated ZIP. }
+        expires_at: { type: string, format: date-time, nullable: true }
+    AssetExcelPackageFailure:
+      type: object
+      required: [reason, message]
+      properties:
+        row_number: { type: integer }
+        order_no: { type: string }
+        sku_code: { type: string }
+        sku_name: { type: string }
+        quantity: { type: integer }
+        address: { type: string }
+        reason: { type: string }
+        message: { type: string }
+    AssetExcelPackageManifest:
+      type: object
+      required: [items, success_count, failure_count, total_files, total_size]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AssetExcelPackageItem' } }
+        failures: { type: array, items: { $ref: '#/components/schemas/AssetExcelPackageFailure' } }
+        success_count: { type: integer }
+        failure_count: { type: integer }
+        total_files: { type: integer }
+        total_size: { type: integer, format: int64 }
+        expires_at: { type: string, format: date-time, nullable: true }
     TaskReferenceBatchDownloadRequest:
       type: object
       additionalProperties: false
@@ -4875,7 +4960,7 @@ components:
               priority:
                 type: string
                 nullable: true
-                description: One of `low` / `normal` / `high` / `critical`.
+                description: One of `normal` / `high` / `drawing` (普通 / 加急 / 出单画图).
               task_type:
                 type: string
                 nullable: true
@@ -5917,16 +6002,22 @@ components:
         created_at: { type: string, format: date-time }
     FlatResourceItem:
       type: object
-      required: [group_id, task_id, resource_role, file_name]
-      description: One matched resource row used when asset-center list filters by resource_role or format_category.
+      required: [group_id, task_id, task_type, resource_role, file_name, resource_created_at]
+      description: One matched resource row used by the five-dimensional asset-center filter.
       properties:
         group_id: { type: integer, format: int64 }
         task_id: { type: integer, format: int64 }
         task_no: { type: string }
+        task_type:
+          type: string
+          enum: [original_product_development, new_product_development, sku_planning, retouch_task, customer_customization, regular_customization]
         sku_code: { type: string }
         resource_role: { type: string, enum: [reference, source, final] }
         file_name: { type: string }
         mime_type: { type: string }
+        resource_owner_id: { type: integer, format: int64 }
+        resource_owner_name: { type: string }
+        resource_created_at: { type: string, format: date-time }
         preview_url: { type: string }
         download_url: { type: string }
     ResourceGroupListResult:
@@ -6514,7 +6605,8 @@ paths:
       summary: Search the current working and finalized resource-group read model
       description: |
         Default response uses `view_mode=group` (one SKU resource-group card).
-        When `resource_role` or a non-all `format_category` is supplied, the service returns `view_mode=flat` with matching `flat_items`.
+        Resource role, exact file format, resource owner, or resource creation-time filters return
+        `view_mode=flat` with matching `flat_items`. The top-level `q` remains the only keyword search.
       x-api-readiness: ready_for_frontend
       parameters:
         - { name: task_id, in: query, schema: { type: integer, format: int64 } }
@@ -6523,8 +6615,11 @@ paths:
         - { name: creator_id, in: query, schema: { type: integer, format: int64 } }
         - { name: resource_role, in: query, schema: { type: string, enum: [reference, source, final] } }
         - { name: q, in: query, description: Searches task number, SKU, indexed resource text, and finalized filenames., schema: { type: string } }
-        - { name: format_category, in: query, schema: { type: string, enum: [all, image, design, pdf, document, video, archive], default: all }, description: document is accepted as an alias of pdf. }
-        - { name: business_lane, in: query, schema: { type: string, enum: [normal, customization] } }
+        - { name: file_format, in: query, description: Exact lowercase file extension without a dot, for example jpg, psd, or tif., schema: { type: string, pattern: '^[a-z0-9]{1,16}$' } }
+        - { name: created_from, in: query, description: Resource creation-time lower bound as RFC3339 or YYYY-MM-DD., schema: { type: string } }
+        - { name: created_to, in: query, description: Resource creation-time upper bound as RFC3339 or YYYY-MM-DD., schema: { type: string } }
+        - { name: resource_owner_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: task_type, in: query, schema: { type: string, enum: [original_product_development, new_product_development, sku_planning, retouch_task, customer_customization, regular_customization] } }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
@@ -9266,6 +9361,78 @@ paths:
           description: Invalid upload request
         '401':
           description: Authentication required
+  /v1/assets/search/batch:
+    post:
+      summary: Batch search production assets
+      description: Returns every ranked system and external candidate for each SKU, task number, or filename term. External resources remain read-only and retain their external resource identity.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetBatchSearchRequest' }
+      responses:
+        '200':
+          description: Batch search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AssetBatchSearchResponse' }
+        '400': { description: Invalid search request }
+        '403': { description: Asset view denied }
+  /v1/assets/excel-package/preview:
+    post:
+      summary: Build a production package manifest from normalized Excel rows
+      description: Matches system and OSS-ready external JPG, PNG, TIF, and TIFF resources. Complete multi-file sets include package_folder so the frontend preserves the set as one folder.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.download]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetExcelPackagePreviewRequest' }
+      responses:
+        '200':
+          description: Production package manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AssetExcelPackageManifest' }
+        '400': { description: Invalid rows }
+        '403': { description: Asset download denied }
+  /v1/assets/excel-package/preview-file:
+    post:
+      summary: Parse XLS or XLSX and build a production package manifest
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.download]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: XLS or XLSX file up to 10 MiB. }
+      responses:
+        '200':
+          description: Production package manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AssetExcelPackageManifest' }
+        '400': { description: Invalid file or template }
+        '403': { description: Asset download denied }
   /v1/assets/batch-download:
     post:
       summary: Batch download asset direct URL manifest
@@ -9825,7 +9992,7 @@ paths:
         - { in: query, name: designer_id, schema: { type: integer, format: int64 } }
         - { in: query, name: owner_department_id, schema: { type: integer, format: int64 } }
         - { in: query, name: owner_team_id, schema: { type: integer, format: int64 } }
-        - { in: query, name: priority, schema: { type: string, enum: [low, normal, high, critical] } }
+        - { in: query, name: priority, schema: { type: string, enum: [normal, high, drawing] } }
         - { in: query, name: overdue, schema: { type: boolean } }
         - in: query
           name: operational_bucket

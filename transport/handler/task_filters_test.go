@@ -11,17 +11,17 @@ import (
 	"workflow/domain"
 )
 
-func TestParseTaskFilterQueryPriorityCritical(t *testing.T) {
+func TestParseTaskFilterQueryPriorityDrawing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks?priority=critical", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks?priority=drawing", nil)
 
 	filter, appErr := parseTaskFilterQuery(c)
 	if appErr != nil {
 		t.Fatalf("parseTaskFilterQuery() error = %+v", appErr)
 	}
-	if len(filter.Priorities) != 1 || filter.Priorities[0] != domain.TaskPriorityCritical {
-		t.Fatalf("Priorities = %#v, want [critical]", filter.Priorities)
+	if len(filter.Priorities) != 1 || filter.Priorities[0] != domain.TaskPriorityDrawing {
+		t.Fatalf("Priorities = %#v, want [drawing]", filter.Priorities)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestParseTaskFilterQueryRejectsUnknownOperationalBucket(t *testing.T) {
 func TestParseTaskFilterQueryPriorityMultiValue(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks?priority=critical,high", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks?priority=drawing,high", nil)
 
 	filter, appErr := parseTaskFilterQuery(c)
 	if appErr != nil {
@@ -96,8 +96,8 @@ func TestParseTaskFilterQueryPriorityMultiValue(t *testing.T) {
 	if len(filter.Priorities) != 2 {
 		t.Fatalf("Priorities len = %d, want 2", len(filter.Priorities))
 	}
-	if filter.Priorities[0] != domain.TaskPriorityCritical || filter.Priorities[1] != domain.TaskPriorityHigh {
-		t.Fatalf("Priorities = %#v, want [critical high]", filter.Priorities)
+	if filter.Priorities[0] != domain.TaskPriorityDrawing || filter.Priorities[1] != domain.TaskPriorityHigh {
+		t.Fatalf("Priorities = %#v, want [drawing high]", filter.Priorities)
 	}
 }
 

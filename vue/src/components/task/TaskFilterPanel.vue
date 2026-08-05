@@ -13,28 +13,28 @@
               <button v-for="option in statusOptions" :key="option.value" type="button" class="status-option" :class="{ active: draft.status.includes(option.value as TaskStatus) }" :aria-pressed="draft.status.includes(option.value as TaskStatus)" @click="toggleStatus(option.value as TaskStatus)">{{ option.label }}</button>
             </div>
           </NFormItem>
-          <NFormItem label="任务分组"><NSelect :value="draft.taskCategory || null" clearable aria-label="任务分组" :input-props="{ 'aria-label': '任务分组' }" placeholder="全部分组" :options="taskCategoryOptions" @update:value="patch({ taskCategory: String($event || '') })" /></NFormItem>
-          <NFormItem label="任务类型"><NSelect :value="draft.taskType || null" clearable aria-label="任务类型" :input-props="{ 'aria-label': '任务类型' }" placeholder="全部类型" :options="taskTypeOptions" @update:value="patch({ taskType: String($event || '') })" /></NFormItem>
-          <NFormItem label="优先级"><NSelect :value="draft.priority || null" clearable aria-label="优先级" :input-props="{ 'aria-label': '优先级' }" placeholder="全部" :options="priorityOptions" @update:value="patch({ priority: String($event || '') })" /></NFormItem>
+          <NFormItem label="任务分组"><NSelect :to="false" :value="draft.taskCategory || null" clearable aria-label="任务分组" :input-props="{ 'aria-label': '任务分组' }" placeholder="全部分组" :options="taskCategoryOptions" @update:value="patch({ taskCategory: String($event || '') })" /></NFormItem>
+          <NFormItem label="任务类型"><NSelect :to="false" :value="draft.taskType || null" clearable aria-label="任务类型" :input-props="{ 'aria-label': '任务类型' }" placeholder="全部类型" :options="taskTypeOptions" @update:value="patch({ taskType: String($event || '') })" /></NFormItem>
+          <NFormItem label="优先级"><NSelect :to="false" :value="draft.priority || null" clearable aria-label="优先级" :input-props="{ 'aria-label': '优先级' }" placeholder="全部" :options="priorityOptions" @update:value="patch({ priority: String($event || '') })" /></NFormItem>
           <NFormItem label="其他"><NCheckbox :checked="draft.overdueOnly" @update:checked="patch({ overdueOnly: !!$event })">仅看已逾期任务</NCheckbox></NFormItem>
         </section>
 
         <section class="filter-section">
           <h3>组织归属</h3>
-          <NFormItem label="归属部门"><NSelect :value="draft.ownerDepartment || null" clearable filterable aria-label="归属部门" :input-props="{ 'aria-label': '归属部门' }" placeholder="全部部门" :options="departmentSelectOptions" @update:value="onOwnerDepartmentChange(String($event || ''))" /></NFormItem>
-          <NFormItem label="归属团队"><NSelect :value="draft.ownerOrgTeam || null" clearable filterable aria-label="归属团队" :input-props="{ 'aria-label': '归属团队' }" placeholder="全部团队" :options="teamSelectOptions" @update:value="patch({ ownerOrgTeam: String($event || '') })" /></NFormItem>
+          <NFormItem label="归属部门"><NSelect :to="false" :value="draft.ownerDepartment || null" clearable filterable aria-label="归属部门" :input-props="{ 'aria-label': '归属部门' }" placeholder="全部部门" :options="departmentSelectOptions" @update:value="onOwnerDepartmentChange(String($event || ''))" /></NFormItem>
+          <NFormItem label="归属团队"><NSelect :to="false" :value="draft.ownerOrgTeam || null" clearable filterable aria-label="归属团队" :input-props="{ 'aria-label': '归属团队' }" placeholder="全部团队" :options="teamSelectOptions" @update:value="patch({ ownerOrgTeam: String($event || '') })" /></NFormItem>
         </section>
 
         <section class="filter-section">
           <h3>相关人员</h3>
-          <NFormItem label="创建人"><NSelect :value="draft.creatorId || null" clearable filterable aria-label="创建人" :input-props="{ 'aria-label': '创建人' }" placeholder="选择创建人" :options="creatorSelectOptions" @update:value="patch({ creatorId: String($event || '') })" /></NFormItem>
-          <NFormItem label="设计师 / 执行人"><NSelect :value="draft.assigneeId || null" clearable filterable aria-label="设计师或执行人" :input-props="{ 'aria-label': '设计师或执行人' }" placeholder="选择人员" :options="assigneeSelectOptions" @update:value="patch({ assigneeId: String($event || '') })" /></NFormItem>
+          <NFormItem label="创建人"><NSelect :to="false" :value="draft.creatorId || null" clearable filterable aria-label="创建人" :input-props="{ 'aria-label': '创建人' }" placeholder="选择创建人" :options="creatorSelectOptions" @update:value="patch({ creatorId: String($event || '') })" /></NFormItem>
+          <NFormItem label="设计师 / 执行人"><NSelect :to="false" :value="draft.assigneeId || null" clearable filterable aria-label="设计师或执行人" :input-props="{ 'aria-label': '设计师或执行人' }" placeholder="选择人员" :options="assigneeSelectOptions" @update:value="patch({ assigneeId: String($event || '') })" /></NFormItem>
         </section>
 
         <section class="filter-section">
           <h3>创建时间</h3>
-          <NFormItem label="开始日期"><NDatePicker :value="dateFromMs" type="date" clearable class="w-full" @update:value="onDateFrom" /></NFormItem>
-          <NFormItem label="结束日期"><NDatePicker :value="dateToMs" type="date" clearable class="w-full" @update:value="onDateTo" /></NFormItem>
+          <NFormItem label="开始日期"><NDatePicker :to="false" :value="dateFromMs" type="date" clearable class="w-full" @update:value="onDateFrom" /></NFormItem>
+          <NFormItem label="结束日期"><NDatePicker :to="false" :value="dateToMs" type="date" clearable class="w-full" @update:value="onDateTo" /></NFormItem>
         </section>
 
         <section class="filter-section keyword-section">
@@ -74,7 +74,7 @@ function onDateTo(value: number | null) { patch({ dateTo: formatDate(value) }) }
 const statusOptions = [{ value: 'Draft', label: '草稿' }, { value: 'PendingAssign', label: '待指派' }, { value: 'InProgress', label: '进行中' }, { value: 'PendingAudit', label: '待审核' }, { value: 'Completed', label: '已结单' }, { value: 'Archived', label: '已归档' }, { value: 'Blocked', label: '阻塞' }, { value: 'Cancelled', label: '已取消' }]
 const taskCategoryOptions = [{ label: '常规任务', value: 'normal' }, { label: '定制任务', value: 'customization' }]
 const taskTypeOptions = [{ label: '原有产品开发', value: 'ORIGINAL_PRODUCT_DEV' }, { label: '新品开发', value: 'NEW_PRODUCT_DEV' }, { label: '策划 SKU', value: 'SKU_PLANNING' }, { label: 'P 图任务', value: 'RETOUCH_TASK' }, { label: '客户定制', value: 'CUSTOMER_CUSTOMIZATION' }, { label: '常规定制', value: 'REGULAR_CUSTOMIZATION' }]
-const priorityOptions = [{ label: '低', value: 'low' }, { label: '普通', value: 'normal' }, { label: '高', value: 'high' }, { label: '加急', value: 'critical' }]
+const priorityOptions = [{ label: '普通', value: 'normal' }, { label: '加急', value: 'high' }, { label: '出单画图', value: 'drawing' }]
 const {
   creatorOptions,
   assigneeOptions,

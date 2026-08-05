@@ -16,7 +16,7 @@ function baseForm(overrides: Partial<TaskCreateFormModel> = {}): TaskCreateFormM
     designRequirement: '',
     referenceFileRefs: [],
     dueAt: null,
-    priority: 'low',
+    priority: 'normal',
     customizationRequired: false,
     note: '',
     costPriceAmount: undefined,

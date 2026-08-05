@@ -1,14 +1,11 @@
-/**
- * v1.21：线上仅接受 low | normal | high | critical。
- * 读模型兼容历史 urgent/medium；写接口前必须归一到四态。
- */
-export type TaskPriorityApi = 'low' | 'normal' | 'high' | 'critical'
+/** 新任务只接受普通、加急和出单画图三档。旧值仅用于读取迁移前缓存。 */
+export type TaskPriorityApi = 'normal' | 'high' | 'drawing'
 
 export function normalizePriorityFromApi(raw: string | null | undefined): TaskPriorityApi {
   const s = String(raw ?? 'normal').trim().toLowerCase()
-  if (s === 'medium') return 'normal'
-  if (s === 'urgent') return 'critical'
-  if (s === 'low' || s === 'normal' || s === 'high' || s === 'critical') return s
+  if (s === 'low' || s === 'medium') return 'normal'
+  if (s === 'critical' || s === 'urgent') return 'high'
+  if (s === 'normal' || s === 'high' || s === 'drawing') return s
   return 'normal'
 }
 

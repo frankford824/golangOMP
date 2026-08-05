@@ -13,10 +13,9 @@ func TestValidateCreateTaskPriority(t *testing.T) {
 		want string
 	}{
 		{name: "empty defaults normal", in: "", want: string(domain.TaskPriorityNormal)},
-		{name: "low", in: "low", want: string(domain.TaskPriorityLow)},
 		{name: "normal", in: "normal", want: string(domain.TaskPriorityNormal)},
 		{name: "high", in: "high", want: string(domain.TaskPriorityHigh)},
-		{name: "critical", in: "critical", want: string(domain.TaskPriorityCritical)},
+		{name: "drawing", in: "drawing", want: string(domain.TaskPriorityDrawing)},
 	}
 	for _, tc := range passCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -30,7 +29,7 @@ func TestValidateCreateTaskPriority(t *testing.T) {
 		})
 	}
 
-	failCases := []string{"urgent", "random", "LOW"}
+	failCases := []string{"low", "critical", "urgent", "random", "LOW"}
 	for _, in := range failCases {
 		t.Run(in, func(t *testing.T) {
 			_, appErr := validateCreateTaskPriority(in)

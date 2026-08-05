@@ -582,13 +582,13 @@ func validateCreateTaskPriority(priority string) (string, *domain.AppError) {
 		return string(domain.TaskPriorityNormal), nil
 	}
 	switch domain.TaskPriority(normalized) {
-	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
+	case domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityDrawing:
 		return normalized, nil
 	default:
 		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "task_priority_invalid", map[string]interface{}{
 			"field":        "priority",
 			"deny_code":    "task_priority_invalid",
-			"allowed":      []string{"low", "normal", "high", "critical"},
+			"allowed":      []string{"normal", "high", "drawing"},
 			"actual_value": normalized,
 		})
 	}

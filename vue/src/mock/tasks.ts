@@ -80,7 +80,7 @@ export const mockTasks: Task[] = [
     groupId: 'g1',
     groupName: '服饰组',
     dueAt: '2024-03-12T18:00:00',
-    priority: 'low',
+    priority: 'normal',
     referenceFileRefs: [],
     assetVersions: [],
     createdAt: '2024-03-06T09:45:00',

@@ -341,7 +341,7 @@ func insertFlattenedRef(ctx context.Context, db *sql.DB, opts BackfillOptions, s
 func phaseD(ctx context.Context, db *sql.DB, opts BackfillOptions) (PhaseStat, error) {
 	start := time.Now()
 	stat := PhaseStat{Name: "Phase D"}
-	rows, err := db.QueryContext(ctx, `SELECT id, priority FROM tasks WHERE priority NOT IN ('low','normal','high','critical')`)
+	rows, err := db.QueryContext(ctx, `SELECT id, priority FROM tasks WHERE priority NOT IN ('normal','high','drawing')`)
 	if err != nil {
 		return finishPhase(stat, start), err
 	}

@@ -92,7 +92,7 @@ export interface TaskCreateFormModel {
 
   // ── 截止时间与优先级 ───────────────────────────────────────────────────────
   dueAt: string | null
-  /** v1.21：low | normal | high | critical */
+  /** 普通 normal | 加急 high | 出单画图 drawing */
   priority: TaskPriorityApi
   /** 创建后是否立即同步 ERP，默认 true */
   syncErpOnCreate?: boolean

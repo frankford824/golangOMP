@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
-import { NButton, NCheckbox } from 'naive-ui'
+import { NButton, NCheckbox, NDatePicker, NSelect } from 'naive-ui'
 import { describe, expect, it, vi } from 'vitest'
 import TaskFilterPanel, { type TaskListFilters } from './TaskFilterPanel.vue'
 
@@ -63,6 +63,18 @@ describe('TaskFilterPanel', () => {
 
     const payload = wrapper.emitted('apply')?.[0] as [TaskListFilters, string]
     expect(payload[0].status).toEqual(['PendingAudit'])
+  })
+
+  it('renders dropdowns inside the drawer stacking context and exposes the three priority choices', () => {
+    const wrapper = mount(TaskFilterPanel, { props: { filters: filters(), keyword: '' } })
+    expect(wrapper.findAllComponents(NSelect).every((select) => select.props('to') === false)).toBe(true)
+    expect(wrapper.findAllComponents(NDatePicker).every((picker) => picker.props('to') === false)).toBe(true)
+    const priority = wrapper.findAllComponents(NSelect).find((select) => select.attributes('aria-label') === '优先级')
+    expect(priority?.props('options')).toEqual([
+      { label: '普通', value: 'normal' },
+      { label: '加急', value: 'high' },
+      { label: '出单画图', value: 'drawing' },
+    ])
   })
 
   it('resets the local draft without mutating parent props', async () => {

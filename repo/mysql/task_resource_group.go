@@ -232,6 +232,10 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		where = append(where, "t.business_lane = ?")
 		args = append(args, params.BusinessLane)
 	}
+	if params.TaskType.Valid() {
+		where = append(where, "t.task_type = ?")
+		args = append(args, params.TaskType)
+	}
 	if normalizeAssetFormatCategoryForSQL(params.FormatCategory) != domain.AssetFormatCategoryAll {
 		formatClauses, formatArgs := appendAssetFormatCategoryWhere(
 			[]string{`(
@@ -325,6 +329,10 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		baseWhere = append(baseWhere, "t.business_lane = ?")
 		baseArgs = append(baseArgs, params.BusinessLane)
 	}
+	if params.TaskType.Valid() {
+		baseWhere = append(baseWhere, "t.task_type = ?")
+		baseArgs = append(baseArgs, params.TaskType)
+	}
 	baseWhere, baseArgs = appendResourceGroupAccessScope(baseWhere, baseArgs, params.Access)
 	baseClause := strings.Join(baseWhere, " AND ")
 	if err := r.validateFlatResourceIntegrity(ctx, baseClause, baseArgs); err != nil {
@@ -332,12 +340,15 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	}
 
 	flatCTE := `WITH flat_resources AS (
-		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, COALESCE(tsi.sku_code, '') AS sku_code,
 		       'reference' AS resource_role,
 		       COALESCE(NULLIF(rr.file_name_snapshot, ''), asr.file_name, '') AS file_name,
 		       COALESCE(asr.mime_type, '') AS mime_type,
 		       CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN COALESCE(asr.ref_key, '') ELSE '' END AS storage_key,
 		       COALESCE(formal_ta.id, 0) AS task_asset_id,
+		       COALESCE(formal_ta.uploaded_by, ur.created_by, t.creator_id) AS resource_owner_id,
+		       COALESCE(NULLIF(owner_user.display_name, ''), NULLIF(owner_user.username, ''), '') AS resource_owner_name,
+		       COALESCE(formal_ta.created_at, asr.created_at, rr.created_at, g.updated_at) AS resource_created_at,
 		       g.updated_at AS group_updated_at, 1 AS role_sort, rr.sort_order AS item_sort, rr.id AS row_id
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
@@ -347,6 +358,8 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
 		LEFT JOIN task_assets formal_ta ON formal_ta.id = rr.formal_task_asset_id
 		LEFT JOIN asset_storage_refs formal_asr ON formal_asr.ref_id = formal_ta.storage_ref_id
+		LEFT JOIN upload_requests ur ON ur.request_id = asr.upload_request_id
+		LEFT JOIN users owner_user ON owner_user.id = COALESCE(formal_ta.uploaded_by, ur.created_by, t.creator_id)
 		WHERE ` + baseClause + `
 		  AND f.task_id = g.task_id
 		  AND rr.ref_id_snapshot = f.ref_id
@@ -378,10 +391,13 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		    )
 		  )
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, COALESCE(tsi.sku_code, '') AS sku_code,
 		       'source' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,
+		       ta.uploaded_by AS resource_owner_id,
+		       COALESCE(NULLIF(owner_user.display_name, ''), NULLIF(owner_user.username, ''), '') AS resource_owner_name,
+		       ta.created_at AS resource_created_at,
 		       g.updated_at AS group_updated_at, 2 AS role_sort, 0 AS item_sort, ta.id AS row_id
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
@@ -389,6 +405,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		JOIN task_asset_group_revisions rev ON rev.id = g.finalized_revision_id
 		JOIN task_assets ta ON ta.id = rev.source_task_asset_id
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		LEFT JOIN users owner_user ON owner_user.id = ta.uploaded_by
 		WHERE ` + baseClause + `
 		  AND ta.task_id = g.task_id AND ta.asset_type = 'source'
 		  AND ta.binding_state = 'bound' AND ta.bound_group_id = g.id AND ta.bound_role = 'source'
@@ -398,10 +415,13 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		  AND ta.storage_ref_id IS NOT NULL AND asr.ref_id IS NOT NULL
 		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, COALESCE(tsi.sku_code, '') AS sku_code,
 		       'final' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,
+		       ta.uploaded_by AS resource_owner_id,
+		       COALESCE(NULLIF(owner_user.display_name, ''), NULLIF(owner_user.username, ''), '') AS resource_owner_name,
+		       ta.created_at AS resource_created_at,
 		       g.updated_at AS group_updated_at, 3 AS role_sort, ri.sort_order AS item_sort, ri.id AS row_id
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
@@ -409,6 +429,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		JOIN task_asset_group_revision_items ri ON ri.revision_id = g.finalized_revision_id
 		JOIN task_assets ta ON ta.id = ri.task_asset_id
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		LEFT JOIN users owner_user ON owner_user.id = ta.uploaded_by
 		WHERE ` + baseClause + `
 		  AND ta.task_id = g.task_id AND ta.asset_type = 'delivery'
 		  AND ta.binding_state = 'bound' AND ta.bound_group_id = g.id AND ta.bound_role = 'final'
@@ -427,6 +448,22 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	if params.ResourceRole != "" {
 		flatWhere = append(flatWhere, "flat.resource_role = ?")
 		flatArgs = append(flatArgs, params.ResourceRole)
+	}
+	if params.FileFormat != "" {
+		flatWhere = append(flatWhere, "LOWER(flat.file_name) LIKE ?")
+		flatArgs = append(flatArgs, "%."+params.FileFormat)
+	}
+	if params.ResourceOwnerID != nil && *params.ResourceOwnerID > 0 {
+		flatWhere = append(flatWhere, "flat.resource_owner_id = ?")
+		flatArgs = append(flatArgs, *params.ResourceOwnerID)
+	}
+	if params.ResourceCreatedFrom != nil {
+		flatWhere = append(flatWhere, "flat.resource_created_at >= ?")
+		flatArgs = append(flatArgs, *params.ResourceCreatedFrom)
+	}
+	if params.ResourceCreatedTo != nil {
+		flatWhere = append(flatWhere, "flat.resource_created_at <= ?")
+		flatArgs = append(flatArgs, *params.ResourceCreatedTo)
 	}
 	if value := strings.TrimSpace(params.Query); value != "" {
 		like := "%" + value + "%"
@@ -463,8 +500,9 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	}
 	queryArgs := append(append([]interface{}{}, filterArgs...), pageSize, (page-1)*pageSize)
 	rows, err := r.db.db.QueryContext(ctx, flatCTE+`
-		SELECT flat.group_id, flat.task_id, flat.task_no, flat.sku_code, flat.resource_role,
-		       flat.file_name, flat.mime_type, flat.storage_key, flat.task_asset_id
+		SELECT flat.group_id, flat.task_id, flat.task_no, flat.task_type, flat.sku_code, flat.resource_role,
+		       flat.file_name, flat.mime_type, flat.resource_owner_id, flat.resource_owner_name,
+		       flat.resource_created_at, flat.storage_key, flat.task_asset_id
 		FROM flat_resources flat
 		WHERE `+flatClause+`
 		ORDER BY flat.group_updated_at DESC, flat.group_id DESC, flat.role_sort, flat.item_sort, flat.row_id
@@ -476,8 +514,9 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	items := make([]domain.FlatResourceItem, 0, pageSize)
 	for rows.Next() {
 		var item domain.FlatResourceItem
-		if err := rows.Scan(&item.GroupID, &item.TaskID, &item.TaskNo, &item.SKUCode, &item.ResourceRole,
-			&item.FileName, &item.MimeType, &item.StorageKey, &item.TaskAssetID); err != nil {
+		if err := rows.Scan(&item.GroupID, &item.TaskID, &item.TaskNo, &item.TaskType, &item.SKUCode, &item.ResourceRole,
+			&item.FileName, &item.MimeType, &item.ResourceOwnerID, &item.ResourceOwnerName,
+			&item.ResourceCreatedAt, &item.StorageKey, &item.TaskAssetID); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, item)

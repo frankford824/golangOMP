@@ -21,6 +21,12 @@ type TaskAssetCenterHandler struct {
 	lifecycleSvc *assetlifecycle.Service
 }
 
+type batchGlobalAssetSearchReq struct {
+	Terms        []string `json:"terms"`
+	FormatFilter string   `json:"format_filter"`
+	AssetKind    string   `json:"asset_kind"`
+}
+
 func NewTaskAssetCenterHandler(svc service.TaskAssetCenterService) *TaskAssetCenterHandler {
 	return &TaskAssetCenterHandler{svc: svc}
 }
@@ -28,6 +34,26 @@ func NewTaskAssetCenterHandler(svc service.TaskAssetCenterService) *TaskAssetCen
 func (h *TaskAssetCenterHandler) SetGlobalAssetServices(globalSvc *assetcenter.Service, lifecycleSvc *assetlifecycle.Service) {
 	h.globalSvc = globalSvc
 	h.lifecycleSvc = lifecycleSvc
+}
+
+func (h *TaskAssetCenterHandler) BatchSearchGlobalAssets(c *gin.Context) {
+	if h.globalSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+		return
+	}
+	var req batchGlobalAssetSearchReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.globalSvc.BatchSearch(c.Request.Context(), assetcenter.BatchSearchRequest{
+		Terms: req.Terms, FormatFilter: req.FormatFilter, AssetKind: req.AssetKind,
+	})
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 type createTaskAssetUploadSessionReq struct {

@@ -190,6 +190,24 @@ export async function downloadBatchAsZip(options: BatchZipDownloadOptions): Prom
   let completed = 0
   let writtenCount = 0
   const concurrency = Math.min(Math.max(1, options.concurrency ?? 4), 8)
+  const blobCache = new Map<string, Promise<Blob>>()
+
+  const loadBlob = (downloadURL: string) => {
+    const cached = blobCache.get(downloadURL)
+    if (cached) return cached
+    const pending = (async () => {
+      const response = await fetch(downloadURL, {
+        credentials: resolveBatchDownloadCredentials(downloadURL),
+        mode: 'cors',
+      })
+      if (!response.ok) throw new Error(`http_${response.status}`)
+      const blob = await response.blob()
+      assertUsableBatchDownloadPayload(blob.size, response.headers.get('content-type') ?? blob.type)
+      return blob
+    })()
+    blobCache.set(downloadURL, pending)
+    return pending
+  }
 
   await mapWithConcurrency(options.items, concurrency, async (item) => {
     const key = String(item.key ?? '').trim() || 'item'
@@ -215,16 +233,7 @@ export async function downloadBatchAsZip(options: BatchZipDownloadOptions): Prom
       return
     }
     try {
-      const response = await fetch(downloadURL, {
-        credentials: resolveBatchDownloadCredentials(downloadURL),
-        mode: 'cors',
-      })
-      if (!response.ok) {
-        failures.push(item.failureHint || `key=${key} filename=${filename} reason=http_${response.status}`)
-        return
-      }
-      const blob = await response.blob()
-      assertUsableBatchDownloadPayload(blob.size, response.headers.get('content-type') ?? blob.type)
+      const blob = await loadBlob(downloadURL)
       const payload = options.normalizeNestedZipFilenames
         ? await normalizeNestedZipBlob(blob, filename, JSZip)
         : blob

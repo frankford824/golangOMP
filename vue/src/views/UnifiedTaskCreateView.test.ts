@@ -399,7 +399,7 @@ describe('UnifiedTaskCreateView', () => {
       attachTo: document.body,
       global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
     })
-    await wrapper.get('.common-ribbon select').setValue('critical')
+    await wrapper.get('.common-ribbon select').setValue('drawing')
     await wrapper.get('.note-field input').setValue('不应带到下一个流程')
     const retouch = wrapper.findAll('.intent-card').find((item) => item.text().includes('只修图'))
     if (!retouch) throw new Error('missing retouch intent')

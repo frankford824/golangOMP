@@ -46,11 +46,11 @@ function mountCard(priority: Task['priority']) {
 }
 
 describe('TaskCard', () => {
-  it('renders critical priority prominently and preserves update minutes', () => {
-    const wrapper = mountCard('critical')
+  it('renders drawing priority prominently and preserves update minutes', () => {
+    const wrapper = mountCard('drawing')
 
-    expect(wrapper.get('.tc-priority').text()).toBe('加急')
-    expect(wrapper.get('.tc-priority').classes()).toContain('tc-priority--critical')
+    expect(wrapper.get('.tc-priority').text()).toBe('出单画图')
+    expect(wrapper.get('.tc-priority').classes()).toContain('tc-priority--drawing')
     expect(wrapper.get('.tc-footer').text()).toContain('更新 2026/07/29 22:57')
   })
 

@@ -166,7 +166,7 @@ func parseTaskPriorities(c *gin.Context, key string) ([]domain.TaskPriority, *do
 
 func validListTaskPriority(priority domain.TaskPriority) bool {
 	switch priority {
-	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
+	case domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityDrawing:
 		return true
 	default:
 		return false

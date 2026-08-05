@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 
@@ -60,8 +61,12 @@ func TestListFlatResourceItemsFiltersCountsAndPagesFilesWithSameScope(t *testing
 			"JOIN task_asset_group_revisions rev",
 			"JOIN task_asset_group_revision_items ri",
 			"flat.resource_role = ?",
+			"flat.resource_owner_id = ?",
+			"flat.resource_created_at >= ?",
+			"flat.resource_created_at <= ?",
 			"flat.file_name LIKE ?",
 			"LOWER(flat.file_name) LIKE ?",
+			"t.task_type = ?",
 			"t.owner_department_id IN (?)",
 			"f.task_id = g.task_id",
 			"rr.ref_id_snapshot = f.ref_id",
@@ -100,12 +105,19 @@ func TestListFlatResourceItemsFiltersCountsAndPagesFilesWithSameScope(t *testing
 		WillReturnRows(sqlmock.NewRows([]string{"violation_code", "entity_id"}))
 	mock.ExpectQuery("flat-resource-filter").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
 	mock.ExpectQuery("flat-resource-filter").WillReturnRows(sqlmock.NewRows([]string{
-		"group_id", "task_id", "task_no", "sku_code", "resource_role", "file_name", "mime_type", "storage_key", "task_asset_id",
-	}).AddRow(8, 3, "RW-008", "SKU-008", "source", "source.psd", "image/vnd.adobe.photoshop", "tasks/3/source.psd", 88))
+		"group_id", "task_id", "task_no", "task_type", "sku_code", "resource_role", "file_name", "mime_type",
+		"resource_owner_id", "resource_owner_name", "resource_created_at", "storage_key", "task_asset_id",
+	}).AddRow(8, 3, "RW-008", "new_product_development", "SKU-008", "source", "source.psd",
+		"image/vnd.adobe.photoshop", 42, "设计师", time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC), "tasks/3/source.psd", 88))
 	items, total, err := repository.ListFlatResourceItems(context.Background(), domain.ResourceGroupListParams{
 		ResourceRole:   domain.ResourceRoleFilterSource,
 		Query:          "source",
 		FormatCategory: domain.AssetFormatCategoryDesign,
+		FileFormat:     "psd",
+		ResourceOwnerID: int64Ptr(42),
+		ResourceCreatedFrom: timePtr(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)),
+		ResourceCreatedTo:   timePtr(time.Date(2026, 8, 5, 23, 59, 59, 0, time.UTC)),
+		TaskType:       domain.TaskTypeNewProductDevelopment,
 		Page:           3, PageSize: 2,
 		Access: domain.ResourceGroupAccessFilter{DepartmentIDs: []int64{101}},
 	})
@@ -121,6 +133,10 @@ func TestListFlatResourceItemsFiltersCountsAndPagesFilesWithSameScope(t *testing
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func timePtr(value time.Time) *time.Time {
+	return &value
 }
 
 func TestListFlatResourceItemsFailsClosedOnIntegrityViolation(t *testing.T) {

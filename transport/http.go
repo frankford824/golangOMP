@@ -300,7 +300,10 @@ func NewRouter(
 
 	assetGroup := v1.Group("/assets")
 	{
+		assetGroup.POST("/search/batch", capabilityAccess(assetGroup, http.MethodPost, "/search/batch", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.BatchSearchGlobalAssets)
 		assetGroup.POST("/batch-download", capabilityAccess(assetGroup, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskAssetCenterH.BatchDownloadGlobalAssets)
+		assetGroup.POST("/excel-package/preview", capabilityAccess(assetGroup, http.MethodPost, "/excel-package/preview", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskAssetCenterH.PreviewExcelPackage)
+		assetGroup.POST("/excel-package/preview-file", capabilityAccess(assetGroup, http.MethodPost, "/excel-package/preview-file", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskAssetCenterH.PreviewExcelPackageFile)
 		assetGroup.GET("/:asset_id", capabilityAccess(assetGroup, http.MethodGet, "/:asset_id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.GetGlobalAsset)
 		assetGroup.DELETE("/:asset_id", capabilityAccess(assetGroup, http.MethodDelete, "/:asset_id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetManage), taskAssetCenterH.DeleteGlobalAsset)
 		assetGroup.GET("/:asset_id/download", capabilityAccess(assetGroup, http.MethodGet, "/:asset_id/download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskAssetCenterH.DownloadGlobalAsset)

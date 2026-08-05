@@ -913,7 +913,10 @@ const activeFilterChips = computed(() => {
   if (f.status.length) chips.push({ key: 'status', label: `状态：${f.status.map((item) => statusDisplay[item] || item).join('、')}` })
   if (f.taskCategory) chips.push({ key: 'taskCategory', label: `分组：${f.taskCategory === 'customization' ? '定制' : '常规'}` })
   if (f.taskType) chips.push({ key: 'taskType', label: `类型：${f.taskType}` })
-  if (f.priority) chips.push({ key: 'priority', label: `优先级：${f.priority}` })
+  if (f.priority) {
+    const label = ({ normal: '普通', high: '加急', drawing: '出单画图' } as Record<string, string>)[f.priority] || f.priority
+    chips.push({ key: 'priority', label: `优先级：${label}` })
+  }
   if (f.ownerDepartment) chips.push({ key: 'ownerDepartment', label: `部门：${f.ownerDepartment}` })
   if (f.ownerOrgTeam) chips.push({ key: 'ownerOrgTeam', label: `团队：${f.ownerOrgTeam}` })
   if (f.creatorId) chips.push({ key: 'creatorId', label: '已选创建人' })

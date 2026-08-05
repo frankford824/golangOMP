@@ -198,8 +198,8 @@ function hydrate() {
 
 function normalizePriority(value: unknown) {
   const raw = String(value || 'normal').toLowerCase()
-  const aliases: Record<string, string> = { 低: 'low', 普通: 'normal', 高: 'high', 紧急: 'critical', urgent: 'critical' }
-  return ['low', 'normal', 'high', 'critical'].includes(raw) ? raw : aliases[String(value)] || 'normal'
+  const aliases: Record<string, string> = { 低: 'normal', 普通: 'normal', 高: 'high', 紧急: 'high', 加急: 'high', 出单画图: 'drawing', low: 'normal', critical: 'high', urgent: 'high' }
+  return ['normal', 'high', 'drawing'].includes(raw) ? raw : aliases[String(value)] || 'normal'
 }
 
 function optionalNumber(value: string) {

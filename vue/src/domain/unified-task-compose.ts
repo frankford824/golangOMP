@@ -5,7 +5,7 @@ import { beijingDateTimeLocalToISO, taskInstantMs } from '@/utils/date'
 import { generateActionId } from '@/utils/uuid'
 
 export type ComposeIntent = 'modify_existing' | 'new_design' | 'retouch' | 'planning_sku'
-export type ComposePriority = 'low' | 'normal' | 'high' | 'critical'
+export type ComposePriority = 'normal' | 'high' | 'drawing'
 export type ComposeColumnKey =
   | 'erp_sku'
   | 'product_i_id'

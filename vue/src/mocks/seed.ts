@@ -33,7 +33,7 @@ export function ensureMockSeed(): void {
       task_no: 'T-20260423-1002',
       task_type: 'regular_customization',
       title: '常规定制补图',
-      priority: 'critical',
+      priority: 'high',
       status: 'in_progress',
       created_by: 'ops_demo',
       designer_id: '2',

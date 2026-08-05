@@ -256,6 +256,89 @@ export interface AssetBatchDownloadResponse {
   data?: AssetBatchDownloadManifest
 }
 
+export type AssetBatchSearchStatus = 'matched' | 'not_found' | 'error'
+
+export interface AssetBatchSearchPayload {
+  terms: string[]
+  format_filter?: 'jpg_png' | 'jpg' | 'png' | 'webp' | 'image' | 'design' | 'pdf' | 'archive' | 'all'
+  asset_kind?: 'auto' | 'all' | 'delivery' | 'reference' | 'source' | 'preview' | 'other'
+}
+
+export interface AssetBatchSearchResult {
+  term: string
+  status: AssetBatchSearchStatus
+  message: string
+  candidates: number
+  asset?: BackendAsset
+  assets?: BackendAsset[]
+}
+
+export interface AssetBatchSearchManifest {
+  results: AssetBatchSearchResult[]
+  matched_count: number
+  failed_count: number
+}
+
+export interface AssetBatchSearchResponse {
+  data?: AssetBatchSearchManifest
+}
+
+export interface AssetExcelPackageRow {
+  row_number?: number
+  order_no: string
+  sku_code: string
+  sku_name?: string
+  quantity: number
+  address?: string
+  keyword?: string
+}
+
+export interface AssetExcelPackageItem {
+  row_number?: number
+  order_no: string
+  sku_code: string
+  sku_name?: string
+  quantity: number
+  asset_id: number
+  resource_id?: string
+  source_type?: string
+  task_id: number
+  task_no?: string
+  filename: string
+  file_size: number
+  mime_type?: string
+  download_url: string
+  address?: string
+  origin_path?: string
+  package_folder?: string
+  expires_at?: string | null
+}
+
+export interface AssetExcelPackageFailure {
+  row_number?: number
+  order_no?: string
+  sku_code?: string
+  sku_name?: string
+  quantity?: number
+  address?: string
+  reason: string
+  message: string
+}
+
+export interface AssetExcelPackageManifest {
+  items: AssetExcelPackageItem[]
+  failures?: AssetExcelPackageFailure[]
+  success_count: number
+  failure_count: number
+  total_files: number
+  total_size: number
+  expires_at?: string | null
+}
+
+export interface AssetExcelPackagePreviewResponse {
+  data?: AssetExcelPackageManifest
+}
+
 export const assetsApi = {
   /**
    * 任务上下文资产列表
@@ -307,6 +390,9 @@ export const assetsApi = {
   ) =>
     http.post(`/v1/assets/upload-sessions/${sessionId}/cancel`, payload ?? {}, { signal }),
 
+  batchSearchAssets: (payload: AssetBatchSearchPayload, signal?: AbortSignal) =>
+    http.post<AssetBatchSearchResponse>('/v1/assets/search/batch', payload, { signal }),
+
   batchDownload: (
     assetRefs: Array<number | string>,
     options?: { namingMode?: 'original' | 'business'; signal?: AbortSignal },
@@ -329,6 +415,19 @@ export const assetsApi = {
         naming_mode: options?.namingMode,
       } as AssetBatchDownloadPayload,
       { signal: options?.signal },
+    )
+  },
+
+  excelPackagePreview: (rows: AssetExcelPackageRow[], signal?: AbortSignal) =>
+    http.post<AssetExcelPackagePreviewResponse>('/v1/assets/excel-package/preview', { rows }, { signal }),
+
+  excelPackagePreviewFile: (file: File, signal?: AbortSignal) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post<AssetExcelPackagePreviewResponse>(
+      '/v1/assets/excel-package/preview-file',
+      form,
+      { signal, headers: { 'Content-Type': 'multipart/form-data' } },
     )
   },
 

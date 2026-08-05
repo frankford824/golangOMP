@@ -659,7 +659,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 
 	priority := p.Priority
 	if priority == "" {
-		priority = domain.TaskPriorityLow
+		priority = domain.TaskPriorityNormal
 	}
 
 	initialStatus := domain.TaskStatusPendingAssign
@@ -804,7 +804,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 
 	priority := p.Priority
 	if priority == "" {
-		priority = domain.TaskPriorityLow
+		priority = domain.TaskPriorityNormal
 	}
 
 	initialStatus := domain.TaskStatusPendingAssign
@@ -1251,9 +1251,9 @@ func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.Ap
 	}
 	if p.Priority != "" && !validTaskPriority(p.Priority) {
 		return taskCreateValidationError(
-			"priority must be low, normal, high, or critical",
+			"priority must be normal, high, or drawing",
 			p,
-			taskCreateViolation("priority", "invalid_priority", "priority must be low, normal, high, or critical"),
+			taskCreateViolation("priority", "invalid_priority", "priority must be normal, high, or drawing"),
 		)
 	}
 	if p.RequesterID != nil && *p.RequesterID <= 0 {
@@ -1548,7 +1548,7 @@ func normalizeUpdateTaskPriority(priority string) (domain.TaskPriority, *domain.
 		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "task_priority_invalid", map[string]interface{}{
 			"field":        "priority",
 			"deny_code":    "task_priority_invalid",
-			"allowed":      []string{"low", "normal", "high", "critical"},
+			"allowed":      []string{"normal", "high", "drawing"},
 			"actual_value": normalized,
 		})
 	}
@@ -1557,7 +1557,7 @@ func normalizeUpdateTaskPriority(priority string) (domain.TaskPriority, *domain.
 
 func validTaskPriority(priority domain.TaskPriority) bool {
 	switch priority {
-	case domain.TaskPriorityLow, domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityCritical:
+	case domain.TaskPriorityNormal, domain.TaskPriorityHigh, domain.TaskPriorityDrawing:
 		return true
 	default:
 		return false

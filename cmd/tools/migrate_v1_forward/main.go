@@ -104,13 +104,13 @@ func apply066(ctx context.Context, db *sql.DB) error {
 
 func apply067(ctx context.Context, db *sql.DB) error {
 	var badCount int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE priority NOT IN ('low','normal','high','critical')").Scan(&badCount); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE priority NOT IN ('normal','high','drawing')").Scan(&badCount); err != nil {
 		return err
 	}
 	if badCount > 0 {
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "priority out of range before CHECK: count=%d", badCount)
 	}
-	if err := v1migrate.ExecIfMissingConstraint(ctx, db, "tasks", "chk_tasks_priority_v1", "ALTER TABLE tasks ADD CONSTRAINT chk_tasks_priority_v1 CHECK (priority IN ('low', 'normal', 'high', 'critical'))"); err != nil {
+	if err := v1migrate.ExecIfMissingConstraint(ctx, db, "tasks", "chk_tasks_priority_v1", "ALTER TABLE tasks ADD CONSTRAINT chk_tasks_priority_v1 CHECK (priority IN ('normal', 'high', 'drawing'))"); err != nil {
 		return err
 	}
 	return v1migrate.ExecIfMissingIndex(ctx, db, "tasks", "idx_tasks_priority_created", "ALTER TABLE tasks ADD KEY idx_tasks_priority_created (priority, created_at)")

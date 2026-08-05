@@ -56,9 +56,12 @@ const (
 type TaskPriority string
 
 const (
+	TaskPriorityNormal  TaskPriority = "normal"
+	TaskPriorityHigh    TaskPriority = "high"
+	TaskPriorityDrawing TaskPriority = "drawing"
+
+	// Deprecated read/rollback-only values. New writes reject both values.
 	TaskPriorityLow      TaskPriority = "low"
-	TaskPriorityNormal   TaskPriority = "normal"
-	TaskPriorityHigh     TaskPriority = "high"
 	TaskPriorityCritical TaskPriority = "critical"
 )
 

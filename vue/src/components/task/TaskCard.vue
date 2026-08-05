@@ -193,10 +193,9 @@ const props = defineProps<{
 }>()
 
 const priorityMeta = computed(() => ({
-  low: { label: '低优先级', tone: 'low' },
   normal: { label: '普通', tone: 'normal' },
-  high: { label: '高优先级', tone: 'high' },
-  critical: { label: '加急', tone: 'critical' },
+  high: { label: '加急', tone: 'high' },
+  drawing: { label: '出单画图', tone: 'drawing' },
 }[props.task.priority] ?? { label: '普通', tone: 'normal' }))
 
 const emit = defineEmits<{
@@ -337,11 +336,6 @@ const emit = defineEmits<{
   line-height: 1.5;
   white-space: nowrap;
 }
-.tc-priority--low {
-  background: rgb(var(--yb-surface-soft));
-  border-color: rgb(var(--yb-border));
-  color: rgb(var(--yb-text-muted));
-}
 .tc-priority--normal {
   background: rgb(var(--yb-brand) / 0.07);
   border-color: rgb(var(--yb-brand) / 0.14);
@@ -352,7 +346,7 @@ const emit = defineEmits<{
   border-color: rgb(var(--yb-warning-border));
   color: rgb(var(--yb-warning-text));
 }
-.tc-priority--critical {
+.tc-priority--drawing {
   background: rgb(var(--yb-danger-soft));
   border-color: rgb(var(--yb-danger) / 0.25);
   color: rgb(var(--yb-danger));

@@ -209,33 +209,42 @@ type ResourceBundle struct {
 }
 
 type ResourceGroupListParams struct {
-	TaskID         int64
-	SKUCode        string
-	TaskNo         string
-	CreatorID      *int64
-	ResourceRole   ResourceRoleFilter
-	Query          string
-	FormatCategory AssetFormatCategoryFilter
-	BusinessLane   TaskBusinessLane
-	Page           int
-	PageSize       int
-	Access         ResourceGroupAccessFilter
+	TaskID              int64
+	SKUCode             string
+	TaskNo              string
+	CreatorID           *int64
+	ResourceRole        ResourceRoleFilter
+	Query               string
+	FormatCategory      AssetFormatCategoryFilter
+	BusinessLane        TaskBusinessLane
+	FileFormat          string
+	ResourceOwnerID     *int64
+	ResourceCreatedFrom *time.Time
+	ResourceCreatedTo   *time.Time
+	TaskType            TaskType
+	Page                int
+	PageSize            int
+	Access              ResourceGroupAccessFilter
 }
 
 // FlatResourceItem is one cross-SKU resource row used when the asset-center
 // list is filtered by resource role or file format.
 type FlatResourceItem struct {
-	GroupID      int64              `json:"group_id"`
-	TaskID       int64              `json:"task_id"`
-	TaskAssetID  int64              `json:"-"`
-	TaskNo       string             `json:"task_no"`
-	SKUCode      string             `json:"sku_code,omitempty"`
-	ResourceRole ResourceRoleFilter `json:"resource_role"`
-	FileName     string             `json:"file_name"`
-	MimeType     string             `json:"mime_type,omitempty"`
-	PreviewURL   string             `json:"preview_url,omitempty"`
-	DownloadURL  string             `json:"download_url,omitempty"`
-	StorageKey   string             `json:"-"`
+	GroupID           int64              `json:"group_id"`
+	TaskID            int64              `json:"task_id"`
+	TaskAssetID       int64              `json:"-"`
+	TaskNo            string             `json:"task_no"`
+	TaskType          TaskType           `json:"task_type"`
+	SKUCode           string             `json:"sku_code,omitempty"`
+	ResourceRole      ResourceRoleFilter `json:"resource_role"`
+	FileName          string             `json:"file_name"`
+	MimeType          string             `json:"mime_type,omitempty"`
+	ResourceOwnerID   int64              `json:"resource_owner_id,omitempty"`
+	ResourceOwnerName string             `json:"resource_owner_name,omitempty"`
+	ResourceCreatedAt time.Time          `json:"resource_created_at"`
+	PreviewURL        string             `json:"preview_url,omitempty"`
+	DownloadURL       string             `json:"download_url,omitempty"`
+	StorageKey        string             `json:"-"`
 }
 
 type ResourceGroupAccessFilter struct {

@@ -149,10 +149,14 @@ export interface FlatResourceItem {
   group_id: number
   task_id: number
   task_no?: string
+  task_type: string
   sku_code?: string
   resource_role: 'reference' | 'source' | 'final'
   file_name: string
   mime_type?: string
+  resource_owner_id?: number
+  resource_owner_name?: string
+  resource_created_at: string
   preview_url?: string
   download_url?: string
 }
@@ -213,8 +217,11 @@ export const resourceGroupsApi = {
     creator_id?: number | string
     resource_role?: 'reference' | 'source' | 'final' | ''
     q?: string
-    format_category?: string
-    business_lane?: string
+    file_format?: string
+    created_from?: string
+    created_to?: string
+    resource_owner_id?: number | string
+    task_type?: string
     page?: number
     page_size?: number
   } = {}): Promise<ResourceGroupListResult> {

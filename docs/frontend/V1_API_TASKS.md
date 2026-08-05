@@ -1465,7 +1465,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 ### 简介
 支持方法: GET。
 
-- `GET`: Default response uses `view_mode=group` (one SKU resource-group card). When `resource_role` or a non-all `format_category` is supplied, the service returns `view_mode=flat` with matching `flat_items`.
+- `GET`: Default response uses `view_mode=group` (one SKU resource-group card). Resource role, exact file format, resource owner, or resource creation-time filters return `view_mode=flat` with matching `flat_items`. The top-level `q` remains the only keyword search.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1483,8 +1483,11 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 | `creator_id` | query | integer | 否 | - |
 | `resource_role` | query | enum(reference/source/final) | 否 | - |
 | `q` | query | string | 否 | Searches task number |
-| `format_category` | query | enum(all/image/design/pdf/document/video/archive) | 否 | document is accepted as an alias of pdf. |
-| `business_lane` | query | enum(normal/customization) | 否 | - |
+| `file_format` | query | string | 否 | Exact lowercase file extension without a dot |
+| `created_from` | query | string | 否 | Resource creation-time lower bound as RFC3339 or YYYY-MM-DD. |
+| `created_to` | query | string | 否 | Resource creation-time upper bound as RFC3339 or YYYY-MM-DD. |
+| `resource_owner_id` | query | integer | 否 | - |
+| `task_type` | query | enum(original_product_development/new_product_development/sku_planning/retouch_task/customer_customization/regular_customization) | 否 | - |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 
@@ -3803,7 +3806,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `designer_id` | query | integer | 否 | - |
 | `owner_department_id` | query | integer | 否 | - |
 | `owner_team_id` | query | integer | 否 | - |
-| `priority` | query | enum(low/normal/high/critical) | 否 | - |
+| `priority` | query | enum(normal/high/drawing) | 否 | - |
 | `overdue` | query | boolean | 否 | - |
 | `operational_bucket` | query | enum(active_tasks/design_pending/pending_audit/handover/customization_in_progress/overdue/due_today/today_created) | 否 | Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. |
 | `date_from` | query | string | 否 | - |
@@ -4560,7 +4563,7 @@ Content-Type: `application/json`
 | `manual_cost_override_reason` | string | 否 | - |
 | `trigger_filing` | boolean | 否 | Legacy compatibility switch. Prefer backend auto-policy; this flag forces one filing evaluation. |
 | `filed_at` | string | 否 | Legacy compatibility trigger timestamp. Backend maps this to a forced filing evaluation source. |
-| `priority` | enum(low/normal/high/critical) | 否 | Task priority. When provided, updates `tasks.priority` without requiring other business-info fields. |
+| `priority` | enum(normal/high/drawing) | 否 | Task priority. When provided, updates `tasks.priority` without requiring other business-info fields. |
 | `remark` | string | 否 | - |
 
 ### 响应体 schema
