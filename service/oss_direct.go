@@ -424,6 +424,12 @@ func (s *OSSDirectService) HeadObject(ctx context.Context, objectKey string) (bo
 	return exists, err
 }
 
+// PresignERPImageURL omits content-disposition so the URL stays within ERP
+// image-field limits. It remains a time-limited, signed private-object URL.
+func (s *OSSDirectService) PresignERPImageURL(objectKey string) *OSSDirectDownloadInfo {
+	return s.presignGetURLWithQuery(objectKey, nil)
+}
+
 func (s *OSSDirectService) StatObject(ctx context.Context, objectKey string) (*OSSObjectInfo, bool, error) {
 	if !s.Enabled() {
 		return nil, false, fmt.Errorf("oss direct service is not enabled")

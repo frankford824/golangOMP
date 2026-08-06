@@ -177,7 +177,7 @@ curl -X GET https://api.example.com/v1/erp/iids \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns one normalized ERP product detail through the MAIN facade. Detail lookup behavior: - accepts the product_id emitted by GET /v1/erp/products - first tries direct bridge detail lookup - when direct bridge detail returns 404, MAIN performs a compatible search-based fallback so list -> detail -> task binding remains stable for result-page integration - returns 404 only when MAIN cannot resolve the list-emitted lookup key anymore
+- `GET`: Returns one normalized ERP product detail through the MAIN facade. Detail lookup behavior: - accepts the product_id emitted by GET /v1/erp/products - first tries direct bridge detail lookup - when direct bridge detail returns 404, MAIN performs a compatible search-based fallback so list -> detail -> task binding remains stable for result-page integration - returns 404 only when MAIN cannot resolve the list-emitted lookup key anymore Browser callers require `catalog.view`; same-host MAIN filing workers may use the loopback-only `X-ERP-Bridge-Internal-Token` for post-upsert readback.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

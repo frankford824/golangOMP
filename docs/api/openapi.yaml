@@ -8430,6 +8430,8 @@ paths:
         - first tries direct bridge detail lookup
         - when direct bridge detail returns 404, MAIN performs a compatible search-based fallback so list -> detail -> task binding remains stable for result-page integration
         - returns 404 only when MAIN cannot resolve the list-emitted lookup key anymore
+        Browser callers require `catalog.view`; same-host MAIN filing workers may
+        use the loopback-only `X-ERP-Bridge-Internal-Token` for post-upsert readback.
       tags: [ERPBridge, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.view]

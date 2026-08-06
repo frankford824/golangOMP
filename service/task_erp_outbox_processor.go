@@ -179,9 +179,12 @@ func (p *taskERPOutboxProcessor) planningImageURL(ctx context.Context, refID str
 	if ref == nil || ref.Status != domain.AssetStorageRefStatusRecorded || ref.IsPlaceholder || ref.StorageAdapter != domain.AssetStorageAdapterOSSUploadService {
 		return "", fmt.Errorf("planning SKU image is not a recorded OSS object")
 	}
-	signed := p.oss.PresignDownloadURLWithFilename(ref.RefKey, ref.FileName)
+	signed := p.oss.PresignERPImageURL(ref.RefKey)
 	if signed == nil || strings.TrimSpace(signed.DownloadURL) == "" {
 		return "", fmt.Errorf("sign planning SKU image URL")
+	}
+	if len([]rune(signed.DownloadURL)) > 300 {
+		return "", fmt.Errorf("planning SKU image URL exceeds ERP 300-character limit")
 	}
 	return signed.DownloadURL, nil
 }

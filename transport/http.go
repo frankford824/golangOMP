@@ -162,7 +162,7 @@ func NewRouter(
 	{
 		erpGroup.GET("/products", capabilityAccess(erpGroup, http.MethodGet, "/products", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), erpBridgeH.SearchProducts)
 		erpGroup.GET("/iids", capabilityAccess(erpGroup, http.MethodGet, "/iids", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), erpBridgeH.ListIIDs)
-		erpGroup.GET("/products/*id", capabilityAccess(erpGroup, http.MethodGet, "/products/{id}", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), func(c *gin.Context) {
+		erpGroup.GET("/products/*id", erpInternalOrCapabilityAccess(erpGroup, http.MethodGet, "/products/{id}", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), func(c *gin.Context) {
 			if erpProductH != nil && strings.Trim(strings.TrimSpace(c.Param("id")), "/") == "by-code" {
 				erpProductH.ByCode(c)
 				return

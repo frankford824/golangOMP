@@ -317,6 +317,20 @@ func TestBuildUploadSessionObjectKey_IsDeterministicAndSafe(t *testing.T) {
 	}
 }
 
+func TestPresignERPImageURLOmitsContentDisposition(t *testing.T) {
+	svc := newTestOSSDirectService()
+	info := svc.PresignERPImageURL("tasks/planning-sku-create/upload-sessions/session/image.png")
+	if info == nil {
+		t.Fatal("PresignERPImageURL() = nil")
+	}
+	if strings.Contains(info.DownloadURL, "response-content-disposition") {
+		t.Fatalf("ERP image URL unexpectedly contains content disposition: %s", info.DownloadURL)
+	}
+	if !strings.Contains(info.DownloadURL, "OSSAccessKeyId=") || !strings.Contains(info.DownloadURL, "Signature=") {
+		t.Fatalf("ERP image URL is not signed: %s", info.DownloadURL)
+	}
+}
+
 func TestCreateUploadPlan_UsesSinglePartAtConfiguredThreshold(t *testing.T) {
 	svc := newTestOSSDirectService()
 	plan, err := svc.CreateUploadPlan(context.Background(), "asset-workbench/uploads/test.png", 10*1024*1024, "image/png")
