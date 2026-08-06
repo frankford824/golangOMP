@@ -27,9 +27,11 @@ type summary struct {
 func main() {
 	var dsn string
 	var apply bool
+	var confirmDatabase string
 	var timeout time.Duration
 	flag.StringVar(&dsn, "dsn", "", "MySQL DSN; defaults to config MySQL DSN")
 	flag.BoolVar(&apply, "apply", false, "insert missing sku_planning resource-group shells")
+	flag.StringVar(&confirmDatabase, "confirm-database", "", "required exact database name guard when --apply is used")
 	flag.DurationVar(&timeout, "timeout", 2*time.Minute, "whole run timeout")
 	flag.Parse()
 
@@ -52,6 +54,13 @@ func main() {
 	defer db.Close()
 	if err := db.PingContext(ctx); err != nil {
 		exitError("ping mysql", err)
+	}
+	var database string
+	if err := db.QueryRowContext(ctx, `SELECT DATABASE()`).Scan(&database); err != nil {
+		exitError("read database", err)
+	}
+	if apply && database != strings.TrimSpace(confirmDatabase) {
+		exitError("validate database guard", fmt.Errorf("connected database %q does not match confirmation %q", database, confirmDatabase))
 	}
 
 	out := summary{

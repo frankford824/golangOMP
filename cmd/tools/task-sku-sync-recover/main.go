@@ -199,8 +199,14 @@ func loadCandidates(ctx context.Context, db *sql.DB) ([]*candidate, error) {
 		); err != nil {
 			return nil, err
 		}
-		if item.TaskType == "sku_planning" && strings.TrimSpace(item.PlanningName) == "" {
-			item.PlanningName = truncateRunes(strings.TrimSpace(item.PlanningDescription), 255)
+		if item.TaskType == "sku_planning" {
+			item.PlanningName = strings.TrimSpace(item.PlanningName)
+			if item.PlanningName == "" {
+				item.PlanningName = strings.TrimSpace(item.PlanningDescription)
+			}
+			// 聚水潭商品名称/简称上限为 40 个 Unicode 字符；完整的冻结
+			// planning revision 仍保留在本地，只收敛异步 ERP 载荷。
+			item.PlanningName = truncateRunes(item.PlanningName, 40)
 		}
 		item.ResolvedIID, item.ResolutionSource = resolveIID(item)
 		out = append(out, item)

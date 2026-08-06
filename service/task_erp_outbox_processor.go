@@ -136,7 +136,7 @@ func (p *taskERPOutboxProcessor) processPlanningSKU(ctx context.Context, item re
 	}
 	payload.SKUCode = strings.TrimSpace(payload.SKUCode)
 	payload.ERPProductIID = strings.TrimSpace(payload.ERPProductIID)
-	payload.ERPProductName = strings.TrimSpace(payload.ERPProductName)
+	payload.ERPProductName = truncateERPShortName(payload.ERPProductName, ERPProductNameMaxLength)
 	if payload.SKUCode == "" || payload.ERPProductIID == "" || payload.ERPProductName == "" {
 		return fmt.Errorf("planning SKU ERP payload is missing sku_code, erp_product_i_id, or erp_product_name")
 	}

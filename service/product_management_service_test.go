@@ -763,8 +763,9 @@ func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T
 	if bridge.itemStyleCalls != 0 {
 		t.Fatalf("image sync used UpdateItemStyle %d times, want 0", bridge.itemStyleCalls)
 	}
-	if bridge.payload.Name != longHistoricalName || bridge.payload.ProductName != longHistoricalName {
-		t.Fatalf("image upsert payload should preserve product name: %+v", bridge.payload)
+	expectedERPName := truncateERPShortName(longHistoricalName, ERPProductNameMaxLength)
+	if bridge.payload.Name != expectedERPName || bridge.payload.ProductName != expectedERPName {
+		t.Fatalf("image upsert payload should use an ERP-safe historical name: %+v", bridge.payload)
 	}
 	if bridge.payload.SKUID != "NSAC000001" || bridge.payload.SKUCode != "NSAC000001" || bridge.payload.IID != "定制亚克力" {
 		t.Fatalf("image upsert payload identifiers = sku:%q sku_code:%q iid:%q", bridge.payload.SKUID, bridge.payload.SKUCode, bridge.payload.IID)

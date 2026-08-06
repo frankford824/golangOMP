@@ -1520,10 +1520,14 @@ func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) do
 	}
 	displayName := firstNonEmptyString(payload.Name, payload.ProductName, payload.ShortName, payload.ProductShortName, payload.SKUCode)
 	if displayName != "" {
-		payload.Name = displayName
-		payload.ProductName = displayName
-		payload.ShortName = displayName
-		payload.ProductShortName = displayName
+		// New writes are validated at 40 characters, while historical task and
+		// product records may predate that rule. Keep the full local snapshot
+		// untouched and make only the ERP transport representation safe.
+		erpDisplayName := truncateERPShortName(displayName, ERPProductNameMaxLength)
+		payload.Name = erpDisplayName
+		payload.ProductName = erpDisplayName
+		payload.ShortName = erpDisplayName
+		payload.ProductShortName = erpDisplayName
 	}
 	if payload.SPrice == nil {
 		payload.SPrice = payload.Price

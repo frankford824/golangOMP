@@ -788,7 +788,10 @@ func (s *productManagementService) syncBaseRecordToERP(ctx context.Context, reco
 	if strings.TrimSpace(record.SKUCode) == "" {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "SKU is required for ERP product sync", nil)
 	}
-	productName := firstNonEmptyString(strings.TrimSpace(record.ProductName), strings.TrimSpace(record.SKUCode))
+	productName := truncateERPShortName(
+		firstNonEmptyString(strings.TrimSpace(record.ProductName), strings.TrimSpace(record.SKUCode)),
+		ERPProductNameMaxLength,
+	)
 	productIID := firstNonEmptyString(strings.TrimSpace(record.ERPIID), strings.TrimSpace(record.ProductIID))
 	shortName := productManagementERPShortName(productName, productIID, record.SKUCode)
 	payload := domain.ERPProductUpsertPayload{
@@ -837,7 +840,10 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	if lookupErr != nil {
 		return lookupErr
 	}
-	productName := firstNonEmptyString(strings.TrimSpace(record.ProductName), skuCode)
+	productName := truncateERPShortName(
+		firstNonEmptyString(strings.TrimSpace(record.ProductName), skuCode),
+		ERPProductNameMaxLength,
+	)
 	shortName := productManagementERPShortName(productName, productIID, skuCode)
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        skuCode,

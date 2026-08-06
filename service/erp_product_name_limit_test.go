@@ -55,6 +55,21 @@ func TestNormalizeERPProductUpsertPayloadForcesProductNameAsShortName(t *testing
 	}
 }
 
+func TestNormalizeERPProductUpsertPayloadTruncatesHistoricalNameForERPOnly(t *testing.T) {
+	historicalName := strings.Repeat("旧", ERPProductNameMaxLength+7)
+	normalized := normalizeERPProductUpsertPayload(domain.ERPProductUpsertPayload{
+		SKUID: "SKU-HISTORICAL-001",
+		Name:  historicalName,
+	})
+	if got := utf8.RuneCountInString(normalized.Name); got != ERPProductNameMaxLength {
+		t.Fatalf("normalized name length = %d, want %d", got, ERPProductNameMaxLength)
+	}
+	if normalized.Name != normalized.ShortName || normalized.Name != normalized.ProductName ||
+		normalized.Name != normalized.ProductShortName {
+		t.Fatalf("normalized ERP names diverged: %+v", normalized)
+	}
+}
+
 func TestTruncateERPShortNameIsRuneSafe(t *testing.T) {
 	got := truncateERPShortName(strings.Repeat("中", 50), ERPProductShortNameMaxLength)
 	if !utf8.ValidString(got) {
