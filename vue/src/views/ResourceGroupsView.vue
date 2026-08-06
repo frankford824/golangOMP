@@ -33,7 +33,7 @@
     </section>
 
     <div v-if="error" class="error" role="alert"><span>{{ error }}</span><button @click="load">重试</button></div>
-    <div v-if="loading && !result.items.length && !result.flat_items.length" class="empty loading-state" role="status">
+    <div v-if="loading && !result.items.length && !result.flat_items.length && !externalItems.length" class="empty loading-state" role="status">
       <span class="loading-spinner" aria-hidden="true" />正在检索 SKU 与资源…
     </div>
     <div v-else-if="loading" class="results-refreshing" role="status"><span class="loading-spinner" aria-hidden="true" />正在更新结果，当前列表仍可查看</div>
@@ -59,7 +59,7 @@
     </template>
 
     <template v-else>
-      <div v-if="!result.items.length" class="empty">没有找到符合条件的 SKU 资源。</div>
+      <div v-if="!result.items.length && !externalItems.length" class="empty">没有找到符合条件的 SKU 资源。</div>
       <section v-else class="grid" aria-label="SKU 资源列表">
         <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" @click="openGroup(group.id)">
           <span class="cover">
@@ -105,6 +105,26 @@
           </span>
         </button>
       </section>
+      <section v-if="externalItems.length" class="external-results" aria-label="外部资源匹配">
+        <header>
+          <div><strong>外部资源匹配</strong><span>ERP / OSS / NAS 已索引资源</span></div>
+          <span>{{ externalItems.length }} 个文件</span>
+        </header>
+        <div class="grid external-grid">
+          <button v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" @click="openExternal(asset)">
+            <span class="cover">
+              <img v-if="externalPreviewURL(asset)" :src="externalPreviewURL(asset)" :alt="externalFileName(asset)" loading="lazy" />
+              <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(externalFileName(asset)) }}</span><small>外部资源</small></span>
+              <span class="mode-badge">外部</span>
+            </span>
+            <span class="card-body">
+              <strong class="sku-code">{{ asset.sku_code || asset.primary_sku_code || filters.q }}</strong>
+              <span class="product-name">{{ externalFileName(asset) }}</span>
+              <span class="provenance">{{ asset.source_label || '外部资源' }} · {{ asset.oss_sync_status === 'ready' ? 'OSS 已就绪' : '只读索引' }}</span>
+            </span>
+          </button>
+        </div>
+      </section>
     </template>
     </template>
 
@@ -143,6 +163,8 @@ import { useRouter } from 'vue-router'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import ProductionPackageDialog from '@/components/assets/ProductionPackageDialog.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
+import type { BackendAsset } from '@/services/apiTypes'
+import { assetsApi, type AssetBatchSearchManifest } from '@/services/api/assetsApi'
 import { resourceGroupsApi, type FlatResourceItem, type ProductCostReconciliation, type ResourceGroup, type ResourceRevision } from '@/services/api/resourceGroupsApi'
 
 type FilterKey = 'resource_role' | 'file_format' | 'created_from' | 'created_to' | 'resource_owner_id'
@@ -155,6 +177,7 @@ const packageOpen = ref(false)
 const brokenImages = ref(new Set<number>())
 const brokenFlat = ref(new Set<number>())
 const liveCosts = ref(new Map<number, ProductCostReconciliation>())
+const externalItems = ref<BackendAsset[]>([])
 let liveCostRequestVersion = 0
 const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final', file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
 const initialPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? Math.max(80, Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE || 100)) : 24
@@ -209,6 +232,16 @@ const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).
 function markImageBroken(id: number) { brokenImages.value = new Set(brokenImages.value).add(id) }
 function markFlatBroken(index: number) { brokenFlat.value = new Set(brokenFlat.value).add(index) }
 function openGroup(id: number) { void router.push(`/asset-center/${id}`) }
+function externalResourceID(asset: BackendAsset) { return String(asset.resource_id || asset.id || '') }
+function externalFileName(asset: BackendAsset) { return asset.file_name || asset.original_filename || externalResourceID(asset) || '外部资源' }
+function externalPreviewURL(asset: BackendAsset) {
+  const candidate = typeof asset.preview_url === 'string' ? asset.preview_url : asset.preview_available ? asset.download_url : ''
+  return candidate || ''
+}
+function openExternal(asset: BackendAsset) {
+  const id = externalResourceID(asset)
+  if (id.startsWith('ext-')) void router.push(`/asset-center/${id}`)
+}
 function clearFilter(key: FilterKey) { filters[key] = ''; search() }
 function clearAllFilters() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }); search() }
 function resetDrawer() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }) }
@@ -220,11 +253,31 @@ async function load() {
   error.value = ''
   try {
     const exactSKUQuery = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(filters.q)
-    const next = await resourceGroupsApi.list({ q: exactSKUQuery ? undefined : filters.q || undefined, sku_code: exactSKUQuery ? filters.q.toUpperCase() : undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, page: result.page, page_size: result.page_size })
+    const externalSearch = exactSKUQuery
+      ? assetsApi.batchSearchAssets({ terms: [filters.q.toUpperCase()], format_filter: 'all', asset_kind: 'all' }).catch(() => null)
+      : Promise.resolve(null)
+    const [next, externalResponse] = await Promise.all([
+      resourceGroupsApi.list({ q: exactSKUQuery ? undefined : filters.q || undefined, sku_code: exactSKUQuery ? filters.q.toUpperCase() : undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, page: result.page, page_size: result.page_size }),
+      externalSearch,
+    ])
     result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (isFlatMode.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
+    const externalBody = externalResponse?.data
+    const externalManifest = externalBody && typeof externalBody === 'object' && 'data' in externalBody
+      ? externalBody.data as AssetBatchSearchManifest | undefined
+      : externalBody as AssetBatchSearchManifest | undefined
+    const seenExternal = new Set<string>()
+    externalItems.value = (externalManifest?.results || [])
+      .flatMap((row) => row.assets || [])
+      .filter((asset) => asset.source_type === 'external' && externalResourceID(asset).startsWith('ext-'))
+      .filter((asset) => {
+        const id = externalResourceID(asset)
+        if (seenExternal.has(id)) return false
+        seenExternal.add(id)
+        return true
+      })
     brokenImages.value = new Set(); brokenFlat.value = new Set()
     if (exactSKUQuery && result.view_mode === 'group' && result.items.length <= 20) void refreshLiveCosts(result.items, requestVersion)
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '资产中心加载失败。' } finally { loading.value = false }
+  } catch (cause) { externalItems.value = []; error.value = cause instanceof Error ? cause.message : '资产中心加载失败。' } finally { loading.value = false }
 }
 async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number) {
   await Promise.all(groups.map(async (group) => {
@@ -273,6 +326,40 @@ onMounted(load)
 }
 
 .sku-asset-card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.external-results {
+  display: grid;
+  gap: 0.75rem;
+  grid-column: 1 / -1;
+}
+
+.external-results > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.78rem;
+}
+
+.external-results > header div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.external-results > header strong {
+  color: rgb(var(--yb-text));
+  font-size: 0.92rem;
+}
+
+.external-grid {
+  width: 100%;
+}
+
+.external-card {
   display: grid;
   grid-template-rows: auto 1fr;
 }

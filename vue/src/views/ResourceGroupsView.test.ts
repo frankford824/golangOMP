@@ -2,10 +2,14 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), costReconciliation: vi.fn(), push: vi.fn() }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), costReconciliation: vi.fn(), batchSearchAssets: vi.fn(), push: vi.fn() }))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@/services/api/resourceGroupsApi')>()
   return { ...original, resourceGroupsApi: { ...original.resourceGroupsApi, list: mocks.list, costReconciliation: mocks.costReconciliation } }
+})
+vi.mock('@/services/api/assetsApi', async (loadOriginal) => {
+  const original = await loadOriginal<typeof import('@/services/api/assetsApi')>()
+  return { ...original, assetsApi: { ...original.assetsApi, batchSearchAssets: mocks.batchSearchAssets } }
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 vi.mock('@/composables/useTaskFilterOptions', async () => {
@@ -69,6 +73,9 @@ describe('ResourceGroupsView', () => {
       status: 'mismatched',
       checked_at: '2026-08-05T10:00:00Z',
       message: 'ERP 成本与系统计算成本不一致',
+    })
+    mocks.batchSearchAssets.mockResolvedValue({
+      data: { data: { results: [], matched_count: 0, failed_count: 1 } },
     })
   })
 
@@ -153,6 +160,49 @@ describe('ResourceGroupsView', () => {
     expect(card.element.tagName).toBe('BUTTON')
     await card.trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+  })
+
+  it('shows exact external SKU matches in the same asset center and opens their read-only detail', async () => {
+    mocks.list.mockResolvedValueOnce({ items: [], view_mode: 'group', flat_items: [], page: 1, page_size: 24, total: 0 })
+    mocks.batchSearchAssets.mockResolvedValueOnce({
+      data: {
+        data: {
+          results: [{
+            term: 'HSC40222',
+            status: 'matched',
+            message: '已匹配',
+            candidates: 1,
+            assets: [{
+              id: '77',
+              resource_id: 'ext-77',
+              source_type: 'external',
+              source_label: '外部资源',
+              file_role: 'delivery',
+              sku_code: 'HSC40222',
+              file_name: 'HSC40222-final.tif',
+              oss_sync_status: 'ready',
+            }],
+          }],
+          matched_count: 1,
+          failed_count: 0,
+        },
+      },
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('.search-field input').setValue('HSC40222')
+    await wrapper.get('.search-row').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.batchSearchAssets).toHaveBeenLastCalledWith({
+      terms: ['HSC40222'],
+      format_filter: 'all',
+      asset_kind: 'all',
+    })
+    expect(wrapper.text()).toContain('外部资源匹配')
+    expect(wrapper.text()).toContain('HSC40222-final.tif')
+    await wrapper.get('.external-card').trigger('click')
+    expect(mocks.push).toHaveBeenCalledWith('/asset-center/ext-77')
   })
 
   it('switches to flat resource grid when the API returns flat view_mode', async () => {
