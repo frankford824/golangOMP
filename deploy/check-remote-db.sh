@@ -83,7 +83,10 @@ resource_group_mismatches="$(run_mysql "
     SELECT
       t.id,
       CASE
-        WHEN t.task_type IN ('sku_planning', 'purchase_task') THEN 0
+        WHEN t.task_type = 'purchase_task' THEN 0
+        WHEN t.task_type = 'sku_planning' THEN (
+          SELECT COUNT(*) FROM task_sku_items tsi WHERE tsi.task_id = t.id
+        )
         WHEN t.task_type = 'retouch_task' THEN (
           SELECT COUNT(*) FROM task_retouch_requirements trr WHERE trr.task_id = t.id
         )
