@@ -84,6 +84,11 @@ func NewRouter(
 		routeAccessCatalog.AddRule(domain.NewCapabilityRouteAccessRule(method, fullPath, readiness, permissions...))
 		return withCapabilityAccess(permissionLogger, effectiveAccessResolver, readiness, permissions...)
 	}
+	erpInternalOrCapabilityAccess := func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, permissions ...domain.PermissionCode) gin.HandlerFunc {
+		fullPath := joinRoutePath(group.BasePath(), path)
+		routeAccessCatalog.AddRule(domain.NewCapabilityRouteAccessRule(method, fullPath, readiness, permissions...))
+		return withERPBridgeInternalOrCapabilityAccess(permissionLogger, effectiveAccessResolver, readiness, permissions...)
+	}
 	access := func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, roles ...domain.Role) gin.HandlerFunc {
 		fullPath := joinRoutePath(group.BasePath(), path)
 		if readiness == domain.APIReadinessReadyForFrontend {
@@ -168,11 +173,11 @@ func NewRouter(
 		erpGroup.GET("/warehouses", capabilityAccess(erpGroup, http.MethodGet, "/warehouses", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.ListWarehouses)
 		erpGroup.GET("/sync-logs", capabilityAccess(erpGroup, http.MethodGet, "/sync-logs", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.ListSyncLogs)
 		erpGroup.GET("/sync-logs/*id", capabilityAccess(erpGroup, http.MethodGet, "/sync-logs/{id}", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.GetSyncLogByID)
-		erpGroup.POST("/products/upsert", capabilityAccess(erpGroup, http.MethodPost, "/products/upsert", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UpsertProduct)
-		erpGroup.POST("/products/style/update", capabilityAccess(erpGroup, http.MethodPost, "/products/style/update", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UpdateItemStyle)
-		erpGroup.POST("/products/shelve/batch", capabilityAccess(erpGroup, http.MethodPost, "/products/shelve/batch", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.ShelveProductsBatch)
-		erpGroup.POST("/products/unshelve/batch", capabilityAccess(erpGroup, http.MethodPost, "/products/unshelve/batch", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UnshelveProductsBatch)
-		erpGroup.POST("/inventory/virtual-qty", capabilityAccess(erpGroup, http.MethodPost, "/inventory/virtual-qty", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UpdateVirtualInventory)
+		erpGroup.POST("/products/upsert", erpInternalOrCapabilityAccess(erpGroup, http.MethodPost, "/products/upsert", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UpsertProduct)
+		erpGroup.POST("/products/style/update", erpInternalOrCapabilityAccess(erpGroup, http.MethodPost, "/products/style/update", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UpdateItemStyle)
+		erpGroup.POST("/products/shelve/batch", erpInternalOrCapabilityAccess(erpGroup, http.MethodPost, "/products/shelve/batch", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.ShelveProductsBatch)
+		erpGroup.POST("/products/unshelve/batch", erpInternalOrCapabilityAccess(erpGroup, http.MethodPost, "/products/unshelve/batch", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UnshelveProductsBatch)
+		erpGroup.POST("/inventory/virtual-qty", erpInternalOrCapabilityAccess(erpGroup, http.MethodPost, "/inventory/virtual-qty", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.UpdateVirtualInventory)
 	}
 
 	categoryGroup := v1.Group("/categories")

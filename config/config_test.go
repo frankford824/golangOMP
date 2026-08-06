@@ -108,6 +108,20 @@ func TestLoadUsesExplicitERPBridgeBaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadUsesERPBridgeInternalToken(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+	t.Setenv("ERP_BRIDGE_INTERNAL_TOKEN", "bridge-secret")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ERPBridge.InternalToken != "bridge-secret" {
+		t.Fatalf("ERPBridge.InternalToken = %q, want configured value", cfg.ERPBridge.InternalToken)
+	}
+}
+
 func TestLoadIncludesUploadServiceDefaults(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
 	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")

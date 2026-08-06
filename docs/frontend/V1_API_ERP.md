@@ -348,7 +348,7 @@ curl -X GET https://api.example.com/v1/erp/warehouses \
 ### 简介
 支持方法: POST。
 
-- `POST`: Bridge-side write endpoint that accepts ordinary product-profile upsert payloads from MAIN. MAIN calls this internally via `ERP_BRIDGE_BASE_URL` when `filed_at` is set on an existing-product task. In the current v0.4 architecture, Bridge uses a `localERPBridgeClient` that persists directly to the shared MySQL database rather than calling an external ERP API. As of 2026-03-17, Bridge also supports a config-driven remote mode: `ERP_REMOTE_MODE=local|remote|hybrid`. - `local`: keep local DB writeback - `remote`: upsert is sent to configured external ERP API - `hybrid`: remote first, optional local fallback by env switch OpenWeb official mapping used by Bridge remote mode: - `POST /v1/erp/products/upsert` -> `/open/webapi/itemapi/itemsku/itemskubatchupload` - `POST /v1/erp/products/style/update` -> `/open/webapi/itemapi/itemskuim/itemupload` - OpenWeb signature parameters are: `app_key`, `access_token`, `timestamp`, `charset`, `version`, `biz` (`sign` excluded from signing), sorted by key and signed as: `md5(app_secret + key1value1key2value2...)` (lowercase hex) Combined-SKU upload endpoint `/open/item/combinesku/upload` is intentionally not auto-selected in current Bridge contract because this payload currently has no explicit "combined SKU" discriminator; Bridge keeps ordinary-SKU mapping deterministic to avoid accidental wrong-endpoint writes. Current live production mode is `hybrid`; do not assume every write endpoint has remote success without upstream response evidence for that endpoint. This route was added in ITERATION_070 to fix a 404 gap that prevented all MAIN -> Bridge filing calls from succeeding. Requires session authentication (Bearer token forwarded from MAIN).
+- `POST`: Bridge-side write endpoint that accepts ordinary product-profile upsert payloads from MAIN. MAIN calls this internally via `ERP_BRIDGE_BASE_URL` when `filed_at` is set on an existing-product task. In the current v0.4 architecture, Bridge uses a `localERPBridgeClient` that persists directly to the shared MySQL database rather than calling an external ERP API. As of 2026-03-17, Bridge also supports a config-driven remote mode: `ERP_REMOTE_MODE=local|remote|hybrid`. - `local`: keep local DB writeback - `remote`: upsert is sent to configured external ERP API - `hybrid`: remote first, optional local fallback by env switch OpenWeb official mapping used by Bridge remote mode: - `POST /v1/erp/products/upsert` -> `/open/webapi/itemapi/itemsku/itemskubatchupload` - `POST /v1/erp/products/style/update` -> `/open/webapi/itemapi/itemskuim/itemupload` - OpenWeb signature parameters are: `app_key`, `access_token`, `timestamp`, `charset`, `version`, `biz` (`sign` excluded from signing), sorted by key and signed as: `md5(app_secret + key1value1key2value2...)` (lowercase hex) Combined-SKU upload endpoint `/open/item/combinesku/upload` is intentionally not auto-selected in current Bridge contract because this payload currently has no explicit "combined SKU" discriminator; Bridge keeps ordinary-SKU mapping deterministic to avoid accidental wrong-endpoint writes. Current live production mode is `hybrid`; do not assume every write endpoint has remote success without upstream response evidence for that endpoint. This route was added in ITERATION_070 to fix a 404 gap that prevented all MAIN -> Bridge filing calls from succeeding. Browser callers require session authentication and `erp.manage`. Same-host MAIN workers may instead send `X-ERP-Bridge-Internal-Token`; Bridge accepts that credential only from a loopback peer and only on the explicitly registered ERP mutation routes. The internal token must never be exposed to frontend code.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -463,7 +463,7 @@ curl -X POST https://api.example.com/v1/erp/products/upsert \
 ### 简介
 支持方法: POST。
 
-- `POST`: Bridge-side style update endpoint for i_id-centered changes, especially for original-product flows where SKU remains unchanged but style-level data (picture/style fields) needs update. OpenWeb remote mapping: `POST /v1/erp/products/style/update` -> `/open/webapi/itemapi/itemskuim/itemupload`.
+- `POST`: Bridge-side style update endpoint for i_id-centered changes, especially for original-product flows where SKU remains unchanged but style-level data (picture/style fields) needs update. OpenWeb remote mapping: `POST /v1/erp/products/style/update` -> `/open/webapi/itemapi/itemskuim/itemupload`. Browser callers require session authentication and `erp.manage`; same-host MAIN workers may use the loopback-only `X-ERP-Bridge-Internal-Token`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -670,7 +670,7 @@ curl -X GET https://api.example.com/v1/erp/sync-logs/<id> \
 ### 简介
 支持方法: POST。
 
-- `POST`: Bridge-owned ERP batch shelve mutation boundary for MAIN integration. OpenWeb official mapping in remote/hybrid mode: `POST /v1/erp/products/shelve/batch` -> `/open/webapi/wmsapi/openshelve/skubatchshelve`. Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but upstream currently rejects with business response `code=100, msg=涓婃灦浠撲綅涓嶈兘涓虹┖` for tested payloads; in `hybrid` mode Bridge falls back to local write path.
+- `POST`: Bridge-owned ERP batch shelve mutation boundary for MAIN integration. OpenWeb official mapping in remote/hybrid mode: `POST /v1/erp/products/shelve/batch` -> `/open/webapi/wmsapi/openshelve/skubatchshelve`. Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but upstream currently rejects with business response `code=100, msg=涓婃灦浠撲綅涓嶈兘涓虹┖` for tested payloads; in `hybrid` mode Bridge falls back to local write path. Same-host MAIN workers may use the loopback-only `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -733,7 +733,7 @@ curl -X POST https://api.example.com/v1/erp/products/shelve/batch \
 ### 简介
 支持方法: POST。
 
-- `POST`: Bridge-owned ERP batch unshelve mutation boundary for MAIN integration. OpenWeb official mapping in remote/hybrid mode: `POST /v1/erp/products/unshelve/batch` -> `/open/webapi/wmsapi/openoffshelve/skubatchoffshelve`. Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but upstream currently rejects with business response `code=100, msg=鎸囧畾绠变笉瀛樺湪` for tested payloads; in `hybrid` mode Bridge falls back to local write path.
+- `POST`: Bridge-owned ERP batch unshelve mutation boundary for MAIN integration. OpenWeb official mapping in remote/hybrid mode: `POST /v1/erp/products/unshelve/batch` -> `/open/webapi/wmsapi/openoffshelve/skubatchoffshelve`. Same-host MAIN workers may use the loopback-only `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`. Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but upstream currently rejects with business response `code=100, msg=鎸囧畾绠变笉瀛樺湪` for tested payloads; in `hybrid` mode Bridge falls back to local write path.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -796,7 +796,7 @@ curl -X POST https://api.example.com/v1/erp/products/unshelve/batch \
 ### 简介
 支持方法: POST。
 
-- `POST`: Bridge-owned ERP virtual inventory mutation boundary for MAIN integration. OpenWeb official mapping in remote/hybrid mode: `POST /v1/erp/inventory/virtual-qty` -> `/open/webapi/itemapi/iteminventory/batchupdatewmsvirtualqtys`. Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but upstream raw body in tested cases returns `code=0, msg=鏈幏鍙栧埌鏈夋晥鐨勪紶鍏ユ暟鎹? data=null`. Bridge classifies this as business rejection and in `hybrid` mode falls back to local write path.
+- `POST`: Bridge-owned ERP virtual inventory mutation boundary for MAIN integration. OpenWeb official mapping in remote/hybrid mode: `POST /v1/erp/inventory/virtual-qty` -> `/open/webapi/itemapi/iteminventory/batchupdatewmsvirtualqtys`. Same-host MAIN workers may use the loopback-only `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`. Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but upstream raw body in tested cases returns `code=0, msg=鏈幏鍙栧埌鏈夋晥鐨勪紶鍏ユ暟鎹? data=null`. Bridge classifies this as business rejection and in `hybrid` mode falls back to local write path.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

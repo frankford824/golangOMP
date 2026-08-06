@@ -258,6 +258,9 @@ func TestERPBridgeClientUpsertProductPostsNormalizedPayload(t *testing.T) {
 		if r.URL.Path != "/v1/erp/products/upsert" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
+		if got := r.Header.Get("X-ERP-Bridge-Internal-Token"); got != "bridge-secret" {
+			t.Fatalf("internal token header = %q", got)
+		}
 		var payload map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode payload: %v", err)
@@ -286,7 +289,7 @@ func TestERPBridgeClientUpsertProductPostsNormalizedPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewERPBridgeClient(ERPBridgeClientConfig{BaseURL: server.URL})
+	client, err := NewERPBridgeClient(ERPBridgeClientConfig{BaseURL: server.URL, InternalToken: "bridge-secret"})
 	if err != nil {
 		t.Fatalf("NewERPBridgeClient() error = %v", err)
 	}

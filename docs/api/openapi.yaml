@@ -8531,7 +8531,11 @@ paths:
         remote success without upstream response evidence for that endpoint.
         This route was added in ITERATION_070 to fix a 404 gap that prevented all
         MAIN -> Bridge filing calls from succeeding.
-        Requires session authentication (Bearer token forwarded from MAIN).
+        Browser callers require session authentication and `erp.manage`.
+        Same-host MAIN workers may instead send `X-ERP-Bridge-Internal-Token`;
+        Bridge accepts that credential only from a loopback peer and only on the
+        explicitly registered ERP mutation routes. The internal token must never
+        be exposed to frontend code.
       tags: [ERPBridge, InternalBridge]
       x-api-readiness: ready_for_frontend
       x-permissions: [erp.manage]
@@ -8567,6 +8571,8 @@ paths:
         where SKU remains unchanged but style-level data (picture/style fields) needs update.
         OpenWeb remote mapping:
         `POST /v1/erp/products/style/update` -> `/open/webapi/itemapi/itemskuim/itemupload`.
+        Browser callers require session authentication and `erp.manage`; same-host
+        MAIN workers may use the loopback-only `X-ERP-Bridge-Internal-Token`.
       tags: [ERPBridge, InternalBridge]
       x-api-readiness: ready_for_frontend
       x-permissions: [erp.manage]
@@ -8681,6 +8687,8 @@ paths:
         Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but
         upstream currently rejects with business response `code=100, msg=涓婃灦浠撲綅涓嶈兘涓虹┖`
         for tested payloads; in `hybrid` mode Bridge falls back to local write path.
+        Same-host MAIN workers may use the loopback-only
+        `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`.
       tags: [ERPBridge, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [erp.manage]
@@ -8711,6 +8719,8 @@ paths:
         Bridge-owned ERP batch unshelve mutation boundary for MAIN integration.
         OpenWeb official mapping in remote/hybrid mode:
         `POST /v1/erp/products/unshelve/batch` -> `/open/webapi/wmsapi/openoffshelve/skubatchoffshelve`.
+        Same-host MAIN workers may use the loopback-only
+        `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`.
         Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but
         upstream currently rejects with business response `code=100, msg=鎸囧畾绠变笉瀛樺湪`
         for tested payloads; in `hybrid` mode Bridge falls back to local write path.
@@ -8744,6 +8754,8 @@ paths:
         Bridge-owned ERP virtual inventory mutation boundary for MAIN integration.
         OpenWeb official mapping in remote/hybrid mode:
         `POST /v1/erp/inventory/virtual-qty` -> `/open/webapi/itemapi/iteminventory/batchupdatewmsvirtualqtys`.
+        Same-host MAIN workers may use the loopback-only
+        `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`.
         Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but
         upstream raw body in tested cases returns `code=0, msg=鏈幏鍙栧埌鏈夋晥鐨勪紶鍏ユ暟鎹? data=null`.
         Bridge classifies this as business rejection and in `hybrid` mode falls back

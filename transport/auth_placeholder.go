@@ -2,6 +2,8 @@ package transport
 
 import (
 	"context"
+	"crypto/subtle"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -14,15 +16,16 @@ import (
 )
 
 const (
-	authorizationHeader       = "Authorization"
-	debugActorIDHeader        = "X-Debug-Actor-Id"
-	debugActorRolesHeader     = "X-Debug-Actor-Roles"
-	workflowActorIDHeader     = "X-Workflow-Actor-Id"
-	workflowActorRolesHeader  = "X-Workflow-Actor-Roles"
-	workflowAuthModeHeader    = "X-Workflow-Auth-Mode"
-	workflowReadinessHeader   = "X-Workflow-API-Readiness"
-	workflowRolesHeader       = "X-Workflow-Required-Roles"
-	workflowPermissionsHeader = "X-Workflow-Required-Permissions"
+	authorizationHeader          = "Authorization"
+	debugActorIDHeader           = "X-Debug-Actor-Id"
+	debugActorRolesHeader        = "X-Debug-Actor-Roles"
+	workflowActorIDHeader        = "X-Workflow-Actor-Id"
+	workflowActorRolesHeader     = "X-Workflow-Actor-Roles"
+	workflowAuthModeHeader       = "X-Workflow-Auth-Mode"
+	workflowReadinessHeader      = "X-Workflow-API-Readiness"
+	workflowRolesHeader          = "X-Workflow-Required-Roles"
+	workflowPermissionsHeader    = "X-Workflow-Required-Permissions"
+	erpBridgeInternalTokenHeader = "X-ERP-Bridge-Internal-Token"
 )
 
 // debugActorHeadersEnabled gates X-Debug-Actor-* identity injection. It is
@@ -100,6 +103,49 @@ func withCapabilityAccess(permissionLogger PermissionLogWriter, resolver Effecti
 		recordRouteAccess(permissionLogger, c, actor, meta, true, "effective capability matched")
 		c.Next()
 	}
+}
+
+// withERPBridgeInternalOrCapabilityAccess keeps the normal session/capability
+// contract for browser callers while allowing MAIN background workers to call
+// same-host Bridge mutation routes. The internal credential is accepted only
+// from a real loopback peer and only on routes that explicitly opt in to this
+// middleware.
+func withERPBridgeInternalOrCapabilityAccess(permissionLogger PermissionLogWriter, resolver EffectiveAccessResolver, readiness domain.APIReadiness, permissions ...domain.PermissionCode) gin.HandlerFunc {
+	capabilityAccess := withCapabilityAccess(permissionLogger, resolver, readiness, permissions...)
+	return func(c *gin.Context) {
+		expected := strings.TrimSpace(os.Getenv("ERP_BRIDGE_INTERNAL_TOKEN"))
+		provided := strings.TrimSpace(c.GetHeader(erpBridgeInternalTokenHeader))
+		if expected == "" || provided == "" || !requestRemoteIsLoopback(c.Request.RemoteAddr) ||
+			subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) != 1 {
+			capabilityAccess(c)
+			return
+		}
+
+		meta := domain.NewCapabilityRouteAccessMeta(readiness, permissions...)
+		c.Header(workflowReadinessHeader, string(readiness))
+		codes := make([]string, 0, len(permissions))
+		for _, permission := range permissions {
+			codes = append(codes, string(permission))
+		}
+		c.Header(workflowPermissionsHeader, strings.Join(codes, ","))
+		ctx := domain.WithRouteAccessMeta(c.Request.Context(), meta)
+		c.Request = c.Request.WithContext(ctx)
+		internalActor := domain.RequestActor{
+			Source:   domain.RequestActorSourceSystemFallback,
+			AuthMode: domain.AuthModeDebugHeaderRoleEnforced,
+		}
+		recordRouteAccess(permissionLogger, c, internalActor, meta, true, "same-host ERP Bridge internal credential matched")
+		c.Next()
+	}
+}
+
+func requestRemoteIsLoopback(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(remoteAddr), "[]")
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func injectRequestActorPlaceholder() gin.HandlerFunc {

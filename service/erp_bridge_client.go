@@ -36,15 +36,17 @@ type ERPBridgeClient interface {
 }
 
 type ERPBridgeClientConfig struct {
-	BaseURL string
-	Timeout time.Duration
-	Logger  *zap.Logger
+	BaseURL       string
+	Timeout       time.Duration
+	InternalToken string
+	Logger        *zap.Logger
 }
 
 type erpBridgeClient struct {
-	baseURL    *url.URL
-	httpClient *http.Client
-	logger     *zap.Logger
+	baseURL       *url.URL
+	httpClient    *http.Client
+	internalToken string
+	logger        *zap.Logger
 }
 
 type erpBridgeHTTPError struct {
@@ -120,7 +122,8 @@ func NewERPBridgeClient(cfg ERPBridgeClientConfig) (ERPBridgeClient, error) {
 		logger = zap.NewNop()
 	}
 	return &erpBridgeClient{
-		baseURL: parsed,
+		baseURL:       parsed,
+		internalToken: strings.TrimSpace(cfg.InternalToken),
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -354,6 +357,9 @@ func (c *erpBridgeClient) doJSON(ctx context.Context, method, rawPath string, qu
 	req.Header.Set("Accept", "application/json")
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.internalToken != "" {
+		req.Header.Set("X-ERP-Bridge-Internal-Token", c.internalToken)
 	}
 	if bearerToken, ok := domain.RequestBearerTokenFromContext(ctx); ok {
 		req.Header.Set("Authorization", "Bearer "+bearerToken)

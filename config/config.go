@@ -237,8 +237,9 @@ type ERPSyncConfig struct {
 }
 
 type ERPBridgeConfig struct {
-	BaseURL string
-	Timeout time.Duration
+	BaseURL       string
+	Timeout       time.Duration
+	InternalToken string
 }
 
 type ERPRemoteConfig struct {
@@ -329,8 +330,9 @@ func Load() (*Config, error) {
 			Timeout:    mustParseDuration(getEnv("ERP_SYNC_TIMEOUT", "30s")),
 		},
 		ERPBridge: ERPBridgeConfig{
-			BaseURL: getEnv("ERP_BRIDGE_BASE_URL", "http://127.0.0.1:8081"),
-			Timeout: mustParseDuration(getEnv("ERP_BRIDGE_TIMEOUT", "15s")),
+			BaseURL:       getEnv("ERP_BRIDGE_BASE_URL", "http://127.0.0.1:8081"),
+			Timeout:       mustParseDuration(getEnv("ERP_BRIDGE_TIMEOUT", "15s")),
+			InternalToken: getEnv("ERP_BRIDGE_INTERNAL_TOKEN", ""),
 		},
 		ERPRemote: ERPRemoteConfig{
 			Mode:                     getEnv("ERP_REMOTE_MODE", "local"),

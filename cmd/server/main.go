@@ -174,9 +174,10 @@ func main() {
 	// Main(8080) keeps forwarding to Bridge(8081) HTTP as before.
 	if cfg.Server.Port != "8081" {
 		erpBridgeClient, err = service.NewERPBridgeClient(service.ERPBridgeClientConfig{
-			BaseURL: cfg.ERPBridge.BaseURL,
-			Timeout: cfg.ERPBridge.Timeout,
-			Logger:  logger.Named("erp_bridge"),
+			BaseURL:       cfg.ERPBridge.BaseURL,
+			Timeout:       cfg.ERPBridge.Timeout,
+			InternalToken: cfg.ERPBridge.InternalToken,
+			Logger:        logger.Named("erp_bridge"),
 		})
 		if err != nil {
 			logger.Fatal("ERP Bridge client config failed", zap.Error(err))

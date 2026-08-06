@@ -66,6 +66,38 @@ func TestTaskAssetUploadSessionRoutesAcceptCapabilityOnlyAndRejectLegacyRoleOnly
 	}
 }
 
+func TestERPBridgeInternalAccessRequiresMatchingTokenAndLoopbackPeer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ERP_BRIDGE_INTERNAL_TOKEN", "bridge-secret")
+
+	for _, tc := range []struct {
+		name       string
+		token      string
+		remoteAddr string
+		wantStatus int
+	}{
+		{name: "matching loopback service credential", token: "bridge-secret", remoteAddr: "127.0.0.1:41234", wantStatus: http.StatusNoContent},
+		{name: "wrong credential", token: "wrong", remoteAddr: "127.0.0.1:41234", wantStatus: http.StatusUnauthorized},
+		{name: "matching credential from non-loopback peer", token: "bridge-secret", remoteAddr: "192.0.2.10:41234", wantStatus: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			router.POST("/v1/erp/products/upsert",
+				withERPBridgeInternalOrCapabilityAccess(nil, effectiveAccessResolverStub{}, domain.APIReadinessReadyForFrontend, domain.PermissionERPManage),
+				func(c *gin.Context) { c.Status(http.StatusNoContent) },
+			)
+			request := httptest.NewRequest(http.MethodPost, "/v1/erp/products/upsert", nil)
+			request.RemoteAddr = tc.remoteAddr
+			request.Header.Set(erpBridgeInternalTokenHeader, tc.token)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestTaskAssetUploadSessionHTTPRegistrationsDoNotUseLegacyRoleAccess(t *testing.T) {
 	raw, err := os.ReadFile("http.go")
 	if err != nil {
