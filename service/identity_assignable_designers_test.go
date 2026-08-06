@@ -154,6 +154,7 @@ func TestListAssignableDesignersIncludesEverySourceFileUploaderInTheNormalLane(t
 	customRoleID := seedAssignableUser(t, userRepo, "retouch_specialist", domain.UserStatusActive)
 	customizationID := seedAssignableUser(t, userRepo, "customization", domain.UserStatusActive)
 	operationsID := seedAssignableUser(t, userRepo, "operations", domain.UserStatusActive)
+	superAdminID := seedAssignableUser(t, userRepo, "super_admin_only", domain.UserStatusActive)
 
 	reader := assignableAccessReader{byUser: map[int64]*domain.EffectiveAccess{
 		designerID:      assignableEffectiveAccess(designerID, 11, "designer", domain.PermissionTaskUploadSource),
@@ -161,6 +162,7 @@ func TestListAssignableDesignersIncludesEverySourceFileUploaderInTheNormalLane(t
 		customRoleID:    assignableEffectiveAccess(customRoleID, 13, "retouch_specialist", domain.PermissionTaskUploadSource),
 		customizationID: assignableEffectiveAccess(customizationID, 14, "customization_operator", domain.PermissionTaskUploadSource),
 		operationsID:    assignableEffectiveAccess(operationsID, 15, "operations", domain.PermissionTaskCreate),
+		superAdminID:    assignableEffectiveAccess(superAdminID, 16, "super_admin", domain.PermissionTaskUploadSource),
 	}}
 	svc := NewIdentityService(
 		userRepo,

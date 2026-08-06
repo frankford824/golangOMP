@@ -1296,11 +1296,14 @@ func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *do
 	return filtered, nil
 }
 
-// assignableCustomizationRoleCode is the only role that scopes a source-file
-// uploader to the customization lane. Every other holder of task.upload_source
-// belongs to the normal lane, including design_director and any custom design
-// role: an allowlist of role codes silently dropped them from the picker.
-const assignableCustomizationRoleCode = "customization_operator"
+// assignableCustomizationRoleCode scopes a source-file uploader to the
+// customization lane. Super-admin permission projection alone is not evidence
+// that a user performs design work; a super-admin who also holds an actual
+// design role is still included through that role's source entry.
+const (
+	assignableCustomizationRoleCode = "customization_operator"
+	assignableSuperAdminRoleCode    = "super_admin"
+)
 
 func effectiveAccessMatchesAssignableLane(access *domain.EffectiveAccess, lane AssignableLane) bool {
 	if access == nil {
@@ -1313,7 +1316,9 @@ func effectiveAccessMatchesAssignableLane(access *domain.EffectiveAccess, lane A
 				return true
 			}
 		case AssignableLaneNormal:
-			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode != assignableCustomizationRoleCode {
+			if source.Permission == domain.PermissionTaskUploadSource &&
+				source.RoleCode != assignableCustomizationRoleCode &&
+				source.RoleCode != assignableSuperAdminRoleCode {
 				return true
 			}
 		case AssignableLaneCustomization:
@@ -1321,7 +1326,7 @@ func effectiveAccessMatchesAssignableLane(access *domain.EffectiveAccess, lane A
 				return true
 			}
 		case AssignableLaneAll:
-			if source.Permission == domain.PermissionTaskUploadSource {
+			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode != assignableSuperAdminRoleCode {
 				return true
 			}
 		}
