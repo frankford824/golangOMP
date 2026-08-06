@@ -81,6 +81,24 @@ describe('CostRuleManagerView', () => {
     expect(mocks.applyRun).not.toHaveBeenCalled()
   })
 
+  it('keeps the calculator aligned with the selected rule group', async () => {
+    mocks.listCostRules.mockResolvedValue({
+      data: {
+        data: [
+          { rule_id: 11, rule_name: 'KT 板基础单价', category_code: 'KT_BOARD', product_family: 'KT 板', rule_type: 'fixed_unit_price', base_price: 12.5, priority: 100, is_active: true },
+          { rule_id: 12, rule_name: '写真布基础单价', category_code: 'PHOTO_CLOTH', product_family: '写真布', rule_type: 'fixed_unit_price', base_price: 8, priority: 100, is_active: true },
+        ],
+      },
+    })
+    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    await flushPromises()
+
+    await wrapper.findAll('.rule-groups > button').find((button) => button.text().includes('写真布'))?.trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('.calculator select').element as HTMLSelectElement).value).toBe('PHOTO_CLOTH')
+  })
+
   it('requires an explicit update before ERP synchronization', async () => {
     const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
     await flushPromises()

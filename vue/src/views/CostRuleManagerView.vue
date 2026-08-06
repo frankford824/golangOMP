@@ -255,7 +255,11 @@ const previewCostLabel = computed(() => typeof preview.value?.estimated_cost ===
 const previewExplanation = computed(() => preview.value?.explanation || (preview.value ? '计算完成。' : '填写尺寸后试算，不会修改任何任务或 ERP 数据。'))
 const erpMismatchCount = computed(() => costDashboard.value.tags?.find((item) => item.code === 'erp_mismatch')?.count || 0)
 
-watch(selectedGroup, (group) => { if (group && !calculator.rule_group) calculator.rule_group = group.code }, { immediate: true })
+watch(selectedGroup, (group) => {
+  if (!group) return
+  calculator.rule_group = group.code
+  preview.value = null
+}, { immediate: true })
 
 function emptyRuleDraft(group = ''): RuleDraft { return { rule_name: '', category_code: group, rule_type: 'fixed_unit_price', is_active: true, priority: 100 } }
 function replaceDraft(next: RuleDraft) { for (const key of Object.keys(ruleDraft)) delete (ruleDraft as Record<string, unknown>)[key]; Object.assign(ruleDraft, next) }
