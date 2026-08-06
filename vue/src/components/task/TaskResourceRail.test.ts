@@ -11,6 +11,13 @@ vi.mock('@/components/media/AssetPreviewMedia.vue', () => ({
   },
 }))
 
+vi.mock('@/components/media/ImagePreviewLightbox.vue', () => ({
+  default: {
+    props: ['modelValue', 'items', 'initialIndex'],
+    template: '<div class="lightbox-stub" :data-open="String(modelValue)" :data-index="initialIndex" :data-titles="items.map((item) => item.title).join(\'|\')" />',
+  },
+}))
+
 function revision(id: number, references: ResourceRevision['references']): ResourceRevision {
   return {
     id,
@@ -68,14 +75,26 @@ describe('TaskResourceRail', () => {
     ])
   })
 
-  it('opens the authoritative resource workspace for scoped references', async () => {
+  it('opens the authoritative resource workspace from the overview action', async () => {
     const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed', taskType: 'retouch_task' } })
 
     await wrapper.get('.rail-column.references .column-head button').trigger('click')
-    await wrapper.get('.rail-column.references .media-strip button').trigger('click')
 
-    expect(wrapper.emitted('openResources')).toHaveLength(2)
+    expect(wrapper.emitted('openResources')).toHaveLength(1)
     expect(wrapper.emitted('openAttachments')).toBeUndefined()
+  })
+
+  it('enlarges a reference thumbnail in place instead of only jumping to a workspace', async () => {
+    const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed', taskType: 'retouch_task' } })
+    expect(wrapper.get('.lightbox-stub').attributes('data-open')).toBe('false')
+
+    await wrapper.findAll('.rail-column.references .media-strip button')[1].trigger('click')
+
+    const lightbox = wrapper.get('.lightbox-stub')
+    expect(lightbox.attributes('data-open')).toBe('true')
+    expect(lightbox.attributes('data-index')).toBe('1')
+    expect(lightbox.attributes('data-titles')).toBe('第一张.jpg|第二张.jpg')
+    expect(wrapper.emitted('openResources')).toBeUndefined()
   })
 
   it('loads formal reference thumbnails through the controlled task-asset path', () => {
@@ -103,8 +122,11 @@ describe('TaskResourceRail', () => {
     expect(wrapper.get('.rail-column.references .column-head small').text()).toBe('1 个附件')
     expect(wrapper.get('.rail-column.references .media-strip button').text()).toBe('image.png')
 
-    await wrapper.get('.rail-column.references .media-strip button').trigger('click')
+    await wrapper.get('.rail-column.references .column-head button').trigger('click')
     expect(wrapper.emitted('openAttachments')).toHaveLength(1)
+
+    await wrapper.get('.rail-column.references .media-strip button').trigger('click')
+    expect(wrapper.get('.lightbox-stub').attributes('data-open')).toBe('true')
   })
 
   it('explains that retouch source files are optional instead of reporting missing SKU submissions', () => {

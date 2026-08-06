@@ -59,13 +59,23 @@
       </article>
     </div>
     <footer v-if="canOperate"><span>{{ actionHint }}</span><button type="button" @click="$emit('openWorkflow')">{{ actionLabel }} <ArrowRight :size="15" aria-hidden="true" /></button></footer>
+
+    <ImagePreviewLightbox
+      v-model="lightboxOpen"
+      :items="lightboxItems"
+      :initial-index="lightboxIndex"
+      aria-label="参考图预览"
+      fallback-title="参考图"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ArrowRight, FileArchive, FileText, Images, LockKeyhole } from 'lucide-vue-next'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
+import type { ImagePreviewLightboxItem } from '@/components/media/imagePreviewLightbox'
 import type { ResourceBundle, ResourceFile, ResourceReference, ResourceRevisionItem } from '@/services/api/resourceGroupsApi'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 
@@ -135,7 +145,25 @@ function referencePreview(file: RailReference) { return String(file.preview_url 
 function taskAssetID(file: RailReference) { return file.formal_task_asset_id ? String(file.formal_task_asset_id) : null }
 function referenceKey(file: RailReference, index: number) { return referenceIdentity(file, 0, index) }
 function referencePreviewable(file: RailReference) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
+// 缩略图只有 58px，之前点击直接跳到弹层，用户永远看不到大图。可预览的图片就地放大。
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+const previewableReferences = computed(() => resourceReferences.value
+  .filter((file) => referencePreviewable(file) && referencePreview(file)))
+const lightboxItems = computed<ImagePreviewLightboxItem[]>(() => previewableReferences.value.map((file) => ({
+  src: referencePreview(file),
+  title: referenceName(file),
+  alt: referenceName(file),
+  downloadUrl: String(file.download_url || '') || undefined,
+  fallbackAssetId: taskAssetID(file) || undefined,
+})))
 function openReference(file: RailReference) {
+  const position = previewableReferences.value.indexOf(file)
+  if (position >= 0) {
+    lightboxIndex.value = position
+    lightboxOpen.value = true
+    return
+  }
   if (file.source === 'task') emit('openAttachments')
   else emit('openResources')
 }

@@ -1047,6 +1047,11 @@ func (r *taskRepo) UpdateDetailBusinessInfo(ctx context.Context, tx repo.Tx, det
 	if err != nil {
 		return fmt.Errorf("update task detail business info: %w", err)
 	}
+	// 列表与详情展示的「更新时间」读的是 tasks.updated_at。只改 task_details 时它不会动，
+	// 运营编辑完备注或设计需求后看到的仍是旧时间。
+	if _, err := sqlTx.ExecContext(ctx, `UPDATE tasks SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, detail.TaskID); err != nil {
+		return fmt.Errorf("touch task updated_at after business info update: %w", err)
+	}
 	if err := reindexTaskSearchDocument(ctx, sqlTx, detail.TaskID); err != nil {
 		return err
 	}

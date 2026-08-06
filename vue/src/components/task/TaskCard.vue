@@ -92,9 +92,10 @@
           v-for="item in batchPreview"
           :key="item.key"
           class="tc-batch-row"
-          :title="item.summary"
+          :title="item.skuCode ? `${item.skuCode} · ${item.summary}` : item.summary"
         >
           <span class="tc-batch-index">{{ item.seq }}</span>
+          <span v-if="item.skuCode" class="tc-batch-sku">{{ item.skuCode }}</span>
           <span class="tc-batch-text">{{ item.summary }}</span>
         </div>
       </div>
@@ -158,6 +159,7 @@ import BaseButton from '../base/BaseButton.vue'
 export interface TaskCardBatchPreviewItem {
   key: string
   seq: number | string
+  skuCode?: string
   summary: string
 }
 
@@ -427,6 +429,17 @@ const emit = defineEmits<{
   font-size: 10px;
   font-weight: 700;
   color: rgb(var(--yb-text-faint));
+}
+.tc-batch-sku {
+  flex: 0 0 auto;
+  max-width: 12ch;
+  overflow: hidden;
+  font-family: var(--yb-font-data);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: rgb(var(--yb-text-secondary));
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tc-batch-text {
   min-width: 0;

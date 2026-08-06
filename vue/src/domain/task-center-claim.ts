@@ -6,13 +6,14 @@ export function taskHasNoClaimHandler(task: Task): boolean {
 }
 
 /**
- * v8 接单入口服从后端动作合同：任务允许指派，并且当前账号具备设计提交能力。
- * 仅有管理侧 task.assign 的运营账号可以指派他人，但不能把它解释成自接单。
+ * v8 接单入口服从后端动作合同的 task.claim。
+ * 此前用 task.assign 当开关，把「能指派别人」误当成「能自己接单」：
+ * 纯设计师没有 task.assign 所以看不到按钮，兼任设计角色的运营反而看得到。
  */
 export function canClaimTaskFromCenter(task: Task, canSubmitDesign: boolean): boolean {
   return canSubmitDesign
     && taskHasNoClaimHandler(task)
-    && (task.allowedActions ?? []).includes('task.assign')
+    && (task.allowedActions ?? []).includes('task.claim')
 }
 
 export function taskCenterClaimButtonLabel(_task: Task, claiming: boolean): string {

@@ -62,6 +62,10 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	if slices.Contains(ordinaryOperations, "task.reference.append") || slices.Contains(ordinaryOperations, "task.business_info.edit") {
 		t.Fatalf("same-department non-creator actions = %v, want no task.reference.append or business edit", ordinaryOperations)
 	}
+	manager := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskReassign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, otherCreatorsTask)
+	if !slices.Contains(manager, "task.business_info.edit") || !slices.Contains(manager, "task.reference.append") {
+		t.Fatalf("manager actions on another creator's task = %v, want both business edit and task.reference.append", manager)
+	}
 	assetManager := v8AllowedTaskActions(actorFor(domain.PermissionAssetManage), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, otherCreatorsTask)
 	if !slices.Contains(assetManager, "task.reference.append") {
 		t.Fatalf("asset manager actions = %v, want task.reference.append", assetManager)
@@ -74,6 +78,26 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	if slices.Contains(designer, "task.reference.append") || slices.Contains(designer, "task.assign") || !slices.Contains(designer, "task.design.submit") {
 		t.Fatalf("task.design.submit actions = %v", designer)
 	}
+	unclaimed := domain.TaskAccessSubject{TaskID: 4, CreatorID: 7, OwnerDepartmentID: &departmentID}
+	operationsOnPool := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskAssign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusPendingAssign, unclaimed)
+	if slices.Contains(operationsOnPool, "task.claim") {
+		t.Fatalf("operations actions on an unclaimed task = %v, want no task.claim", operationsOnPool)
+	}
+	designerOnPool := v8AllowedTaskActions(actorFor(domain.PermissionTaskUploadSource), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusPendingAssign, unclaimed)
+	if !slices.Contains(designerOnPool, "task.claim") {
+		t.Fatalf("designer actions on an unclaimed task = %v, want task.claim", designerOnPool)
+	}
+	takenByOther := unclaimed
+	takenByOther.DesignerID = handlerInt64Ptr(77)
+	designerOnTaken := v8AllowedTaskActions(actorFor(domain.PermissionTaskUploadSource), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, takenByOther)
+	if slices.Contains(designerOnTaken, "task.claim") {
+		t.Fatalf("designer actions on a claimed task = %v, want no task.claim", designerOnTaken)
+	}
+	planningPool := v8AllowedTaskActions(actorFor(domain.PermissionTaskUploadSource), domain.TaskTypeSKUPlanning, domain.TaskStatusPendingAssign, unclaimed)
+	if slices.Contains(planningPool, "task.claim") {
+		t.Fatalf("planning actions = %v, want no task.claim", planningPool)
+	}
+
 	completed := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskAssign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusCompleted, subject)
 	if slices.Contains(completed, "task.reference.append") || slices.Contains(completed, "task.assign") {
 		t.Fatalf("completed actions = %v", completed)

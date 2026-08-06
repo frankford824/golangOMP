@@ -64,6 +64,52 @@ const bundle: ResourceBundle = {
 }
 
 describe('SkuResourceMatrix', () => {
+  it('shows per-SKU reference images uploaded at creation time alongside revision references', () => {
+    const wrapper = mount(SkuResourceMatrix, {
+      props: {
+        bundle,
+        skuItems: [
+          {
+            sku_code: 'SKU-009',
+            reference_file_refs: [
+              { file_name: 'direction.jpg', preview_url: '/reference' },
+              { file_name: '运营手绘稿.png', mime_type: 'image/png', download_url: '/sku-item-reference' },
+            ],
+          },
+          { sku_code: 'SKU-010', reference_file_refs: [{ file_name: '别的SKU.png', download_url: '/other' }] },
+        ],
+      },
+      global: { stubs: { Teleport: true } },
+    })
+
+    const captions = wrapper.findAll('.reference-stage .tile-caption').map((item) => item.text())
+    expect(captions.some((caption) => caption.includes('运营手绘稿.png'))).toBe(true)
+    expect(captions.some((caption) => caption.includes('别的SKU.png'))).toBe(false)
+    expect(captions.filter((caption) => caption.includes('direction.jpg'))).toHaveLength(1)
+  })
+
+  it('keeps distinct reference files that happen to share a filename', () => {
+    const wrapper = mount(SkuResourceMatrix, {
+      props: {
+        bundle,
+        skuItems: [{
+          sku_code: 'SKU-009',
+          reference_file_refs: [
+            { file_name: 'direction.jpg', preview_url: '/different-reference' },
+          ],
+        }],
+      },
+      global: { stubs: { Teleport: true } },
+    })
+
+    const captions = wrapper.findAll('.reference-stage .tile-caption').map((item) => item.text())
+    expect(captions.filter((caption) => caption.includes('direction.jpg'))).toHaveLength(2)
+    expect(wrapper.findAll('.reference-stage .asset-preview-media-stub').map((item) => item.attributes('src'))).toEqual([
+      '/reference',
+      '/different-reference',
+    ])
+  })
+
   it('renders the three business stages and makes set order immediately visible', async () => {
     const wrapper = mount(SkuResourceMatrix, { props: { bundle }, global: { stubs: { Teleport: true } } })
     expect(wrapper.findAll('.stage-card h3').map((item) => item.text())).toEqual(['运营参考图', '当前有效源文件', '最终成品图'])

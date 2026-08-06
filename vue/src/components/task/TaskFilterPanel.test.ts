@@ -1,17 +1,26 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
 import { NButton, NCheckbox, NDatePicker, NSelect } from 'naive-ui'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskFilterPanel, { type TaskListFilters } from './TaskFilterPanel.vue'
 
+const optionsState = vi.hoisted(() => ({
+  loadError: '',
+  loading: false,
+  departments: [] as Array<{ label: string; value: string }>,
+  loadFilterOptions: vi.fn(),
+}))
 vi.mock('@/composables/useTaskFilterOptions', async () => {
-  const { ref } = await import('vue')
+  const { computed, ref } = await import('vue')
   return {
     useTaskFilterOptions: () => ({
       creatorOptions: ref([]),
       assigneeOptions: ref([]),
-      ownerDepartmentOptions: ref([]),
+      ownerDepartmentOptions: computed(() => optionsState.departments),
       ownerTeamOptions: ref([]),
+      loadFilterOptions: optionsState.loadFilterOptions,
+      loadError: computed(() => optionsState.loadError),
+      loading: computed(() => optionsState.loading),
     }),
   }
 })
@@ -27,6 +36,34 @@ function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
 }
 
 describe('TaskFilterPanel', () => {
+  beforeEach(() => {
+    optionsState.loadError = ''
+    optionsState.loading = false
+    optionsState.departments = []
+    optionsState.loadFilterOptions.mockClear()
+  })
+
+  it('tells the user why the organization and people dropdowns are empty', async () => {
+    const empty = mount(TaskFilterPanel, { props: { filters: filters(), keyword: '' } })
+    expect(empty.get('.options-status').text()).toContain('没有可选的部门、团队或人员')
+    expect(empty.find('.options-status.is-error').exists()).toBe(false)
+    empty.unmount()
+
+    optionsState.loadError = '加载任务筛选候选失败，请稍后重试'
+    const failed = mount(TaskFilterPanel, { props: { filters: filters(), keyword: '' } })
+    const status = failed.get('.options-status.is-error')
+    expect(status.text()).toContain('加载任务筛选候选失败')
+    await status.get('button').trigger('click')
+    expect(optionsState.loadFilterOptions).toHaveBeenCalledTimes(1)
+    failed.unmount()
+
+    optionsState.loadError = ''
+    optionsState.departments = [{ label: '设计部', value: '1' }]
+    const loaded = mount(TaskFilterPanel, { props: { filters: filters(), keyword: '' } })
+    expect(loaded.find('.options-status').exists()).toBe(false)
+    loaded.unmount()
+  })
+
   it('keeps edits local and emits one committed snapshot only when applied', async () => {
     const original = filters()
     const wrapper = mount(TaskFilterPanel, { props: { filters: original, keyword: '' } })

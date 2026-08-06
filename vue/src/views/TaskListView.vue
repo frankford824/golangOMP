@@ -1520,6 +1520,7 @@ function taskCardBatchPreview(task: Task) {
     .map((item, index) => ({
       key: batchItemKey(item, index),
       seq: item.sequenceNo ?? index + 1,
+      skuCode: normalizeCardText(item.skuCode),
       summary: batchItemSummary(item),
     }))
 }

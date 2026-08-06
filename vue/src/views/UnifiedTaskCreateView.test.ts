@@ -157,14 +157,16 @@ describe('UnifiedTaskCreateView', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('创建后自动同步 ERP')
-    expect(wrapper.text()).toContain('已开启：填写 ERP 款式编码；商品名称直接取产品描述/规格')
+    expect(wrapper.text()).toContain('ERP 同步')
+    expect(wrapper.text()).toContain('本次同步：需填写 ERP 款式编码，商品名称取产品描述 / 规格')
+    expect(wrapper.text()).not.toContain('创建后自动同步 ERP')
     const sync = wrapper.get('input[aria-label="创建成功后自动同步 ERP"]')
     expect((sync.element as HTMLInputElement).checked).toBe(true)
     await sync.setValue(false)
-    expect(wrapper.text()).toContain('未开启：本次只创建任务与 SKU')
+    expect(wrapper.text()).toContain('本次不同步：只创建任务与 SKU')
+    expect(wrapper.text()).not.toContain('本次同步：')
     await sync.setValue(true)
-    expect(wrapper.text()).toContain('已开启：填写 ERP 款式编码；商品名称直接取产品描述/规格')
+    expect(wrapper.text()).toContain('本次同步：需填写 ERP 款式编码，商品名称取产品描述 / 规格')
 
     await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('HZS')
     await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')

@@ -1350,7 +1350,7 @@ components:
         workflow_contract_version: { type: integer, enum: [2] }
         allowed_actions:
           type: array
-          description: Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.business_info.edit` authorizes non-governed task-field editing, while `task.terminate` authorizes the explicit task cancellation flow.
+          description: Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.claim` authorizes the current actor to claim an unassigned design-side module, `task.business_info.edit` authorizes non-governed task-field editing, and `task.terminate` authorizes the explicit task cancellation flow.
           items: { type: string }
         priority: { type: string, enum: [normal, high, drawing] }
         deadline_at: { type: string, format: date-time, nullable: true }
@@ -2844,7 +2844,10 @@ components:
         task_status: { type: string, enum: [Draft, PendingAssign, Assigned, InProgress, PendingAudit, Completed, Archived, Cancelled, Blocked] }
         workflow_revision: { type: integer, format: int64 }
         workflow_contract_version: { type: integer, enum: [2] }
-        allowed_actions: { type: array, items: { type: string } }
+        allowed_actions:
+          type: array
+          description: Effective task actions for this list row. `task.claim` is emitted only for an unassigned design task that the current actor may claim; it is distinct from the management-only `task.assign` action.
+          items: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         deadline_at: { type: string, format: date-time, nullable: true }

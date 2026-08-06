@@ -998,6 +998,29 @@ func (h *TaskHandler) GetByID(c *gin.Context) {
 	respondOK(c, task)
 }
 
+// v8ActorMayClaimTask mirrors task_pool.authorizeModuleClaim: an unclaimed task
+// in a claimable state can be picked up by anyone holding scoped
+// task.upload_source. The scope check runs against a prospective subject where
+// the actor is the handler, so a self-scoped designer can still claim from the
+// pool exactly like the claim endpoint allows.
+func v8ActorMayClaimTask(actor domain.RequestActor, taskType domain.TaskType, status domain.TaskStatus, subject domain.TaskAccessSubject) bool {
+	if !taskType.RequiresDesign() {
+		return false
+	}
+	if status != domain.TaskStatusPendingAssign && status != domain.TaskStatusInProgress {
+		return false
+	}
+	if subject.DesignerID != nil && *subject.DesignerID > 0 {
+		return false
+	}
+	if subject.CurrentHandlerID != nil && *subject.CurrentHandlerID > 0 {
+		return false
+	}
+	prospective := subject
+	prospective.CurrentHandlerID = &actor.ID
+	return domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskUploadSource, prospective)
+}
+
 func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, status domain.TaskStatus, subject domain.TaskAccessSubject) []string {
 	actions := make([]string, 0, 9)
 	subject.TaskType = taskType
@@ -1007,7 +1030,11 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 	}
 	creatorMayEdit := actor.ID == subject.CreatorID &&
 		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject)
-	managerMayEdit := domain.ActorHasPermission(actor, domain.PermissionTaskCreate) &&
+	// actor.Permissions 是 effective 权限的扁平投影，但只有中间件填过它才非空；
+	// 这里同时认两者，避免编辑能力依赖调用方是否投影过这份列表。
+	mayCreateTasks := domain.ActorHasPermission(actor, domain.PermissionTaskCreate) ||
+		(actor.EffectiveAccess != nil && actor.EffectiveAccess.Has(domain.PermissionTaskCreate))
+	managerMayEdit := mayCreateTasks &&
 		(domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAssign, subject) ||
 			domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, subject))
 	if activeTask && (creatorMayEdit || managerMayEdit || domain.EffectiveAccessAllowsTask(actor, domain.PermissionCatalogManage, subject)) {
@@ -1028,11 +1055,13 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 		}
 		return actions
 	}
-	creatorMayAppendReference := creatorMayEdit
+	// 谁能改业务信息，谁就该能补参考图：此前管理者能编辑文字却不能补图，
+	// 运营在他人任务上只能看到一半的编辑能力。
+	businessEditorMayAppendReference := creatorMayEdit || managerMayEdit
 	assetManagerMayAppendReference := domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, subject)
 	if (status == domain.TaskStatusDraft || status == domain.TaskStatusPendingAssign || status == domain.TaskStatusAssigned ||
 		status == domain.TaskStatusInProgress || status == domain.TaskStatusPendingAudit) &&
-		(creatorMayAppendReference || assetManagerMayAppendReference) {
+		(businessEditorMayAppendReference || assetManagerMayAppendReference) {
 		actions = append(actions, "task.reference.append")
 	}
 	if status == domain.TaskStatusPendingAssign &&
@@ -1045,6 +1074,11 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 	}
 	if status == domain.TaskStatusInProgress && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskUploadSource, subject) {
 		actions = append(actions, "task.design.submit")
+	}
+	// 自接单是设计能力，不是管理能力。任务中心此前拿 task.assign 当接单开关，
+	// 结果纯设计师看不到按钮，而兼任设计角色的运营反而看得到。
+	if v8ActorMayClaimTask(actor, taskType, status, subject) {
+		actions = append(actions, "task.claim")
 	}
 	if status == domain.TaskStatusPendingAudit && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAudit, subject) {
 		actions = append(actions, "task.audit.approve", "task.audit.return_to_design")

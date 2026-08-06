@@ -27,7 +27,7 @@
         <section class="stage-card reference-stage">
           <header><span class="stage-number">01</span><div><h3>运营参考图</h3><p>设计需求与方向依据</p></div></header>
           <div v-if="references(group).length" class="reference-grid">
-            <template v-for="(reference, index) in references(group)" :key="reference.id || index">
+            <template v-for="(reference, index) in references(group)" :key="reference.key || index">
               <button v-if="imagePreviewable(reference)" type="button" class="visual-tile" :disabled="!reference.preview_url" @click="openResourcePreview(reference.formal_task_asset_id, reference.preview_url, reference.file_name || `参考图 ${index + 1}`)">
                 <AssetPreviewMedia
                   v-if="reference.preview_url"
@@ -139,7 +139,23 @@ import ResourceRevisionDrawer from '@/components/task/ResourceRevisionDrawer.vue
 import { fetchTaskAssetPreviewMeta } from '@/domain/asset-access'
 import type { ResourceBundle, ResourceFile, ResourceGroup, ResourceReference, ResourceRevision } from '@/services/api/resourceGroupsApi'
 
-const props = defineProps<{ bundle: ResourceBundle; enableRevisionHistory?: boolean }>()
+export interface SkuResourceMatrixItem extends Record<string, unknown> {
+  sku_code?: string | null
+  skuCode?: string | null
+  reference_file_refs?: unknown
+  referenceFileRefs?: unknown
+}
+
+interface DisplayReference {
+  key: string
+  file_name?: string
+  mime_type?: string
+  preview_url?: string
+  download_url?: string
+  formal_task_asset_id?: number | null
+}
+
+const props = defineProps<{ bundle: ResourceBundle; enableRevisionHistory?: boolean; skuItems?: SkuResourceMatrixItem[] }>()
 
 const preview = reactive({ url: '', name: '', open: false })
 const previewItems = computed(() => preview.url ? [{
@@ -150,7 +166,88 @@ const previewItems = computed(() => preview.url ? [{
 const historyGroup = ref<ResourceGroup | null>(null)
 const revision = (group: ResourceGroup): ResourceRevision | null | undefined => group.finalized_revision || group.working_revision
 const orderedItems = (group: ResourceGroup) => [...(revision(group)?.items || [])].sort((a, b) => a.sort_order - b.sort_order)
-const references = (group: ResourceGroup): ResourceReference[] => [...(revision(group)?.references || [])].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+// 同一张图从资源组修订和 SKU 明细两条路进来时携带的字段不同。只有不可变资产 ID
+// 或受控 URL 能证明是同一对象；文件名只是展示信息，同名文件不能据此合并。
+function referenceIdentities(file: Pick<DisplayReference, 'formal_task_asset_id' | 'download_url' | 'preview_url'>): string[] {
+  const identities: string[] = []
+  if (file.formal_task_asset_id) identities.push(`asset:${file.formal_task_asset_id}`)
+  for (const url of [file.download_url, file.preview_url]) {
+    const trimmed = String(url || '').trim()
+    if (trimmed) identities.push(`url:${trimmed}`)
+  }
+  return identities
+}
+
+function referenceKey(
+  file: Pick<DisplayReference, 'formal_task_asset_id' | 'download_url' | 'preview_url'>,
+  fallback: string,
+): string {
+  return referenceIdentities(file)[0] || fallback
+}
+
+function toDisplayReference(value: unknown, fallbackKey: string): DisplayReference | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Record<string, unknown>
+  const text = (key: string) => { const item = raw[key]; return typeof item === 'string' && item.trim() ? item.trim() : '' }
+  const fileName = text('file_name') || text('filename') || text('name')
+  const previewURL = text('preview_url') || text('url') || text('download_url')
+  const downloadURL = text('download_url') || text('url')
+  if (!fileName && !previewURL && !downloadURL) return null
+  const assetID = Number(raw.formal_task_asset_id ?? raw.task_asset_id ?? 0)
+  const file: DisplayReference = {
+    key: '',
+    file_name: fileName || undefined,
+    mime_type: text('mime_type') || undefined,
+    preview_url: previewURL || undefined,
+    download_url: downloadURL || undefined,
+    formal_task_asset_id: Number.isFinite(assetID) && assetID > 0 ? assetID : null,
+  }
+  file.key = referenceKey(file, fallbackKey)
+  return file
+}
+
+// 批量创建时逐 SKU 上传的参考图存在 task_sku_items.reference_file_refs，不会进资源组修订，
+// 只读 revision.references 会让这些图在总览里整片消失。
+function skuItemReferences(group: ResourceGroup): DisplayReference[] {
+  const skuCode = String(group.sku_code || '').trim()
+  if (!skuCode || !props.skuItems?.length) return []
+  const out: DisplayReference[] = []
+  for (const [itemIndex, item] of props.skuItems.entries()) {
+    if (String(item.sku_code ?? item.skuCode ?? '').trim() !== skuCode) continue
+    const raw = item.reference_file_refs ?? item.referenceFileRefs
+    const list = Array.isArray(raw) ? raw : []
+    for (const [referenceIndex, entry] of list.entries()) {
+      const file = toDisplayReference(entry, `sku:${skuCode}:${itemIndex}:${referenceIndex}`)
+      if (file) out.push(file)
+    }
+  }
+  return out
+}
+
+const references = (group: ResourceGroup): DisplayReference[] => {
+  const revisionRefs = [...(revision(group)?.references || [])]
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+    .map((reference, index) => {
+      const file: DisplayReference = {
+        key: '',
+        file_name: reference.file_name,
+        mime_type: reference.mime_type,
+        preview_url: reference.preview_url,
+        download_url: reference.download_url,
+        formal_task_asset_id: reference.formal_task_asset_id,
+      }
+      file.key = referenceKey(file, `revision:${reference.id || index}`)
+      return file
+    })
+  const seen = new Set(revisionRefs.flatMap((reference) => referenceIdentities(reference)))
+  for (const file of skuItemReferences(group)) {
+    const identities = referenceIdentities(file)
+    if (identities.some((identity) => seen.has(identity))) continue
+    identities.forEach((identity) => seen.add(identity))
+    revisionRefs.push(file)
+  }
+  return revisionRefs
+}
 const scopeLabel = (group: ResourceGroup) => group.scope_kind === 'retouch_requirement' ? '修图需求' : '任务资源'
 const sourceStageLabels: Record<string, string> = { audit: '审核人员上传的替换源文件', design: '设计人员提交的源文件', retouch: '修图源文件', migration: '历史任务确认后的源文件', reopen: '重开后提交的源文件' }
 const sourceStageLabel = (group: ResourceGroup) => sourceStageLabels[revision(group)?.source_stage || ''] || '当前审核确认版本'

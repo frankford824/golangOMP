@@ -23,5 +23,7 @@ export function erpProductNameLimitMessage(label = '产品名称'): string {
 
 export function erpProductNameError(value: unknown, label = '产品名称'): string {
   if (!isErpProductNameTooLong(value)) return ''
-  return erpProductNameLimitMessage(label)
+  // 只说「超出上限」时运营得自己数字数，尤其是从旧系统整段粘过来的长名称。
+  const overflow = erpProductNameLength(value) - ERP_PRODUCT_NAME_MAX_LENGTH
+  return `${erpProductNameLimitMessage(label)}（当前超出 ${overflow} 个字）`
 }

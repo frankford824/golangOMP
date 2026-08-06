@@ -19,6 +19,15 @@
           <NFormItem label="其他"><NCheckbox :checked="draft.overdueOnly" @update:checked="patch({ overdueOnly: !!$event })">仅看已逾期任务</NCheckbox></NFormItem>
         </section>
 
+        <section v-if="optionsLoading || optionsLoadError || !hasLoadedOptions" class="options-status" :class="{ 'is-error': Boolean(optionsLoadError) }" role="status">
+          <span v-if="optionsLoading">正在加载部门、团队和人员候选…</span>
+          <template v-else-if="optionsLoadError">
+            <span>{{ optionsLoadError }}，部门、团队和人员暂时选不了。</span>
+            <button type="button" @click="loadFilterOptions">重新加载</button>
+          </template>
+          <span v-else>没有可选的部门、团队或人员，可能是你的可见范围内还没有相关任务。</span>
+        </section>
+
         <section class="filter-section">
           <h3>组织归属</h3>
           <NFormItem label="归属部门"><NSelect :to="false" :value="draft.ownerDepartment || null" clearable filterable aria-label="归属部门" :input-props="{ 'aria-label': '归属部门' }" placeholder="全部部门" :options="departmentSelectOptions" @update:value="onOwnerDepartmentChange(String($event || ''))" /></NFormItem>
@@ -80,15 +89,26 @@ const {
   assigneeOptions,
   ownerDepartmentOptions,
   ownerTeamOptions,
+  loadFilterOptions,
+  loadError: optionsLoadError,
+  loading: optionsLoading,
 } = useTaskFilterOptions(true, '全部', () => draft.ownerDepartment ?? '')
 const departmentSelectOptions = computed(() => ownerDepartmentOptions.value.map((item) => ({ label: item.label, value: item.value })))
 const teamSelectOptions = computed(() => ownerTeamOptions.value.map((item) => ({ label: item.label, value: item.value })))
 const creatorSelectOptions = computed(() => creatorOptions.value.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })))
 const assigneeSelectOptions = computed(() => assigneeOptions.value.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })))
+// 接口成功但返回空数组时下拉同样是空的，必须和「加载失败」分开告诉用户，否则只能看到空白。
+const hasLoadedOptions = computed(() => Boolean(
+  departmentSelectOptions.value.length
+  || teamSelectOptions.value.length
+  || creatorSelectOptions.value.length
+  || assigneeSelectOptions.value.length,
+))
 function apply() { emit('apply', cloneFilters(draft), draftKeyword.value.trim()) }
 function reset() { const next = emptyFilters(); Object.assign(draft, next); draftKeyword.value = ''; emit('reset', next, '') }
 </script>
 
 <style scoped>
-.filter-panel{height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-heading{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-heading p{margin:0;color:rgb(var(--yb-brand));font-size:11px;font-weight:850;letter-spacing:.1em}.filter-heading h2{margin:3px 0 0;font-size:22px}.filter-heading button{width:40px;height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:24px;cursor:pointer}.filter-form{min-height:0;display:grid;grid-template-rows:1fr auto}.filter-scroll{min-height:0;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr 1fr;gap:4px 13px;padding:18px 22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-section h3{grid-column:1/-1;margin:0 0 7px;font-size:13px}.wide{grid-column:1/-1}.status-options{display:flex;flex-wrap:wrap;gap:7px}.status-option{min-height:32px;padding:0 11px;border:1px solid rgb(var(--yb-border));border-radius:999px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));font-size:12px;cursor:pointer}.status-option.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:750}.filter-actions{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:15px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.w-full{width:100%}@media(max-width:520px){.filter-section{grid-template-columns:1fr}.filter-section h3,.wide{grid-column:auto}.filter-heading{padding:16px}.filter-section{padding:16px}}
+.filter-panel{height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-heading{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-heading p{margin:0;color:rgb(var(--yb-brand));font-size:11px;font-weight:850;letter-spacing:.1em}.filter-heading h2{margin:3px 0 0;font-size:22px}.filter-heading button{width:40px;height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:24px;cursor:pointer}.filter-form{min-height:0;display:grid;grid-template-rows:1fr auto}.filter-scroll{min-height:0;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr 1fr;gap:4px 13px;padding:18px 22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-section h3{grid-column:1/-1;margin:0 0 7px;font-size:13px}.wide{grid-column:1/-1}.status-options{display:flex;flex-wrap:wrap;gap:7px}.status-option{min-height:32px;padding:0 11px;border:1px solid rgb(var(--yb-border));border-radius:999px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));font-size:12px;cursor:pointer}.status-option.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:750}.options-status{display:flex;flex-wrap:wrap;align-items:center;gap:9px;padding:12px 22px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-secondary));font-size:12px;line-height:1.55}.options-status.is-error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.options-status button{min-height:30px;padding:0 11px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.filter-actions{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:15px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.w-full{width:100%}@media(max-width:520px){.filter-section{grid-template-columns:1fr}.filter-section h3,.wide{grid-column:auto}.filter-heading{padding:16px}.filter-section{padding:16px}}
 </style>

@@ -34,19 +34,38 @@
           </a>
         </header>
         <div class="preview-stage">
-          <img v-if="previewable(selectedFile) && previewUrl(selectedFile) && !broken.has(fileKey(selectedFile, selectedIndex))" :src="previewUrl(selectedFile)" :alt="fileName(selectedFile)" @error="markBroken(selectedFile, selectedIndex)" />
+          <button
+            v-if="previewable(selectedFile) && previewUrl(selectedFile) && !broken.has(fileKey(selectedFile, selectedIndex))"
+            type="button"
+            class="preview-zoom"
+            :aria-label="`放大查看 ${fileName(selectedFile)}`"
+            @click="openLightbox(selectedIndex)"
+          >
+            <img :src="previewUrl(selectedFile)" :alt="fileName(selectedFile)" @error="markBroken(selectedFile, selectedIndex)" />
+            <span class="preview-zoom-hint"><Maximize2 :size="14" aria-hidden="true" />点击放大</span>
+          </button>
           <div v-else class="preview-fallback"><FileText :size="46" aria-hidden="true" /><strong>{{ fileType(selectedFile) }}</strong><p>{{ fileUrl(selectedFile) ? '该文件不支持网页内预览，可下载后查看。' : '附件记录已保留，但当前账号没有预览或下载权限。' }}</p></div>
         </div>
         <footer><span>{{ selectedIndex + 1 }} / {{ files.length }}</span><p>参考附件仅用于理解运营需求，不会被当作最终成品。</p></footer>
       </template>
       <div v-else class="preview-empty"><Paperclip :size="44" aria-hidden="true" /><strong>还没有参考附件</strong><p>上传图片、PDF 或压缩包后，可在这里集中预览与下载。</p></div>
     </article>
+
+    <ImagePreviewLightbox
+      v-model="lightboxOpen"
+      :items="lightboxItems"
+      :initial-index="lightboxIndex"
+      aria-label="参考附件预览"
+      fallback-title="参考附件"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Download, FileText, Paperclip, Plus } from 'lucide-vue-next'
+import { Download, FileText, Maximize2, Paperclip, Plus } from 'lucide-vue-next'
+import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
+import type { ImagePreviewLightboxItem } from '@/components/media/imagePreviewLightbox'
 
 interface AttachmentFile extends Record<string, unknown> {
   id?: number
@@ -73,8 +92,28 @@ function fileKey(file: AttachmentFile, index: number) { return String(file.id ||
 function previewable(file: AttachmentFile) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(fileName(file)) }
 function fileType(file: AttachmentFile) { const suffix = fileName(file).split('.').pop(); return String(suffix || '文件').toUpperCase() }
 function markBroken(file: AttachmentFile, index: number) { broken.value = new Set(broken.value).add(fileKey(file, index)) }
+
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+// 只把图片放进灯箱，索引单独映射，否则 PDF / 压缩包会让左右翻页停在空白页。
+const previewableEntries = computed(() => props.files
+  .map((file, index) => ({ file, index }))
+  .filter(({ file, index }) => previewable(file) && previewUrl(file) && !broken.value.has(fileKey(file, index))))
+const lightboxItems = computed<ImagePreviewLightboxItem[]>(() => previewableEntries.value.map(({ file }) => ({
+  src: previewUrl(file),
+  title: fileName(file),
+  alt: fileName(file),
+  downloadUrl: fileUrl(file) || undefined,
+  fallbackAssetId: file.asset_id ? String(file.asset_id) : undefined,
+})))
+function openLightbox(fileIndex: number) {
+  const position = previewableEntries.value.findIndex((entry) => entry.index === fileIndex)
+  if (position < 0) return
+  lightboxIndex.value = position
+  lightboxOpen.value = true
+}
 </script>
 
 <style scoped>
-.attachment-workspace{height:100%;min-height:0;display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);overflow:hidden;background:rgb(var(--yb-surface-soft))}.attachment-list{min-height:0;display:grid;grid-template-rows:auto 1fr;border-right:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.attachment-list>header,.attachment-preview>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px;border-bottom:1px solid rgb(var(--yb-border))}.attachment-list header p,.attachment-preview header p{margin:0;color:rgb(var(--yb-text-muted));font-size:10px;font-weight:750}.attachment-list header strong{font-size:14px}.attachment-list header button,.attachment-preview header a{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:11px;font-weight:720;text-decoration:none;cursor:pointer}.attachment-items{min-height:0;padding:8px;overflow:auto}.attachment-items>button{width:100%;display:grid;grid-template-columns:56px minmax(0,1fr);align-items:center;gap:10px;border:1px solid transparent;border-radius:10px;padding:7px;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer}.attachment-items>button:hover,.attachment-items>button.selected{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft))}.attachment-items button>span:last-child{min-width:0;display:grid;gap:4px}.attachment-items strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.attachment-items small{color:rgb(var(--yb-text-muted));font-size:10px}.attachment-thumb{width:56px;height:44px;display:grid;place-items:center;overflow:hidden;border-radius:7px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted))}.attachment-thumb img{width:100%;height:100%;object-fit:cover}.attachment-preview{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto}.attachment-preview h3{max-width:60vw;margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}.attachment-preview header a{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.preview-stage{min-height:0;display:grid;place-items:center;padding:20px;overflow:auto;background:linear-gradient(45deg,rgb(var(--yb-surface-muted)) 25%,transparent 25%),linear-gradient(-45deg,rgb(var(--yb-surface-muted)) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,rgb(var(--yb-surface-muted)) 75%),linear-gradient(-45deg,transparent 75%,rgb(var(--yb-surface-muted)) 75%);background-size:24px 24px;background-position:0 0,0 12px,12px -12px,-12px 0}.preview-stage>img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 14px 40px rgb(var(--yb-shadow)/.15)}.preview-fallback,.preview-empty{display:grid;place-items:center;align-content:center;gap:8px;color:rgb(var(--yb-text-muted));text-align:center}.preview-fallback strong,.preview-empty strong{color:rgb(var(--yb-text));font-size:16px}.preview-fallback p,.preview-empty p{max-width:34ch;margin:0;font-size:12px;line-height:1.6}.attachment-preview>footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 15px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));font-size:11px}.attachment-preview>footer p{margin:0}.empty-copy{padding:22px;color:rgb(var(--yb-text-muted));font-size:12px;line-height:1.6}@media(max-width:760px){.attachment-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,34vh) minmax(0,1fr)}.attachment-list{border-right:0;border-bottom:1px solid rgb(var(--yb-border))}.attachment-preview h3{max-width:48vw}.attachment-preview>footer{align-items:flex-start;flex-direction:column}}
+.attachment-workspace{height:100%;min-height:0;display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);overflow:hidden;background:rgb(var(--yb-surface-soft))}.attachment-list{min-height:0;display:grid;grid-template-rows:auto 1fr;border-right:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.attachment-list>header,.attachment-preview>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px;border-bottom:1px solid rgb(var(--yb-border))}.attachment-list header p,.attachment-preview header p{margin:0;color:rgb(var(--yb-text-muted));font-size:10px;font-weight:750}.attachment-list header strong{font-size:14px}.attachment-list header button,.attachment-preview header a{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:11px;font-weight:720;text-decoration:none;cursor:pointer}.attachment-items{min-height:0;padding:8px;overflow:auto}.attachment-items>button{width:100%;display:grid;grid-template-columns:56px minmax(0,1fr);align-items:center;gap:10px;border:1px solid transparent;border-radius:10px;padding:7px;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer}.attachment-items>button:hover,.attachment-items>button.selected{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft))}.attachment-items button>span:last-child{min-width:0;display:grid;gap:4px}.attachment-items strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.attachment-items small{color:rgb(var(--yb-text-muted));font-size:10px}.attachment-thumb{width:56px;height:44px;display:grid;place-items:center;overflow:hidden;border-radius:7px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted))}.attachment-thumb img{width:100%;height:100%;object-fit:cover}.attachment-preview{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto}.attachment-preview h3{max-width:60vw;margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}.attachment-preview header a{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.preview-stage{min-height:0;display:grid;place-items:center;padding:20px;overflow:auto;background:linear-gradient(45deg,rgb(var(--yb-surface-muted)) 25%,transparent 25%),linear-gradient(-45deg,rgb(var(--yb-surface-muted)) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,rgb(var(--yb-surface-muted)) 75%),linear-gradient(-45deg,transparent 75%,rgb(var(--yb-surface-muted)) 75%);background-size:24px 24px;background-position:0 0,0 12px,12px -12px,-12px 0}.preview-stage>img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 14px 40px rgb(var(--yb-shadow)/.15)}.preview-zoom{position:relative;max-width:100%;max-height:100%;display:grid;padding:0;border:0;background:transparent;cursor:zoom-in}.preview-zoom img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 14px 40px rgb(var(--yb-shadow)/.15)}.preview-zoom-hint{position:absolute;right:9px;bottom:9px;display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:999px;background:rgb(var(--yb-surface)/.92);color:rgb(var(--yb-text-secondary));font-size:11px;font-weight:700;opacity:0;transition:opacity .15s ease}.preview-zoom:hover .preview-zoom-hint,.preview-zoom:focus-visible .preview-zoom-hint{opacity:1}.preview-fallback,.preview-empty{display:grid;place-items:center;align-content:center;gap:8px;color:rgb(var(--yb-text-muted));text-align:center}.preview-fallback strong,.preview-empty strong{color:rgb(var(--yb-text));font-size:16px}.preview-fallback p,.preview-empty p{max-width:34ch;margin:0;font-size:12px;line-height:1.6}.attachment-preview>footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 15px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));font-size:11px}.attachment-preview>footer p{margin:0}.empty-copy{padding:22px;color:rgb(var(--yb-text-muted));font-size:12px;line-height:1.6}@media(max-width:760px){.attachment-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,34vh) minmax(0,1fr)}.attachment-list{border-right:0;border-bottom:1px solid rgb(var(--yb-border))}.attachment-preview h3{max-width:48vw}.attachment-preview>footer{align-items:flex-start;flex-direction:column}}
 </style>

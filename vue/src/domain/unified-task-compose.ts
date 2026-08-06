@@ -1,6 +1,6 @@
 import type { PlanningSKUInput } from '@/services/api/planningSkuApi'
 import type { Task, TaskBatchItem } from '@/domain/types'
-import { isErpProductNameTooLong } from '@/domain/erp-product-name'
+import { erpProductNameError, isErpProductNameTooLong } from '@/domain/erp-product-name'
 import { beijingDateTimeLocalToISO, taskInstantMs } from '@/utils/date'
 import { generateActionId } from '@/utils/uuid'
 
@@ -208,7 +208,7 @@ export function validateCompose(
     } else if (intent === 'new_design') {
       if (!row.product_i_id?.trim()) add('product_i_id', '请选择款式编码 i_id')
       if (!row.product_name?.trim()) add('product_name', '产品名称不能为空')
-      if (isErpProductNameTooLong(row.product_name)) add('product_name', '产品名称不能超过 40 个字')
+      if (isErpProductNameTooLong(row.product_name)) add('product_name', erpProductNameError(row.product_name))
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写设计需求')
     } else if (intent === 'retouch') {
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写修图要求')

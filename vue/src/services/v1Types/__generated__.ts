@@ -4373,7 +4373,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Asset download denied */
+                /** @description Asset view denied */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4435,7 +4435,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Asset download denied */
+                /** @description Asset view denied */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -4495,6 +4495,13 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
+                };
+                /** @description Asset view denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 /** @description Internal error while building direct download manifest */
                 500: {
@@ -18402,7 +18409,7 @@ export interface components {
             workflow_revision: number;
             /** @enum {integer} */
             workflow_contract_version?: 2;
-            /** @description Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.business_info.edit` authorizes non-governed task-field editing, while `task.terminate` authorizes the explicit task cancellation flow. */
+            /** @description Effective capabilities intersected with stable data scope and state rules; an empty array under contract version 2 explicitly denies all actions. `task.claim` authorizes the current actor to claim an unassigned design-side module, `task.business_info.edit` authorizes non-governed task-field editing, and `task.terminate` authorizes the explicit task cancellation flow. */
             allowed_actions: string[];
             /** @enum {string} */
             priority?: "normal" | "high" | "drawing";
@@ -19386,6 +19393,7 @@ export interface components {
             workflow_revision: number;
             /** @enum {integer} */
             workflow_contract_version?: 2;
+            /** @description Effective task actions for this list row. `task.claim` is emitted only for an unassigned design task that the current actor may claim; it is distinct from the management-only `task.assign` action. */
             allowed_actions: string[];
             /** Format: date-time */
             created_at?: string;

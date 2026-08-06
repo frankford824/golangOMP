@@ -147,6 +147,43 @@ func TestListAssignableDesignersUsesExplicitAccessForEveryLane(t *testing.T) {
 	}
 }
 
+func TestListAssignableDesignersIncludesEverySourceFileUploaderInTheNormalLane(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	designerID := seedAssignableUser(t, userRepo, "designer", domain.UserStatusActive)
+	directorID := seedAssignableUser(t, userRepo, "design_director", domain.UserStatusActive)
+	customRoleID := seedAssignableUser(t, userRepo, "retouch_specialist", domain.UserStatusActive)
+	customizationID := seedAssignableUser(t, userRepo, "customization", domain.UserStatusActive)
+	operationsID := seedAssignableUser(t, userRepo, "operations", domain.UserStatusActive)
+
+	reader := assignableAccessReader{byUser: map[int64]*domain.EffectiveAccess{
+		designerID:      assignableEffectiveAccess(designerID, 11, "designer", domain.PermissionTaskUploadSource),
+		directorID:      assignableEffectiveAccess(directorID, 12, "design_director", domain.PermissionTaskUploadSource),
+		customRoleID:    assignableEffectiveAccess(customRoleID, 13, "retouch_specialist", domain.PermissionTaskUploadSource),
+		customizationID: assignableEffectiveAccess(customizationID, 14, "customization_operator", domain.PermissionTaskUploadSource),
+		operationsID:    assignableEffectiveAccess(operationsID, 15, "operations", domain.PermissionTaskCreate),
+	}}
+	svc := NewIdentityService(
+		userRepo,
+		&identitySessionRepoStub{},
+		&identityPermissionLogRepoStub{},
+		identityTxRunner{},
+		WithIdentityEffectiveAccessReader(reader),
+	)
+	actor := &domain.RequestActor{ID: 100}
+
+	normal, appErr := svc.ListAssignableDesigners(context.Background(), actor, AssignableLaneNormal)
+	if appErr != nil {
+		t.Fatalf("normal lane: %+v", appErr)
+	}
+	assertUsernamesExact(t, normal, "retouch_specialist", "design_director", "designer")
+
+	customization, appErr := svc.ListAssignableDesigners(context.Background(), actor, AssignableLaneCustomization)
+	if appErr != nil {
+		t.Fatalf("customization lane: %+v", appErr)
+	}
+	assertUsernamesExact(t, customization, "customization")
+}
+
 func TestListAssignableDesignersTraversesEveryActiveUserPage(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	reader := assignableAccessReader{byUser: map[int64]*domain.EffectiveAccess{}}

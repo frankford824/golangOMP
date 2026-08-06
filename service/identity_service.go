@@ -1296,6 +1296,12 @@ func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *do
 	return filtered, nil
 }
 
+// assignableCustomizationRoleCode is the only role that scopes a source-file
+// uploader to the customization lane. Every other holder of task.upload_source
+// belongs to the normal lane, including design_director and any custom design
+// role: an allowlist of role codes silently dropped them from the picker.
+const assignableCustomizationRoleCode = "customization_operator"
+
 func effectiveAccessMatchesAssignableLane(access *domain.EffectiveAccess, lane AssignableLane) bool {
 	if access == nil {
 		return false
@@ -1307,15 +1313,15 @@ func effectiveAccessMatchesAssignableLane(access *domain.EffectiveAccess, lane A
 				return true
 			}
 		case AssignableLaneNormal:
-			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode == "designer" {
+			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode != assignableCustomizationRoleCode {
 				return true
 			}
 		case AssignableLaneCustomization:
-			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode == "customization_operator" {
+			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode == assignableCustomizationRoleCode {
 				return true
 			}
 		case AssignableLaneAll:
-			if source.Permission == domain.PermissionTaskUploadSource && (source.RoleCode == "designer" || source.RoleCode == "customization_operator") {
+			if source.Permission == domain.PermissionTaskUploadSource {
 				return true
 			}
 		}
