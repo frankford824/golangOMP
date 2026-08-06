@@ -18,6 +18,10 @@ type TaskERPOutboxImageService interface {
 	AutoSyncImagesAfterTaskClosed(ctx context.Context, taskID int64, actorID int64) *domain.AppError
 }
 
+type TaskERPOutboxProjectionService interface {
+	MarkTaskSKUItemBaseSyncSucceeded(ctx context.Context, taskID int64, taskSKUItemID int64) error
+}
+
 type TaskERPOutboxProcessor interface {
 	ProcessTaskERPOutbox(ctx context.Context, item repo.TaskERPOutboxItem) error
 }
@@ -25,13 +29,15 @@ type TaskERPOutboxProcessor interface {
 type taskERPOutboxProcessor struct {
 	filing      TaskERPOutboxFilingService
 	images      TaskERPOutboxImageService
+	projections TaskERPOutboxProjectionService
 	erpBridge   ERPBridgeService
 	storageRefs repo.AssetStorageRefRepo
 	oss         *OSSDirectService
 }
 
 func NewTaskERPOutboxProcessor(filing TaskERPOutboxFilingService, images TaskERPOutboxImageService, erpBridge ERPBridgeService, storageRefs repo.AssetStorageRefRepo, oss *OSSDirectService) TaskERPOutboxProcessor {
-	return &taskERPOutboxProcessor{filing: filing, images: images, erpBridge: erpBridge, storageRefs: storageRefs, oss: oss}
+	projections, _ := images.(TaskERPOutboxProjectionService)
+	return &taskERPOutboxProcessor{filing: filing, images: images, projections: projections, erpBridge: erpBridge, storageRefs: storageRefs, oss: oss}
 }
 
 func (p *taskERPOutboxProcessor) ProcessTaskERPOutbox(ctx context.Context, item repo.TaskERPOutboxItem) error {
@@ -51,8 +57,11 @@ func (p *taskERPOutboxProcessor) ProcessTaskERPOutbox(ctx context.Context, item 
 		if appErr != nil {
 			return fmt.Errorf("task filing: %s", appErr.Message)
 		}
-		if view != nil && view.CanRetry {
-			return fmt.Errorf("task filing remains retryable: %s", strings.TrimSpace(view.FilingErrorMessage))
+		if view == nil {
+			return fmt.Errorf("task filing returned no status")
+		}
+		if view.FilingStatus != domain.FilingStatusFiled || view.ERPSyncRequired {
+			return fmt.Errorf("task filing remains incomplete (%s): %s", view.FilingStatus, strings.TrimSpace(view.FilingErrorMessage))
 		}
 		return nil
 	case "task_image_sync":
@@ -127,6 +136,9 @@ func (p *taskERPOutboxProcessor) processPlanningSKU(ctx context.Context, item re
 	if p.erpBridge == nil {
 		return fmt.Errorf("ERP bridge is unavailable")
 	}
+	if p.projections == nil {
+		return fmt.Errorf("task SKU filing projection service is unavailable")
+	}
 	var payload planningSKUOutboxPayload
 	if err := json.Unmarshal(item.Payload, &payload); err != nil {
 		return fmt.Errorf("decode planning SKU ERP payload: %w", err)
@@ -149,6 +161,9 @@ func (p *taskERPOutboxProcessor) processPlanningSKU(ctx context.Context, item re
 	}
 	if _, appErr := p.erpBridge.UpsertProduct(ctx, base); appErr != nil {
 		return fmt.Errorf("planning SKU base sync: %s", appErr.Message)
+	}
+	if err := p.projections.MarkTaskSKUItemBaseSyncSucceeded(ctx, item.TaskID, payload.TaskSKUItemID); err != nil {
+		return fmt.Errorf("mark planning SKU base sync projection: %w", err)
 	}
 	if strings.TrimSpace(payload.ImageRefID) == "" {
 		return nil

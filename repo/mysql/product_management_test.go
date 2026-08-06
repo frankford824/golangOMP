@@ -276,8 +276,8 @@ func TestProductManagementMarkBaseSyncProjectionSyncedUpdatesTaskProjection(t *t
 				"filing_status = 'filed'",
 				"erp_sync_required = 0",
 				"last_filed_at = ?",
-				"EXISTS ( SELECT 1 FROM erp_product_sync_records pm WHERE pm.task_id = td.task_id )",
 				"NOT EXISTS ( SELECT 1 FROM erp_product_sync_records pm WHERE pm.task_id = td.task_id AND pm.base_sync_status <> 'synced' )",
+				"NOT EXISTS ( SELECT 1 FROM task_sku_items tsi WHERE tsi.task_id = td.task_id",
 			} {
 				if !strings.Contains(normalized, fragment) {
 					return fmt.Errorf("task projection SQL missing %q: %s", fragment, normalized)

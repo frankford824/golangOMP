@@ -1130,7 +1130,7 @@ func (s *productManagementService) markProductManagementSyncSucceeded(ctx contex
 		imageSyncedAt = nil
 	}
 	_ = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		return s.records.UpdateSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
+		if err := s.records.UpdateSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
 			Status:            domain.ProductManagementERPSyncStatusSynced,
 			BaseStatus:        domain.ProductManagementERPSyncStatusSynced,
 			ImageStatus:       imageStatus,
@@ -1142,7 +1142,28 @@ func (s *productManagementService) markProductManagementSyncSucceeded(ctx contex
 			LastSyncError:     "",
 			BaseSyncError:     "",
 			ImageSyncError:    imageErr,
-		})
+		}); err != nil {
+			return err
+		}
+		if err := s.records.MarkBaseSyncProjectionSynced(ctx, tx, record.TaskID, record.TaskSKUItemID, now); err != nil {
+			return err
+		}
+		if s.costRuns != nil {
+			if err := s.costRuns.MarkERPResultForProductManagementRecord(ctx, tx, record.ID, domain.CostRunItemStatusERPSynced, ""); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *productManagementService) MarkTaskSKUItemBaseSyncSucceeded(ctx context.Context, taskID int64, taskSKUItemID int64) error {
+	if taskID <= 0 || taskSKUItemID <= 0 {
+		return fmt.Errorf("task_id and task_sku_item_id are required")
+	}
+	now := s.now()
+	return s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		return s.records.MarkBaseSyncProjectionSynced(ctx, tx, taskID, &taskSKUItemID, now)
 	})
 }
 

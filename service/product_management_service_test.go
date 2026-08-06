@@ -407,6 +407,31 @@ func TestProductManagementBaseSyncSuccessMarksTaskProjection(t *testing.T) {
 	}
 }
 
+func TestProductManagementCombinedSyncSuccessMarksTaskProjection(t *testing.T) {
+	now := time.Date(2026, 6, 23, 9, 45, 0, 0, time.UTC)
+	skuItemID := int64(1493)
+	records := &productManagementRecordRepoFake{}
+	svc := &productManagementService{
+		records:  records,
+		txRunner: productManagementUnitTxRunner{},
+		now:      func() time.Time { return now },
+	}
+
+	svc.markProductManagementSyncSucceeded(context.Background(), &domain.ProductManagementRecord{
+		ID:            6417,
+		TaskID:        1498,
+		TaskSKUItemID: &skuItemID,
+		SKUCode:       "CGO000166",
+	})
+
+	if records.projectionTaskID != 1498 {
+		t.Fatalf("projection task id = %d, want 1498", records.projectionTaskID)
+	}
+	if records.projectionSKUItemID == nil || *records.projectionSKUItemID != skuItemID {
+		t.Fatalf("projection sku item id = %+v, want %d", records.projectionSKUItemID, skuItemID)
+	}
+}
+
 func TestProductManagementBaseSyncTreatsTimeoutAsSuccessWhenReadbackMatches(t *testing.T) {
 	previousSleeper := productManagementERPBaseReadbackSleep
 	productManagementERPBaseReadbackSleep = func(time.Duration) {}

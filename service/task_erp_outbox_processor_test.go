@@ -26,6 +26,22 @@ type taskERPOutboxImageStub struct {
 	err     *domain.AppError
 }
 
+type taskERPOutboxProjectionStub struct {
+	taskID        int64
+	taskSKUItemID int64
+	err           error
+}
+
+func (s *taskERPOutboxProjectionStub) MarkTaskSKUItemBaseSyncSucceeded(_ context.Context, taskID int64, taskSKUItemID int64) error {
+	s.taskID = taskID
+	s.taskSKUItemID = taskSKUItemID
+	return s.err
+}
+
+func (s *taskERPOutboxProjectionStub) AutoSyncImagesAfterTaskClosed(_ context.Context, _ int64, _ int64) *domain.AppError {
+	return nil
+}
+
 func (s *taskERPOutboxImageStub) AutoSyncImagesAfterTaskClosed(_ context.Context, taskID, actorID int64) *domain.AppError {
 	s.taskID = taskID
 	s.actorID = actorID
@@ -44,7 +60,7 @@ func (s *taskERPOutboxERPStub) UpsertProduct(_ context.Context, payload domain.E
 }
 
 func TestTaskERPOutboxProcessorDispatchesFinalizedTaskJobs(t *testing.T) {
-	filing := &taskERPOutboxFilingStub{view: &domain.TaskFilingStatusView{CanRetry: false}}
+	filing := &taskERPOutboxFilingStub{view: &domain.TaskFilingStatusView{FilingStatus: domain.FilingStatusFiled}}
 	images := &taskERPOutboxImageStub{}
 	processor := NewTaskERPOutboxProcessor(filing, images, nil, nil, nil)
 
@@ -63,7 +79,7 @@ func TestTaskERPOutboxProcessorDispatchesFinalizedTaskJobs(t *testing.T) {
 }
 
 func TestTaskERPOutboxProcessorUsesPersistedTaskFilingSource(t *testing.T) {
-	filing := &taskERPOutboxFilingStub{view: &domain.TaskFilingStatusView{CanRetry: false}}
+	filing := &taskERPOutboxFilingStub{view: &domain.TaskFilingStatusView{FilingStatus: domain.FilingStatusFiled}}
 	processor := NewTaskERPOutboxProcessor(filing, nil, nil, nil, nil)
 	payload := []byte(`{"task_id":42,"operator_id":9,"source":"task_create"}`)
 
@@ -79,7 +95,7 @@ func TestTaskERPOutboxProcessorUsesPersistedTaskFilingSource(t *testing.T) {
 }
 
 func TestTaskERPOutboxProcessorMapsRecoveryToManualRetry(t *testing.T) {
-	filing := &taskERPOutboxFilingStub{view: &domain.TaskFilingStatusView{CanRetry: false}}
+	filing := &taskERPOutboxFilingStub{view: &domain.TaskFilingStatusView{FilingStatus: domain.FilingStatusFiled}}
 	processor := NewTaskERPOutboxProcessor(filing, nil, nil, nil, nil)
 	payload := []byte(`{"task_id":42,"operator_id":1,"source":"task_sku_sync_recovery"}`)
 
@@ -112,9 +128,24 @@ func TestTaskERPOutboxProcessorRetriesUnfinishedFiling(t *testing.T) {
 	}
 }
 
+func TestTaskERPOutboxProcessorRejectsPendingFilingWithoutRetryFlag(t *testing.T) {
+	processor := NewTaskERPOutboxProcessor(&taskERPOutboxFilingStub{
+		view: &domain.TaskFilingStatusView{
+			FilingStatus:       domain.FilingStatusPending,
+			ERPSyncRequired:    true,
+			CanRetry:           false,
+			FilingErrorMessage: "缺少建档字段",
+		},
+	}, nil, nil, nil, nil)
+	if err := processor.ProcessTaskERPOutbox(context.Background(), repo.TaskERPOutboxItem{ID: 1, TaskID: 42, JobType: "task_filing"}); err == nil {
+		t.Fatal("ProcessTaskERPOutbox() error = nil, want incomplete filing failure")
+	}
+}
+
 func TestTaskERPOutboxProcessorPlanningSKUUsesOutboxIdentity(t *testing.T) {
 	erp := &taskERPOutboxERPStub{}
-	processor := NewTaskERPOutboxProcessor(nil, nil, erp, nil, nil)
+	projections := &taskERPOutboxProjectionStub{}
+	processor := NewTaskERPOutboxProcessor(nil, projections, erp, nil, nil)
 	skuItemID := int64(7)
 	payload, err := json.Marshal(planningSKUOutboxPayload{
 		TaskID: 42, TaskSKUItemID: skuItemID, SKUCode: "PLAN-001", RevisionID: 9,
@@ -129,6 +160,9 @@ func TestTaskERPOutboxProcessorPlanningSKUUsesOutboxIdentity(t *testing.T) {
 	}
 	if len(erp.payloads) != 1 || erp.payloads[0].SKUCode != "PLAN-001" || erp.payloads[0].IID != "IID-1" {
 		t.Fatalf("ERP payloads = %+v", erp.payloads)
+	}
+	if projections.taskID != 42 || projections.taskSKUItemID != skuItemID {
+		t.Fatalf("projection task/item = %d/%d", projections.taskID, projections.taskSKUItemID)
 	}
 
 	wrongItemID := int64(8)

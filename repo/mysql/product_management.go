@@ -1038,16 +1038,21 @@ func (r *productManagementRepo) MarkBaseSyncProjectionSynced(ctx context.Context
 		       filed_at = COALESCE(td.filed_at, ?),
 		       updated_at = CURRENT_TIMESTAMP
 		 WHERE td.task_id = ?
-		   AND EXISTS (
-		     SELECT 1
-		       FROM erp_product_sync_records pm
-		      WHERE pm.task_id = td.task_id
-		   )
 		   AND NOT EXISTS (
 		     SELECT 1
 		       FROM erp_product_sync_records pm
 		      WHERE pm.task_id = td.task_id
 		        AND pm.base_sync_status <> 'synced'
+		   )
+		   AND NOT EXISTS (
+		     SELECT 1
+		       FROM task_sku_items tsi
+		      WHERE tsi.task_id = td.task_id
+		        AND (
+		          tsi.erp_sync_required <> 0
+		          OR tsi.filing_status <> 'filed'
+		          OR tsi.erp_sync_status <> 'filed'
+		        )
 		   )
 		   AND (
 		     td.filing_status <> 'filed'
