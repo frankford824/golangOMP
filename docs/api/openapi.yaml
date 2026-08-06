@@ -9391,7 +9391,7 @@ paths:
       description: Matches system and OSS-ready external JPG, PNG, TIF, and TIFF resources. Complete multi-file sets include package_folder so the frontend preserves the set as one folder.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [asset.download]
+      x-permissions: [asset.view]
       requestBody:
         required: true
         content:
@@ -9407,13 +9407,13 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/AssetExcelPackageManifest' }
         '400': { description: Invalid rows }
-        '403': { description: Asset download denied }
+        '403': { description: Asset view denied }
   /v1/assets/excel-package/preview-file:
     post:
       summary: Parse XLS or XLSX and build a production package manifest
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [asset.download]
+      x-permissions: [asset.view]
       requestBody:
         required: true
         content:
@@ -9433,14 +9433,14 @@ paths:
                 properties:
                   data: { $ref: '#/components/schemas/AssetExcelPackageManifest' }
         '400': { description: Invalid file or template }
-        '403': { description: Asset download denied }
+        '403': { description: Asset view denied }
   /v1/assets/batch-download:
     post:
       summary: Batch download asset direct URL manifest
       description: Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; external resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [asset.download]
+      x-permissions: [asset.view]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       requestBody:
@@ -9465,6 +9465,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Asset view denied
         '500':
           description: Internal error while building direct download manifest
           content:

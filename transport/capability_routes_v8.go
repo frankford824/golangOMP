@@ -204,6 +204,12 @@ func v8TaskRoutePermissions(method, path string) ([]domain.PermissionCode, bool)
 }
 
 func v8AssetRoutePermissions(method, path string) []domain.PermissionCode {
+	if method == http.MethodPost && (path == "/v1/assets/batch-download" || path == "/v1/assets/excel-package/preview" || path == "/v1/assets/excel-package/preview-file") {
+		// Production packaging is available to every authenticated asset-center
+		// viewer. Keep the wider asset.download capability on single-file,
+		// task-attachment and asset-workbench download surfaces.
+		return []domain.PermissionCode{domain.PermissionAssetView}
+	}
 	if strings.Contains(path, "/upload-sessions") {
 		if method == http.MethodGet {
 			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskCreate, domain.PermissionTaskUploadSource, domain.PermissionTaskAudit, domain.PermissionAssetManage}

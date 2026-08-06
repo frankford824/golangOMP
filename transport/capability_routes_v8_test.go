@@ -32,7 +32,9 @@ func TestV8BusinessRoutePermissionsCoverActiveTaskAssetAndERPSurfaces(t *testing
 		{http.MethodPost, "/v1/tasks/8/assets/upload-sessions", domain.PermissionTaskUploadSource},
 		{http.MethodGet, "/v1/assets/search", domain.PermissionAssetView},
 		{http.MethodDelete, "/v1/assets/77", domain.PermissionAssetManage},
-		{http.MethodPost, "/v1/assets/batch-download", domain.PermissionAssetDownload},
+		{http.MethodPost, "/v1/assets/batch-download", domain.PermissionAssetView},
+		{http.MethodPost, "/v1/assets/excel-package/preview", domain.PermissionAssetView},
+		{http.MethodPost, "/v1/assets/excel-package/preview-file", domain.PermissionAssetView},
 		{http.MethodGet, "/v1/task-board/overview", domain.PermissionTaskView},
 		{http.MethodGet, "/v1/erp/products", domain.PermissionCatalogView},
 		{http.MethodPost, "/v1/erp/products/upsert", domain.PermissionERPManage},
@@ -56,6 +58,53 @@ func TestV8BusinessRoutePermissionsCoverActiveTaskAssetAndERPSurfaces(t *testing
 			}
 			if len(rule.RequiredPermissions) == 0 {
 				t.Fatal("active rule has no explicit capability")
+			}
+		})
+	}
+}
+
+func TestProductionPackageRoutesAreAvailableToAssetViewers(t *testing.T) {
+	tests := []struct {
+		path         string
+		registration string
+	}{
+		{path: "/v1/assets/batch-download", registration: `assetGroup.POST("/batch-download"`},
+		{path: "/v1/assets/excel-package/preview", registration: `assetGroup.POST("/excel-package/preview"`},
+		{path: "/v1/assets/excel-package/preview-file", registration: `assetGroup.POST("/excel-package/preview-file"`},
+	}
+
+	raw, err := os.ReadFile("http.go")
+	if err != nil {
+		t.Fatalf("read http.go: %v", err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			permissions, governed := v8BusinessRoutePermissions(http.MethodPost, tt.path)
+			if !governed {
+				t.Fatal("production package route is not governed")
+			}
+			if !permissionListContains(permissions, domain.PermissionAssetView) {
+				t.Fatalf("permissions = %v, want asset.view", permissions)
+			}
+			if permissionListContains(permissions, domain.PermissionAssetDownload) {
+				t.Fatalf("permissions = %v, production package must not require asset.download", permissions)
+			}
+
+			var registration string
+			for _, line := range strings.Split(string(raw), "\n") {
+				if strings.Contains(line, tt.registration) {
+					registration = strings.TrimSpace(line)
+					break
+				}
+			}
+			if registration == "" {
+				t.Fatalf("registration not found for %s", tt.path)
+			}
+			if !strings.Contains(registration, "domain.PermissionAssetView") {
+				t.Fatalf("registration missing asset.view: %s", registration)
+			}
+			if strings.Contains(registration, "domain.PermissionAssetDownload") {
+				t.Fatalf("registration still requires asset.download: %s", registration)
 			}
 		})
 	}

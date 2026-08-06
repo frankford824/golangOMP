@@ -125,7 +125,7 @@ Content-Type: `application/json`
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid rows |
-| 403 | 见 `error.code` | 见 `deny_code` | Asset download denied |
+| 403 | 见 `error.code` | 见 `deny_code` | Asset view denied |
 
 ### curl 示例
 ```bash
@@ -189,7 +189,7 @@ Content-Type: `multipart/form-data`
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid file or template |
-| 403 | 见 `error.code` | 见 `deny_code` | Asset download denied |
+| 403 | 见 `error.code` | 见 `deny_code` | Asset view denied |
 
 ### curl 示例
 ```bash
@@ -253,6 +253,7 @@ Content-Type: `application/json`
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request or all assets unavailable |
+| 403 | 见 `error.code` | 见 `deny_code` | Asset view denied |
 | 500 | 见 `error.code` | 见 `deny_code` | Internal error while building direct download manifest |
 
 ### curl 示例
