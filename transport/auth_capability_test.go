@@ -98,6 +98,17 @@ func TestERPBridgeInternalAccessRequiresMatchingTokenAndLoopbackPeer(t *testing.
 	}
 }
 
+func TestERPCategoriesRouteAllowsSameHostWorkerCredential(t *testing.T) {
+	raw, err := os.ReadFile("http.go")
+	if err != nil {
+		t.Fatalf("read http.go: %v", err)
+	}
+	want := `erpGroup.GET("/categories", erpInternalOrCapabilityAccess(`
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("ERP categories route must opt in to the loopback-only worker credential")
+	}
+}
+
 func TestTaskAssetUploadSessionHTTPRegistrationsDoNotUseLegacyRoleAccess(t *testing.T) {
 	raw, err := os.ReadFile("http.go")
 	if err != nil {

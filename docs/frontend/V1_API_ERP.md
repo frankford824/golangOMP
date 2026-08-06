@@ -235,7 +235,7 @@ curl -X GET https://api.example.com/v1/erp/products/<id> \
 ### 简介
 支持方法: GET。
 
-- `GET`: Normalized categories for **exact** product filters on /v1/erp/products. Source is local configurable mapping layer (categories table; current 31 rows are sample data, not production category center). Business classification primary semantic = style code (i_id); JST category field is ERP raw field. Do NOT use jst_inventory or any large sync table scan. For **global** category pickers (rules, filters, dropdowns), prefer **GET /v1/categories** or **GET /v1/categories/search** as the primary API. See docs/TRUTH_SOURCE_ALIGNMENT.md.
+- `GET`: Normalized categories for **exact** product filters on /v1/erp/products. Source is local configurable mapping layer (categories table; current 31 rows are sample data, not production category center). Business classification primary semantic = style code (i_id); JST category field is ERP raw field. Do NOT use jst_inventory or any large sync table scan. For **global** category pickers (rules, filters, dropdowns), prefer **GET /v1/categories** or **GET /v1/categories/search** as the primary API. See docs/TRUTH_SOURCE_ALIGNMENT.md. Browser callers require `catalog.view`; same-host MAIN filing workers may use the loopback-only `X-ERP-Bridge-Internal-Token` while resolving category metadata.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

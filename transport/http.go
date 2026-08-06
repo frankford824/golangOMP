@@ -169,7 +169,7 @@ func NewRouter(
 			}
 			erpBridgeH.GetProductByID(c)
 		})
-		erpGroup.GET("/categories", capabilityAccess(erpGroup, http.MethodGet, "/categories", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), erpBridgeH.ListCategories)
+		erpGroup.GET("/categories", erpInternalOrCapabilityAccess(erpGroup, http.MethodGet, "/categories", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), erpBridgeH.ListCategories)
 		erpGroup.GET("/warehouses", capabilityAccess(erpGroup, http.MethodGet, "/warehouses", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.ListWarehouses)
 		erpGroup.GET("/sync-logs", capabilityAccess(erpGroup, http.MethodGet, "/sync-logs", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.ListSyncLogs)
 		erpGroup.GET("/sync-logs/*id", capabilityAccess(erpGroup, http.MethodGet, "/sync-logs/{id}", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), erpBridgeH.GetSyncLogByID)
