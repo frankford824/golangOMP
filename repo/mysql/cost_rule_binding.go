@@ -220,14 +220,17 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	page := filter.Page
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
 	keyword := strings.TrimSpace(filter.Keyword)
 	normalizedExpr := "UPPER(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(pm.erp_i_id, ''), pm.product_i_id)), ' ', ''), '　', ''))"
 	groupByNormalizedExpr := normalizedExpr
 	where := []string{
 		"COALESCE(NULLIF(pm.erp_i_id, ''), pm.product_i_id, '') <> ''",
 		"b.id IS NULL",
-		"JSON_VALID(cost_snapshot.calculation_snapshot_json)",
-		"JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.legacy_alias_fallback')) = 'true'",
 	}
 	args := []interface{}{}
 	if keyword != "" {
@@ -251,13 +254,14 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 		) x`, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count unbound cost rule candidates: %w", err)
 	}
-	queryArgs := append(append([]interface{}{}, args...), limit)
+	queryArgs := append(append([]interface{}{}, args...), limit, offset)
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT
 		  COALESCE(MIN(NULLIF(pm.erp_i_id, '')), '') AS erp_i_id,
 		  COALESCE(MIN(NULLIF(pm.product_i_id, '')), '') AS product_i_id,
 		  `+normalizedExpr+` AS normalized_i_id,
-		  COALESCE(MIN(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.rule_group')), '')), '') AS suggested_rule_group,
+		  COALESCE(GROUP_CONCAT(DISTINCT NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.rule_group')), '') ORDER BY JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.rule_group')) SEPARATOR ','), '') AS suggested_rule_groups,
+		  COUNT(DISTINCT NULLIF(JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.rule_group')), '')) AS suggested_group_count,
 		  COUNT(*) AS match_count,
 		  MIN(pm.sku_code) AS example_sku_code,
 		  MIN(pm.task_no) AS example_task_no,
@@ -270,7 +274,7 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 		WHERE `+whereSQL+`
 		GROUP BY `+groupByNormalizedExpr+`
 		ORDER BY match_count DESC, normalized_i_id ASC
-		LIMIT ?`, queryArgs...)
+		LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list unbound cost rule candidates: %w", err)
 	}
@@ -278,11 +282,13 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 	items := make([]*domain.UnboundCostRuleCandidate, 0)
 	for rows.Next() {
 		var item domain.UnboundCostRuleCandidate
+		var suggestedGroups string
 		if err := rows.Scan(
 			&item.ERPProductIID,
 			&item.ProductIID,
 			&item.NormalizedIID,
-			&item.SuggestedRuleGroup,
+			&suggestedGroups,
+			&item.SuggestedGroupCount,
 			&item.MatchCount,
 			&item.ExampleSKUCode,
 			&item.ExampleTaskNo,
@@ -290,12 +296,35 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan unbound cost rule candidate: %w", err)
 		}
+		item.SuggestedRuleGroups = splitNonEmptyCSV(suggestedGroups)
+		switch item.SuggestedGroupCount {
+		case 0:
+			item.MappingConfidence = "unmatched"
+		case 1:
+			item.MappingConfidence = "unique"
+			if len(item.SuggestedRuleGroups) == 1 {
+				item.SuggestedRuleGroup = item.SuggestedRuleGroups[0]
+			}
+		default:
+			item.MappingConfidence = "conflict"
+		}
 		items = append(items, &item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterate unbound cost rule candidates: %w", err)
 	}
 	return items, total, nil
+}
+
+func splitNonEmptyCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if normalized := strings.TrimSpace(part); normalized != "" {
+			result = append(result, normalized)
+		}
+	}
+	return result
 }
 
 func scanCostRuleBinding(scanner interface{ Scan(...interface{}) error }) (*domain.CostRuleBinding, error) {

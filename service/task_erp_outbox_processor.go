@@ -43,9 +43,11 @@ func (p *taskERPOutboxProcessor) ProcessTaskERPOutbox(ctx context.Context, item 
 		if p.filing == nil {
 			return fmt.Errorf("task filing processor is unavailable")
 		}
-		view, appErr := p.filing.TriggerFiling(ctx, TriggerTaskFilingParams{
-			TaskID: item.TaskID, Source: TaskFilingTriggerSourceAuditFinalApproved, Force: true,
-		})
+		params, err := decodeTaskFilingOutboxParams(item)
+		if err != nil {
+			return err
+		}
+		view, appErr := p.filing.TriggerFiling(ctx, params)
 		if appErr != nil {
 			return fmt.Errorf("task filing: %s", appErr.Message)
 		}
@@ -66,6 +68,49 @@ func (p *taskERPOutboxProcessor) ProcessTaskERPOutbox(ctx context.Context, item 
 	default:
 		return fmt.Errorf("unsupported task ERP outbox job type %q", item.JobType)
 	}
+}
+
+type taskFilingOutboxPayload struct {
+	TaskID     int64  `json:"task_id"`
+	OperatorID int64  `json:"operator_id"`
+	Source     string `json:"source"`
+}
+
+func decodeTaskFilingOutboxParams(item repo.TaskERPOutboxItem) (TriggerTaskFilingParams, error) {
+	payload := taskFilingOutboxPayload{TaskID: item.TaskID}
+	if len(item.Payload) > 0 {
+		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+			return TriggerTaskFilingParams{}, fmt.Errorf("decode task filing ERP payload: %w", err)
+		}
+	}
+	if payload.TaskID == 0 {
+		payload.TaskID = item.TaskID
+	}
+	if payload.TaskID != item.TaskID {
+		return TriggerTaskFilingParams{}, fmt.Errorf("task filing ERP payload identity does not match outbox row")
+	}
+
+	source := TaskFilingTriggerSourceAuditFinalApproved
+	switch strings.TrimSpace(payload.Source) {
+	case "", string(TaskFilingTriggerSourceAuditFinalApproved):
+		// Historical workflow-finalization jobs did not persist a source field.
+	case "task_create", string(TaskFilingTriggerSourceCreate):
+		source = TaskFilingTriggerSourceCreate
+	case "task_sku_sync_recovery", string(TaskFilingTriggerSourceManualRetry):
+		source = TaskFilingTriggerSourceManualRetry
+	case string(TaskFilingTriggerSourceBusinessInfoPatch):
+		source = TaskFilingTriggerSourceBusinessInfoPatch
+	case string(TaskFilingTriggerSourceLegacyFiledAt):
+		source = TaskFilingTriggerSourceLegacyFiledAt
+	default:
+		return TriggerTaskFilingParams{}, fmt.Errorf("unsupported task filing ERP source %q", payload.Source)
+	}
+	return TriggerTaskFilingParams{
+		TaskID:     item.TaskID,
+		OperatorID: payload.OperatorID,
+		Source:     source,
+		Force:      true,
+	}, nil
 }
 
 type planningSKUOutboxPayload struct {

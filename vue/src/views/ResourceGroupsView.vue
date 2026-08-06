@@ -3,7 +3,7 @@
     <header class="page-heading yb-page-surface yb-page-header-row" data-page-header="asset-center">
       <div class="yb-page-heading-copy">
         <h1 class="yb-page-title">SKU 资产中心</h1>
-        <p class="yb-page-subtitle">每张卡片就是一个可交付 SKU：图片、来源任务、规格、组合关系与当前成本保持在同一处。</p>
+        <p class="yb-page-subtitle">SKU 生成后立即可检索；图片、来源任务、规格、组合关系与系统计算成本在同一张卡片持续补齐。</p>
       </div>
       <div class="page-actions">
         <button class="primary-button" @click="packageOpen = true">生产打包</button>
@@ -33,9 +33,13 @@
     </section>
 
     <div v-if="error" class="error" role="alert"><span>{{ error }}</span><button @click="load">重试</button></div>
-    <div v-if="loading" class="empty">正在整理当前有效资源…</div>
+    <div v-if="loading && !result.items.length && !result.flat_items.length" class="empty loading-state" role="status">
+      <span class="loading-spinner" aria-hidden="true" />正在检索 SKU 与资源…
+    </div>
+    <div v-else-if="loading" class="results-refreshing" role="status"><span class="loading-spinner" aria-hidden="true" />正在更新结果，当前列表仍可查看</div>
 
-    <template v-else-if="isFlatMode">
+    <template v-if="!loading || result.items.length || result.flat_items.length">
+    <template v-if="isFlatMode">
       <div v-if="!result.flat_items.length" class="empty">没有找到符合条件的资源。</div>
       <section v-else class="grid flat-grid" aria-label="匹配资源列表">
         <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
@@ -86,10 +90,14 @@
               <span>任务 {{ group.task_no || group.task_id }}</span>
               <span>{{ group.creator_name || '创建人待补充' }}</span>
             </span>
-            <span class="sku-facts">
+            <span class="sku-facts" :class="{ 'has-erp-cost': liveCost(group.id) }">
               <span><small>规格 / 尺寸</small><b>{{ specificationText(group) }}</b></span>
               <span><small>计价面积</small><b>{{ areaText(group) }}</b></span>
-              <span><small>当前成本</small><b>{{ costText(group) }}</b></span>
+              <span><small>系统计算成本</small><b>{{ costText(group) }}</b></span>
+              <span v-if="liveCost(group.id)">
+                <small>ERP 实际成本</small>
+                <b :class="{ 'cost-mismatch': liveCost(group.id)?.status === 'mismatched' }">{{ erpCostText(liveCost(group.id)) }}</b>
+              </span>
             </span>
             <span v-if="comboText(group)" class="combo-line"><small>组合编码</small><b>{{ comboText(group) }}</b></span>
             <span class="cost-rule-line">{{ costRuleText(group) }}</span>
@@ -97,6 +105,7 @@
           </span>
         </button>
       </section>
+    </template>
     </template>
 
     <nav v-if="result.total > result.page_size" class="pager" aria-label="资源分页">
@@ -118,7 +127,6 @@
               <label>资源创建开始时间<input v-model="filters.created_from" type="date" /></label>
               <label>资源创建结束时间<input v-model="filters.created_to" type="date" /></label>
               <label>资源所属人<select v-model="filters.resource_owner_id"><option value="">全部人员</option><option v-for="item in creatorOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-              <label>对应任务类型<select v-model="filters.task_type"><option value="">全部任务类型</option><option v-for="item in taskTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
             </section>
             <footer><button type="button" class="quiet-button" @click="resetDrawer">重置</button><button class="primary-button">应用筛选</button></footer>
           </form>
@@ -135,9 +143,9 @@ import { useRouter } from 'vue-router'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import ProductionPackageDialog from '@/components/assets/ProductionPackageDialog.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
-import { resourceGroupsApi, type FlatResourceItem, type ResourceGroup, type ResourceRevision } from '@/services/api/resourceGroupsApi'
+import { resourceGroupsApi, type FlatResourceItem, type ProductCostReconciliation, type ResourceGroup, type ResourceRevision } from '@/services/api/resourceGroupsApi'
 
-type FilterKey = 'resource_role' | 'file_format' | 'created_from' | 'created_to' | 'resource_owner_id' | 'task_type'
+type FilterKey = 'resource_role' | 'file_format' | 'created_from' | 'created_to' | 'resource_owner_id'
 
 const router = useRouter()
 const loading = ref(false)
@@ -146,7 +154,9 @@ const filterDrawerOpen = ref(false)
 const packageOpen = ref(false)
 const brokenImages = ref(new Set<number>())
 const brokenFlat = ref(new Set<number>())
-const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final', file_format: '', created_from: '', created_to: '', resource_owner_id: '', task_type: '' })
+const liveCosts = ref(new Map<number, ProductCostReconciliation>())
+let liveCostRequestVersion = 0
+const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final', file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
 const initialPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? Math.max(80, Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE || 100)) : 24
 const result = reactive({ items: [] as ResourceGroup[], flat_items: [] as FlatResourceItem[], view_mode: 'group' as 'group' | 'flat', page: 1, page_size: initialPageSize, total: 0 })
 const { creatorOptions: rawCreatorOptions } = useTaskFilterOptions(true, '全部')
@@ -172,6 +182,11 @@ const costText = (group: ResourceGroup) => {
   const cost = group.sku_profile?.cost_price
   return typeof cost === 'number' && Number.isFinite(cost) ? `¥ ${cost.toFixed(2)}` : '成本待计算'
 }
+const liveCost = (groupID: number) => liveCosts.value.get(groupID)
+const erpCostText = (cost?: ProductCostReconciliation) => {
+  if (typeof cost?.erp_cost_price === 'number' && Number.isFinite(cost.erp_cost_price)) return `¥ ${cost.erp_cost_price.toFixed(2)}`
+  return cost?.status === 'unavailable' ? 'ERP 查询失败' : 'ERP 未维护'
+}
 const comboText = (group: ResourceGroup) => (group.sku_profile?.combo_sku_codes || []).join('、')
 const costRuleText = (group: ResourceGroup) => {
   const trace = group.sku_profile?.cost_trace
@@ -183,20 +198,11 @@ const syncLabel = (group: ResourceGroup) => ({ synced: 'ERP 已同步', queued: 
 const syncTone = (group: ResourceGroup) => group.sku_profile?.erp_sync_status === 'synced' ? 'is-synced' : group.sku_profile?.erp_sync_status === 'failed' ? 'is-failed' : 'is-pending'
 const fileInitial = (name?: string) => (name || '文件').split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'
 const formatResourceDate = (value?: string) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value)) : '时间待补充'
-const taskTypeOptions = [
-  { label: '原有产品开发', value: 'original_product_development' },
-  { label: '新品开发', value: 'new_product_development' },
-  { label: '策划 SKU', value: 'sku_planning' },
-  { label: '修图任务', value: 'retouch_task' },
-  { label: '客户定制', value: 'customer_customization' },
-  { label: '常规定制', value: 'regular_customization' },
-]
-const taskTypeLabel = (value: string) => taskTypeOptions.find((item) => item.value === value)?.label || value
-const filterLabels: Record<FilterKey, string> = { resource_role: '资源类型', file_format: '文件格式', created_from: '创建开始', created_to: '创建结束', resource_owner_id: '资源所属人', task_type: '任务类型' }
+const filterLabels: Record<FilterKey, string> = { resource_role: '资源类型', file_format: '文件格式', created_from: '创建开始', created_to: '创建结束', resource_owner_id: '资源所属人' }
 const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).flatMap((key) => {
   const value = String(filters[key] || '')
   if (!value) return []
-  const display = key === 'resource_owner_id' ? creatorOptions.value.find((item) => item.value === value)?.label || value : key === 'task_type' ? taskTypeLabel(value) : key === 'resource_role' ? roleLabel(value) : value
+  const display = key === 'resource_owner_id' ? creatorOptions.value.find((item) => item.value === value)?.label || value : key === 'resource_role' ? roleLabel(value) : value
   return [{ key, label: `${filterLabels[key]}：${display}` }]
 }))
 
@@ -208,13 +214,30 @@ function clearAllFilters() { (Object.keys(filterLabels) as FilterKey[]).forEach(
 function resetDrawer() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }) }
 function searchFromDrawer() { filterDrawerOpen.value = false; search() }
 async function load() {
+  const requestVersion = ++liveCostRequestVersion
+  liveCosts.value = new Map()
   loading.value = true
   error.value = ''
   try {
-    const next = await resourceGroupsApi.list({ q: filters.q || undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, task_type: filters.task_type || undefined, page: result.page, page_size: result.page_size })
+    const exactSKUQuery = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(filters.q)
+    const next = await resourceGroupsApi.list({ q: exactSKUQuery ? undefined : filters.q || undefined, sku_code: exactSKUQuery ? filters.q.toUpperCase() : undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, page: result.page, page_size: result.page_size })
     result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (isFlatMode.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
     brokenImages.value = new Set(); brokenFlat.value = new Set()
+    if (exactSKUQuery && result.view_mode === 'group' && result.items.length <= 20) void refreshLiveCosts(result.items, requestVersion)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '资产中心加载失败。' } finally { loading.value = false }
+}
+async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number) {
+  await Promise.all(groups.map(async (group) => {
+    try {
+      const cost = await resourceGroupsApi.costReconciliation(group.id)
+      if (requestVersion !== liveCostRequestVersion) return
+      const next = new Map(liveCosts.value)
+      next.set(group.id, cost)
+      liveCosts.value = next
+    } catch {
+      // The card keeps the system calculation visible; ERP lookup failure is available in group details.
+    }
+  }))
 }
 function search() { result.page = 1; void load() }
 function goPage(page: number) { result.page = Math.max(1, Math.min(totalPages.value, page)); void load() }
@@ -223,6 +246,9 @@ onMounted(load)
 
 <style scoped>
 .groups-page{max-width:1320px;margin:0 auto;padding:28px;display:grid;gap:20px}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.page-actions{display:flex;gap:10px;flex-wrap:wrap}.page-heading h1{margin:4px 0;font-size:31px}.page-heading p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{margin:0;font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.quiet-button,.primary-button,.filter-button,.pager button,.error button,.icon-button{min-height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 14px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));cursor:pointer}.primary-button{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.search-workbench{display:grid;gap:10px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface))}.search-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.search-field{position:relative}.search-field input{width:100%;min-height:42px;border:1px solid rgb(var(--yb-border));border-radius:11px;padding:0 16px 0 40px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text))}.search-icon{position:absolute;left:14px;top:9px;color:rgb(var(--yb-text-muted));font-size:20px}.filter-button.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.active-filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.active-filters button{border:0;border-radius:999px;padding:6px 10px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));cursor:pointer}.active-filters .clear-filters{background:transparent;color:rgb(var(--yb-text-muted))}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}.resource-card{min-width:0;padding:0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));text-align:left;cursor:pointer;transition:transform .18s,border-color .18s,box-shadow .18s}.resource-card:hover,.resource-card:focus-visible{transform:translateY(-3px);border-color:rgb(var(--yb-brand-border));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.1);outline:2px solid rgb(var(--yb-brand-soft));outline-offset:2px}.cover{position:relative;display:block;aspect-ratio:16/11;background:rgb(var(--yb-surface-muted))}.cover img,.preview-fallback{width:100%;height:100%;object-fit:cover}.preview-fallback{display:grid;place-items:center;align-content:center;gap:6px;color:rgb(var(--yb-text-muted))}.file-mark{font-size:18px;font-weight:900}.preview-fallback small{font-size:11px}.mode-badge,.item-count{position:absolute;top:10px;padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface)/.94);font-size:11px;font-weight:800}.mode-badge{left:10px;color:rgb(var(--yb-brand))}.item-count{right:10px;color:rgb(var(--yb-text))}.card-body{display:grid;gap:7px;padding:14px}.sku-code{font-size:13px;color:rgb(var(--yb-brand))}.product-name{min-height:22px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.card-meta{display:flex;gap:8px;font-size:12px;color:rgb(var(--yb-text-muted))}.card-meta span+span::before{content:'·';margin-right:8px}.provenance{font-size:11px;color:rgb(var(--yb-text-faint))}.warn{font-size:12px;color:rgb(var(--yb-warning-text))}.pager{display:flex;align-items:center;justify-content:center;gap:14px}.empty,.error{padding:38px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:16px;color:rgb(var(--yb-text-muted))}.error{display:flex;align-items:center;justify-content:center;gap:12px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.drawer-layer{position:fixed;inset:0;z-index:90;display:flex;justify-content:flex-end}.drawer-backdrop{position:absolute;inset:0;border:0;background:rgb(var(--yb-overlay-night)/.42)}.filter-drawer{position:relative;width:min(390px,100vw);height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));box-shadow:-18px 0 48px rgb(var(--yb-shadow)/.18)}.filter-drawer>header{display:flex;align-items:center;justify-content:space-between;padding:22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-drawer h2{margin:3px 0 0}.icon-button{width:40px;padding:0;font-size:24px}.filter-drawer form{min-height:0;display:grid;grid-template-rows:1fr auto;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr;gap:14px;padding:22px}.filter-section h3{margin:0;font-size:14px}.filter-section label{display:grid;gap:6px;font-size:12px;color:rgb(var(--yb-text-muted))}.filter-section input,.filter-section select{box-sizing:border-box;width:100%;height:42px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 11px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-drawer footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}@media(max-width:700px){.groups-page{padding:16px}.page-heading{align-items:stretch;flex-direction:column}.search-row{grid-template-columns:1fr auto}.search-row .primary-button{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card-body{padding:11px}.product-name{font-size:13px}}@media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.mode-badge,.item-count{top:7px}.mode-badge{left:7px}.item-count{right:7px}.provenance,.card-meta{font-size:10px}}
+</style>
+<style scoped>
+.results-refreshing{position:sticky;top:.5rem;z-index:4;display:flex;align-items:center;justify-content:center;gap:.55rem;width:max-content;max-width:calc(100% - 2rem);margin:-.25rem auto;padding:.55rem .85rem;border:1px solid rgb(var(--yb-brand-border));border-radius:999px;background:rgb(var(--yb-surface)/.94);color:rgb(var(--yb-brand));font-size:.76rem;font-weight:750;box-shadow:0 .5rem 1.4rem rgb(var(--yb-shadow)/.1);backdrop-filter:blur(12px)}.loading-state{display:flex;align-items:center;justify-content:center;gap:.65rem}.loading-spinner{width:1rem;height:1rem;border:2px solid rgb(var(--yb-brand-border));border-top-color:rgb(var(--yb-brand));border-radius:50%;animation:asset-search-spin .75s linear infinite}@keyframes asset-search-spin{to{transform:rotate(360deg)}}
 </style>
 <style scoped>
 .groups-page {
@@ -333,6 +359,10 @@ onMounted(load)
   background: rgb(var(--yb-surface-soft));
 }
 
+.sku-facts.has-erp-cost {
+  grid-template-columns: 1.25fr 0.85fr 0.85fr 0.85fr;
+}
+
 .sku-facts > span {
   min-width: 0;
   display: grid;
@@ -357,6 +387,10 @@ onMounted(load)
   font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sku-facts b.cost-mismatch {
+  color: rgb(var(--yb-danger-text));
 }
 
 .combo-line {

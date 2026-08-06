@@ -3097,6 +3097,12 @@ components:
           minimum: 0
           nullable: true
           description: Optional area captured by operations for the single-SKU task.
+        craft_text:
+          type: string
+          description: Human-readable structure and craft summary captured at creation, for example `平面 开槽`.
+        process:
+          type: string
+          description: Canonical cost-rule process keyword captured at creation, for example `开槽` or `不开槽`.
     CreateTaskBatchItem:
       type: object
       required: [product_name, design_requirement]
@@ -4090,13 +4096,25 @@ components:
           $ref: '#/components/schemas/PaginationMeta'
     UnboundCostRuleCandidate:
       type: object
+      required: [normalized_i_id, suggested_rule_groups, suggested_group_count, mapping_confidence, match_count]
       properties:
         erp_i_id: { type: string }
         product_i_id: { type: string }
         normalized_i_id: { type: string }
         suggested_rule_group:
           type: string
-          description: Rule group seen in the legacy text-fallback cost snapshot, if available.
+          description: The single inferred rule group; omitted when history has no group or conflicting groups.
+        suggested_rule_groups:
+          type: array
+          description: Every distinct rule group observed in historical calculation snapshots for this unbound style.
+          items: { type: string }
+        suggested_group_count:
+          type: integer
+          format: int64
+        mapping_confidence:
+          type: string
+          enum: [unique, conflict, unmatched]
+          description: Unique is safe to propose; conflict and unmatched require explicit operator selection.
         suggested_display_name: { type: string }
         match_count:
           type: integer
@@ -4107,6 +4125,30 @@ components:
           type: number
           format: double
           nullable: true
+    ProductCostReconciliation:
+      type: object
+      required: [product_management_record_id, sku_code, status, checked_at, message]
+      description: Live read-only comparison between the retained system calculation and the current ERP observation. Neither value is overwritten by this read.
+      properties:
+        product_management_record_id: { type: integer, format: int64 }
+        sku_code: { type: string }
+        system_cost_price: { type: number, format: double, nullable: true }
+        erp_cost_price: { type: number, format: double, nullable: true }
+        cost_delta:
+          type: number
+          format: double
+          nullable: true
+          description: ERP actual cost minus system calculated cost.
+        status:
+          type: string
+          enum: [matched, mismatched, system_missing, erp_missing, unavailable]
+        checked_at: { type: string, format: date-time }
+        message: { type: string }
+        system_trace:
+          allOf: [{ $ref: '#/components/schemas/ProductManagementCostTrace' }]
+          nullable: true
+        erp_i_id: { type: string }
+        erp_product_name: { type: string }
     ProductCostDashboardResponse:
       type: object
       properties:
@@ -5743,13 +5785,55 @@ components:
         creator_name: { type: string }
         business_lane: { type: string, enum: [normal, customization] }
         sku_profile:
-          allOf: [{ $ref: '#/components/schemas/ProductManagementRecord' }]
+          allOf: [{ $ref: '#/components/schemas/TaskAssetGroupSKUProfile' }]
           nullable: true
-          description: Current SKU business projection used by the asset center for specifications, dimensions, cost trace, combination codes, and ERP synchronization state.
+          description: Scoped SKU business projection used by the asset center for specifications, dimensions, system-calculated cost, combination codes, and ERP synchronization state.
         working_revision: { $ref: '#/components/schemas/TaskAssetGroupRevision' }
         finalized_revision: { $ref: '#/components/schemas/TaskAssetGroupRevision' }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    TaskAssetGroupSKUProfile:
+      type: object
+      required: [id, task_id, sku_code]
+      properties:
+        id: { type: integer, format: int64 }
+        task_id: { type: integer, format: int64 }
+        task_sku_item_id: { type: integer, format: int64, nullable: true }
+        sku_code: { type: string }
+        product_i_id: { type: string }
+        erp_i_id: { type: string }
+        category_name: { type: string }
+        product_family: { type: string }
+        product_name: { type: string }
+        combo_sku_codes:
+          type: array
+          items: { type: string }
+        cost_price:
+          type: number
+          format: double
+          nullable: true
+          description: Retained system-calculated or explicitly overridden cost. This is not asserted to be the current ERP cost.
+        cost_trace:
+          type: object
+          nullable: true
+          properties:
+            rule_name: { type: string }
+            rule_source: { type: string }
+            matched_rule_version: { type: integer, nullable: true }
+            requires_manual_review: { type: boolean }
+            manual_cost_override: { type: boolean }
+            manual_cost_override_reason: { type: string }
+            input_snapshot: { type: object, additionalProperties: true, nullable: true }
+            calculation_snapshot: { type: object, additionalProperties: true, nullable: true }
+        spec_text: { type: string }
+        size_text: { type: string }
+        area_trace:
+          allOf: [{ $ref: '#/components/schemas/ProductManagementAreaTrace' }]
+          nullable: true
+        erp_sync_status:
+          $ref: '#/components/schemas/ProductManagementSyncStatus'
+        last_erp_synced_at: { type: string, format: date-time, nullable: true }
+        last_erp_checked_at: { type: string, format: date-time, nullable: true }
     ResourceBundle:
       type: object
       required: [task_id, workflow_revision, groups]
@@ -5827,13 +5911,12 @@ components:
         idempotency_key: { type: string, minLength: 1, maxLength: 128 }
     PlanningSKUItemInput:
       type: object
-      required: [client_item_id, category_code, description_spec, quantity]
+      required: [client_item_id, description_spec, quantity]
       properties:
         client_item_id: { type: string }
         category_code:
           type: string
-          minLength: 1
-          description: Legacy purchase-task category identity used to derive the one-letter SKU category segment.
+          description: Deprecated compatibility input. When omitted, SKU generation derives its category identity from `erp_product_i_id`.
         sku_code_type:
           type: string
           enum: [regular, customization]
@@ -5845,7 +5928,9 @@ components:
         note: { type: string, maxLength: 2000 }
         reference_url: { type: string, format: uri }
         image_upload_ref: { type: string }
-        erp_product_i_id: { type: string }
+        erp_product_i_id:
+          type: string
+          description: User-facing 款式编码. Required for new clients and used for both SKU category derivation and ERP filing.
         erp_product_name: { type: string }
     PlanningSKUCreateRequest:
       type: object
@@ -6608,7 +6693,8 @@ paths:
       tags: [TaskResourceWorkflow]
       summary: Search the current working and finalized resource-group read model
       description: |
-        Default response uses `view_mode=group` (one SKU resource-group card).
+        Default response uses `view_mode=group` (one SKU resource-group card). A generated SKU-scoped
+        shell is visible before any final asset revision exists; task- and retouch-scoped empty shells remain hidden.
         Resource role, exact file format, resource owner, or resource creation-time filters return
         `view_mode=flat` with matching `flat_items`. The top-level `q` remains the only keyword search.
       x-api-readiness: ready_for_frontend
@@ -6656,6 +6742,30 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/TaskAssetGroup' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
+        '409': { $ref: '#/components/responses/V8Conflict' }
+  /v1/resource-groups/{id}/cost-reconciliation:
+    get:
+      operationId: reconcileTaskResourceGroupCost
+      tags: [TaskResourceWorkflow, ERPBridge, CostRules]
+      summary: Compare one SKU system cost with its current ERP cost
+      description: |
+        Performs a live read-only ERP lookup after enforcing the caller's effective `asset.view` scope.
+        The response keeps the system calculation and ERP observation separate and never mutates either source.
+      x-api-readiness: ready_for_frontend
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Live cost comparison.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/ProductCostReconciliation' }
         '403': { $ref: '#/components/responses/V8Forbidden' }
         '404': { $ref: '#/components/responses/V8NotFound' }
         '409': { $ref: '#/components/responses/V8Conflict' }
@@ -8099,8 +8209,8 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /v1/cost-rule-bindings/unbound-candidates:
     get:
-      summary: List unbound i_id candidates from legacy pricing fallback
-      description: Returns normalized i_id values that currently have no active binding and whose latest cost snapshot was produced by legacy text alias fallback. This powers the "unassociated style" migration list.
+      summary: List every unbound i_id candidate and its historical rule evidence
+      description: Returns every normalized i_id with no active binding. Historical cost snapshots are grouped into unique, conflicting, or unmatched evidence so the UI never presents a conflicting inferred mapping as safe.
       tags: [CostRules, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.view]

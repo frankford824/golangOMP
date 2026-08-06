@@ -378,7 +378,8 @@ export interface paths {
         };
         /**
          * Search the current working and finalized resource-group read model
-         * @description Default response uses `view_mode=group` (one SKU resource-group card).
+         * @description Default response uses `view_mode=group` (one SKU resource-group card). A generated SKU-scoped
+         *     shell is visible before any final asset revision exists; task- and retouch-scoped empty shells remain hidden.
          *     Resource role, exact file format, resource owner, or resource creation-time filters return
          *     `view_mode=flat` with matching `flat_items`. The top-level `q` remains the only keyword search.
          */
@@ -400,6 +401,27 @@ export interface paths {
         };
         /** Read one resource group and its current revisions */
         get: operations["getTaskResourceGroup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/resource-groups/{id}/cost-reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare one SKU system cost with its current ERP cost
+         * @description Performs a live read-only ERP lookup after enforcing the caller's effective `asset.view` scope.
+         *     The response keeps the system calculation and ERP observation separate and never mutates either source.
+         */
+        get: operations["reconcileTaskResourceGroupCost"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2368,8 +2390,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List unbound i_id candidates from legacy pricing fallback
-         * @description Returns normalized i_id values that currently have no active binding and whose latest cost snapshot was produced by legacy text alias fallback. This powers the "unassociated style" migration list.
+         * List every unbound i_id candidate and its historical rule evidence
+         * @description Returns every normalized i_id with no active binding. Historical cost snapshots are grouped into unique, conflicting, or unmatched evidence so the UI never presents a conflicting inferred mapping as safe.
          */
         get: {
             parameters: {
@@ -19611,6 +19633,10 @@ export interface components {
              * @description Optional area captured by operations for the single-SKU task.
              */
             area?: number | null;
+            /** @description Human-readable structure and craft summary captured at creation, for example `平面 开槽`. */
+            craft_text?: string;
+            /** @description Canonical cost-rule process keyword captured at creation, for example `开槽` or `不开槽`. */
+            process?: string;
         };
         CreateTaskBatchItem: {
             client_item_id?: string;
@@ -20293,16 +20319,48 @@ export interface components {
         UnboundCostRuleCandidate: {
             erp_i_id?: string;
             product_i_id?: string;
-            normalized_i_id?: string;
-            /** @description Rule group seen in the legacy text-fallback cost snapshot, if available. */
+            normalized_i_id: string;
+            /** @description The single inferred rule group; omitted when history has no group or conflicting groups. */
             suggested_rule_group?: string;
+            /** @description Every distinct rule group observed in historical calculation snapshots for this unbound style. */
+            suggested_rule_groups: string[];
+            /** Format: int64 */
+            suggested_group_count: number;
+            /**
+             * @description Unique is safe to propose; conflict and unmatched require explicit operator selection.
+             * @enum {string}
+             */
+            mapping_confidence: "unique" | "conflict" | "unmatched";
             suggested_display_name?: string;
             /** Format: int64 */
-            match_count?: number;
+            match_count: number;
             example_sku_code?: string;
             example_task_no?: string;
             /** Format: double */
             average_cost_price?: number | null;
+        };
+        /** @description Live read-only comparison between the retained system calculation and the current ERP observation. Neither value is overwritten by this read. */
+        ProductCostReconciliation: {
+            /** Format: int64 */
+            product_management_record_id: number;
+            sku_code: string;
+            /** Format: double */
+            system_cost_price?: number | null;
+            /** Format: double */
+            erp_cost_price?: number | null;
+            /**
+             * Format: double
+             * @description ERP actual cost minus system calculated cost.
+             */
+            cost_delta?: number | null;
+            /** @enum {string} */
+            status: "matched" | "mismatched" | "system_missing" | "erp_missing" | "unavailable";
+            /** Format: date-time */
+            checked_at: string;
+            message: string;
+            system_trace?: components["schemas"]["ProductManagementCostTrace"] | null;
+            erp_i_id?: string;
+            erp_product_name?: string;
         };
         ProductCostDashboardResponse: {
             /** Format: int64 */
@@ -21538,14 +21596,56 @@ export interface components {
             creator_name?: string;
             /** @enum {string} */
             business_lane?: "normal" | "customization";
-            /** @description Current SKU business projection used by the asset center for specifications, dimensions, cost trace, combination codes, and ERP synchronization state. */
-            sku_profile?: components["schemas"]["ProductManagementRecord"] | null;
+            /** @description Scoped SKU business projection used by the asset center for specifications, dimensions, system-calculated cost, combination codes, and ERP synchronization state. */
+            sku_profile?: components["schemas"]["TaskAssetGroupSKUProfile"] | null;
             working_revision?: components["schemas"]["TaskAssetGroupRevision"];
             finalized_revision?: components["schemas"]["TaskAssetGroupRevision"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        TaskAssetGroupSKUProfile: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            task_id: number;
+            /** Format: int64 */
+            task_sku_item_id?: number | null;
+            sku_code: string;
+            product_i_id?: string;
+            erp_i_id?: string;
+            category_name?: string;
+            product_family?: string;
+            product_name?: string;
+            combo_sku_codes?: string[];
+            /**
+             * Format: double
+             * @description Retained system-calculated or explicitly overridden cost. This is not asserted to be the current ERP cost.
+             */
+            cost_price?: number | null;
+            cost_trace?: {
+                rule_name?: string;
+                rule_source?: string;
+                matched_rule_version?: number | null;
+                requires_manual_review?: boolean;
+                manual_cost_override?: boolean;
+                manual_cost_override_reason?: string;
+                input_snapshot?: {
+                    [key: string]: unknown;
+                } | null;
+                calculation_snapshot?: {
+                    [key: string]: unknown;
+                } | null;
+            } | null;
+            spec_text?: string;
+            size_text?: string;
+            area_trace?: components["schemas"]["ProductManagementAreaTrace"] | null;
+            erp_sync_status?: components["schemas"]["ProductManagementSyncStatus"];
+            /** Format: date-time */
+            last_erp_synced_at?: string | null;
+            /** Format: date-time */
+            last_erp_checked_at?: string | null;
         };
         ResourceBundle: {
             /** Format: int64 */
@@ -21618,8 +21718,8 @@ export interface components {
         };
         PlanningSKUItemInput: {
             client_item_id: string;
-            /** @description Legacy purchase-task category identity used to derive the one-letter SKU category segment. */
-            category_code: string;
+            /** @description Deprecated compatibility input. When omitted, SKU generation derives its category identity from `erp_product_i_id`. */
+            category_code?: string;
             /**
              * @description `regular` uses the CG prefix; `customization` uses the DZ prefix.
              * @default regular
@@ -21634,6 +21734,7 @@ export interface components {
             /** Format: uri */
             reference_url?: string;
             image_upload_ref?: string;
+            /** @description User-facing 款式编码. Required for new clients and used for both SKU category derivation and ERP filing. */
             erp_product_i_id?: string;
             erp_product_name?: string;
         };
@@ -22612,6 +22713,33 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["TaskAssetGroup"];
+                    };
+                };
+            };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
+        };
+    };
+    reconcileTaskResourceGroupCost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Live cost comparison. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ProductCostReconciliation"];
                     };
                 };
             };

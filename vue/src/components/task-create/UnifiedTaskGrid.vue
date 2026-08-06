@@ -104,6 +104,8 @@ function displayCell(row: ComposeRow, column: ComposeColumn): string | number {
     return uploading ? `${count} 个 · 上传中` : count ? `${count} 个文件` : '拖入 / 粘贴'
   }
   if (column.key === 'set_mode_hint') return row.set_mode_hint ? '建议套装' : '单图优先'
+  if (column.key === 'structure_type') return row.structure_type === 'three_dimensional' ? '立体' : row.structure_type === 'flat' ? '平面' : ''
+  if (column.key === 'slotting') return row.slotting === 'slotted' ? '开槽' : row.slotting === 'not_slotted' ? '不开槽' : ''
   const value = row[column.key as keyof ComposeRow] as string | number | undefined
   if (typeof value === 'number' && Number.isNaN(value)) return ''
   return value ?? ''
@@ -353,6 +355,12 @@ function parseCellInto(target: ComposeRow, raw: unknown, column: ComposeColumn):
   const before = record[column.key]
   if (column.key === 'set_mode_hint') {
     target.set_mode_hint = /^(1|true|是|套装|建议套装)$/i.test(String(raw ?? '').trim())
+  } else if (column.key === 'structure_type') {
+    const text = String(raw ?? '').trim().toLowerCase()
+    record[column.key] = !text ? undefined : /^(立体|3d|three[_ -]?dimensional)$/.test(text) ? 'three_dimensional' : /^(平面|2d|flat)$/.test(text) ? 'flat' : text
+  } else if (column.key === 'slotting') {
+    const text = String(raw ?? '').trim().toLowerCase()
+    record[column.key] = !text ? undefined : /^(开槽|slotted)$/.test(text) ? 'slotted' : /^(不开槽|无槽|not[_ -]?slotted)$/.test(text) ? 'not_slotted' : text
   } else if (column.kind === 'number') {
     const text = String(raw ?? '').trim()
     const numeric = Number(text)

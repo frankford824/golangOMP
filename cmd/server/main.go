@@ -461,7 +461,8 @@ func main() {
 	aiChatService.SetAnalysisOrchestrator(aichatsvc.NewToolOrchestrator(aiChatClient, retrievalService, aiAnalysisRepo))
 	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo,
 		service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc),
-		service.WithTaskResourceWorkflowSKUProfiles(productManagementSvc))
+		service.WithTaskResourceWorkflowSKUProfiles(productManagementSvc),
+		service.WithTaskResourceWorkflowCostReconciler(productManagementSvc))
 	assetWorkbenchOptions := []assetworkbench.Option{
 		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
 		assetworkbench.WithUserRepository(userRepo),
@@ -493,6 +494,7 @@ func main() {
 		service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo),
 		service.WithPlanningSKUAssets(assetStorageRefRepo, service.NewStorageStreamOpener(ossDirectSvc, uploadClient), ossDirectSvc),
 		service.WithPlanningSKUProductCodeSequences(productCodeSeqRepo),
+		service.WithPlanningSKUResourceGroups(taskResourceGroupRepo),
 	)
 	taskERPOutboxProcessor := service.NewTaskERPOutboxProcessor(taskSvc, productManagementSvc, erpBridgeSvc, assetStorageRefRepo, ossDirectSvc)
 

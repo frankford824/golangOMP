@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type TaskAssetGroupScopeKind string
 
@@ -43,24 +46,35 @@ const (
 // synchronization state, operator capabilities and full cost traces which are
 // not part of asset visibility.
 type TaskAssetGroupSKUProfile struct {
-	ID            int64                         `json:"id"`
-	TaskID        int64                         `json:"task_id"`
-	TaskSKUItemID *int64                        `json:"task_sku_item_id,omitempty"`
-	SKUCode       string                        `json:"sku_code"`
-	CategoryName  string                        `json:"category_name,omitempty"`
-	ProductFamily string                        `json:"product_family,omitempty"`
-	ProductName   string                        `json:"product_name,omitempty"`
-	ComboSKUCodes []string                      `json:"combo_sku_codes,omitempty"`
-	CostPrice     *float64                      `json:"cost_price,omitempty"`
-	CostTrace     *TaskAssetGroupSKUCostSummary `json:"cost_trace,omitempty"`
-	SpecText      string                        `json:"spec_text,omitempty"`
-	SizeText      string                        `json:"size_text,omitempty"`
-	AreaTrace     *TaskAssetGroupSKUAreaSummary `json:"area_trace,omitempty"`
+	ID               int64                          `json:"id"`
+	TaskID           int64                          `json:"task_id"`
+	TaskSKUItemID    *int64                         `json:"task_sku_item_id,omitempty"`
+	SKUCode          string                         `json:"sku_code"`
+	ProductIID       string                         `json:"product_i_id,omitempty"`
+	ERPIID           string                         `json:"erp_i_id,omitempty"`
+	CategoryName     string                         `json:"category_name,omitempty"`
+	ProductFamily    string                         `json:"product_family,omitempty"`
+	ProductName      string                         `json:"product_name,omitempty"`
+	ComboSKUCodes    []string                       `json:"combo_sku_codes,omitempty"`
+	CostPrice        *float64                       `json:"cost_price,omitempty"`
+	CostTrace        *TaskAssetGroupSKUCostSummary  `json:"cost_trace,omitempty"`
+	SpecText         string                         `json:"spec_text,omitempty"`
+	SizeText         string                         `json:"size_text,omitempty"`
+	AreaTrace        *TaskAssetGroupSKUAreaSummary  `json:"area_trace,omitempty"`
+	ERPSyncStatus    ProductManagementERPSyncStatus `json:"erp_sync_status,omitempty"`
+	LastERPSyncedAt  *time.Time                     `json:"last_erp_synced_at,omitempty"`
+	LastERPCheckedAt *time.Time                     `json:"last_erp_checked_at,omitempty"`
 }
 
 type TaskAssetGroupSKUCostSummary struct {
-	RuleName             string `json:"rule_name,omitempty"`
-	RequiresManualReview bool   `json:"requires_manual_review"`
+	RuleName                 string          `json:"rule_name,omitempty"`
+	RuleSource               string          `json:"rule_source,omitempty"`
+	MatchedRuleVersion       *int            `json:"matched_rule_version,omitempty"`
+	RequiresManualReview     bool            `json:"requires_manual_review"`
+	ManualCostOverride       bool            `json:"manual_cost_override"`
+	ManualCostOverrideReason string          `json:"manual_cost_override_reason,omitempty"`
+	InputSnapshot            json.RawMessage `json:"input_snapshot,omitempty"`
+	CalculationSnapshot      json.RawMessage `json:"calculation_snapshot,omitempty"`
 }
 
 type TaskAssetGroupSKUAreaSummary struct {

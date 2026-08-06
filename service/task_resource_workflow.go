@@ -50,6 +50,7 @@ type TaskResourceWorkflowService interface {
 	ResourceBundle(ctx context.Context, taskID int64, actor domain.RequestActor) (*domain.ResourceBundle, *domain.AppError)
 	ListResourceGroups(ctx context.Context, actor domain.RequestActor, params domain.ResourceGroupListParams) (*domain.ResourceGroupListResult, *domain.AppError)
 	ResourceGroup(ctx context.Context, actor domain.RequestActor, groupID int64) (*domain.TaskAssetGroup, *domain.AppError)
+	ResourceGroupCostReconciliation(ctx context.Context, actor domain.RequestActor, groupID int64) (*domain.ProductCostReconciliation, *domain.AppError)
 	ResourceGroupRevisions(ctx context.Context, actor domain.RequestActor, groupID int64, page, pageSize int) (*domain.ResourceGroupRevisionListResult, *domain.AppError)
 	BatchDownloadResourceGroups(ctx context.Context, actor domain.RequestActor, request domain.ResourceGroupBatchDownloadRequest) (*domain.ResourceGroupBatchDownloadManifest, *domain.AppError)
 	SubmitDesign(ctx context.Context, taskID int64, actor domain.RequestActor, request domain.SubmitDesignV2Request) (*domain.ResourceBundle, *domain.AppError)
@@ -64,10 +65,15 @@ type taskResourceWorkflowService struct {
 	finalizer *TaskFinalizer
 	ossDirect *OSSDirectService
 	profiles  taskResourceSKUProfileProvider
+	costs     taskResourceCostReconciler
 }
 
 type taskResourceSKUProfileProvider interface {
 	GetByTaskIDs(ctx context.Context, taskIDs []int64) ([]*domain.ProductManagementRecord, *domain.AppError)
+}
+
+type taskResourceCostReconciler interface {
+	ReconcileCost(ctx context.Context, recordID int64) (*domain.ProductCostReconciliation, *domain.AppError)
 }
 
 type FinalizeMode string
@@ -93,6 +99,14 @@ func WithTaskResourceWorkflowSKUProfiles(provider interface{}) TaskResourceWorkf
 	return func(service *taskResourceWorkflowService) {
 		if typed, ok := provider.(taskResourceSKUProfileProvider); ok {
 			service.profiles = typed
+		}
+	}
+}
+
+func WithTaskResourceWorkflowCostReconciler(provider interface{}) TaskResourceWorkflowOption {
+	return func(service *taskResourceWorkflowService) {
+		if typed, ok := provider.(taskResourceCostReconciler); ok {
+			service.costs = typed
 		}
 	}
 }
@@ -251,6 +265,20 @@ func (s *taskResourceWorkflowService) ResourceGroup(ctx context.Context, actor d
 	return &items[0], nil
 }
 
+func (s *taskResourceWorkflowService) ResourceGroupCostReconciliation(ctx context.Context, actor domain.RequestActor, groupID int64) (*domain.ProductCostReconciliation, *domain.AppError) {
+	group, appErr := s.ResourceGroup(ctx, actor, groupID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if s.costs == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "cost reconciliation service is not configured", nil)
+	}
+	if group.SKUProfile == nil || group.SKUProfile.ID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "resource group has no SKU cost profile", map[string]interface{}{"group_id": groupID})
+	}
+	return s.costs.ReconcileCost(ctx, group.SKUProfile.ID)
+}
+
 func (s *taskResourceWorkflowService) ResourceGroupRevisions(ctx context.Context, actor domain.RequestActor, groupID int64, page, pageSize int) (*domain.ResourceGroupRevisionListResult, *domain.AppError) {
 	if actor.ID <= 0 || !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required", nil)
@@ -338,12 +366,22 @@ func (s *taskResourceWorkflowService) hydrateSKUProfiles(ctx context.Context, gr
 func taskAssetGroupSKUProfile(record *domain.ProductManagementRecord) *domain.TaskAssetGroupSKUProfile {
 	profile := &domain.TaskAssetGroupSKUProfile{
 		ID: record.ID, TaskID: record.TaskID, TaskSKUItemID: record.TaskSKUItemID,
-		SKUCode: record.SKUCode, CategoryName: record.CategoryName, ProductFamily: record.ProductFamily,
+		SKUCode: record.SKUCode, ProductIID: record.ProductIID, ERPIID: record.ERPIID,
+		CategoryName: record.CategoryName, ProductFamily: record.ProductFamily,
 		ProductName: record.ProductName, ComboSKUCodes: append([]string(nil), record.ComboSKUCodes...),
 		CostPrice: record.CostPrice, SpecText: record.SpecText, SizeText: record.SizeText,
+		ERPSyncStatus: record.ERPSyncStatus, LastERPSyncedAt: record.LastERPSyncedAt, LastERPCheckedAt: record.LastERPCheckedAt,
 	}
 	if record.CostTrace != nil {
-		profile.CostTrace = &domain.TaskAssetGroupSKUCostSummary{RuleName: record.CostTrace.RuleName, RequiresManualReview: record.CostTrace.RequiresManualReview}
+		profile.CostTrace = &domain.TaskAssetGroupSKUCostSummary{
+			RuleName: record.CostTrace.RuleName, RuleSource: record.CostTrace.RuleSource,
+			MatchedRuleVersion:       record.CostTrace.MatchedRuleVersion,
+			RequiresManualReview:     record.CostTrace.RequiresManualReview,
+			ManualCostOverride:       record.CostTrace.ManualCostOverride,
+			ManualCostOverrideReason: record.CostTrace.ManualCostOverrideReason,
+			InputSnapshot:            append(json.RawMessage(nil), record.CostTrace.InputSnapshot...),
+			CalculationSnapshot:      append(json.RawMessage(nil), record.CostTrace.CalculationSnapshot...),
+		}
 	}
 	if record.AreaTrace != nil {
 		profile.AreaTrace = &domain.TaskAssetGroupSKUAreaSummary{WidthM: record.AreaTrace.WidthM, HeightM: record.AreaTrace.HeightM, Quantity: record.AreaTrace.Quantity, AreaM2: record.AreaTrace.AreaM2, SourceLabel: record.AreaTrace.SourceLabel, Warning: record.AreaTrace.Warning}

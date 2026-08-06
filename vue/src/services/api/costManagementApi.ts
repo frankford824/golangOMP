@@ -87,8 +87,14 @@ export interface UnboundCostRuleCandidate {
   product_i_id?: string
   erp_i_id?: string
   suggested_rule_group?: string
+  suggested_rule_groups: string[]
+  suggested_group_count: number
+  mapping_confidence: 'unique' | 'conflict' | 'unmatched'
   suggested_display_name?: string
   match_count?: number
+  average_cost_price?: number | null
+  example_sku_code?: string
+  example_task_no?: string
   sku_count?: number
   task_count?: number
   last_seen_at?: string

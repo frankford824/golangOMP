@@ -99,10 +99,13 @@
         </div>
       </header>
 
-      <div class="flex-1 overflow-auto custom-scrollbar isolate">
+      <div ref="contentScroller" class="flex-1 overflow-auto custom-scrollbar isolate">
         <main class="content">
           <router-view v-slot="{ Component, route }">
-            <component v-if="Component" :is="Component" :key="route.path" />
+            <KeepAlive :max="8">
+              <component v-if="Component && route.meta.keepAlive" :is="Component" :key="String(route.name || route.path)" />
+            </KeepAlive>
+            <component v-if="Component && !route.meta.keepAlive" :is="Component" :key="route.path" />
           </router-view>
         </main>
       </div>
@@ -159,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePermissionsStore } from '@/stores/permissions'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
@@ -175,6 +178,8 @@ const searchOpen = ref(false)
 const notificationOpen = ref(false)
 const mobileSidebarOpen = ref(false)
 const routeLoading = ref(false)
+const contentScroller = ref<HTMLElement | null>(null)
+const routeScrollPositions = new Map<string, number>()
 let routeLoadingTimer: ReturnType<typeof setTimeout> | null = null
 let removeRouteBeforeGuard: (() => void) | null = null
 let removeRouteAfterHook: (() => void) | null = null
@@ -300,12 +305,16 @@ function onGlobalKeydown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown)
-  removeRouteBeforeGuard = router.beforeEach((_to, _from, next) => {
+  removeRouteBeforeGuard = router.beforeEach((_to, from, next) => {
+    if (contentScroller.value) routeScrollPositions.set(from.fullPath, contentScroller.value.scrollTop)
     startRouteLoading()
     next()
   })
-  removeRouteAfterHook = router.afterEach(() => {
+  removeRouteAfterHook = router.afterEach((to) => {
     stopRouteLoading()
+    void nextTick(() => {
+      if (contentScroller.value) contentScroller.value.scrollTop = routeScrollPositions.get(to.fullPath) ?? 0
+    })
   })
   removeRouteErrorHook = router.onError(() => {
     stopRouteLoading()

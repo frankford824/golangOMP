@@ -20,6 +20,8 @@ export type ComposeColumnKey =
   | 'width'
   | 'height'
   | 'area'
+  | 'structure_type'
+  | 'slotting'
   | 'special_note'
   | 'reference_assets'
   | 'source_assets'
@@ -52,6 +54,8 @@ export interface ComposeRow {
   width?: number
   height?: number
   area?: number
+  structure_type?: 'flat' | 'three_dimensional'
+  slotting?: 'slotted' | 'not_slotted'
   special_note?: string
   reference_assets: ComposeAssetDraft[]
   source_assets: ComposeAssetDraft[]
@@ -111,6 +115,8 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'width', label: '宽', width: 82, kind: 'number' },
     { key: 'height', label: '高', width: 82, kind: 'number' },
     { key: 'area', label: '面积', width: 92, kind: 'number' },
+    { key: 'structure_type', label: '形态', width: 100, help: '平面或立体' },
+    { key: 'slotting', label: '工艺', width: 100, help: '开槽或不开槽' },
     { key: 'special_note', label: '特殊说明', width: 180 },
     { key: 'reference_assets', label: '参考图', width: 120, kind: 'asset' },
     { key: 'set_mode_hint', label: '建议套装', width: 102, kind: 'boolean', help: '仅供设计师参考，最终由设计阶段判定' },
@@ -122,6 +128,8 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'width', label: '宽', width: 82, kind: 'number' },
     { key: 'height', label: '高', width: 82, kind: 'number' },
     { key: 'area', label: '面积', width: 92, kind: 'number' },
+    { key: 'structure_type', label: '形态', width: 100, help: '平面或立体' },
+    { key: 'slotting', label: '工艺', width: 100, help: '开槽或不开槽' },
     { key: 'special_note', label: '特殊说明', width: 180 },
     { key: 'reference_assets', label: '参考图', width: 120, kind: 'asset' },
     { key: 'set_mode_hint', label: '建议套装', width: 102, kind: 'boolean', help: '仅供设计师参考，最终由设计阶段判定' },
@@ -133,14 +141,13 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'special_note', label: '补充说明', width: 220 },
   ],
   planning_sku: [
-    { key: 'category_code', label: '编号类目（非 ERP 款式）', width: 190, required: true, help: '只用于计算 CG/DZ 编号中的 1 位类目短码，不会同步成 ERP 商品编码' },
+    { key: 'product_i_id', label: '款式编码', width: 190, required: true, help: '同时用于生成 SKU 的类目标识；开启同步时也作为 ERP 款式编码' },
     { key: 'description_spec', label: '产品描述 / 规格', width: 310, required: true },
     { key: 'quantity', label: '数量', width: 96, required: true, kind: 'number' },
     { key: 'target_price', label: '目标价', width: 110 },
     { key: 'note', label: '备注', width: 210 },
     { key: 'reference_url', label: '参考链接', width: 220 },
     { key: 'reference_assets', label: '产品图片', width: 140, kind: 'asset' },
-    { key: 'product_i_id', label: 'ERP 款式编码 i_id', width: 170, help: '仅用于 ERP 建档；ERP 商品名称直接取“产品描述 / 规格”，无需重复填写' },
   ],
 }
 
@@ -213,7 +220,7 @@ export function validateCompose(
     } else if (intent === 'retouch') {
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写修图要求')
     } else {
-      if (!row.category_code?.trim()) add('category_code', '请填写 SKU 类目，用于生成旧采购口径编号')
+      if (!row.product_i_id?.trim()) add('product_i_id', '请选择款式编码')
       const description = row.description_spec?.trim() ?? ''
       if (!description) add('description_spec', '产品描述 / 规格不能为空')
       if (description.length > 4000) add('description_spec', '产品描述 / 规格不能超过 4000 字')
@@ -221,7 +228,12 @@ export function validateCompose(
       if (row.target_price && !/^\d{1,10}(\.\d{1,2})?$/.test(row.target_price)) add('target_price', '目标价最多 10 位整数、2 位小数')
       if ((row.note?.length ?? 0) > 2000) add('note', '备注不能超过 2000 字')
       if (row.reference_url && !/^https?:\/\//i.test(row.reference_url)) add('reference_url', '参考链接仅支持 HTTP / HTTPS')
-      if (common.erp_sync_mode === 'async' && !row.product_i_id?.trim()) add('product_i_id', '开启 ERP 同步时 i_id 必填')
+    }
+    if ((intent === 'modify_existing' || intent === 'new_design') && row.structure_type && !['flat', 'three_dimensional'].includes(row.structure_type)) {
+      add('structure_type', '形态只能选择平面或立体')
+    }
+    if ((intent === 'modify_existing' || intent === 'new_design') && row.slotting && !['slotted', 'not_slotted'].includes(row.slotting)) {
+      add('slotting', '工艺只能选择开槽或不开槽')
     }
     for (const [field, assets] of [['reference_assets', row.reference_assets], ['source_assets', row.source_assets]] as const) {
       for (const asset of assets) {
@@ -244,6 +256,18 @@ function dimensionVariant(row: ComposeRow): Record<string, unknown> | undefined 
   if (Number.isFinite(row.width) && Number(row.width) >= 0) value.width = row.width
   if (Number.isFinite(row.height) && Number(row.height) >= 0) value.height = row.height
   if (Number.isFinite(row.area) && Number(row.area) >= 0) value.area = row.area
+  if (row.structure_type) {
+    value.structure_type = row.structure_type
+    value.structure_text = row.structure_type === 'three_dimensional' ? '立体' : '平面'
+  }
+  if (row.slotting) {
+    value.slotting = row.slotting
+    value.process = row.slotting === 'slotted' ? '开槽' : '不开槽'
+    value.craft_text = [
+      row.structure_type === 'three_dimensional' ? '立体' : row.structure_type === 'flat' ? '平面' : '',
+      value.process,
+    ].filter(Boolean).join(' ')
+  }
   if (row.special_note?.trim()) value.special_note = row.special_note.trim()
   if (row.set_mode_hint) value.set_mode_hint = true
   return Object.keys(value).length ? value : undefined
@@ -303,6 +327,11 @@ export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'plannin
         width: row.width,
         height: row.height,
         area: row.area,
+        craftText: [
+          row.structure_type === 'three_dimensional' ? '立体' : row.structure_type === 'flat' ? '平面' : '',
+          row.slotting === 'slotted' ? '开槽' : row.slotting === 'not_slotted' ? '不开槽' : '',
+        ].filter(Boolean).join(' '),
+        process: row.slotting === 'slotted' ? '开槽' : row.slotting === 'not_slotted' ? '不开槽' : '',
         note: rowTaskNote(common.note, row.special_note),
         referenceFileRefs: uploadedRefs(row.reference_assets),
         setModeHint: row.set_mode_hint,
@@ -351,6 +380,11 @@ export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'plannin
         width: row.width,
         height: row.height,
         area: row.area,
+        craftText: [
+          row.structure_type === 'three_dimensional' ? '立体' : row.structure_type === 'flat' ? '平面' : '',
+          row.slotting === 'slotted' ? '开槽' : row.slotting === 'not_slotted' ? '不开槽' : '',
+        ].filter(Boolean).join(' '),
+        process: row.slotting === 'slotted' ? '开槽' : row.slotting === 'not_slotted' ? '不开槽' : '',
         note: rowTaskNote(common.note, row.special_note),
         referenceFileRefs: uploadedRefs(row.reference_assets),
         setModeHint: row.set_mode_hint,
@@ -374,7 +408,7 @@ export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'plannin
 export function buildPlanningInputs(rows: ComposeRow[], customizationRequired = false): PlanningSKUInput[] {
   return rows.map((row) => ({
     client_item_id: row.id,
-    category_code: row.category_code?.trim() ?? '',
+    category_code: row.product_i_id?.trim() ?? '',
     sku_code_type: customizationRequired ? 'customization' : 'regular',
     description_spec: row.description_spec?.trim() ?? '',
     quantity: Number(row.quantity),

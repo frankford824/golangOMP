@@ -99,6 +99,27 @@ describe('CostRuleManagerView', () => {
     expect((wrapper.get('.calculator select').element as HTMLSelectElement).value).toBe('PHOTO_CLOTH')
   })
 
+  it('exposes conflicting historical rule evidence instead of guessing a binding', async () => {
+    mocks.listCandidates.mockResolvedValue({ data: [{
+      normalized_i_id: 'STYLE-CONFLICT',
+      erp_i_id: 'STYLE-CONFLICT',
+      suggested_rule_groups: ['KT_BOARD', 'PHOTO_CLOTH'],
+      suggested_group_count: 2,
+      mapping_confidence: 'conflict',
+      match_count: 18,
+      example_sku_code: 'SKU-18',
+    }] })
+    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('当前加载的规则冲突')
+    expect(wrapper.text()).toContain('1')
+    await wrapper.findAll('button').find((button) => button.text() === '处理未绑定款式')?.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('历史曾命中 KT_BOARD、PHOTO_CLOTH')
+    expect(document.body.textContent).toContain('确认绑定此组')
+  })
+
   it('requires an explicit update before ERP synchronization', async () => {
     const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
     await flushPromises()

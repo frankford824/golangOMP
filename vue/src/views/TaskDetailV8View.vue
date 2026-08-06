@@ -50,6 +50,22 @@
         @open-attachments="openWorkspace('attachments')"
         @open-workflow="openWorkspace('workflow')"
       />
+      <section v-if="isRetouch && retouchMaterialRows.length" class="retouch-materials" aria-label="待修素材">
+        <header>
+          <div><p class="eyebrow">待修素材</p><h2>设计人员可直接查看和下载</h2></div>
+          <strong>{{ retouchMaterialCount }} 个文件</strong>
+        </header>
+        <div class="retouch-material-grid">
+          <article v-for="row in retouchMaterialRows" :key="row.key">
+            <img v-if="row.file.imagePreviewUrl" :src="row.file.imagePreviewUrl" :alt="row.file.fileName">
+            <span v-else class="retouch-file-mark">{{ row.file.fileName.split('.').pop()?.toUpperCase() || 'FILE' }}</span>
+            <div><small>修图要求 {{ row.requirementIndex + 1 }}</small><strong>{{ row.file.fileName }}</strong><p>{{ row.requirement }}</p></div>
+            <button type="button" :disabled="retouchDownloadingKey === row.key" @click="downloadRetouchMaterial(row)">
+              <Download :size="15" aria-hidden="true" />{{ retouchDownloadingKey === row.key ? '下载中' : '下载素材' }}
+            </button>
+          </article>
+        </div>
+      </section>
       <section v-if="bundle && !bundleHasCurrentRevision && legacyAssetRows.length" class="legacy-resource-bridge" role="status">
         <div>
           <p class="eyebrow">迁移前文件</p>
@@ -233,7 +249,7 @@
             <section v-if="resourceSKUProfiles.length"><p class="eyebrow">SKU 规格与成本</p><div class="detail-sku-costs"><article v-for="item in resourceSKUProfiles" :key="item.groupId"><div><strong>{{ item.sku }}</strong><span>{{ item.product }}</span></div><dl><div><dt>规格</dt><dd>{{ item.specification }}</dd></div><div><dt>面积</dt><dd>{{ item.area }}</dd></div><div><dt>成本</dt><dd>{{ item.cost }}</dd></div><div><dt>规则</dt><dd>{{ item.rule }}</dd></div></dl></article></div></section>
             <section><p class="eyebrow">业务与时效</p><dl class="detail-list"><div v-for="item in businessDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
             <section><p class="eyebrow">文案与同步</p><dl class="detail-list"><div v-for="item in contentDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
-            <section v-if="retouchRequirements.length"><p class="eyebrow">逐项修图要求</p><ol class="retouch-requirement-list"><li v-for="(item,index) in retouchRequirements" :key="String(item.id || index)"><span>{{ index + 1 }}</span><div><strong>{{ item.description || item.requirement || `修图要求 ${index + 1}` }}</strong><p v-if="item.remark || item.note">{{ item.remark || item.note }}</p></div></li></ol></section>
+            <section v-if="retouchRequirements.length"><p class="eyebrow">逐项修图要求</p><ol class="retouch-requirement-list"><li v-for="(item,index) in retouchRequirements" :key="String(item.id || index)"><span>{{ index + 1 }}</span><div><strong>{{ item.description || `修图要求 ${index + 1}` }}</strong><p v-if="item.remark">{{ item.remark }}</p><small>{{ item.sourceAssets?.length || 0 }} 个待修素材</small></div></li></ol></section>
             <section class="reference-summary"><p class="eyebrow">{{ isRetouch ? '运营参考图' : '任务级参考附件' }}</p><div><strong>{{ displayReferenceFiles.length }} 个文件</strong><p>{{ isRetouch ? '集中展示任务级附件与逐项修图需求所绑定的参考图。' : '任务级参考资料已集中到独立附件工作台；SKU 范围的参考图仍以资源组版本为准。' }}</p><button type="button" @click="openWorkspace('attachments')">{{ isRetouch ? '打开运营参考图' : '打开任务级附件工作台' }}</button></div></section>
             <section v-if="skuItems.length" class="sku-item-section">
               <div class="sku-item-heading">
@@ -357,7 +373,7 @@ import {
   Upload,
 } from 'lucide-vue-next'
 import { tasksApi } from '@/services/api/tasksApi'
-import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceGroupsApi'
+import { resourceGroupsApi, type ProductCostReconciliation, type ResourceBundle } from '@/services/api/resourceGroupsApi'
 import { mergeDetailEnvelopeIntoTaskRaw } from '@/domain/mappers/task-detail-envelope'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { usePermission } from '@/composables/usePermission'
@@ -378,12 +394,15 @@ import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { planningSkuApi, type PlanningSKUCreateResult } from '@/services/api/planningSkuApi'
 import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detail-display'
 import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
+import { mapRetouchRequirementsFromApi } from '@/domain/mappers/retouch-requirements-from-api'
+import { retouchSourceAssetsToDisplayItems, type RetouchSourceFileDisplayItem } from '@/domain/retouch-requirement-assets'
 import { assetKindLabelCn } from '@/domain/mappers/read-model-labels-cn'
 import { assetsApi } from '@/services/api/assetsApi'
 import type { BackendAsset } from '@/services/apiTypes'
 import { fetchAssetDownloadMetaResolved } from '@/domain/asset-access'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { formatTaskRecordDateBeijing } from '@/utils/date'
+import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
 interface V8Task extends Record<string, unknown> {
   id: number; task_no: string; task_type: string; task_status: string; workflow_revision: number; workflow_contract_version: 2; allowed_actions: string[]
@@ -410,6 +429,7 @@ const task = ref<V8Task | null>(null)
 const isCustomization = computed(() => task.value?.business_lane === 'customization' || ['regular_customization', 'customer_customization'].includes(task.value?.task_type || ''))
 const aggregate = ref<Record<string, unknown>>({})
 const bundle = ref<ResourceBundle | null>(null)
+const costReconciliations = ref<Record<number, ProductCostReconciliation>>({})
 const bundleHasCurrentRevision = computed(() => Boolean(bundle.value?.groups.some((group) => group.working_revision || group.finalized_revision)))
 const bundleError = ref('')
 const legacyAssets = ref<BackendAsset[]>([])
@@ -439,6 +459,7 @@ const terminateReason = ref('')
 const terminateError = ref('')
 const referenceInput = ref<HTMLInputElement | null>(null)
 const referenceUploading = ref(false)
+const retouchDownloadingKey = ref('')
 const planningExporting = ref(false)
 const planningResult = ref<PlanningSKUCreateResult | null>(null)
 const assignError = ref('')
@@ -473,11 +494,25 @@ const requirementText = computed(() => task.value?.design_requirement || task.va
 const operationNote = computed(() => task.value?.note || task.value?.operation_note || task.value?.remark || '未填写运营备注。')
 const referenceFiles = computed(() => (task.value?.reference_file_refs || []) as ReferenceFile[])
 const skuItems = computed(() => (aggregate.value.sku_items || aggregate.value.skuItems || []) as Array<Record<string, unknown>>)
-const retouchRequirements = computed(() => (aggregate.value.retouch_requirements || aggregate.value.retouchRequirements || []) as Array<Record<string, unknown>>)
-const retouchReferenceFiles = computed(() => retouchRequirements.value.flatMap((item) => {
-  const raw = item.reference_file_refs ?? item.referenceFileRefs
-  return Array.isArray(raw) ? raw as ReferenceFile[] : []
-}))
+const retouchRequirements = computed(() => mapRetouchRequirementsFromApi(
+  aggregate.value.retouch_requirements || aggregate.value.retouchRequirements,
+))
+const retouchReferenceFiles = computed(() => retouchRequirements.value.flatMap((item) => item.referenceFileRefs || []) as ReferenceFile[])
+interface RetouchMaterialRow {
+  key: string
+  requirementIndex: number
+  requirement: string
+  file: RetouchSourceFileDisplayItem
+}
+const retouchMaterialRows = computed<RetouchMaterialRow[]>(() => retouchRequirements.value.flatMap((item, requirementIndex) =>
+  retouchSourceAssetsToDisplayItems(item.sourceAssets || []).map((file) => ({
+    key: `${item.id}-${file.key}`,
+    requirementIndex,
+    requirement: item.description,
+    file,
+  })),
+))
+const retouchMaterialCount = computed(() => retouchMaterialRows.value.length)
 const displayReferenceFiles = computed(() => dedupeReferenceFileRefs(
   [...referenceFiles.value, ...retouchReferenceFiles.value],
 ) as ReferenceFile[])
@@ -644,16 +679,30 @@ const contentDetailItems = computed(() => [
 const resourceSKUProfiles = computed(() => (bundle.value?.groups || []).map((group) => {
   const profile = group.sku_profile
   const area = profile?.area_trace?.area_m2
-  const cost = profile?.cost_price
+  const systemCost = profile?.cost_price
+  const reconciliation = costReconciliations.value[group.id]
+  const erpCost = reconciliation?.erp_cost_price
+  const hasSystemCost = typeof systemCost === 'number'
+  const hasERPCost = typeof erpCost === 'number'
+  const cost = hasERPCost
+    ? reconciliation.status === 'matched'
+      ? `ERP ¥${erpCost.toFixed(2)}`
+      : `ERP ¥${erpCost.toFixed(2)}${hasSystemCost ? ` · 系统 ¥${systemCost.toFixed(2)}` : ''}`
+    : hasSystemCost ? `系统 ¥${systemCost.toFixed(2)}` : '成本待计算'
+  const rule = reconciliation?.status === 'system_missing'
+    ? 'ERP 已有成本，系统规则未匹配'
+    : reconciliation?.status === 'mismatched'
+      ? 'ERP 与系统成本不一致'
+      : profile?.cost_trace?.rule_name || '尚未关联规则'
   return {
     groupId: group.id,
     sku: group.sku_code || '未绑定 SKU',
     product: group.product_name || profile?.product_name || '未命名产品',
     specification: profile?.size_text || profile?.spec_text || '规格待补充',
     area: typeof area === 'number' ? `${area.toFixed(3)} ㎡` : '面积待核对',
-    cost: typeof cost === 'number' ? `¥${cost.toFixed(2)}` : '成本待计算',
-    rule: profile?.cost_trace?.rule_name || '尚未关联规则',
-    costValue: typeof cost === 'number' ? cost : null,
+    cost,
+    rule,
+    costValue: hasERPCost ? erpCost : hasSystemCost ? systemCost : null,
   }
 }))
 const resourceCostSummary = computed(() => {
@@ -733,6 +782,7 @@ async function load() {
   if (!Number.isInteger(taskId.value) || taskId.value <= 0) { error.value = '任务 ID 无效。'; return }
   loading.value = true; error.value = ''; bundleError.value = ''
   legacyAssets.value = []
+  costReconciliations.value = {}
   planningResult.value = null
   try {
     const [detailResponse, taskResponse] = await Promise.all([
@@ -762,6 +812,18 @@ async function load() {
       task.value.task_type === 'sku_planning' ? planningSkuApi.getTask(taskId.value) : Promise.resolve(null),
     ])
     bundle.value = nextBundle
+    if (nextBundle) {
+      const reconciled = await Promise.all(nextBundle.groups.map(async (group) => {
+        try {
+          return [group.id, await resourceGroupsApi.costReconciliation(group.id)] as const
+        } catch {
+          return null
+        }
+      }))
+      costReconciliations.value = Object.fromEntries(
+        reconciled.filter((item): item is readonly [number, ProductCostReconciliation] => Boolean(item)),
+      )
+    }
     if (nextBundle && !nextBundle.groups.some((group) => group.working_revision || group.finalized_revision)) {
       await loadLegacyAssets()
     }
@@ -827,6 +889,23 @@ async function downloadPlanningResult() {
     error.value = cause instanceof Error ? cause.message : '策划结果导出失败，请稍后重试。'
   } finally {
     planningExporting.value = false
+  }
+}
+async function downloadRetouchMaterial(row: RetouchMaterialRow) {
+  if (retouchDownloadingKey.value) return
+  retouchDownloadingKey.value = row.key
+  error.value = ''
+  try {
+    const result = await downloadAssetFileWithOriginalFilename({
+      assetId: row.file.assetId,
+      downloadUrl: row.file.downloadUrl,
+      preferredFilename: row.file.fileName,
+    })
+    if (!result.ok) error.value = result.message || '待修素材下载失败。'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '待修素材下载失败。'
+  } finally {
+    retouchDownloadingKey.value = ''
   }
 }
 // 资源组读取失败，或迁移前未完成任务只有空壳组时，退回任务资产列表。它直接查
@@ -980,7 +1059,7 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .primary-button,.secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{min-height:38px;padding:0 14px;border-radius:10px;font-weight:750;text-decoration:none;cursor:pointer}
 .primary-button{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));box-shadow:0 8px 18px rgb(var(--yb-brand)/.16)}
 .planning-results{display:grid;gap:14px;padding:16px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.05)}.planning-results>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.planning-results>header h2{margin:3px 0}.planning-results>header p:last-child{margin:4px 0 0;color:rgb(var(--yb-text-muted))}.planning-results>header>strong{padding:6px 10px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-deep));white-space:nowrap}.planning-result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.planning-result-grid>article{display:grid;grid-template-columns:112px minmax(0,1fr);gap:12px;padding:10px;border:1px solid rgb(var(--yb-border));border-radius:14px;background:rgb(var(--yb-surface-soft))}.planning-image{width:112px;height:112px;display:grid;place-items:center;overflow:hidden;border-radius:11px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:11px;text-align:center}.planning-image img{width:100%;height:100%;object-fit:cover}.planning-result-copy{min-width:0}.planning-result-copy>p{margin:2px 0;color:rgb(var(--yb-text-muted));font-size:10px}.planning-result-copy h3{margin:2px 0 7px}.planning-result-copy>strong{display:-webkit-box;overflow:hidden;font-size:12px;line-height:1.5;-webkit-box-orient:vertical;-webkit-line-clamp:2}.planning-result-copy dl{display:grid;gap:3px;margin:9px 0 0}.planning-result-copy dl div{display:grid;grid-template-columns:45px minmax(0,1fr);gap:4px}.planning-result-copy dt{color:rgb(var(--yb-text-muted));font-size:10px}.planning-result-copy dd{margin:0;overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
-.retouch-requirement-list{display:grid;gap:10px;margin:12px 0 0;padding:0;list-style:none}.retouch-requirement-list li{display:grid;grid-template-columns:30px 1fr;gap:10px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-requirement-list li>span{display:grid;width:26px;height:26px;place-items:center;border-radius:9px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:800}.retouch-requirement-list strong{display:block}.retouch-requirement-list p{margin:4px 0 0;color:rgb(var(--yb-text-muted))}
+.retouch-materials{display:grid;gap:14px;padding:18px 20px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));box-shadow:0 12px 28px rgb(var(--yb-shadow)/.04)}.retouch-materials>header{display:flex;align-items:end;justify-content:space-between;gap:16px}.retouch-materials h2{margin:3px 0 0;font-size:18px}.retouch-materials>header>strong{color:rgb(var(--yb-brand-strong))}.retouch-material-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.retouch-material-grid article{display:grid;grid-template-columns:54px minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-material-grid img,.retouch-file-mark{width:54px;height:54px;border-radius:10px;object-fit:cover}.retouch-file-mark{display:grid;place-items:center;background:rgb(var(--yb-surface-neutral-inverse-deep));color:rgb(var(--yb-text-inverse));font-size:11px;font-weight:850}.retouch-material-grid article>div{display:grid;gap:3px;min-width:0}.retouch-material-grid small,.retouch-material-grid p{margin:0;color:rgb(var(--yb-text-muted));font-size:11px}.retouch-material-grid strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.retouch-material-grid button{display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand-strong));font-weight:750;cursor:pointer}.retouch-material-grid button:disabled{opacity:.55;cursor:wait}.retouch-requirement-list{display:grid;gap:10px;margin:12px 0 0;padding:0;list-style:none}.retouch-requirement-list li{display:grid;grid-template-columns:30px 1fr;gap:10px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-requirement-list li>span{display:grid;width:26px;height:26px;place-items:center;border-radius:9px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:800}.retouch-requirement-list strong{display:block}.retouch-requirement-list p{margin:4px 0 0;color:rgb(var(--yb-text-muted))}
 .secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}
 .overview-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(250px,.8fr) minmax(285px,1fr);align-items:start;gap:12px}.brief-card{min-width:0;padding:16px;display:grid;align-content:start;gap:12px}.brief-card header{align-items:start}.brief-card header button{min-height:30px;padding:0 9px}
 .mission-copy{display:grid;grid-template-columns:1.15fr .85fr;gap:10px}.mission-copy>section,.mission-copy>aside{min-width:0;padding:12px;border-radius:12px;background:rgb(var(--yb-surface-soft))}.mission-copy>aside{border-left:3px solid rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft))}.section-label{display:block;margin-bottom:5px;color:rgb(var(--yb-text-muted));font-size:10px;font-weight:800;letter-spacing:.08em}

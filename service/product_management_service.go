@@ -21,6 +21,7 @@ type ProductManagementService interface {
 	List(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, domain.PaginationMeta, *domain.AppError)
 	ListComboTree(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError)
 	CostDashboard(ctx context.Context) (*domain.ProductCostDashboardResponse, *domain.AppError)
+	ReconcileCost(ctx context.Context, recordID int64) (*domain.ProductCostReconciliation, *domain.AppError)
 	GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, *domain.AppError)
 	ListImageCandidates(ctx context.Context, actor domain.RequestActor, recordID int64) ([]*domain.ProductManagementImageCandidate, *domain.AppError)
 	ReparseImage(ctx context.Context, actor domain.RequestActor, recordID int64) (*domain.ProductManagementRecord, *domain.AppError)
@@ -191,6 +192,81 @@ func (s *productManagementService) CostDashboard(ctx context.Context) (*domain.P
 	s.decorateCostDashboardPolicy(result)
 	s.setCostDashboardCache(ctx, result)
 	return result, nil
+}
+
+func (s *productManagementService) ReconcileCost(ctx context.Context, recordID int64) (*domain.ProductCostReconciliation, *domain.AppError) {
+	if recordID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "product management record id must be positive", nil)
+	}
+	record, err := s.records.GetByID(ctx, recordID)
+	if errors.Is(err, repo.ErrNotFound) || record == nil {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, infraAppError("get product cost reconciliation record", err)
+	}
+	checkedAt := s.now().UTC()
+	result := &domain.ProductCostReconciliation{
+		ProductManagementRecordID: record.ID,
+		SKUCode:                   strings.TrimSpace(record.SKUCode),
+		SystemCostPrice:           cloneFloat64Ptr(record.CostPrice),
+		Status:                    domain.ProductCostReconciliationUnavailable,
+		CheckedAt:                 checkedAt,
+		Message:                   "ERP 实际成本暂不可核对",
+		SystemTrace:               cloneProductManagementCostTrace(record.CostTrace),
+	}
+	if s.erpBridge == nil {
+		result.Message = "ERP 成本核对服务未配置；系统计算成本未被修改"
+		return result, nil
+	}
+	if result.SKUCode == "" {
+		result.Message = "当前记录缺少 SKU 编码，无法读取 ERP 实际成本"
+		return result, nil
+	}
+	product, appErr := s.erpBridge.GetProductByID(ctx, result.SKUCode)
+	if appErr != nil || product == nil {
+		if appErr != nil && strings.TrimSpace(appErr.Message) != "" {
+			result.Message = "ERP 实际成本读取失败：" + strings.TrimSpace(appErr.Message)
+		} else {
+			result.Message = "ERP 未返回该 SKU；系统计算成本未被修改"
+		}
+		return result, nil
+	}
+	result.ERPCostPrice = cloneFloat64Ptr(product.CostPrice)
+	result.ERPProductIID = strings.TrimSpace(product.IID)
+	result.ERPProductName = strings.TrimSpace(firstNonEmptyString(product.ProductName, product.Name))
+	switch {
+	case result.SystemCostPrice == nil && result.ERPCostPrice == nil:
+		result.Status = domain.ProductCostReconciliationSystemMissing
+		result.Message = "系统与 ERP 均没有成本，需先补齐计价输入或人工成本"
+	case result.SystemCostPrice == nil:
+		result.Status = domain.ProductCostReconciliationSystemMissing
+		result.Message = "ERP 已有实际成本，但系统没有可解释的成本快照"
+	case result.ERPCostPrice == nil:
+		result.Status = domain.ProductCostReconciliationERPMissing
+		result.Message = "系统已有计算成本，但 ERP 未返回成本"
+	default:
+		delta := *result.ERPCostPrice - *result.SystemCostPrice
+		result.CostDelta = &delta
+		if math.Abs(delta) <= productManagementERPBaseCostTolerance {
+			result.Status = domain.ProductCostReconciliationMatched
+			result.Message = "系统计算成本与 ERP 实际成本一致"
+		} else {
+			result.Status = domain.ProductCostReconciliationMismatch
+			result.Message = "ERP 实际成本与系统计算成本不一致；两边均保留，不会被本次核对静默覆盖"
+		}
+	}
+	return result, nil
+}
+
+func cloneProductManagementCostTrace(trace *domain.ProductManagementCostTrace) *domain.ProductManagementCostTrace {
+	if trace == nil {
+		return nil
+	}
+	copied := *trace
+	copied.InputSnapshot = append(json.RawMessage(nil), trace.InputSnapshot...)
+	copied.CalculationSnapshot = append(json.RawMessage(nil), trace.CalculationSnapshot...)
+	return &copied
 }
 
 func (s *productManagementService) decorateCostDashboardPolicy(result *domain.ProductCostDashboardResponse) {

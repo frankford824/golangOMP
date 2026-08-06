@@ -40,11 +40,40 @@ type UnboundCostRuleCandidate struct {
 	ProductIID           string   `json:"product_i_id,omitempty"`
 	NormalizedIID        string   `json:"normalized_i_id"`
 	SuggestedRuleGroup   string   `json:"suggested_rule_group,omitempty"`
+	SuggestedRuleGroups  []string `json:"suggested_rule_groups"`
+	SuggestedGroupCount  int64    `json:"suggested_group_count"`
+	MappingConfidence    string   `json:"mapping_confidence"`
 	SuggestedDisplayName string   `json:"suggested_display_name,omitempty"`
 	MatchCount           int64    `json:"match_count"`
 	ExampleSKUCode       string   `json:"example_sku_code,omitempty"`
 	ExampleTaskNo        string   `json:"example_task_no,omitempty"`
 	AverageCostPrice     *float64 `json:"average_cost_price,omitempty"`
+}
+
+type ProductCostReconciliationStatus string
+
+const (
+	ProductCostReconciliationMatched       ProductCostReconciliationStatus = "matched"
+	ProductCostReconciliationMismatch      ProductCostReconciliationStatus = "mismatched"
+	ProductCostReconciliationSystemMissing ProductCostReconciliationStatus = "system_missing"
+	ProductCostReconciliationERPMissing    ProductCostReconciliationStatus = "erp_missing"
+	ProductCostReconciliationUnavailable   ProductCostReconciliationStatus = "unavailable"
+)
+
+// ProductCostReconciliation keeps the system rule result and the live ERP
+// observation separate. A readback never silently overwrites either source.
+type ProductCostReconciliation struct {
+	ProductManagementRecordID int64                           `json:"product_management_record_id"`
+	SKUCode                   string                          `json:"sku_code"`
+	SystemCostPrice           *float64                        `json:"system_cost_price,omitempty"`
+	ERPCostPrice              *float64                        `json:"erp_cost_price,omitempty"`
+	CostDelta                 *float64                        `json:"cost_delta,omitempty"`
+	Status                    ProductCostReconciliationStatus `json:"status"`
+	CheckedAt                 time.Time                       `json:"checked_at"`
+	Message                   string                          `json:"message"`
+	SystemTrace               *ProductManagementCostTrace     `json:"system_trace,omitempty"`
+	ERPProductIID             string                          `json:"erp_i_id,omitempty"`
+	ERPProductName            string                          `json:"erp_product_name,omitempty"`
 }
 
 type ProductCostDashboardResponse struct {

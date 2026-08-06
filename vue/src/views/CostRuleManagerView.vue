@@ -80,6 +80,23 @@
       </aside>
     </section>
 
+    <section class="mapping-diagnostics" aria-labelledby="mapping-diagnostics-title">
+      <header>
+        <div>
+          <p class="eyebrow">款式编码与计价规则</p>
+          <h2 id="mapping-diagnostics-title">成本规则命中诊断</h2>
+          <p>明确绑定优先；只有唯一历史规则的款式才可作为建议。存在多个历史规则时必须人工选择，系统不会猜。</p>
+        </div>
+        <button class="secondary" @click="bindingDialogOpen = true">处理未绑定款式</button>
+      </header>
+      <div class="diagnostic-grid">
+        <article><span>已明确绑定</span><strong>{{ bindings.filter((item) => item.is_active).length }}</strong><small>款式编码直接命中规则组</small></article>
+        <article><span>当前加载的唯一建议</span><strong>{{ candidateStats.unique }}</strong><small>可核对后绑定</small></article>
+        <article class="warning"><span>当前加载的规则冲突</span><strong>{{ candidateStats.conflict }}</strong><small>不能自动决定规则组</small></article>
+        <article class="danger"><span>当前加载的无证据项</span><strong>{{ candidateStats.unmatched }}</strong><small>需补充明确规则</small></article>
+      </div>
+    </section>
+
     <section class="operations-panel" aria-labelledby="cost-operations-title">
       <header class="operations-heading">
         <div>
@@ -146,8 +163,12 @@
           <label class="dialog-search">搜索未绑定款式<input v-model.trim="candidateKeyword" placeholder="输入款式编码或名称" @keyup.enter="loadCandidates" /><button class="secondary" @click="loadCandidates">搜索</button></label>
           <div class="candidate-list">
             <article v-for="candidate in candidates" :key="candidate.normalized_i_id">
-              <span><strong>{{ candidate.i_id_raw || candidate.display_i_id || candidate.normalized_i_id }}</strong><small>{{ candidate.suggested_display_name || `${candidate.sku_count || 0} 个 SKU` }}</small></span>
-              <button class="primary" :disabled="savingBinding" @click="bindCandidate(candidate)">绑定</button>
+              <span>
+                <strong>{{ candidate.i_id_raw || candidate.display_i_id || candidate.erp_i_id || candidate.product_i_id || candidate.normalized_i_id }}</strong>
+                <small>{{ candidateEvidence(candidate) }}</small>
+                <small>{{ candidate.match_count || 0 }} 个 SKU · 示例 {{ candidate.example_sku_code || '无' }}<template v-if="typeof candidate.average_cost_price === 'number'"> · 平均系统成本 ¥{{ candidate.average_cost_price.toFixed(2) }}</template></small>
+              </span>
+              <button class="primary" :disabled="savingBinding" @click="bindCandidate(candidate)">{{ candidateConfidence(candidate) === 'conflict' ? '确认绑定此组' : '绑定' }}</button>
             </article>
             <div v-if="!candidates.length" class="empty-large">没有找到待绑定款式。</div>
           </div>
@@ -251,6 +272,10 @@ const ruleGroups = computed(() => {
 })
 const selectedGroup = computed(() => ruleGroups.value.find((group) => group.code === selectedGroupCode.value) || ruleGroups.value[0] || null)
 const selectedBindings = computed(() => bindings.value.filter((binding) => binding.rule_group === selectedGroup.value?.code && binding.is_active))
+const candidateStats = computed(() => candidates.value.reduce((result, candidate) => {
+  result[candidateConfidence(candidate)] += 1
+  return result
+}, { unique: 0, conflict: 0, unmatched: 0 }))
 const previewCostLabel = computed(() => typeof preview.value?.estimated_cost === 'number' ? `¥ ${preview.value.estimated_cost.toFixed(2)}` : preview.value?.requires_manual_review ? '需要人工报价' : '—')
 const previewExplanation = computed(() => preview.value?.explanation || (preview.value ? '计算完成。' : '填写尺寸后试算，不会修改任何任务或 ERP 数据。'))
 const erpMismatchCount = computed(() => costDashboard.value.tags?.find((item) => item.code === 'erp_mismatch')?.count || 0)
@@ -283,17 +308,19 @@ function ruleSummary(rule: CostRuleRow) {
 async function loadAll() {
   loading.value = true; error.value = ''; notice.value = ''
   try {
-    const [ruleResponse, bindingResponse, runResponse, dashboardResponse] = await Promise.all([
+    const [ruleResponse, bindingResponse, runResponse, dashboardResponse, candidateResponse] = await Promise.all([
       categoriesApi.listCostRules({ page: 1, page_size: 500 }),
       costManagementApi.listCostRuleBindings({ page: 1, page_size: 500 }),
       costManagementApi.listCostRecalculationRuns({ page: 1, page_size: 20 }),
       costManagementApi.getCostDashboard(),
+      costManagementApi.listUnboundCostRuleCandidates({ page: 1, page_size: 100 }),
     ])
     const body = ruleResponse.data as { data?: CostRuleRow[] }
     rules.value = body.data || []
     bindings.value = bindingResponse.data || []
     runs.value = runResponse.data || []
     costDashboard.value = dashboardResponse
+    candidates.value = candidateResponse.data || []
     if (!selectedGroupCode.value || !ruleGroups.value.some((group) => group.code === selectedGroupCode.value)) selectedGroupCode.value = ruleGroups.value[0]?.code || ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成本规则加载失败。' }
   finally { loading.value = false }
@@ -324,6 +351,17 @@ async function saveRule() {
 async function loadCandidates() {
   try { candidates.value = (await costManagementApi.listUnboundCostRuleCandidates({ keyword: candidateKeyword.value, page: 1, page_size: 100 })).data || [] }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '待绑定款式加载失败。' }
+}
+function candidateEvidence(candidate: UnboundCostRuleCandidate) {
+  if (candidateConfidence(candidate) === 'unique') return `历史唯一建议：${candidate.suggested_rule_group || candidate.suggested_rule_groups?.[0] || '待核对'}`
+  if (candidateConfidence(candidate) === 'conflict') return `冲突：历史曾命中 ${candidate.suggested_rule_groups?.join('、') || '多个规则组'}`
+  return '没有可证明的历史规则，请根据实际业务选择'
+}
+function candidateConfidence(candidate: UnboundCostRuleCandidate): 'unique' | 'conflict' | 'unmatched' {
+  if (candidate.mapping_confidence) return candidate.mapping_confidence
+  if ((candidate.suggested_rule_groups?.length || 0) > 1) return 'conflict'
+  if (candidate.suggested_rule_group || candidate.suggested_rule_groups?.length === 1) return 'unique'
+  return 'unmatched'
 }
 async function bindCandidate(candidate: UnboundCostRuleCandidate) {
   if (!selectedGroup.value) return
@@ -368,7 +406,7 @@ async function syncRunERP(id: number) {
   finally { runActionBusy.value = null }
 }
 
-onMounted(async () => { await loadAll(); await loadCandidates() })
+onMounted(loadAll)
 </script>
 
 <style scoped>
@@ -386,4 +424,16 @@ onMounted(async () => { await loadAll(); await loadCandidates() })
 @media(max-width:1320px){.cost-layout{grid-template-columns:minmax(13rem,15rem) minmax(0,1fr)}.calculator{position:static;grid-column:2;grid-template-columns:repeat(2,minmax(0,1fr))}.calculator>header,.preview-result,.calculate-button{grid-column:1/-1}.run-card{grid-template-columns:1fr}.run-actions{justify-content:flex-start}}
 @media(max-width:900px){.cost-layout{grid-template-columns:1fr}.rule-groups{position:static;display:flex;max-height:none;overflow:auto}.rule-groups>header{display:none}.rule-groups>button{min-width:11rem;border-right:1px solid rgb(var(--yb-border));border-bottom:0}.calculator{grid-column:auto}}
 @media(max-width:620px){.calculator{grid-template-columns:1fr}.calculator>header,.preview-result,.calculate-button{grid-column:auto}.workspace-heading,.binding-panel>header{display:grid}.field-pair{grid-template-columns:1fr}.cost-health,.run-summary,.run-actions{width:100%;flex-wrap:wrap}}
+.mapping-diagnostics{display:grid;gap:1rem;padding:1rem;border:1px solid rgb(var(--yb-border));border-radius:1rem;background:rgb(var(--yb-surface))}
+.mapping-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+.mapping-diagnostics h2{margin:.2rem 0}
+.mapping-diagnostics p{margin:.25rem 0 0;color:rgb(var(--yb-text-muted));font-size:.78rem}
+.diagnostic-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem}
+.diagnostic-grid article{display:grid;gap:.25rem;border:1px solid rgb(var(--yb-border));border-radius:.8rem;padding:.8rem;background:rgb(var(--yb-surface-soft))}
+.diagnostic-grid span,.diagnostic-grid small{color:rgb(var(--yb-text-muted));font-size:.68rem}
+.diagnostic-grid strong{font-size:1.35rem}
+.diagnostic-grid .warning{background:rgb(var(--yb-warning-soft));color:rgb(var(--yb-warning-text))}
+.diagnostic-grid .danger{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}
+@media(max-width:900px){.diagnostic-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.mapping-diagnostics>header{display:grid}.diagnostic-grid{grid-template-columns:1fr}}
 </style>

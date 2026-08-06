@@ -104,8 +104,8 @@ func TestPlanningSKUDerivesERPProductNameFromDescription(t *testing.T) {
 		t.Fatalf("ERPProductName = %q, want description fallback %q", item.ERPProductName, item.DescriptionSpec)
 	}
 	headers := planningExcelHeaders(true)
-	if got := headers[len(headers)-1]; got != "ERP 款式编码 i_id" {
-		t.Fatalf("last ERP template header = %q, want ERP style i_id", got)
+	if got := headers[0]; got != "款式编码" {
+		t.Fatalf("first template header = %q, want the single visible style code", got)
 	}
 	for _, header := range headers {
 		if header == "ERP 产品名称" {

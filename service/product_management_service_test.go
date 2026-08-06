@@ -14,6 +14,43 @@ import (
 	"workflow/repo"
 )
 
+func TestProductManagementReconcileCostKeepsSystemAndERPValuesSeparate(t *testing.T) {
+	systemCost := 8.6
+	erpCost := 9.1
+	record := &domain.ProductManagementRecord{
+		ID: 31, SKUCode: "SKU-009", CostPrice: &systemCost,
+		CostTrace: &domain.ProductManagementCostTrace{RuleName: "杯具面积规则"},
+	}
+	bridge := &productManagementERPBridgeCapture{
+		readbackProduct: &domain.ERPProduct{SKUCode: "SKU-009", IID: "STYLE-009", ProductName: "北欧客厅组合", CostPrice: &erpCost},
+	}
+	svc := &productManagementService{
+		records:   &productManagementRecordRepoFake{items: []*domain.ProductManagementRecord{record}},
+		erpBridge: bridge,
+		now:       func() time.Time { return time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC) },
+	}
+
+	result, appErr := svc.ReconcileCost(context.Background(), 31)
+	if appErr != nil {
+		t.Fatalf("ReconcileCost() appErr = %+v", appErr)
+	}
+	if result.Status != domain.ProductCostReconciliationMismatch {
+		t.Fatalf("status = %s, want mismatched", result.Status)
+	}
+	if result.SystemCostPrice == nil || *result.SystemCostPrice != systemCost {
+		t.Fatalf("system cost = %+v, want %.2f", result.SystemCostPrice, systemCost)
+	}
+	if result.ERPCostPrice == nil || *result.ERPCostPrice != erpCost {
+		t.Fatalf("erp cost = %+v, want %.2f", result.ERPCostPrice, erpCost)
+	}
+	if result.CostDelta == nil || math.Abs(*result.CostDelta-0.5) > 0.0001 {
+		t.Fatalf("delta = %+v, want 0.5", result.CostDelta)
+	}
+	if record.CostPrice == nil || *record.CostPrice != systemCost {
+		t.Fatalf("reconciliation mutated retained system cost: %+v", record.CostPrice)
+	}
+}
+
 func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T) {
 	assetID := int64(7301)
 	versionID := int64(4395)

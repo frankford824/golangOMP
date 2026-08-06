@@ -33,7 +33,7 @@ describe('unified task compose domain', () => {
     ])).toEqual([])
   })
 
-  it('keeps planning numbering identity separate from ERP identity and derives the ERP name', () => {
+  it('uses one visible style code for planning numbering and ERP filing', () => {
     const row = createComposeRow({
       id: 'row-1',
       category_code: 'HZS',
@@ -42,11 +42,11 @@ describe('unified task compose domain', () => {
       product_i_id: 'HQT',
     })
 
-    expect(composeColumns('planning_sku').map((column) => column.key)).toContain('category_code')
+    expect(composeColumns('planning_sku').map((column) => column.key)).not.toContain('category_code')
     expect(composeColumns('planning_sku').map((column) => column.key)).toContain('product_i_id')
     expect(composeColumns('planning_sku').map((column) => column.key)).not.toContain('product_name')
     expect(buildPlanningInputs([row])[0]).toMatchObject({
-      category_code: 'HZS',
+      category_code: 'HQT',
       erp_product_i_id: 'HQT',
       erp_product_name: '亚克力立牌 20cm',
     })
@@ -160,7 +160,7 @@ describe('unified task compose domain', () => {
 
     const planning = createComposeRow({
       id: 'p1',
-      category_code: 'HZS',
+      product_i_id: 'HZS',
       description_spec: '亚克力立牌 20cm',
       quantity: 3,
       target_price: '12.50',
@@ -187,13 +187,30 @@ describe('unified task compose domain', () => {
       width: 1.2,
       height: 0.8,
       area: 0.96,
+      structure_type: 'three_dimensional',
+      slotting: 'slotted',
       special_note: '注意出血位',
     })
     expect(validateCompose('new_design', { ...common, due_at: '2026-07-15T18:00' }, [row], new Date('2026-07-16T00:00:00Z')))
       .toContainEqual(expect.objectContaining({ field: 'due_at', message: '截止时间不能早于当前时间' }))
 
     const [unit] = buildTaskSubmissionUnits('new_design', common, [row])
-    expect(unit.task).toMatchObject({ width: 1.2, height: 0.8, area: 0.96, note: '运营备注\n注意出血位' })
+    expect(unit.task).toMatchObject({
+      width: 1.2, height: 0.8, area: 0.96,
+      craftText: '立体 开槽', process: '开槽', note: '运营备注\n注意出血位',
+    })
+  })
+
+  it('stores explicit structure and slotting semantics per batch SKU', () => {
+    const rows = [
+      createComposeRow({ id: 'a', product_i_id: 'A', product_name: 'A款', design_requirement: 'A需求', structure_type: 'flat', slotting: 'not_slotted' }),
+      createComposeRow({ id: 'b', product_i_id: 'B', product_name: 'B款', design_requirement: 'B需求', structure_type: 'three_dimensional', slotting: 'slotted' }),
+    ]
+    const [unit] = buildTaskSubmissionUnits('new_design', common, rows)
+    expect(unit.task.batchItems?.map((item) => item.variantJson)).toEqual([
+      expect.objectContaining({ structure_type: 'flat', structure_text: '平面', slotting: 'not_slotted', process: '不开槽', craft_text: '平面 不开槽' }),
+      expect.objectContaining({ structure_type: 'three_dimensional', structure_text: '立体', slotting: 'slotted', process: '开槽', craft_text: '立体 开槽' }),
+    ])
   })
 
   it('keeps the create idempotency key inside the 128-character backend limit for large batches', () => {

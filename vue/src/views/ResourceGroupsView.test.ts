@@ -2,10 +2,10 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), push: vi.fn() }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), costReconciliation: vi.fn(), push: vi.fn() }))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@/services/api/resourceGroupsApi')>()
-  return { ...original, resourceGroupsApi: { ...original.resourceGroupsApi, list: mocks.list } }
+  return { ...original, resourceGroupsApi: { ...original.resourceGroupsApi, list: mocks.list, costReconciliation: mocks.costReconciliation } }
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 vi.mock('@/composables/useTaskFilterOptions', async () => {
@@ -60,6 +60,16 @@ describe('ResourceGroupsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.list.mockResolvedValue({ items: [group], view_mode: 'group', flat_items: [], page: 1, page_size: 24, total: 48 })
+    mocks.costReconciliation.mockResolvedValue({
+      product_management_record_id: 91,
+      sku_code: 'SKU-008',
+      system_cost_price: 18.5,
+      erp_cost_price: 20,
+      cost_delta: 1.5,
+      status: 'mismatched',
+      checked_at: '2026-08-05T10:00:00Z',
+      message: 'ERP 成本与系统计算成本不一致',
+    })
   })
 
   it('keeps all filters while paging and opens the numeric resource-group route', async () => {
@@ -74,7 +84,6 @@ describe('ResourceGroupsView', () => {
     await selects[0].setValue('final')
     await selects[1].setValue('tif')
     await selects[2].setValue('12')
-    await selects[3].setValue('new_product_development')
     await wrapper.get('.filter-drawer form').trigger('submit')
     await flushPromises()
 
@@ -85,7 +94,6 @@ describe('ResourceGroupsView', () => {
       created_from: '2026-08-01',
       created_to: '2026-08-05',
       resource_owner_id: '12',
-      task_type: 'new_product_development',
       page: 1,
       page_size: 24,
     })
@@ -97,7 +105,6 @@ describe('ResourceGroupsView', () => {
       resource_role: 'final',
       file_format: 'tif',
       resource_owner_id: '12',
-      task_type: 'new_product_development',
       page: 2,
     }))
   })
@@ -115,9 +122,14 @@ describe('ResourceGroupsView', () => {
     await flushPromises()
 
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({
-      q: 'CGK001500',
+      q: undefined,
+      sku_code: 'CGK001500',
       page: 1,
     }))
+    expect(mocks.costReconciliation).toHaveBeenCalledWith(8)
+    expect(wrapper.text()).toContain('ERP 实际成本')
+    expect(wrapper.text()).toContain('¥ 20.00')
+    expect(wrapper.get('.cost-mismatch').text()).toBe('¥ 20.00')
   })
 
   it('shows a single SKU cover summary card and navigates on click', async () => {

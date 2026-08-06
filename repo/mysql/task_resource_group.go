@@ -15,6 +15,8 @@ import (
 
 type TaskResourceGroupRepo struct{ db *DB }
 
+const resourceGroupSKUIdentitySQL = "COALESCE(NULLIF(tsi.sku_code, ''), NULLIF(t.primary_sku_code, ''), NULLIF(t.sku_code, ''), '')"
+
 func NewTaskResourceGroupRepo(db *DB) *TaskResourceGroupRepo {
 	return &TaskResourceGroupRepo{db: db}
 }
@@ -68,7 +70,7 @@ func (r *TaskResourceGroupRepo) GetWorkflowForUpdate(ctx context.Context, tx rep
 func (r *TaskResourceGroupRepo) EnsureGroupShells(ctx context.Context, tx repo.Tx, taskID int64, taskType domain.TaskType) error {
 	sqlTx := Unwrap(tx)
 	switch taskType {
-	case domain.TaskTypeSKUPlanning, domain.TaskTypePurchaseTask:
+	case domain.TaskTypePurchaseTask:
 		return nil
 	case domain.TaskTypeRetouchTask:
 		_, err := sqlTx.ExecContext(ctx, `
@@ -115,7 +117,7 @@ type resourceGroupCountQuerier interface {
 func expectedResourceGroupCount(ctx context.Context, queryer resourceGroupCountQuerier, taskID int64, taskType domain.TaskType) (int64, error) {
 	var count int64
 	switch taskType {
-	case domain.TaskTypeSKUPlanning, domain.TaskTypePurchaseTask:
+	case domain.TaskTypePurchaseTask:
 		return 0, nil
 	case domain.TaskTypeRetouchTask:
 		if err := queryer.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_retouch_requirements WHERE task_id = ?`, taskID).Scan(&count); err != nil {
@@ -176,14 +178,17 @@ func (r *TaskResourceGroupRepo) ListByTaskID(ctx context.Context, taskID int64) 
 }
 
 func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64, error) {
-	where := []string{"g.finalized_revision_id IS NOT NULL"}
+	// A SKU identity becomes searchable as soon as it is generated. Finalized
+	// assets enrich the card later; they are not a prerequisite for the card.
+	// Task- and retouch-scoped empty shells remain hidden.
+	where := []string{"(g.finalized_revision_id IS NOT NULL OR " + resourceGroupSKUIdentitySQL + " <> '')"}
 	args := make([]interface{}, 0, 12)
 	if params.TaskID > 0 {
 		where = append(where, "g.task_id = ?")
 		args = append(args, params.TaskID)
 	}
 	if value := strings.TrimSpace(params.SKUCode); value != "" {
-		where = append(where, "tsi.sku_code = ?")
+		where = append(where, resourceGroupSKUIdentitySQL+" = ?")
 		args = append(args, value)
 	}
 	if value := strings.TrimSpace(params.TaskNo); value != "" {
@@ -214,7 +219,7 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 	if value := strings.TrimSpace(params.Query); value != "" {
 		like := "%" + value + "%"
 		where = append(where, `(
-			t.task_no LIKE ? OR COALESCE(tsi.sku_code,'') LIKE ?
+			t.task_no LIKE ? OR `+resourceGroupSKUIdentitySQL+` LIKE ?
 			OR EXISTS (
 				SELECT 1 FROM task_asset_group_search_documents doc
 				WHERE doc.group_id=g.id AND (doc.internal_text LIKE ? OR doc.final_text LIKE ?)
@@ -276,7 +281,7 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		SELECT g.id, g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id,
 		       g.working_revision_id, g.finalized_revision_id, g.lock_version,
 		       g.migration_incomplete, g.migration_issue, g.created_at, g.updated_at,
-		       t.task_no, COALESCE(tsi.sku_code, ''),
+		       t.task_no, `+resourceGroupSKUIdentitySQL+`,
 		       COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
 		       t.creator_id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''), t.business_lane
 		FROM task_asset_groups g
@@ -314,7 +319,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		baseArgs = append(baseArgs, params.TaskID)
 	}
 	if value := strings.TrimSpace(params.SKUCode); value != "" {
-		baseWhere = append(baseWhere, "tsi.sku_code = ?")
+		baseWhere = append(baseWhere, resourceGroupSKUIdentitySQL+" = ?")
 		baseArgs = append(baseArgs, value)
 	}
 	if value := strings.TrimSpace(params.TaskNo); value != "" {
@@ -340,7 +345,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	}
 
 	flatCTE := `WITH flat_resources AS (
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, COALESCE(tsi.sku_code, '') AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, `+resourceGroupSKUIdentitySQL+` AS sku_code,
 		       'reference' AS resource_role,
 		       COALESCE(NULLIF(rr.file_name_snapshot, ''), asr.file_name, '') AS file_name,
 		       COALESCE(asr.mime_type, '') AS mime_type,
@@ -391,7 +396,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		    )
 		  )
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, COALESCE(tsi.sku_code, '') AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, `+resourceGroupSKUIdentitySQL+` AS sku_code,
 		       'source' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,
@@ -415,7 +420,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		  AND ta.storage_ref_id IS NOT NULL AND asr.ref_id IS NOT NULL
 		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, COALESCE(tsi.sku_code, '') AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, `+resourceGroupSKUIdentitySQL+` AS sku_code,
 		       'final' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,

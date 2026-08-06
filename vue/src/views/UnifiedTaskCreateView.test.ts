@@ -118,12 +118,11 @@ describe('UnifiedTaskCreateView', () => {
     })
     expect(wrapper.get('.compose-page').attributes('data-compose-intent')).toBe('planning_sku')
     expect(wrapper.text()).toContain('只要 SKU 编码明细')
-    expect(wrapper.text()).toContain('还有 4 处需要完善')
+    expect(wrapper.text()).toContain('还有 3 处需要完善')
 
-    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('HZS')
+    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('KT_STANDARD')
     await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
     await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('2')
-    await wrapper.findAll('[data-row-index="0"] label').find((field) => field.text().includes('ERP 款式编码'))?.get('input').setValue('KT_STANDARD')
     await flushPromises()
     const submit = wrapper.get('.validation-dock .primary-button')
     expect(submit.attributes('disabled')).toBeUndefined()
@@ -131,7 +130,7 @@ describe('UnifiedTaskCreateView', () => {
     await flushPromises()
 
     expect(mocks.create).toHaveBeenCalledWith([
-      expect.objectContaining({ category_code: 'HZS', sku_code_type: 'regular', description_spec: '亚克力立牌 20cm', quantity: 2, erp_product_i_id: 'KT_STANDARD', erp_product_name: '亚克力立牌 20cm' }),
+      expect.objectContaining({ category_code: 'KT_STANDARD', sku_code_type: 'regular', description_spec: '亚克力立牌 20cm', quantity: 2, erp_product_i_id: 'KT_STANDARD', erp_product_name: '亚克力立牌 20cm' }),
     ], 'async', expect.any(String))
     expect(wrapper.text()).toContain('任务 RW-088 已结单')
     expect(wrapper.text()).toContain('CGH000021')
@@ -142,23 +141,19 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
-  it('states ERP sync behavior explicitly and exposes per-row read-only cost preview', async () => {
+  it('states ERP sync behavior explicitly without the removed planning cost panel', async () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
         stubs: {
           UnifiedTaskGrid: { template: '<div class="grid-stub" />' },
           IIdSelector: true,
           RouterLink: true,
-          CostExplanationPanel: {
-            props: ['title', 'seed', 'open'],
-            template: '<div class="cost-preview-stub">{{ title }} · {{ seed.categoryCode }} · {{ seed.quantity }}</div>',
-          },
         },
       },
     })
 
     expect(wrapper.text()).toContain('ERP 同步')
-    expect(wrapper.text()).toContain('本次同步：需填写 ERP 款式编码，商品名称取产品描述 / 规格')
+    expect(wrapper.text()).toContain('本次同步：款式编码同时用于生成 SKU 与 ERP 建档，商品名称取产品描述 / 规格')
     expect(wrapper.text()).not.toContain('创建后自动同步 ERP')
     const sync = wrapper.get('input[aria-label="创建成功后自动同步 ERP"]')
     expect((sync.element as HTMLInputElement).checked).toBe(true)
@@ -166,15 +161,9 @@ describe('UnifiedTaskCreateView', () => {
     expect(wrapper.text()).toContain('本次不同步：只创建任务与 SKU')
     expect(wrapper.text()).not.toContain('本次同步：')
     await sync.setValue(true)
-    expect(wrapper.text()).toContain('本次同步：需填写 ERP 款式编码，商品名称取产品描述 / 规格')
+    expect(wrapper.text()).toContain('本次同步：款式编码同时用于生成 SKU 与 ERP 建档，商品名称取产品描述 / 规格')
 
-    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('HZS')
-    await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
-    await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('2')
-    await flushPromises()
-    expect(wrapper.get('.cost-preview-stub').text()).toContain('第 1 行 SKU 预估成本')
-    expect(wrapper.get('.cost-preview-stub').text()).toContain('HZS')
-    expect(wrapper.get('.cost-preview-stub').text()).toContain('2')
+    expect(wrapper.find('.cost-preview-stub').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -189,10 +178,9 @@ describe('UnifiedTaskCreateView', () => {
         },
       },
     })
-    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('HZS')
+    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('KT_STANDARD')
     await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
     await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('1')
-    await wrapper.findAll('[data-row-index="0"] label').find((field) => field.text().includes('ERP 款式编码'))?.get('input').setValue('KT_STANDARD')
     await wrapper.get('.validation-dock .primary-button').trigger('click')
     await flushPromises()
 

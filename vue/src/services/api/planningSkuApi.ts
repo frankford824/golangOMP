@@ -5,7 +5,7 @@ import { resolveFileMimeType } from '@/utils/mime'
 
 export interface PlanningSKUInput {
   client_item_id: string
-  category_code: string
+  category_code?: string
   sku_code_type?: 'regular' | 'customization'
   description_spec: string
   quantity: number

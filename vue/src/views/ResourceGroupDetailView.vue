@@ -11,7 +11,7 @@
       <div class="hero-actions">
         <button v-if="group" class="secondary" @click="router.push(`/tasks/${group.task_id}`)">查看来源任务</button>
         <button class="secondary" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button>
-        <button class="primary" :disabled="downloading || !group" @click="downloadAll">{{ downloading ? '准备中…' : '下载全部成品' }}</button>
+        <button class="primary" :disabled="downloading || !group || finalCount === 0" @click="downloadAll">{{ downloading ? '准备中…' : finalCount ? '下载全部成品' : '暂无成品可下载' }}</button>
       </div>
     </header>
 
@@ -31,7 +31,12 @@
         <article><span>款式编码</span><strong>{{ profile?.product_i_id || profile?.erp_i_id || '待关联' }}</strong><small v-if="comboCodes">组合编码：{{ comboCodes }}</small></article>
         <article><span>规格与尺寸</span><strong>{{ profile?.size_text || profile?.spec_text || '待补充' }}</strong><small>{{ dimensionDetail }}</small></article>
         <article><span>计价面积</span><strong>{{ areaLabel }}</strong><small>{{ profile?.area_trace?.formula || profile?.area_trace?.warning || '暂无可解释的面积计算过程' }}</small></article>
-        <article class="cost-card"><span>当前成本</span><strong>{{ costLabel }}</strong><small>{{ costRuleLabel }}</small></article>
+        <article class="cost-card"><span>系统计算成本</span><strong>{{ systemCostLabel }}</strong><small>{{ costRuleLabel }}</small></article>
+        <article class="cost-card" :class="reconciliationTone"><span>ERP 实际成本</span><strong>{{ erpCostLabel }}</strong><small>{{ costDeltaLabel }}</small></article>
+      </div>
+      <div class="reconciliation-note" :class="reconciliationTone">
+        <span>{{ reconcilingCost ? '正在从 ERP 只读核对成本…' : reconciliationMessage }}</span>
+        <small v-if="costReconciliation?.checked_at">核对时间 {{ formatCheckedAt(costReconciliation.checked_at) }}</small>
       </div>
     </section>
 
@@ -57,7 +62,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
 import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
-import { resourceGroupsApi, type ResourceGroup } from '@/services/api/resourceGroupsApi'
+import { resourceGroupsApi, type ProductCostReconciliation, type ResourceGroup } from '@/services/api/resourceGroupsApi'
 import { downloadBatchAsZip } from '@/utils/batchZipDownload'
 
 const route = useRoute()
@@ -65,6 +70,8 @@ const router = useRouter()
 const group = ref<ResourceGroup | null>(null)
 const loading = ref(false)
 const downloading = ref(false)
+const reconcilingCost = ref(false)
+const costReconciliation = ref<ProductCostReconciliation | null>(null)
 const error = ref('')
 const groupId = computed(() => Number(route.params.id))
 const activeRevision = computed(() => group.value?.finalized_revision || group.value?.working_revision)
@@ -74,7 +81,16 @@ const profile = computed(() => group.value?.sku_profile || null)
 const displaySKU = computed(() => group.value?.sku_code || profile.value?.sku_code || 'SKU 待关联')
 const comboCodes = computed(() => (profile.value?.combo_sku_codes || []).join('、'))
 const areaLabel = computed(() => typeof profile.value?.area_trace?.area_m2 === 'number' ? `${profile.value.area_trace.area_m2.toFixed(3)} ㎡` : '面积待核对')
-const costLabel = computed(() => typeof profile.value?.cost_price === 'number' ? `¥ ${profile.value.cost_price.toFixed(2)}` : '成本待计算')
+const systemCostLabel = computed(() => typeof profile.value?.cost_price === 'number' ? `¥ ${profile.value.cost_price.toFixed(2)}` : '成本待计算')
+const erpCostLabel = computed(() => typeof costReconciliation.value?.erp_cost_price === 'number' ? `¥ ${costReconciliation.value.erp_cost_price.toFixed(2)}` : 'ERP 未返回')
+const costDeltaLabel = computed(() => {
+  const delta = costReconciliation.value?.cost_delta
+  if (typeof delta !== 'number') return '等待实时核对'
+  if (Math.abs(delta) <= 0.0005) return '与系统计算一致'
+  return `比系统成本${delta > 0 ? '高' : '低'} ¥ ${Math.abs(delta).toFixed(2)}`
+})
+const reconciliationMessage = computed(() => costReconciliation.value?.message || '尚未进行 ERP 实际成本核对')
+const reconciliationTone = computed(() => costReconciliation.value?.status === 'matched' ? 'is-matched' : costReconciliation.value?.status === 'mismatched' ? 'is-mismatched' : 'is-unavailable')
 const costRuleLabel = computed(() => profile.value?.cost_trace?.rule_name ? `按「${profile.value.cost_trace.rule_name}」计算${profile.value.cost_trace.matched_rule_version ? ` · 第 ${profile.value.cost_trace.matched_rule_version} 版` : ''}` : '尚未关联成本规则')
 const dimensionDetail = computed(() => {
   const trace = profile.value?.area_trace
@@ -101,9 +117,28 @@ const costPreviewSeed = computed(() => ({
 async function load() {
   loading.value = true
   error.value = ''
-  try { group.value = await resourceGroupsApi.get(groupId.value) }
+  costReconciliation.value = null
+  try {
+    group.value = await resourceGroupsApi.get(groupId.value)
+    if (group.value?.sku_profile?.id) {
+      reconcilingCost.value = true
+      try { costReconciliation.value = await resourceGroupsApi.costReconciliation(groupId.value) }
+      catch (cause) {
+        costReconciliation.value = {
+          product_management_record_id: group.value.sku_profile.id,
+          sku_code: displaySKU.value,
+          status: 'unavailable',
+          checked_at: new Date().toISOString(),
+          message: cause instanceof Error ? `ERP 实际成本核对失败：${cause.message}` : 'ERP 实际成本核对失败',
+        }
+      } finally { reconcilingCost.value = false }
+    }
+  }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '资源详情加载失败。' }
   finally { loading.value = false }
+}
+function formatCheckedAt(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 async function downloadAll() {
   if (!group.value) return
@@ -136,5 +171,5 @@ onMounted(load)
 </style>
 
 <style scoped>
-.sku-business-panel{display:grid;gap:1rem;padding:1.15rem;border:1px solid rgb(var(--yb-border));border-radius:1.1rem;background:rgb(var(--yb-surface))}.sku-business-panel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.sku-business-panel h2{margin:.2rem 0 0;font-size:1.05rem}.sync-state{border-radius:999px;padding:.38rem .65rem;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:.72rem;font-weight:800}.sync-state.is-synced{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-text))}.sync-state.is-failed{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.business-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:.9rem;background:rgb(var(--yb-surface-soft))}.business-grid article{min-width:0;display:grid;align-content:start;gap:.35rem;padding:.9rem}.business-grid article+article{border-left:1px solid rgb(var(--yb-border))}.business-grid span,.business-grid small{color:rgb(var(--yb-text-muted));font-size:.68rem}.business-grid strong{overflow:hidden;font-size:.9rem;text-overflow:ellipsis}.business-grid small{line-height:1.45}.cost-card strong{color:rgb(var(--yb-brand));font-size:1.05rem}@media(max-width:900px){.business-grid{grid-template-columns:1fr 1fr}.business-grid article:nth-child(3){border-left:0}.business-grid article:nth-child(n+3){border-top:1px solid rgb(var(--yb-border))}}@media(max-width:560px){.business-grid{grid-template-columns:1fr}.business-grid article+article{border-left:0;border-top:1px solid rgb(var(--yb-border))}}
+.sku-business-panel{display:grid;gap:1rem;padding:1.15rem;border:1px solid rgb(var(--yb-border));border-radius:1.1rem;background:rgb(var(--yb-surface))}.sku-business-panel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.sku-business-panel h2{margin:.2rem 0 0;font-size:1.05rem}.sync-state{border-radius:999px;padding:.38rem .65rem;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:.72rem;font-weight:800}.sync-state.is-synced{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-text))}.sync-state.is-failed{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.business-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:.9rem;background:rgb(var(--yb-surface-soft))}.business-grid article{min-width:0;display:grid;align-content:start;gap:.35rem;padding:.9rem}.business-grid article+article{border-left:1px solid rgb(var(--yb-border))}.business-grid span,.business-grid small{color:rgb(var(--yb-text-muted));font-size:.68rem}.business-grid strong{overflow:hidden;font-size:.9rem;text-overflow:ellipsis}.business-grid small{line-height:1.45}.cost-card strong{color:rgb(var(--yb-brand));font-size:1.05rem}.cost-card.is-mismatched strong{color:rgb(var(--yb-danger-text))}.reconciliation-note{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.75rem .9rem;border-radius:.75rem;background:rgb(var(--yb-surface-muted));font-size:.78rem}.reconciliation-note small{color:rgb(var(--yb-text-muted))}.reconciliation-note.is-matched{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-text))}.reconciliation-note.is-mismatched{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}@media(max-width:1050px){.business-grid{grid-template-columns:1fr 1fr}.business-grid article:nth-child(odd){border-left:0}.business-grid article:nth-child(n+3){border-top:1px solid rgb(var(--yb-border))}}@media(max-width:560px){.business-grid{grid-template-columns:1fr}.business-grid article+article{border-left:0;border-top:1px solid rgb(var(--yb-border))}.reconciliation-note{align-items:flex-start;flex-direction:column}}
 </style>

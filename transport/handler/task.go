@@ -98,6 +98,8 @@ type createTaskReq struct {
 	Width             *float64                      `json:"width"`
 	Height            *float64                      `json:"height"`
 	Area              *float64                      `json:"area"`
+	CraftText         string                        `json:"craft_text"`
+	Process           string                        `json:"process"`
 	ReferenceLink     string                        `json:"reference_link"`
 	SyncERPOnCreate   *bool                         `json:"sync_erp_on_create"`
 	ClientCreateID    string                        `json:"client_create_id"`
@@ -841,6 +843,8 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		Width:              req.Width,
 		Height:             req.Height,
 		Area:               req.Area,
+		CraftText:          req.CraftText,
+		Process:            req.Process,
 		ReferenceLink:      req.ReferenceLink,
 		BatchSKUMode:       req.BatchSKUMode,
 		SKUCodeType:        domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),

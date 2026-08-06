@@ -59,6 +59,7 @@ type planningSKUService struct {
 	streams              StorageStreamOpener
 	ossDirect            *OSSDirectService
 	productCodeSequences repo.ProductCodeSequenceRepo
+	resourceGroups       taskResourceGroupInitializer
 	now                  func() time.Time
 }
 
@@ -75,6 +76,12 @@ func WithPlanningSKUAssets(storageRefs repo.AssetStorageRefRepo, streams Storage
 func WithPlanningSKUProductCodeSequences(sequences repo.ProductCodeSequenceRepo) PlanningSKUOption {
 	return func(service *planningSKUService) {
 		service.productCodeSequences = sequences
+	}
+}
+
+func WithPlanningSKUResourceGroups(initializer taskResourceGroupInitializer) PlanningSKUOption {
+	return func(service *planningSKUService) {
+		service.resourceGroups = initializer
 	}
 }
 
@@ -174,11 +181,12 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 			skuCode := skuCodes[i]
 			quantity := input.Quantity
 			skuCodeType := normalizePlanningSKUCodeType(input.SKUCodeType)
+			categoryIdentity := planningSKUCategoryIdentity(input)
 			items = append(items, &domain.TaskSKUItem{
 				SequenceNo: i + 1, SKUCode: skuCode, SKUStatus: domain.TaskSKUStatusGenerated,
 				SKUOrigin: "native", ProductIID: strings.TrimSpace(input.ERPProductIID),
 				ProductNameSnapshot: planningProductName(input), Quantity: &quantity,
-				CategoryCode: strings.ToUpper(strings.TrimSpace(input.CategoryCode)), SKUCodeType: skuCodeType,
+				CategoryCode: strings.ToUpper(categoryIdentity), SKUCodeType: skuCodeType,
 			})
 		}
 		batchMode := domain.TaskBatchModeSingle
@@ -205,6 +213,12 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 		}
 		if err := s.taskRepo.CreateSKUItems(ctx, tx, items); err != nil {
 			return err
+		}
+		if s.resourceGroups == nil {
+			return fmt.Errorf("planning SKU resource group initializer is unavailable")
+		}
+		if err := s.resourceGroups.EnsureGroupShells(ctx, tx, taskID, domain.TaskTypeSKUPlanning); err != nil {
+			return fmt.Errorf("create planning SKU resource groups: %w", err)
 		}
 		if err := s.repo.CreateSettings(ctx, tx, domain.PlanningSKUSettings{
 			TaskID: taskID, ERPSyncMode: request.ERPSyncMode, CodeRuleRevisionID: skuRule.ID,
@@ -376,8 +390,8 @@ func (s *planningSKUService) Template(_ context.Context, includeERP bool) ([]byt
 		cell, _ := excelize.CoordinatesToCellName(column+1, 1)
 		_ = f.SetCellValue(sheet, cell, header)
 	}
-	_ = f.SetCellValue(sheet, "A2", "示例：可在本单元格放置一张图片")
-	_ = f.SetCellValue(sheet, "B2", "HZS")
+	_ = f.SetCellValue(sheet, "A2", "HZS")
+	_ = f.SetCellValue(sheet, "B2", "示例：可在本单元格放置一张图片")
 	_ = f.SetCellValue(sheet, "C2", "产品描述与规格（必填）")
 	_ = f.SetCellValue(sheet, "D2", 1)
 	_ = f.SetColWidth(sheet, "A", "A", 18)
@@ -409,7 +423,17 @@ func (s *planningSKUService) ParseExcel(_ context.Context, reader io.Reader, inc
 			continue
 		}
 		item := domain.PlanningSKUItemInput{ClientItemID: strconv.Itoa(rowIndex + 1)}
-		item.CategoryCode = excelCell(row, 1)
+		newLayout := strings.EqualFold(excelCell(rows[0], 0), "款式编码")
+		pictureColumn := "B"
+		if newLayout {
+			item.ERPProductIID = excelCell(row, 0)
+			item.CategoryCode = item.ERPProductIID
+		} else {
+			// Keep the former A-picture/B-category/H-i_id workbook readable.
+			item.CategoryCode = excelCell(row, 1)
+			item.ERPProductIID = excelCell(row, 7)
+			pictureColumn = "A"
+		}
 		item.DescriptionSpec = excelCell(row, 2)
 		quantity, quantityErr := strconv.ParseInt(excelCell(row, 3), 10, 64)
 		if quantityErr == nil {
@@ -421,7 +445,6 @@ func (s *planningSKUService) ParseExcel(_ context.Context, reader io.Reader, inc
 		item.Note = excelCell(row, 5)
 		item.ReferenceURL = excelCell(row, 6)
 		if includeERP {
-			item.ERPProductIID = excelCell(row, 7)
 			// Keep the former ninth column readable for old workbooks, while new
 			// templates derive the ERP name from the already-required description.
 			item.ERPProductName = excelCell(row, 8)
@@ -429,7 +452,7 @@ func (s *planningSKUService) ParseExcel(_ context.Context, reader io.Reader, inc
 				item.ERPProductName = planningERPProductName(item)
 			}
 		}
-		if pictures, pictureErr := f.GetPictures(sheet, fmt.Sprintf("A%d", rowIndex+1)); pictureErr == nil && len(pictures) > 1 {
+		if pictures, pictureErr := f.GetPictures(sheet, fmt.Sprintf("%s%d", pictureColumn, rowIndex+1)); pictureErr == nil && len(pictures) > 1 {
 			result.Errors = append(result.Errors, domain.PlanningSKUExcelParseError{Row: rowIndex + 1, Field: "product_image", Reason: "each row may contain at most one embedded image"})
 		}
 		if appErr := validatePlanningSKUItem(item, map[bool]domain.PlanningSKUERPSyncMode{true: domain.PlanningSKUERPSyncAsync, false: domain.PlanningSKUERPSyncNone}[includeERP], rowIndex, true); appErr != nil {
@@ -698,7 +721,7 @@ func allocatePlanningSKUCodes(
 	}
 	indexesByKey := make(map[allocationKey][]int)
 	for index, item := range items {
-		shortCode, appErr := deriveDefaultTaskProductCategoryShortCode(item.CategoryCode)
+		shortCode, appErr := deriveDefaultTaskProductCategoryShortCode(planningSKUCategoryIdentity(item))
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -735,8 +758,8 @@ func allocatePlanningSKUCodes(
 
 func validatePlanningSKUItem(item domain.PlanningSKUItemInput, mode domain.PlanningSKUERPSyncMode, index int, requireCodeIdentity bool) *domain.AppError {
 	if requireCodeIdentity {
-		if _, appErr := normalizeDefaultTaskProductCategoryCode(item.CategoryCode); appErr != nil {
-			return planningRowError(index, "category_code", "is required")
+		if _, appErr := normalizeDefaultTaskProductCategoryCode(planningSKUCategoryIdentity(item)); appErr != nil {
+			return planningRowError(index, "erp_product_i_id", "is required")
 		}
 		if item.SKUCodeType != "" && !item.SKUCodeType.Valid() {
 			return planningRowError(index, "sku_code_type", "must be regular or customization")
@@ -771,6 +794,15 @@ func validatePlanningSKUItem(item domain.PlanningSKUItemInput, mode domain.Plann
 		return planningRowError(index, "erp_product_name", erpProductNameLimitMessage())
 	}
 	return nil
+}
+
+// planningSKUCategoryIdentity keeps legacy API clients compatible while making
+// 款式编码 the single input for both SKU generation and ERP filing.
+func planningSKUCategoryIdentity(item domain.PlanningSKUItemInput) string {
+	if value := strings.TrimSpace(item.ERPProductIID); value != "" {
+		return value
+	}
+	return strings.TrimSpace(item.CategoryCode)
 }
 
 func planningRowError(index int, field, message string) *domain.AppError {
@@ -840,12 +872,8 @@ func totalPlanningQuantity(items []domain.PlanningSKUItemInput) int64 {
 
 func pointerInt64(value int64) *int64 { return &value }
 
-func planningExcelHeaders(includeERP bool) []string {
-	headers := []string{"产品图片", "SKU 类目", "产品描述/规格", "数量", "目标价", "备注", "参考链接"}
-	if includeERP {
-		headers = append(headers, "ERP 款式编码 i_id")
-	}
-	return headers
+func planningExcelHeaders(_ bool) []string {
+	return []string{"款式编码", "产品图片", "产品描述/规格", "数量", "目标价", "备注", "参考链接"}
 }
 
 func excelCell(row []string, index int) string {

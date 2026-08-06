@@ -48,7 +48,7 @@ const routes: RouteRecordRaw[] = [
         path: 'tasks',
         name: 'TaskList',
         component: () => import('@/views/TaskListView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'task_list' },
+        meta: { requiresAuth: true, requiredMenuKey: 'task_list', keepAlive: true },
       },
       {
         path: 'tasks/create',
@@ -109,7 +109,7 @@ const routes: RouteRecordRaw[] = [
         path: 'asset-center',
         name: 'AssetsIndex',
         component: () => import('@/views/ResourceGroupsView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'resource_management' },
+        meta: { requiresAuth: true, requiredMenuKey: 'resource_management', keepAlive: true },
       },
       {
         path: 'asset-center/:id(ext-[^/]+)',
@@ -127,7 +127,7 @@ const routes: RouteRecordRaw[] = [
         path: 'cost-rules',
         name: 'CostRules',
         component: () => import('@/views/CostRuleManagerView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'cost_rules' },
+        meta: { requiresAuth: true, requiredMenuKey: 'cost_rules', keepAlive: true },
       },
       {
         path: 'data-center',

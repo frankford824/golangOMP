@@ -77,6 +77,10 @@ func (productManagementServiceStub) CostDashboard(context.Context) (*domain.Prod
 	return &domain.ProductCostDashboardResponse{}, nil
 }
 
+func (productManagementServiceStub) ReconcileCost(context.Context, int64) (*domain.ProductCostReconciliation, *domain.AppError) {
+	return &domain.ProductCostReconciliation{}, nil
+}
+
 func (productManagementServiceStub) GetByTaskID(context.Context, int64) ([]*domain.ProductManagementRecord, *domain.AppError) {
 	return nil, nil
 }

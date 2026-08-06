@@ -98,6 +98,9 @@ export interface ResourceSKUProfile {
     matched_rule_version?: number | null
     requires_manual_review?: boolean
     manual_cost_override?: boolean
+    manual_cost_override_reason?: string
+    input_snapshot?: Record<string, unknown>
+    calculation_snapshot?: Record<string, unknown>
   } | null
   spec_text?: string
   size_text?: string
@@ -115,6 +118,20 @@ export interface ResourceSKUProfile {
   image_sync_status?: string
   last_erp_synced_at?: string | null
   last_erp_checked_at?: string | null
+}
+
+export interface ProductCostReconciliation {
+  product_management_record_id: number
+  sku_code: string
+  system_cost_price?: number | null
+  erp_cost_price?: number | null
+  cost_delta?: number | null
+  status: 'matched' | 'mismatched' | 'system_missing' | 'erp_missing' | 'unavailable'
+  checked_at: string
+  message: string
+  system_trace?: ResourceSKUProfile['cost_trace']
+  erp_i_id?: string
+  erp_product_name?: string
 }
 
 export interface ResourceGroup {
@@ -229,6 +246,9 @@ export const resourceGroupsApi = {
   },
   async get(id: number): Promise<ResourceGroup> {
     return unwrap(await http.get(`/v1/resource-groups/${id}`))
+  },
+  async costReconciliation(id: number): Promise<ProductCostReconciliation> {
+    return unwrap(await http.get(`/v1/resource-groups/${id}/cost-reconciliation`))
   },
   async revisions(id: number, params: { page?: number; page_size?: number } = {}): Promise<ResourceRevisionListResult> {
     return unwrap(await http.get(`/v1/resource-groups/${id}/revisions`, { params }))

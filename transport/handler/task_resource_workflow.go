@@ -108,6 +108,20 @@ func (h *TaskResourceWorkflowHandler) ResourceGroup(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *TaskResourceWorkflowHandler) ResourceGroupCostReconciliation(c *gin.Context) {
+	groupID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid resource group id", nil))
+		return
+	}
+	result, appErr := h.svc.ResourceGroupCostReconciliation(c.Request.Context(), requestActor(c), groupID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *TaskResourceWorkflowHandler) ResourceGroupRevisions(c *gin.Context) {
 	groupID, err := parseID(c)
 	if err != nil {

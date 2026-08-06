@@ -83,6 +83,10 @@ export interface TaskAssetVersion {
   uploaderName: string
   uploadedAt: string
   note?: string
+  /** 任务创建/业务信息中的工艺描述，例如“平面 开槽”。 */
+  craftText?: string
+  /** 成本规则使用的规范工艺关键词，例如“开槽”“不开槽”。 */
+  process?: string
   /** 后端 `asset_id`：用于 GET /v1/assets/{id}/preview|download */
   assetRootId?: string
   /** 后端 `asset_no`（AST-0001/AST-0002 等业务编号），用于按根分组/定位 */

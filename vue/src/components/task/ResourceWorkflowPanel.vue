@@ -80,6 +80,16 @@
                     <small>{{ entry.row.source.inherited ? '设计师提交 · 将作为有效源文件' : entry.row.sourceMemberNames.length > 1 ? `本次已打包 ${entry.row.sourceMemberNames.length} 份源文件` : '本次上传' }}</small>
                     <small v-if="entry.row.sourceMemberNames.length > 1" class="bundle-members">{{ entry.row.sourceMemberNames.join('、') }}</small>
                   </div>
+                  <button
+                    v-if="entry.row.source.inherited"
+                    type="button"
+                    class="source-download"
+                    :disabled="downloadingSourceID === entry.row.source.id"
+                    aria-label="下载设计源文件"
+                    @click="downloadSource(entry.row.source)"
+                  >
+                    <Download :size="16" aria-hidden="true" />{{ downloadingSourceID === entry.row.source.id ? '下载中' : '下载' }}
+                  </button>
                   <CheckCircle2 :size="18" class="file-ready" aria-label="已就绪" />
                 </div>
                 <label v-if="canUploadSource(entry.row)" class="drop-zone source-drop">
@@ -100,7 +110,7 @@
                 <template v-else>
                   <label class="drop-zone final-drop">
                     <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length && entry.row.mode === 'set' ? `继续添加成品（当前 ${entry.row.finals.length} 张）` : entry.row.finals.length ? '替换单图成品' : '上传最终成品图或成品 ZIP' }}</span>
-                    <input type="file" accept="image/*,.zip,application/zip" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
+                    <input type="file" accept="image/*,.zip,application/zip" :multiple="entry.row.mode === 'set'" :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
                   </label>
                   <button v-if="entry.row.finals.length" type="button" class="clear-finals" :disabled="Boolean(entry.row.uploading)" @click="clearFinals(entry.row)">清空本组成品</button>
                   <ol v-if="entry.row.finals.length" class="final-order">
@@ -179,6 +189,7 @@ import {
   CheckCircle2,
   CircleCheckBig,
   CopyCheck,
+  Download,
   FilePenLine,
   Images,
   Info,
@@ -192,6 +203,7 @@ import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode } from '@/services/api/resourceGroupsApi'
 import { tasksApi } from '@/services/api/tasksApi'
 import { buildSourceBundleFile, expandFinalUploadFiles } from '@/domain/resource-workflow-files'
+import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
 type UploadedFile = { id: number; name: string; inherited?: boolean }
 type EditorRow = {
@@ -212,6 +224,7 @@ const rows = ref<EditorRow[]>([])
 const changedGroups = ref(new Set<number>())
 const replaceSourceGroups = ref(new Set<number>())
 const busy = ref(false)
+const downloadingSourceID = ref<number | null>(null)
 const error = ref('')
 const success = ref('')
 const reason = ref('')
@@ -334,6 +347,22 @@ function toggleSourceReplacement(row: EditorRow) {
   markChanged(row.group.id)
 }
 function canUploadSource(row: EditorRow) { return isDesignStage.value || isRetouchStage.value || replaceSourceGroups.value.has(row.group.id) }
+async function downloadSource(file: UploadedFile) {
+  if (downloadingSourceID.value) return
+  downloadingSourceID.value = file.id
+  error.value = ''
+  try {
+    const result = await downloadAssetFileWithOriginalFilename({
+      taskAssetId: String(file.id),
+      preferredFilename: file.name,
+    })
+    if (!result.ok) error.value = result.message || '源文件下载失败。'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '源文件下载失败。'
+  } finally {
+    downloadingSourceID.value = null
+  }
+}
 function finalRequirement(row: EditorRow) { return row.mode === 'set' ? '套装至少 2 张，可拖拽排序' : '单图恰好 1 张' }
 function assetVersionId(uploaded: Awaited<ReturnType<typeof uploadTaskFileViaAssetSession>>): number {
   const raw = uploaded.version?.id || uploaded.version?.version_id
@@ -437,7 +466,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetric
 .stage-map{display:grid;grid-template-columns:repeat(3,1fr);border-block:1px solid rgb(var(--yb-border));background:linear-gradient(90deg,rgb(var(--yb-brand-soft)/.45),rgb(var(--yb-surface)) 48%)}.stage-node{position:relative;display:flex;align-items:center;gap:10px;min-height:66px;padding:10px 18px;color:rgb(var(--yb-text-muted))}.stage-node:not(:last-child)::after{content:"";position:absolute;right:-8px;width:16px;height:1px;background:rgb(var(--yb-border-strong))}.stage-node.active{color:rgb(var(--yb-text));background:rgb(var(--yb-brand-soft)/.45)}.stage-node.complete{color:rgb(var(--yb-text))}.stage-index{display:grid;place-items:center;width:28px;height:28px;border:1px solid rgb(var(--yb-border-strong));border-radius:50%;font-weight:800}.active .stage-index{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.complete .stage-index{border-color:rgb(var(--yb-brand));color:rgb(var(--yb-brand))}.stage-node div{display:grid;gap:3px}.stage-node small{font-size:11px;color:rgb(var(--yb-text-muted))}
 .contract-note{display:flex;gap:10px;align-items:center;margin:12px 18px 0;padding:10px 12px;border:1px solid rgb(var(--yb-brand-border));border-radius:11px;background:rgb(var(--yb-brand-soft)/.45);font-size:12px}.contract-note span{color:rgb(var(--yb-text-muted))}.audit-note{border-color:rgb(var(--yb-success-border));background:rgb(var(--yb-success-soft))}
 .editor-viewport{min-height:260px;overflow:auto;overscroll-behavior:contain;margin:12px 18px;background:rgb(var(--yb-surface-soft));border-radius:14px}.editor-spacer{position:relative}.editor-window{position:absolute;inset:0 0 auto}.sku-workbench{box-sizing:border-box;height:calc(var(--editor-row-height) - 10px);margin:5px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:13px;background:rgb(var(--yb-surface));overflow:auto}.sku-head,.column-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.sku-head>div:first-child,.column-title>div{display:grid;gap:3px}.sku-head span,.column-title small{font-size:11px;color:rgb(var(--yb-text-muted))}.sku-head .operations-hint{width:max-content;padding:3px 7px;border-radius:999px;background:rgb(var(--yb-warning-soft));color:rgb(var(--yb-warning-strong));font-weight:750}.mode-control{display:flex;align-items:center;gap:4px}.mode-control>span{margin-right:4px}.mode-control button{min-height:32px;padding:0 11px;border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));cursor:pointer}.mode-control button:first-of-type{border-radius:8px 0 0 8px}.mode-control button:last-of-type{margin-left:-5px;border-radius:0 8px 8px 0}.mode-control button.selected{position:relative;z-index:1;border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-weight:800}.mode-control button:disabled{cursor:default;opacity:1}
-.resource-columns{display:grid;grid-template-columns:1fr 1.08fr;gap:10px;margin-top:12px}.source-column,.final-column{display:grid;align-content:start;gap:10px;min-height:185px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:11px}.final-column.locked{background:rgb(var(--yb-surface-soft))}.replace-toggle{display:flex;align-items:center;gap:6px;font-size:11px;color:rgb(var(--yb-text-muted))}.file-tile{display:flex;align-items:center;gap:10px;padding:11px;border-radius:10px;background:rgb(var(--yb-surface-muted))}.file-tile div{display:grid;gap:3px;min-width:0}.file-tile strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-tile small{font-size:11px;color:rgb(var(--yb-text-muted))}.file-mark{display:grid;place-items:center;min-width:42px;height:42px;border-radius:9px;background:rgb(var(--yb-surface-neutral-inverse-deep));color:rgb(var(--yb-text-inverse));font-size:10px;font-weight:900}.drop-zone{display:grid;place-items:center;min-height:56px;padding:10px;border:1px dashed rgb(var(--yb-brand-border));border-radius:10px;color:rgb(var(--yb-brand-strong));font-size:12px;cursor:pointer}.drop-zone input{position:absolute;width:1px;height:1px;opacity:0}.locked-final{display:flex;align-items:center;gap:10px;min-height:92px;padding:12px;border-radius:10px;background:rgb(var(--yb-surface-muted))}.locked-final div{display:grid;gap:4px}.locked-final small{color:rgb(var(--yb-text-muted))}.lock-symbol{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.mode-summary{padding:4px 8px;border-radius:8px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-size:11px;font-weight:800}.final-order{display:grid;gap:5px;margin:0;padding:0;list-style:none}.final-order li{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:7px;padding:7px;border-radius:8px;background:rgb(var(--yb-surface-muted))}.final-order li>span{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-size:11px}.final-order strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.final-order button{border:0;background:transparent;cursor:pointer}.uploading{margin-top:8px;color:rgb(var(--yb-brand));font-size:12px}
+.resource-columns{display:grid;grid-template-columns:1fr 1.08fr;gap:10px;margin-top:12px}.source-column,.final-column{display:grid;align-content:start;gap:10px;min-height:185px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:11px}.final-column.locked{background:rgb(var(--yb-surface-soft))}.replace-toggle{display:flex;align-items:center;gap:6px;font-size:11px;color:rgb(var(--yb-text-muted))}.file-tile{display:flex;align-items:center;gap:10px;padding:11px;border-radius:10px;background:rgb(var(--yb-surface-muted))}.file-tile div{display:grid;gap:3px;min-width:0;flex:1}.file-tile strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-tile small{font-size:11px;color:rgb(var(--yb-text-muted))}.source-download{display:inline-flex;align-items:center;gap:4px;padding:7px 9px;border:1px solid rgb(var(--yb-border));border-radius:8px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand-strong));font-size:11px;font-weight:750;cursor:pointer}.source-download:disabled{opacity:.55;cursor:wait}.file-mark{display:grid;place-items:center;min-width:42px;height:42px;border-radius:9px;background:rgb(var(--yb-surface-neutral-inverse-deep));color:rgb(var(--yb-text-inverse));font-size:10px;font-weight:900}.drop-zone{display:grid;place-items:center;min-height:56px;padding:10px;border:1px dashed rgb(var(--yb-brand-border));border-radius:10px;color:rgb(var(--yb-brand-strong));font-size:12px;cursor:pointer}.drop-zone input{position:absolute;width:1px;height:1px;opacity:0}.locked-final{display:flex;align-items:center;gap:10px;min-height:92px;padding:12px;border-radius:10px;background:rgb(var(--yb-surface-muted))}.locked-final div{display:grid;gap:4px}.locked-final small{color:rgb(var(--yb-text-muted))}.lock-symbol{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.mode-summary{padding:4px 8px;border-radius:8px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-size:11px;font-weight:800}.final-order{display:grid;gap:5px;margin:0;padding:0;list-style:none}.final-order li{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:7px;padding:7px;border-radius:8px;background:rgb(var(--yb-surface-muted))}.final-order li>span{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-size:11px}.final-order strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.final-order button{border:0;background:transparent;cursor:pointer}.uploading{margin-top:8px;color:rgb(var(--yb-brand));font-size:12px}
 .command-dock{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.command-dock>div:first-child{display:grid;gap:2px}.command-dock span{font-size:11px;color:rgb(var(--yb-text-muted))}.command-dock label{display:grid;gap:4px;flex:1}.command-dock input,.command-dock select{min-height:39px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.dock-actions{display:flex;gap:8px}.primary,.quiet-button,.danger{min-height:42px;padding:0 17px;border-radius:10px;font-weight:750;cursor:pointer}.primary{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));box-shadow:0 8px 18px rgb(var(--yb-brand)/.16)}.quiet-button{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.danger{border:1px solid rgb(var(--yb-danger-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-danger-text))}.primary:disabled,.quiet-button:disabled,.danger:disabled{opacity:.45;cursor:not-allowed}.message{margin:10px 18px 0;padding:10px 12px;border-radius:10px}.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.success{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}
 .confirm-backdrop{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:20px;background:rgb(var(--yb-overlay-night)/.48)}.confirm-dialog{position:relative;width:min(610px,100%);display:grid;gap:13px;padding:24px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 26px 70px rgb(var(--yb-shadow)/.24)}.confirm-dialog h3{margin:0;font-size:24px}.confirm-dialog>p{margin:0;color:rgb(var(--yb-text-muted))}.dialog-close{position:absolute;top:14px;right:14px;width:34px;height:34px;border:0;border-radius:9px;background:rgb(var(--yb-surface-muted));cursor:pointer}.confirm-dialog dl{display:grid;gap:7px;margin:0;padding:12px;border-radius:11px;background:rgb(var(--yb-surface-soft))}.confirm-dialog dl div{display:grid;grid-template-columns:80px 1fr;gap:12px}.confirm-dialog dt{color:rgb(var(--yb-text-muted))}.confirm-dialog dd{margin:0}.confirm-actions{display:flex;justify-content:flex-end;gap:8px}
 @media(max-width:780px){.resource-workspace{border-radius:14px}.workspace-head{padding:15px}.stage-map{grid-template-columns:1fr}.stage-node{min-height:54px}.stage-node:not(:last-child)::after{left:31px;right:auto;bottom:-9px;width:1px;height:18px}.contract-note{align-items:flex-start;flex-direction:column}.editor-viewport{margin:10px;height:min(57vh,620px)}.resource-columns{grid-template-columns:1fr}.sku-head{align-items:flex-start;flex-direction:column}.mode-control{width:100%}.mode-control button{flex:1}.command-dock,.audit-dock,.reopen-dock{align-items:stretch;flex-direction:column}.dock-actions{display:grid;grid-template-columns:1fr 1.5fr}.dock-actions button,.command-dock>.primary{width:100%}.confirm-backdrop{align-items:end;padding:0}.confirm-dialog{max-height:92vh;overflow:auto;border-radius:20px 20px 0 0}.stage-node small{max-width:32ch}}

@@ -87,6 +87,8 @@ type CreateTaskParams struct {
 	Width             *float64
 	Height            *float64
 	Area              *float64
+	CraftText         string
+	Process           string
 	ReferenceLink     string
 
 	// Batch create
@@ -741,6 +743,8 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		Width:                 cloneFloat64Ptr(p.Width),
 		Height:                cloneFloat64Ptr(p.Height),
 		Area:                  cloneFloat64Ptr(p.Area),
+		CraftText:             strings.TrimSpace(p.CraftText),
+		Process:               strings.TrimSpace(p.Process),
 		Quantity:              p.Quantity,
 		SKUCodeType:           p.SKUCodeType,
 		ReferenceImagesJSON:   referenceImagesJSON,
@@ -952,7 +956,16 @@ func (s *taskService) finishTaskCreate(ctx context.Context, p CreateTaskParams, 
 			Force:      p.SyncERPOnCreate,
 		}
 		if s.createFilingAsync {
-			s.triggerFilingBestEffortAsync(filingParams, "task_create_auto_policy")
+			if enqueuer, ok := s.taskRepo.(interface {
+				EnqueueTaskCreateFiling(context.Context, int64, int64) error
+			}); ok {
+				if err := enqueuer.EnqueueTaskCreateFiling(ctx, newID, p.CreatorID); err != nil {
+					log.Printf("task_create_filing_enqueue_failed task_id=%d actor_id=%d err=%v", newID, p.CreatorID, err)
+					s.triggerFilingBestEffortAsync(filingParams, "task_create_outbox_fallback")
+				}
+			} else {
+				s.triggerFilingBestEffortAsync(filingParams, "task_create_compat_fallback")
+			}
 		} else {
 			s.triggerFilingBestEffort(ctx, filingParams, "task_create_auto_policy")
 		}

@@ -109,7 +109,7 @@
         <Barcode :size="22" />
         <div>
           <strong>已启用兼容 SKU 编号规则</strong>
-          <span>{{ common.customization_required ? '定制 DZ' : '常规 CG' }} + 每行“SKU 类目”的 1 位确定性短码 + 6 位连续序号</span>
+          <span>{{ common.customization_required ? '定制 DZ' : '常规 CG' }} + 每行“款式编码”的确定性短码 + 6 位连续序号</span>
           <small>此处展示的是格式，不预占编号；提交完成后会在结果页显式列出全部实际 SKU。</small>
         </div>
         <code>{{ common.customization_required ? 'DZ' : 'CG' }}X000001</code>
@@ -145,7 +145,16 @@
             <article v-for="(row, index) in rows" :key="row.id" class="mobile-row-card" :class="{ selected: selectedRowId === row.id }" data-testid="compose-row" :data-row-index="index" @click="selectRow(row.id)">
               <header><span>第 {{ index + 1 }} 行</span><strong>{{ mobileRowTitle(row) }}</strong><button type="button" :disabled="rows.length === 1" :aria-label="`删除第 ${index + 1} 行`" @click.stop="removeRow(row.id)"><Trash2 :size="15" /></button></header>
               <div class="mobile-fields">
-                <label v-for="column in editableTextColumns" :key="column.key">{{ column.label }}<textarea v-if="longTextColumn(column.key)" :value="String(row[column.key as keyof ComposeRow] || '')" rows="2" @input="updateRowField(row.id, column.key, ($event.target as HTMLTextAreaElement).value)" /><input v-else :type="column.kind === 'number' ? 'number' : 'text'" :value="String(row[column.key as keyof ComposeRow] || '')" @input="updateRowField(row.id, column.key, ($event.target as HTMLInputElement).value)" /></label>
+                <label v-for="column in editableTextColumns" :key="column.key">{{ column.label }}
+                  <select v-if="column.key === 'structure_type'" :value="row.structure_type || ''" @change="updateRowField(row.id, column.key, ($event.target as HTMLSelectElement).value)">
+                    <option value="">待确认</option><option value="flat">平面</option><option value="three_dimensional">立体</option>
+                  </select>
+                  <select v-else-if="column.key === 'slotting'" :value="row.slotting || ''" @change="updateRowField(row.id, column.key, ($event.target as HTMLSelectElement).value)">
+                    <option value="">待确认</option><option value="not_slotted">不开槽</option><option value="slotted">开槽</option>
+                  </select>
+                  <textarea v-else-if="longTextColumn(column.key)" :value="String(row[column.key as keyof ComposeRow] || '')" rows="2" @input="updateRowField(row.id, column.key, ($event.target as HTMLTextAreaElement).value)" />
+                  <input v-else :type="column.kind === 'number' ? 'number' : 'text'" :value="String(row[column.key as keyof ComposeRow] || '')" @input="updateRowField(row.id, column.key, ($event.target as HTMLInputElement).value)" />
+                </label>
                 <label v-if="showSetHint" class="mobile-switch">建议做成套装<input v-model="row.set_mode_hint" type="checkbox" /></label>
                 <button class="asset-button" type="button" @click.stop="openFilePicker(row.id, 'reference_assets')"><ImagePlus :size="16" />参考图 {{ row.reference_assets.length ? `(${row.reference_assets.length})` : '' }}</button>
                 <button v-if="intent === 'retouch'" class="asset-button" type="button" @click.stop="openFilePicker(row.id, 'source_assets')"><Paperclip :size="16" />待修素材 {{ row.source_assets.length ? `(${row.source_assets.length})` : '' }}</button>
@@ -163,24 +172,29 @@
             <p v-if="selectedRow.erp_sku" class="selected-erp">已选择：{{ selectedRow.product_name }} · {{ selectedRow.erp_sku }}</p>
           </section>
           <section v-if="intent === 'new_design' || (intent === 'planning_sku' && erpSync)" class="drawer-section">
-            <IIdSelector :model-value="selectedRow.product_i_id" :label="intent === 'planning_sku' ? 'ERP 款式编码 i_id' : '款式编码 i_id'" @update:model-value="updateSelected('product_i_id', $event)" />
-            <p v-if="intent === 'planning_sku'" class="drawer-field-hint">编号类目只生成 CG/DZ SKU；这里选择的是 ERP 款式编码。ERP 商品名称会直接采用“产品描述 / 规格”，无需再填一列。</p>
+            <IIdSelector :model-value="selectedRow.product_i_id" label="款式编码" @update:model-value="updateSelected('product_i_id', $event)" />
+            <p v-if="intent === 'planning_sku'" class="drawer-field-hint">款式编码同时决定 CG/DZ SKU 的类目标识；开启同步时也会作为 ERP 款式编码。ERP 商品名称直接采用“产品描述 / 规格”。</p>
           </section>
           <section v-if="showSetHint" class="drawer-section hint-section">
             <div><h4>建议做成套装</h4><p>给设计师的参考：最终做单图还是套装，由设计师在设计时决定。</p></div>
             <input v-model="selectedRow.set_mode_hint" type="checkbox" aria-label="建议按套装设计" />
           </section>
-          <section v-if="intent === 'planning_sku'" class="drawer-section planning-cost-preview">
-            <CostExplanationPanel
-              :title="`第 ${selectedRowIndex + 1} 行 SKU 预估成本`"
-              :seed="planningCostPreviewSeed"
-              :resource-id="selectedRow.id"
-              :sku-code="selectedRow.result_sku_code || ''"
-              open
-            />
+          <section v-if="intent === 'modify_existing' || intent === 'new_design'" class="drawer-section spec-section">
+            <h4>生产规格</h4>
+            <label>形态
+              <select :value="selectedRow.structure_type || ''" @change="updateSelected('structure_type', ($event.target as HTMLSelectElement).value || undefined)">
+                <option value="">待确认</option><option value="flat">平面</option><option value="three_dimensional">立体</option>
+              </select>
+            </label>
+            <label>工艺
+              <select :value="selectedRow.slotting || ''" @change="updateSelected('slotting', ($event.target as HTMLSelectElement).value || undefined)">
+                <option value="">待确认</option><option value="not_slotted">不开槽</option><option value="slotted">开槽</option>
+              </select>
+            </label>
+            <p>宽、高、面积与这里的形态/工艺会随 SKU 保存，并参与成本规则匹配和 ERP 同步。</p>
           </section>
           <section class="drawer-section"><h4>{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</h4><div class="asset-list"><article v-for="asset in selectedRow.reference_assets" :key="asset.id"><img v-if="asset.preview_url" :src="asset.preview_url" alt="" /><FileImage v-else :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ assetStatusText(asset.status) }}</span></div><button type="button" aria-label="移除文件" @click="removeAsset(selectedRow.id, 'reference_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'reference_assets')"><ImagePlus :size="16" />添加{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</button></section>
-          <section v-if="intent === 'retouch'" class="drawer-section"><h4>待修素材</h4><div class="asset-list"><article v-for="asset in selectedRow.source_assets" :key="asset.id"><FileArchive :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ asset.error || assetStatusText(asset.status) }}</span></div><button type="button" @click="removeAsset(selectedRow.id, 'source_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'source_assets')"><Paperclip :size="16" />添加 PSD / AI / ZIP 等素材</button></section>
+          <section v-if="intent === 'retouch'" class="drawer-section"><h4>待修素材</h4><div class="asset-list"><article v-for="asset in selectedRow.source_assets" :key="asset.id"><FileArchive :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ asset.error || assetStatusText(asset.status) }}</span></div><button type="button" @click="removeAsset(selectedRow.id, 'source_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'source_assets')"><Paperclip :size="16" />添加图片、PSD / AI 或 ZIP 素材</button></section>
           <section class="drawer-section"><h4>本行提示</h4><ul v-if="selectedRowViolations.length" class="drawer-errors"><li v-for="issue in selectedRowViolations" :key="`${issue.field}-${issue.message}`">{{ issue.message }}</li></ul><p v-else class="drawer-ok"><CheckCircle2 :size="15" />本行信息已完整</p></section>
         </aside>
       </div>
@@ -218,7 +232,6 @@ import { AlertTriangle, Barcode, CheckCircle2, FileArchive, FileImage, ImagePlus
 
 import UnifiedTaskGrid from '@/components/task-create/UnifiedTaskGrid.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
-import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import {
   applyBackendViolations,
   buildPlanningInputs,
@@ -314,21 +327,12 @@ const erpSync = computed({ get: () => common.erp_sync_mode === 'async', set: (va
 const erpSyncHint = computed(() => {
   if (!erpSync.value) return '本次不同步：只创建任务与 SKU'
   return intent.value === 'planning_sku'
-    ? '本次同步：需填写 ERP 款式编码，商品名称取产品描述 / 规格'
+    ? '本次同步：款式编码同时用于生成 SKU 与 ERP 建档，商品名称取产品描述 / 规格'
     : '本次同步：创建成功后自动报送 ERP'
 })
 const violations = computed(() => [...validateCompose(intent.value, common, rows.value), ...remoteViolations.value])
 const selectedRow = computed(() => rows.value.find((row) => row.id === selectedRowId.value))
 const selectedRowIndex = computed(() => Math.max(0, rows.value.findIndex((row) => row.id === selectedRowId.value)))
-const planningCostPreviewSeed = computed(() => ({
-  categoryCode: selectedRow.value?.category_code || '',
-  productIID: selectedRow.value?.product_i_id || '',
-  width: selectedRow.value?.width,
-  height: selectedRow.value?.height,
-  area: selectedRow.value?.area,
-  quantity: selectedRow.value?.quantity,
-  notes: [selectedRow.value?.description_spec, selectedRow.value?.special_note, selectedRow.value?.note].filter(Boolean).join(' '),
-}))
 const selectedRowViolations = computed(() => violations.value.filter((issue) => issue.row_id === selectedRowId.value))
 const failedRows = computed(() => rows.value.filter((row) => row.status === 'failed'))
 const submitLabel = computed(() => intent.value === 'planning_sku' ? `生成 ${rows.value.length} 个 SKU 并结单` : intent.value === 'modify_existing' ? `创建 ${rows.value.length} 张任务单` : '创建任务')
@@ -603,6 +607,43 @@ function applyERPProduct(row: ComposeRow, item: Record<string, unknown>) {
   row.erp_sku = erpProductCode(item)
   row.product_name = String(item.product_name ?? item.name ?? '')
   row.erp_product_snapshot = item
+  const variant = parseERPVariant(item.variant_json ?? item.variant ?? item.specification)
+  row.width = firstERPNumber(item, variant, 'width', 'width_m') ?? row.width
+  row.height = firstERPNumber(item, variant, 'height', 'height_m') ?? row.height
+  row.area = firstERPNumber(item, variant, 'area', 'area_m2') ?? row.area
+  const structure = firstERPText(item, variant, 'structure_type', 'structure', 'shape_type').toLowerCase()
+  if (/立体|3d|three[_ -]?dimensional/.test(structure)) row.structure_type = 'three_dimensional'
+  else if (/平面|2d|flat/.test(structure)) row.structure_type = 'flat'
+  const process = firstERPText(item, variant, 'slotting', 'process', 'craft_text').toLowerCase()
+  if (/不开槽|无槽|not[_ -]?slotted/.test(process)) row.slotting = 'not_slotted'
+  else if (/开槽|slotted/.test(process)) row.slotting = 'slotted'
+}
+
+function parseERPVariant(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+  if (typeof value !== 'string' || !value.trim()) return {}
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch { return {} }
+}
+
+function firstERPNumber(item: Record<string, unknown>, variant: Record<string, unknown>, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = variant[key] ?? item[key]
+    if (value == null || String(value).trim() === '') continue
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+  return undefined
+}
+
+function firstERPText(item: Record<string, unknown>, variant: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = variant[key] ?? item[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
 }
 
 async function lookupERPProduct(code: string): Promise<Record<string, unknown> | undefined> {
@@ -987,4 +1028,5 @@ function startAnother() { resetComposeState() }
 .compose-confirm .primary-button.danger{border-color:rgb(var(--yb-danger));background:rgb(var(--yb-danger))}
 @media(max-width:1180px){.intent-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.note-field{flex-basis:100%}.workspace-layout.has-drawer{grid-template-columns:minmax(0,1fr) 19rem}.validation-dock{grid-template-columns:1fr auto}.validation-items{grid-column:1/-1;grid-row:2}.dock-actions{grid-column:2;grid-row:1}}
 @media(max-width:760px){.compose-page{padding:.75rem}.compose-hero,.workspace-toolbar,.result-heading{align-items:flex-start;flex-direction:column}.hero-actions,.toolbar-actions,.result-actions{width:100%;justify-content:flex-start}.intent-grid{grid-template-columns:1fr}.intent-card{min-height:6.5rem}.common-ribbon{flex-direction:column;align-items:stretch}.common-ribbon input[type=datetime-local],.common-ribbon select{width:100%}.sku-rule-notice{grid-template-columns:auto 1fr}.sku-rule-notice>code{grid-column:1/-1;width:max-content}.generated-sku-banner{align-items:flex-start;flex-direction:column}.generated-sku-preview{justify-content:flex-start}.workspace-layout.has-drawer{grid-template-columns:1fr}.grid-column{padding:.65rem}.row-drawer{border-left:0;border-top:1px solid rgb(var(--yb-border-context))}.mobile-row-list{display:grid;gap:.65rem}.mobile-row-card{display:grid;gap:.65rem;padding:.8rem;border:1px solid rgb(var(--yb-border-context));border-radius:.8rem;background:rgb(var(--yb-surface))}.mobile-row-card.selected{border-color:rgb(var(--yb-brand))}.mobile-row-card header{display:grid;grid-template-columns:auto 1fr auto;gap:.55rem;align-items:center}.mobile-row-card header span{font-size:.7rem;color:rgb(var(--yb-text-secondary))}.mobile-fields{display:grid;gap:.55rem}.mobile-fields label{display:grid;gap:.3rem;font-size:.72rem;font-weight:700;color:rgb(var(--yb-text-secondary))}.mobile-fields input,.mobile-fields textarea{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid rgb(var(--yb-border-context));border-radius:.6rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.mobile-fields .mobile-switch{grid-template-columns:1fr auto}.mobile-switch input{width:2.4rem}.validation-dock{position:static;grid-template-columns:1fr}.validation-items,.dock-actions{grid-column:auto;grid-row:auto}.dock-actions{display:grid}.dock-actions .primary-button{width:100%}.task-result-grid,.sku-result-grid{grid-template-columns:1fr}}
+.spec-section{grid-template-columns:1fr 1fr}.spec-section h4,.spec-section p{grid-column:1/-1}.spec-section label{display:grid;gap:.35rem;font-size:.74rem;font-weight:760;color:rgb(var(--yb-text-secondary))}.spec-section select{min-height:2.45rem;padding:0 .65rem;border:1px solid rgb(var(--yb-border-context));border-radius:.65rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.mobile-fields select{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid rgb(var(--yb-border-context));border-radius:.6rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}
 </style>

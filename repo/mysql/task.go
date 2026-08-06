@@ -16,6 +16,24 @@ type taskRepo struct{ db *DB }
 
 func NewTaskRepo(db *DB) repo.TaskRepo { return &taskRepo{db: db} }
 
+func (r *taskRepo) EnqueueTaskCreateFiling(ctx context.Context, taskID, actorID int64) error {
+	if taskID <= 0 {
+		return fmt.Errorf("task_id must be positive")
+	}
+	_, err := r.db.db.ExecContext(ctx, `
+		INSERT INTO task_erp_outbox (task_id, job_type, dedupe_key, payload_json)
+		VALUES (?, 'task_filing', ?, JSON_OBJECT(
+			'task_id', ?, 'operator_id', ?, 'source', 'task_create'
+		))
+		ON DUPLICATE KEY UPDATE
+			status = IF(status = 'succeeded', status, 'pending'),
+			next_retry_at = IF(status = 'succeeded', next_retry_at, NULL),
+			lease_token = IF(status = 'succeeded', lease_token, NULL),
+			lease_until = IF(status = 'succeeded', lease_until, NULL)`,
+		taskID, fmt.Sprintf("task_filing:create:%d", taskID), taskID, actorID)
+	return err
+}
+
 func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, detail *domain.TaskDetail) (int64, error) {
 	sqlTx := Unwrap(tx)
 	filingStatus := detail.FilingStatus
