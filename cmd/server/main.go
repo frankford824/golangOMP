@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // registers mysql driver
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
@@ -942,7 +942,11 @@ func erpRemoteServiceConfig(cfg *config.Config, log *zap.Logger) service.ERPRemo
 }
 
 func connectMySQL(cfg config.MySQLConfig) (*sql.DB, error) {
-	db, err := sql.Open("mysql", cfg.DSN)
+	runtimeDSN, err := mysqlRuntimeDSN(cfg.DSN)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("mysql", runtimeDSN)
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open: %w", err)
 	}
@@ -956,6 +960,19 @@ func connectMySQL(cfg config.MySQLConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("mysql ping: %w", err)
 	}
 	return db, nil
+}
+
+func mysqlRuntimeDSN(raw string) (string, error) {
+	cfg, err := mysqldriver.ParseDSN(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse MySQL DSN: %w", err)
+	}
+	// MySQL 8 can choose a dramatically slower execution path for parameterized
+	// FULLTEXT queries (seconds instead of milliseconds on the current product
+	// index). The driver still escapes every argument, but sends the final query
+	// directly so MySQL can use the literal-aware FULLTEXT plan.
+	cfg.InterpolateParams = true
+	return cfg.FormatDSN(), nil
 }
 
 func envOr(key, fallback string) string {
