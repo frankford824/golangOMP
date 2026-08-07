@@ -17,13 +17,14 @@ import (
 )
 
 type reindexSummary struct {
-	DryRun         bool          `json:"dry_run"`
-	Tasks          *reindexTable `json:"tasks,omitempty"`
-	Assets         *reindexTable `json:"assets,omitempty"`
-	Products       *reindexTable `json:"products,omitempty"`
-	ElapsedMS      int64         `json:"elapsed_ms"`
-	GeneratedAtUTC string        `json:"generated_at_utc"`
-	Message        string        `json:"message,omitempty"`
+	DryRun         bool                                 `json:"dry_run"`
+	Tasks          *reindexTable                        `json:"tasks,omitempty"`
+	Assets         *reindexTable                        `json:"assets,omitempty"`
+	Products       *reindexTable                        `json:"products,omitempty"`
+	ProductIndex   *mysqlrepo.ProductSearchNgramRebuild `json:"product_index,omitempty"`
+	ElapsedMS      int64                                `json:"elapsed_ms"`
+	GeneratedAtUTC string                               `json:"generated_at_utc"`
+	Message        string                               `json:"message,omitempty"`
 }
 
 type reindexTable struct {
@@ -38,40 +39,44 @@ func main() {
 	var tasks bool
 	var assets bool
 	var products bool
+	var ensureProductIndex bool
 	var dryRun bool
 	var timeout time.Duration
 	flag.StringVar(&dsn, "dsn", "", "MySQL DSN; defaults to config MySQL DSN")
 	flag.BoolVar(&tasks, "tasks", false, "rebuild task_search_documents through the canonical task projection")
 	flag.BoolVar(&assets, "assets", true, "rebuild task_asset_group_search_documents")
 	flag.BoolVar(&products, "products", true, "rebuild product_search_documents")
+	flag.BoolVar(&ensureProductIndex, "ensure-product-index", false, "build the scalable product ngram index only when it is not ready")
 	flag.BoolVar(&dryRun, "dry-run", false, "count rows without rebuilding documents")
 	flag.DurationVar(&timeout, "timeout", 10*time.Minute, "whole run timeout")
 	flag.Parse()
 
 	code := run(context.Background(), runOptions{
-		DSN:      dsn,
-		Tasks:    tasks,
-		Assets:   assets,
-		Products: products,
-		DryRun:   dryRun,
-		Timeout:  timeout,
+		DSN:                dsn,
+		Tasks:              tasks,
+		Assets:             assets,
+		Products:           products,
+		EnsureProductIndex: ensureProductIndex,
+		DryRun:             dryRun,
+		Timeout:            timeout,
 	})
 	os.Exit(code)
 }
 
 type runOptions struct {
-	DSN      string
-	Tasks    bool
-	Assets   bool
-	Products bool
-	DryRun   bool
-	Timeout  time.Duration
+	DSN                string
+	Tasks              bool
+	Assets             bool
+	Products           bool
+	EnsureProductIndex bool
+	DryRun             bool
+	Timeout            time.Duration
 }
 
 func run(parent context.Context, opts runOptions) int {
 	start := time.Now()
-	if !opts.Tasks && !opts.Assets && !opts.Products {
-		writeError("at least one of --tasks, --assets or --products must be true")
+	if !opts.Tasks && !opts.Assets && !opts.Products && !opts.EnsureProductIndex {
+		writeError("at least one rebuild target or --ensure-product-index must be selected")
 		return 2
 	}
 	if opts.Timeout <= 0 {
@@ -136,6 +141,21 @@ func run(parent context.Context, opts runOptions) int {
 			return 1
 		}
 		out.Products = table
+		if !opts.DryRun {
+			index, err := mysqlrepo.RebuildProductSearchNgramIndex(ctx, db)
+			if err != nil {
+				writeRunError(&out, start, fmt.Sprintf("rebuild product ngram index: %v", err))
+				return 1
+			}
+			out.ProductIndex = &index
+		}
+	} else if opts.EnsureProductIndex && !opts.DryRun {
+		index, err := mysqlrepo.EnsureProductSearchNgramIndex(ctx, db)
+		if err != nil {
+			writeRunError(&out, start, fmt.Sprintf("ensure product ngram index: %v", err))
+			return 1
+		}
+		out.ProductIndex = &index
 	}
 	out.ElapsedMS = time.Since(start).Milliseconds()
 	if opts.DryRun {
@@ -231,6 +251,9 @@ func rebuildProducts(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTabl
 	out.BeforeRows, err = countRows(ctx, tx, `SELECT COUNT(*) FROM product_search_documents`)
 	if err != nil {
 		return nil, fmt.Errorf("count product documents: %w", err)
+	}
+	if err := mysqlrepo.InvalidateProductSearchNgramIndexTx(ctx, tx); err != nil {
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM product_search_documents`); err != nil {
 		return nil, fmt.Errorf("delete product documents: %w", err)

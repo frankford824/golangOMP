@@ -162,15 +162,22 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 - Behavior:
   - uploads the package
   - deploys into `/root/ecommerce_ai/releases/<version>`
-  - refreshes shared scripts under `/root/ecommerce_ai/scripts`
-  - refreshes stable symlinks:
+  - applies pending additive migrations and validates the reviewed cutover marker
+    while the existing release and links are still live
+  - stops MAIN and Bridge, then ensures the product bigram search index through
+    the packaged `search_reindex` tool
+  - refreshes compatibility links through `current` and atomically switches the
+    single release-selection symlink only after every pre-cutover gate passes:
     - `/root/ecommerce_ai/current`
     - `/root/ecommerce_ai/ecommerce-api`
     - `/root/ecommerce_ai/erp_bridge`
+  - starts MAIN and Bridge from the new release; a startup-readiness failure
+    restores the previous links and restarts the previous release
   - reuses stable env files under:
     - `/root/ecommerce_ai/shared/main.env`
     - `/root/ecommerce_ai/shared/bridge.env`
-  - stops the current MAIN and Bridge, then starts the new release on the live ports
+  - never changes a live release symlink before migration, search-index, and
+    reviewed-cutover validation have passed
 
 ### Side-by-Side Validation Mode
 - Command:
@@ -228,11 +235,19 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 1. Validates the explicit `--version` for remote deploys and records lifecycle steps in `deploy/release-history.log`
 2. Runs `go test ./...` unless `--skip-tests` is used
 3. Builds static Linux AMD64 binaries (`GOOS=linux GOARCH=amd64`) named `ecommerce-api` and `erp_bridge`
+   plus the packaged `search_reindex` readiness tool
 4. Creates a versioned package directory and `.tar.gz` artifact under `dist/`
 5. Uploads the tarball over `scp`
 6. Extracts on the remote host under `/root/ecommerce_ai/incoming`
 7. Runs `deploy/remote-deploy.sh` in either cutover mode or side-by-side mode
 8. Appends release status records back into `deploy/release-history.log`
+
+For normal cutover, `remote-deploy.sh` uses a shadow-table rebuild for
+`product_search_ngrams`, verifies it is non-empty when product documents exist,
+then activates it with `RENAME TABLE`. The live release links remain unchanged
+through this preparation. The compatibility binary links point through
+`/root/ecommerce_ai/current`, so the final `mv -T` of `current` is the only
+release-selection operation.
 
 ## First Deploy Behavior
 - In normal cutover mode:

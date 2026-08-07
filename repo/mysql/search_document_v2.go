@@ -132,8 +132,11 @@ func reindexProductSearchDocument(ctx context.Context, q taskSearchDocumentSQL, 
 		  ),
 		  p.updated_at
 		FROM products p
-		WHERE p.sku_code = ?`, skuCode); err != nil {
+			WHERE p.sku_code = ?`, skuCode); err != nil {
 		return fmt.Errorf("upsert product search document: %w", err)
+	}
+	if err := reindexProductSearchNgrams(ctx, q, skuCode); err != nil {
+		return err
 	}
 	return nil
 }

@@ -180,6 +180,7 @@ make_package() {
   cp -R "$ROOT/deploy" "$package_root/deploy"
   cp /bin/true "$package_root/ecommerce-api"
   cp /bin/true "$package_root/erp_bridge"
+  cp /bin/true "$package_root/search_reindex"
   printf 'PORT=8080\n' >"$package_root/.env.example"
   printf 'SERVER_PORT=8081\n' >"$package_root/bridge.env.example"
   printf 'new package\n' >"$package_root/package-marker"
@@ -232,6 +233,12 @@ test_remote_deploy_stops_exact_candidate() {
   kill -0 "$live_pid" >/dev/null 2>&1 || fail_test "stable MAIN pid was touched"
   [ ! -e "$base/run/ecommerce-api-${version}-parallel.pid" ] || fail_test "parallel pidfile was not removed"
   [ -f "$release/package-marker" ] || fail_test "release directory was not replaced"
+  [ "$(readlink -f "$base/current")" = "$(readlink -f "$release")" ] ||
+    fail_test "validated release was not activated through current"
+  [ "$(readlink "$base/ecommerce-api")" = "$base/current/ecommerce-api" ] ||
+    fail_test "MAIN compatibility link must resolve through current"
+  [ "$(readlink "$base/erp_bridge")" = "$base/current/erp_bridge" ] ||
+    fail_test "Bridge compatibility link must resolve through current"
 }
 
 test_remote_deploy_rejects_foreign_pidfile() {
@@ -268,7 +275,47 @@ test_remote_deploy_rejects_foreign_pidfile() {
   [ -f "$release/old-marker" ] || fail_test "release was removed after pid ownership failure"
 }
 
+test_remote_deploy_validation_failure_preserves_live_links() {
+  local base="$TMP_ROOT/validation-order"
+  local package_root="$TMP_ROOT/validation-package"
+  local version="vvalidation"
+  local old_release="$base/releases/vold"
+  local output
+
+  make_package "$package_root"
+  write_shared_envs "$base"
+  mkdir -p "$old_release" "$base/run"
+  cp /bin/true "$old_release/ecommerce-api"
+  cp /bin/true "$old_release/erp_bridge"
+  ln -s "$old_release" "$base/current"
+  ln -s "$old_release/ecommerce-api" "$base/ecommerce-api"
+  ln -s "$old_release/erp_bridge" "$base/erp_bridge"
+  cat >"$package_root/deploy/run-pending-migrations.sh" <<'SH'
+#!/usr/bin/env bash
+exit 42
+SH
+  chmod +x "$package_root/deploy/run-pending-migrations.sh"
+
+  if output="$(bash "$ROOT/deploy/remote-deploy.sh" \
+    --package-root "$package_root" \
+    --version "$version" \
+    --remote-base-dir "$base" \
+    --runtime-env-path "$base/shared/main.env" \
+    --bridge-env-path "$base/shared/bridge.env" \
+    --keep-releases 0 \
+    --start-services 2>&1)"; then
+    fail_test "remote-deploy accepted a failed pre-cutover migration"
+  fi
+  [ "$(readlink -f "$base/current")" = "$(readlink -f "$old_release")" ] ||
+    fail_test "current changed before migration/readiness validation passed"
+  [ "$(readlink -f "$base/ecommerce-api")" = "$(readlink -f "$old_release/ecommerce-api")" ] ||
+    fail_test "MAIN link changed before migration/readiness validation passed"
+  [ "$(readlink -f "$base/erp_bridge")" = "$(readlink -f "$old_release/erp_bridge")" ] ||
+    fail_test "Bridge link changed before migration/readiness validation passed"
+}
+
 test_start_main_guards
 test_remote_deploy_stops_exact_candidate
 test_remote_deploy_rejects_foreign_pidfile
+test_remote_deploy_validation_failure_preserves_live_links
 printf 'PASS: deploy process guards\n'

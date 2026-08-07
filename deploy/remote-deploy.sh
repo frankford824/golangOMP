@@ -68,6 +68,9 @@ BRIDGE_ENV_PATH="${BRIDGE_ENV_PATH:-$REMOTE_BASE_DIR/shared/bridge.env}"
 RELEASE_DIR="$REMOTE_BASE_DIR/releases/$VERSION"
 SHARED_AVATAR_DIR="$REMOTE_BASE_DIR/shared/avatars"
 PARALLEL_PID_FILE="$REMOTE_BASE_DIR/run/ecommerce-api-${VERSION}-parallel.pid"
+PREVIOUS_CURRENT_TARGET="$(readlink -f "$REMOTE_BASE_DIR/current" 2>/dev/null || true)"
+PREVIOUS_MAIN_LINK="$(readlink "$REMOTE_BASE_DIR/ecommerce-api" 2>/dev/null || true)"
+PREVIOUS_BRIDGE_LINK="$(readlink "$REMOTE_BASE_DIR/erp_bridge" 2>/dev/null || true)"
 
 process_is_running() {
   local pid="$1"
@@ -119,6 +122,64 @@ wait_for_port_release() {
     sleep 0.25
   done
   return 1
+}
+
+atomic_symlink() {
+  local target="$1"
+  local link_path="$2"
+  local next_link="${link_path}.next.$$"
+
+  rm -f "$next_link"
+  ln -s "$target" "$next_link"
+  mv -Tf "$next_link" "$link_path"
+}
+
+restore_link() {
+  local previous_target="$1"
+  local link_path="$2"
+
+  if [ -n "$previous_target" ]; then
+    atomic_symlink "$previous_target" "$link_path"
+  else
+    rm -f "$link_path"
+  fi
+}
+
+activate_release_links() {
+  # Keep compatibility aliases pinned through current. The only release
+  # cutover is therefore the final atomic rename of the current symlink.
+  atomic_symlink "$REMOTE_BASE_DIR/current/ecommerce-api" "$REMOTE_BASE_DIR/ecommerce-api"
+  atomic_symlink "$REMOTE_BASE_DIR/current/erp_bridge" "$REMOTE_BASE_DIR/erp_bridge"
+  atomic_symlink "$RELEASE_DIR" "$REMOTE_BASE_DIR/current"
+}
+
+restore_previous_links() {
+  # Restore current first so operational inspection immediately identifies the
+  # rollback target, then restore the two compatibility aliases.
+  restore_link "$PREVIOUS_CURRENT_TARGET" "$REMOTE_BASE_DIR/current"
+  restore_link "$PREVIOUS_MAIN_LINK" "$REMOTE_BASE_DIR/ecommerce-api"
+  restore_link "$PREVIOUS_BRIDGE_LINK" "$REMOTE_BASE_DIR/erp_bridge"
+}
+
+restart_previous_release() {
+  [ -n "$PREVIOUS_CURRENT_TARGET" ] || return 0
+  [ -x "$PREVIOUS_CURRENT_TARGET/deploy/start-main.sh" ] || return 1
+  [ -x "$PREVIOUS_CURRENT_TARGET/deploy/start-bridge.sh" ] || return 1
+
+  "$PREVIOUS_CURRENT_TARGET/deploy/start-main.sh" \
+    --base-dir "$REMOTE_BASE_DIR" \
+    --env-file "$RUNTIME_ENV_PATH" \
+    --binary-path "$PREVIOUS_CURRENT_TARGET/ecommerce-api" >/dev/null
+  "$PREVIOUS_CURRENT_TARGET/deploy/start-bridge.sh" \
+    --base-dir "$REMOTE_BASE_DIR" \
+    --env-file "$BRIDGE_ENV_PATH" >/dev/null
+}
+
+rollback_failed_cutover() {
+  "$RELEASE_DIR/deploy/stop-main.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null 2>&1 || true
+  "$RELEASE_DIR/deploy/stop-bridge.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null 2>&1 || true
+  restore_previous_links
+  restart_previous_release
 }
 
 stop_existing_parallel_candidate() {
@@ -189,10 +250,6 @@ chmod +x "$RELEASE_DIR"/deploy/*.sh "$RELEASE_DIR/ecommerce-api" "$RELEASE_DIR/e
 if [ "$PARALLEL" != "true" ]; then
   cp "$RELEASE_DIR"/deploy/*.sh "$REMOTE_BASE_DIR/scripts/"
   chmod +x "$REMOTE_BASE_DIR/scripts/"*.sh
-
-  ln -sfn "$RELEASE_DIR" "$REMOTE_BASE_DIR/current"
-  ln -sfn "$RELEASE_DIR/ecommerce-api" "$REMOTE_BASE_DIR/ecommerce-api"
-  ln -sfn "$RELEASE_DIR/erp_bridge" "$REMOTE_BASE_DIR/erp_bridge"
 fi
 
 MAIN_ENV_CREATED="false"
@@ -289,9 +346,36 @@ PY
         --expected-commit "$PACKAGE_COMMIT"
       "$REMOTE_BASE_DIR/scripts/stop-main.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
       "$REMOTE_BASE_DIR/scripts/stop-bridge.sh" --base-dir "$REMOTE_BASE_DIR" >/dev/null || true
-      "$REMOTE_BASE_DIR/scripts/start-main.sh" --base-dir "$REMOTE_BASE_DIR" --env-file "$RUNTIME_ENV_PATH" >/dev/null
-      "$REMOTE_BASE_DIR/scripts/start-bridge.sh" --base-dir "$REMOTE_BASE_DIR" --env-file "$BRIDGE_ENV_PATH" >/dev/null
+      if [ ! -x "$RELEASE_DIR/search_reindex" ]; then
+        restart_previous_release ||
+          fail "Packaged search_reindex is missing and the previous release could not be restarted."
+        fail "Packaged search_reindex tool is required before live cutover."
+      fi
+      if ! "$RELEASE_DIR/deploy/run-with-env.sh" "$RUNTIME_ENV_PATH" \
+        "$RELEASE_DIR/search_reindex" \
+        --tasks=false \
+        --assets=false \
+        --products=false \
+        --ensure-product-index \
+        --timeout=20m; then
+        restart_previous_release ||
+          fail "Product search index readiness failed and the previous release could not be restarted."
+        fail "Product search index readiness failed before live symlink cutover."
+      fi
+      activate_release_links
+      if ! "$RELEASE_DIR/deploy/start-main.sh" --base-dir "$REMOTE_BASE_DIR" --env-file "$RUNTIME_ENV_PATH" >/dev/null; then
+        rollback_failed_cutover ||
+          fail "New MAIN failed readiness and automatic rollback restart also failed."
+        fail "New MAIN failed readiness; previous release links and services were restored."
+      fi
+      if ! "$RELEASE_DIR/deploy/start-bridge.sh" --base-dir "$REMOTE_BASE_DIR" --env-file "$BRIDGE_ENV_PATH" >/dev/null; then
+        rollback_failed_cutover ||
+          fail "New Bridge failed readiness and automatic rollback restart also failed."
+        fail "New Bridge failed readiness; previous release links and services were restored."
+      fi
     fi
+  else
+    activate_release_links
   fi
 fi
 
@@ -301,6 +385,11 @@ if [ "${KEEP_RELEASES:-0}" -gt 0 ] 2>/dev/null; then
     REMOVE_COUNT=$((${#RELEASE_DIRS[@]} - KEEP_RELEASES))
     for old_version in "${RELEASE_DIRS[@]:0:$REMOVE_COUNT}"; do
       if [ "$old_version" != "$VERSION" ]; then
+        old_release_target="$(readlink -f "$REMOTE_BASE_DIR/releases/$old_version" 2>/dev/null || true)"
+        current_release_target="$(readlink -f "$REMOTE_BASE_DIR/current" 2>/dev/null || true)"
+        if [ -n "$old_release_target" ] && [ "$old_release_target" = "$current_release_target" ]; then
+          continue
+        fi
         rm -rf "$REMOTE_BASE_DIR/releases/$old_version"
       fi
     done

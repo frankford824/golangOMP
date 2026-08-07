@@ -476,6 +476,7 @@ package_release() {
   local asset_preview_output
   local external_asset_worker_output
   local external_asset_nas_watcher_output
+  local search_reindex_output
 
   dist_root="$(resolve_path "$root" "$output_root")"
   artifact_dir_name="${artifact_prefix}-${version}-linux-amd64"
@@ -489,6 +490,7 @@ package_release() {
   asset_preview_output="$stage_root/generate_asset_previews"
   external_asset_worker_output="$stage_root/external_asset_worker"
   external_asset_nas_watcher_output="$stage_root/external_asset_nas_watcher"
+  search_reindex_output="$stage_root/search_reindex"
 
   rm -rf "$stage_root" "$artifact_path"
   mkdir -p "$stage_root" "$stage_root/config" "$stage_root/db" "$stage_root/docs" "$deploy_root"
@@ -509,6 +511,9 @@ package_release() {
     if [ -f "$root/cmd/tools/external-asset-nas-watcher/main_linux.go" ]; then
       go_build_linux_amd64 "$root" "$go_tool" "$external_asset_nas_watcher_output" "./cmd/tools/external-asset-nas-watcher"
     fi
+    if [ -f "$root/cmd/tools/search-reindex/main.go" ]; then
+      go_build_linux_amd64 "$root" "$go_tool" "$search_reindex_output" "./cmd/tools/search-reindex"
+    fi
   )
 
   wait_for_file "$stage_root/ecommerce-api" "main"
@@ -521,6 +526,9 @@ package_release() {
   fi
   if [ -f "$root/cmd/tools/external-asset-nas-watcher/main_linux.go" ]; then
     wait_for_file "$stage_root/external_asset_nas_watcher" "external asset NAS watcher"
+  fi
+  if [ -f "$root/cmd/tools/search-reindex/main.go" ]; then
+    wait_for_file "$stage_root/search_reindex" "search reindex tool"
   fi
 
   cp "$root"/config/*.json "$stage_root/config/"
@@ -558,6 +566,9 @@ package_release() {
   if [ -f "$stage_root/external_asset_nas_watcher" ]; then
     chmod +x "$stage_root/external_asset_nas_watcher"
   fi
+  if [ -f "$stage_root/search_reindex" ]; then
+    chmod +x "$stage_root/search_reindex"
+  fi
 
   cat >"$stage_root/PACKAGE_INFO.json" <<EOF
 {
@@ -570,12 +581,14 @@ package_release() {
   "asset_preview_generator_binary": "generate_asset_previews",
   "external_asset_worker_binary": "external_asset_worker",
   "external_asset_nas_watcher_binary": "external_asset_nas_watcher",
+  "search_reindex_binary": "search_reindex",
   "resolved_entrypoint": "$(json_escape "$entrypoint")",
   "main_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ecommerce-api $(json_escape "$entrypoint")",
   "bridge_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o erp_bridge $(json_escape "$entrypoint")",
   "asset_preview_generator_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o generate_asset_previews ./cmd/tools/generate-asset-previews",
   "external_asset_worker_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external_asset_worker ./cmd/tools/external-asset-worker",
   "external_asset_nas_watcher_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external_asset_nas_watcher ./cmd/tools/external-asset-nas-watcher",
+  "search_reindex_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o search_reindex ./cmd/tools/search-reindex",
   "runtime_bridge_base_url": "$(json_escape "$bridge_base_url")",
   "suggested_remote_base_dir": "/root/ecommerce_ai",
   "runtime_env_example": ".env.example",

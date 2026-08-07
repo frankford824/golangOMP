@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/config"
+	mysqlrepo "workflow/repo/mysql"
 	"workflow/service/aiagent"
 )
 
@@ -224,11 +225,21 @@ func updateSemanticDocument(ctx context.Context, db *sql.DB, candidate semanticC
 			 WHERE asset_id = ?`, semanticText, candidate.ID)
 		return err
 	case "products":
-		_, err := db.ExecContext(ctx, `
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(ctx, `
 			UPDATE product_search_documents
 			   SET semantic_text = ?, semantic_enriched_at = CURRENT_TIMESTAMP
-			 WHERE sku_code = ?`, semanticText, candidate.ID)
-		return err
+			 WHERE sku_code = ?`, semanticText, candidate.ID); err != nil {
+			return err
+		}
+		if err := mysqlrepo.ReindexProductSearchNgramsTx(ctx, tx, candidate.ID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	default:
 		return fmt.Errorf("unsupported candidate kind %q", candidate.Kind)
 	}

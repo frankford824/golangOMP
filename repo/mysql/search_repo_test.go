@@ -136,7 +136,7 @@ func TestSearchProductsFromDocumentsCodeKeywordUsesUnionWithoutFullText(t *testi
 	}
 }
 
-func TestSearchProductsFromDocumentsTextKeywordUsesBoundedSubstring(t *testing.T) {
+func TestSearchProductsFromDocumentsTextKeywordUsesBoundedFallbackBeforeIndexReady(t *testing.T) {
 	mysqlSchemaPresenceCache = sync.Map{}
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
 	if err != nil {
@@ -147,6 +147,9 @@ func TestSearchProductsFromDocumentsTextKeywordUsesBoundedSubstring(t *testing.T
 	mock.ExpectQuery("schema-table").
 		WithArgs("product_search_documents").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("schema-table").
+		WithArgs("product_search_ngrams").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("schema-column").
 		WithArgs("product_search_documents", "semantic_text").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -179,6 +182,9 @@ func TestSearchProductsFromDocumentsTextKeywordIncludesSemanticSubstring(t *test
 	mock.ExpectQuery("schema-table").
 		WithArgs("product_search_documents").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("schema-table").
+		WithArgs("product_search_ngrams").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("schema-column").
 		WithArgs("product_search_documents", "semantic_text").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
@@ -193,6 +199,47 @@ func TestSearchProductsFromDocumentsTextKeywordIncludesSemanticSubstring(t *test
 		t.Fatalf("SearchProducts() error = %v", err)
 	}
 	if len(items) != 1 || items[0].ERPCode != "CGK000999" {
+		t.Fatalf("items=%+v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSearchProductsFromDocumentsTextKeywordUsesNgramIndexWhenReady(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("schema-table").
+		WithArgs("product_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("schema-table").
+		WithArgs("product_search_ngrams").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("schema-table").
+		WithArgs("product_search_index_state").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("product-index-ready").
+		WithArgs(productSearchNgramIndexName, productSearchNgramIndexVersion).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("schema-column").
+		WithArgs("product_search_documents", "semantic_text").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("product-doc-ngram").
+		WithArgs("医师", "师节", 2, 1000, "%医师节%", "%医师节%", 20).
+		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}).
+			AddRow("CGK001543", "医师节手举牌", "IID-1543", "KT板"))
+
+	repo := NewSearchRepo(New(db))
+	items, err := repo.SearchProducts(context.Background(), "医师节", 20)
+	if err != nil {
+		t.Fatalf("SearchProducts() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ERPCode != "CGK001543" {
 		t.Fatalf("items=%+v", items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -341,6 +388,21 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 			}
 			if strings.Contains(normalized, "MATCH(") {
 				return fmt.Errorf("product text query must avoid the slow fulltext path: %s", normalized)
+			}
+		case "product-index-ready":
+			for _, fragment := range []string{"FROM product_search_index_state", "index_name = ?", "index_version = ?"} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("product index readiness query missing %q: %s", fragment, normalized)
+				}
+			}
+		case "product-doc-ngram":
+			for _, fragment := range []string{"FROM product_search_ngrams n", "n.term IN (?,?)", "HAVING COUNT(DISTINCT n.term) = ?", "search_text LIKE ?"} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("product ngram query missing %q: %s", fragment, normalized)
+				}
+			}
+			if strings.Contains(normalized, "MATCH(") {
+				return fmt.Errorf("product ngram query must not use fulltext: %s", normalized)
 			}
 		case "task-doc-scoped":
 			for _, fragment := range []string{"FROM task_search_documents d JOIN tasks t", "t.creator_id = ?", "t.owner_department_id IN (?)", "t.owner_team_id IN (?)"} {

@@ -711,6 +711,66 @@ func (r *searchRepo) searchProductDocumentsByCode(ctx context.Context, kw normal
 
 func (r *searchRepo) searchProductDocumentsByText(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchProduct, error) {
 	limit = normalizeSearchLimit(limit)
+	terms := productSearchQueryNgrams(kw.Raw)
+	if len(terms) > 0 && productSearchNgramIndexReady(ctx, r.db.db) {
+		return r.searchProductDocumentsByNgrams(ctx, kw, terms, limit)
+	}
+	return r.searchProductDocumentsByTextFallback(ctx, kw, limit)
+}
+
+func (r *searchRepo) searchProductDocumentsByNgrams(ctx context.Context, kw normalizedSearchKeyword, terms []string, limit int) ([]domain.SearchProduct, error) {
+	limit = normalizeSearchLimit(limit)
+	if len(terms) == 0 {
+		return []domain.SearchProduct{}, nil
+	}
+	likePattern := "%" + strings.Join(strings.Fields(kw.Raw), "%") + "%"
+	hasSemanticText := productSearchDocumentsSemanticTextExists(ctx, r.db.db)
+	where := "search_text LIKE ?"
+	order := "CASE WHEN product_name LIKE ? THEN 0 ELSE 1 END"
+	args := make([]interface{}, 0, len(terms)+6)
+	for _, term := range terms {
+		args = append(args, term)
+	}
+	candidateLimit := limit * 50
+	if candidateLimit < 1000 {
+		candidateLimit = 1000
+	}
+	if candidateLimit > 5000 {
+		candidateLimit = 5000
+	}
+	args = append(args, len(terms), candidateLimit, likePattern, likePattern)
+	if hasSemanticText {
+		where = "(search_text LIKE ? OR semantic_text LIKE ?)"
+		order = "CASE WHEN product_name LIKE ? THEN 0 WHEN search_text LIKE ? THEN 1 ELSE 2 END"
+		args = append(args[:len(terms)+2], likePattern, likePattern, likePattern, likePattern)
+	}
+	args = append(args, limit)
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
+		SELECT d.sku_code AS erp_code, d.product_name, d.i_id, d.category
+		  FROM product_search_documents d
+		  JOIN (
+		    SELECT n.sku_code
+		      FROM product_search_ngrams n
+		      JOIN product_search_documents ranked ON ranked.sku_code = n.sku_code
+		     WHERE n.term IN (`+searchPlaceholders(len(terms))+`)
+		     GROUP BY n.sku_code
+		    HAVING COUNT(DISTINCT n.term) = ?
+		     ORDER BY MAX(ranked.source_updated_at) DESC, n.sku_code DESC
+		     LIMIT ?
+		  ) hits ON hits.sku_code = d.sku_code
+		 WHERE `+strings.ReplaceAll(strings.ReplaceAll(where, "search_text", "d.search_text"), "semantic_text", "d.semantic_text")+`
+		 ORDER BY `+strings.ReplaceAll(strings.ReplaceAll(order, "product_name", "d.product_name"), "search_text", "d.search_text")+`, d.source_updated_at DESC, d.sku_code DESC
+		 LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search product documents by ngram: %w", err)
+	}
+	return scanSearchProducts(rows)
+}
+
+func (r *searchRepo) searchProductDocumentsByTextFallback(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchProduct, error) {
+	limit = normalizeSearchLimit(limit)
 	likePattern := "%" + strings.Join(strings.Fields(kw.Raw), "%") + "%"
 	hasSemanticText := productSearchDocumentsSemanticTextExists(ctx, r.db.db)
 	where := "search_text LIKE ?"
@@ -731,7 +791,7 @@ func (r *searchRepo) searchProductDocumentsByText(ctx context.Context, kw normal
 		 ORDER BY `+order+`, source_updated_at DESC, sku_code DESC
 		 LIMIT ?`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("search product documents by text: %w", err)
+		return nil, fmt.Errorf("search product documents by text fallback: %w", err)
 	}
 	return scanSearchProducts(rows)
 }
