@@ -290,7 +290,7 @@ func batchSearchExternalFileFingerprint(asset *AssetDetail) string {
 
 func normalizeBatchSearchFormat(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "jpg_png", "jpg", "png", "webp", "image", "design", "pdf", "archive", "all":
+	case "jpg_png", "jpg", "png", "tif", "webp", "image", "design", "pdf", "archive", "all":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "jpg_png"
@@ -308,7 +308,7 @@ func normalizeBatchSearchAssetKind(value string) string {
 
 func batchSearchFormatCategory(formatFilter string) domain.AssetFormatCategoryFilter {
 	switch formatFilter {
-	case "jpg_png", "jpg", "png", "webp", "image":
+	case "jpg_png", "jpg", "png", "tif", "webp", "image":
 		return domain.AssetFormatCategoryImage
 	case "design":
 		return domain.AssetFormatCategoryDesign
@@ -340,6 +340,8 @@ func matchesBatchSearchFormat(row *repo.TaskAssetSearchRow, formatFilter string)
 		return ext == "jpg" || mimeType == "image/jpeg"
 	case "png":
 		return ext == "png" || mimeType == "image/png"
+	case "tif":
+		return ext == "tif" || ext == "tiff" || mimeType == "image/tif" || mimeType == "image/tiff"
 	case "webp":
 		return ext == "webp" || mimeType == "image/webp"
 	case "image":

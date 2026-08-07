@@ -14,7 +14,7 @@ import (
 	externalassets "workflow/service/external_assets"
 )
 
-func TestBuildExcelPackageManifestMatchesOnlyJPGPNG(t *testing.T) {
+func TestBuildExcelPackageManifestMatchesOnlyFinalProductionImages(t *testing.T) {
 	jpgKey := "tasks/RW-1/assets/AST-1/v1/delivery/sku-a.jpg"
 	psdKey := "tasks/RW-1/assets/AST-2/v1/delivery/sku-b.psd"
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
@@ -141,7 +141,7 @@ func TestExcelPackageSystemSetCandidatesPreserveFolderAndComponentOrder(t *testi
 		makeCandidate(2, "GK000804-2.jpg"),
 	}
 
-	got := excelPackageSystemSetCandidates(candidates, scope)
+	got := excelPackageSystemSetCandidates(candidates, ExcelPackageRow{SKUCode: scope})
 	if len(got) != 3 {
 		t.Fatalf("set candidates = %d, want 3", len(got))
 	}
@@ -149,8 +149,8 @@ func TestExcelPackageSystemSetCandidatesPreserveFolderAndComponentOrder(t *testi
 		t.Fatalf("component order = %d, %d, %d", got[0].system.Asset.ID, got[1].system.Asset.ID, got[2].system.Asset.ID)
 	}
 	for _, candidate := range got {
-		if candidate.packageFolder != scope {
-			t.Fatalf("package folder = %q, want %q", candidate.packageFolder, scope)
+		if candidate.packageFolder != "GK000804_生日小熊凯蒂猫5个装" {
+			t.Fatalf("package folder = %q, want business code and name", candidate.packageFolder)
 		}
 	}
 }
@@ -176,9 +176,93 @@ func TestExcelPackageSingleExplicitSetStillUsesFolder(t *testing.T) {
 		},
 	}}
 
-	got := excelPackageSystemSetCandidates(candidates, scope)
-	if len(got) != 1 || got[0].packageFolder != scope {
-		t.Fatalf("single explicit set = %+v, want one candidate in %q folder", got, scope)
+	got := excelPackageSystemSetCandidates(candidates, ExcelPackageRow{SKUCode: scope})
+	if len(got) != 1 || got[0].packageFolder != "GK000804_生日小熊凯蒂猫5个装" {
+		t.Fatalf("single explicit set = %+v, want one candidate in business-named folder", got)
+	}
+}
+
+func TestProductionPackageSetIntentRecognizesCommonSetUnits(t *testing.T) {
+	for _, name := range []string{"生日挂布5条装", "贴纸6张装", "礼盒3件套", "婚庆套装"} {
+		if !productionPackageSetIntent(name) {
+			t.Fatalf("productionPackageSetIntent(%q) = false, want true", name)
+		}
+	}
+	if productionPackageSetIntent("单张海报") {
+		t.Fatal("single image must not be treated as a set")
+	}
+}
+
+func TestBuildExcelPackageManifestExcludesReferenceAndPreviewAssets(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scope := "HSC10001"
+	jpgMime := "image/jpeg"
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	makeRow := func(id int64, assetType domain.TaskAssetType, filename string, offset time.Duration) *repo.TaskAssetSearchRow {
+		key := "tasks/RW-10001/" + filename
+		return &repo.TaskAssetSearchRow{
+			Asset: &domain.TaskAsset{
+				ID: id, TaskID: 501, AssetID: int64PtrExcelPkg(id), ScopeSKUCode: &scope,
+				AssetType: assetType, FileName: filename, MimeType: &jpgMime, StorageKey: &key,
+				UploadStatus: &uploaded, CreatedAt: now.Add(offset),
+			},
+			Task: &domain.Task{ID: 501, TaskNo: "RW-10001", SKUCode: scope, ProductNameSnapshot: "婚庆贴纸"},
+		}
+	}
+	svc := NewService(&excelPackageRepoStub{rowsByKeyword: map[string][]*repo.TaskAssetSearchRow{
+		scope: {
+			makeRow(101, domain.TaskAssetTypeReference, "参考图.jpg", 3*time.Minute),
+			makeRow(102, domain.TaskAssetTypePreview, "效果图.jpg", 2*time.Minute),
+			makeRow(103, domain.TaskAssetTypeDelivery, "最终成品.jpg", time.Minute),
+		},
+	}}, excelPackagePresignerStub{}, nil)
+
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+		{RowNumber: 2, OrderNo: scope, SKUCode: scope, Quantity: 1},
+	}, "jpg")
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if len(manifest.Items) != 1 || manifest.Items[0].AssetID != 103 {
+		t.Fatalf("items = %+v, want only the final delivery asset", manifest.Items)
+	}
+	if manifest.Items[0].SKUName != "婚庆贴纸" {
+		t.Fatalf("SKUName = %q, want system product name", manifest.Items[0].SKUName)
+	}
+}
+
+func TestBuildExcelPackageManifestHonorsTIFOnlyFilter(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scope := "HSC10002"
+	tifMime := "image/tiff"
+	jpgMime := "image/jpeg"
+	now := time.Date(2026, 8, 7, 12, 30, 0, 0, time.UTC)
+	makeRow := func(id int64, filename, mime string, offset time.Duration) *repo.TaskAssetSearchRow {
+		key := "tasks/RW-10002/" + filename
+		return &repo.TaskAssetSearchRow{
+			Asset: &domain.TaskAsset{
+				ID: id, TaskID: 502, AssetID: int64PtrExcelPkg(id), ScopeSKUCode: &scope,
+				AssetType: domain.TaskAssetTypeDelivery, FileName: filename, MimeType: &mime, StorageKey: &key,
+				UploadStatus: &uploaded, CreatedAt: now.Add(offset),
+			},
+			Task: &domain.Task{ID: 502, TaskNo: "RW-10002", SKUCode: scope, ProductNameSnapshot: "镂空模板"},
+		}
+	}
+	svc := NewService(&excelPackageRepoStub{rowsByKeyword: map[string][]*repo.TaskAssetSearchRow{
+		scope: {
+			makeRow(201, "成品.jpg", jpgMime, 2*time.Minute),
+			makeRow(202, "镂空.tif", tifMime, time.Minute),
+		},
+	}}, excelPackagePresignerStub{}, nil)
+
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+		{RowNumber: 2, OrderNo: scope, SKUCode: scope, Quantity: 1},
+	}, "tif")
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if len(manifest.Items) != 1 || manifest.Items[0].AssetID != 202 || !strings.HasSuffix(strings.ToLower(manifest.Items[0].Filename), ".tif") {
+		t.Fatalf("items = %+v, want only TIF delivery", manifest.Items)
 	}
 }
 
@@ -235,7 +319,7 @@ func TestBuildExcelPackageManifestMatchesExternalP3Image(t *testing.T) {
 	}, ossDirect))
 
 	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
-		{RowNumber: 2, OrderNo: "SO-1", SKUCode: "HSC12654", Quantity: 2, Address: "张三*敏感地址"},
+		{RowNumber: 2, OrderNo: "SO-1", SKUCode: "HSC12654", SKUName: "婚庆贴纸", Quantity: 2, Address: "张三*敏感地址"},
 	})
 	if appErr != nil {
 		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
@@ -431,7 +515,7 @@ func TestBuildExcelPackageManifestPackagesXuKaiMultiImageFolderAsCompleteSet(t *
 	}, ossDirect))
 
 	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
-		{RowNumber: 2, OrderNo: "HSC33333", SKUCode: "HSC33333", Quantity: 2},
+		{RowNumber: 2, OrderNo: "HSC33333", SKUCode: "HSC33333", SKUName: "真-常规水晶标-卡通喜字款", Quantity: 2},
 	})
 	if appErr != nil {
 		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
@@ -444,7 +528,7 @@ func TestBuildExcelPackageManifestPackagesXuKaiMultiImageFolderAsCompleteSet(t *
 	}
 	wantOrder := []string{"第一张【24x32cm】.jpg", "第二张【19x15cm】.jpg", "第三张【25x35cm】.jpg"}
 	for index, item := range manifest.Items {
-		if item.Filename != wantOrder[index] || item.Quantity != 2 || pathpkg.Dir(item.OriginPath) != parentPath || item.PackageFolder != pathpkg.Base(parentPath) {
+		if item.Filename != wantOrder[index] || item.Quantity != 2 || pathpkg.Dir(item.OriginPath) != parentPath || item.PackageFolder != "HSC33333_真-常规水晶标-卡通喜字款" {
 			t.Fatalf("items[%d]=%+v, want ordered component %q", index, item, wantOrder[index])
 		}
 	}
@@ -452,7 +536,7 @@ func TestBuildExcelPackageManifestPackagesXuKaiMultiImageFolderAsCompleteSet(t *
 	searchRows[1].OSSOriginalKey = ""
 	searchRows[1].OSSSyncStatus = domain.ExternalAssetOSSStatusNone
 	incomplete, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
-		{RowNumber: 2, OrderNo: "HSC33333", SKUCode: "HSC33333", Quantity: 1},
+		{RowNumber: 2, OrderNo: "HSC33333", SKUCode: "HSC33333", SKUName: "真-常规水晶标-卡通喜字款", Quantity: 1},
 	})
 	if appErr != nil {
 		t.Fatalf("BuildExcelPackageManifest incomplete set error = %+v", appErr)

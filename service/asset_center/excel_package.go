@@ -90,7 +90,7 @@ type preparedExcelPackageMatch struct {
 	failureMessage string
 }
 
-func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPackageRow) (*ExcelPackageManifest, *domain.AppError) {
+func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPackageRow, requestedFormats ...string) (*ExcelPackageManifest, *domain.AppError) {
 	if len(rows) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rows must not be empty", nil)
 	}
@@ -107,6 +107,7 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 		Items:    make([]ExcelPackageItem, 0, len(rows)),
 		Failures: make([]ExcelPackageFailure, 0),
 	}
+	formatFilter := normalizeExcelPackageFormat(firstNonEmptyExcelPackage(requestedFormats...))
 	var totalBytes int64
 	var totalFiles int
 	successRows := 0
@@ -127,18 +128,18 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 			manifest.Failures = append(manifest.Failures, row.failure("invalid_quantity", "数量必须大于 0"))
 			continue
 		}
-		cacheKey := excelPackageMatchCacheKey(row)
+		cacheKey := excelPackageMatchCacheKey(row) + "\x00" + formatFilter
 		matches, ok := matchCache[cacheKey]
 		if !ok {
 			var appErr *domain.AppError
-			matches, appErr = s.matchExcelPackageAssets(ctx, row)
+			matches, appErr = s.matchExcelPackageAssets(ctx, row, formatFilter)
 			if appErr != nil {
 				return nil, appErr
 			}
 			matchCache[cacheKey] = matches
 		}
 		if len(matches) == 0 {
-			manifest.Failures = append(manifest.Failures, row.failure("asset_not_found", "未找到匹配的生产图片（JPG/PNG/TIF/TIFF）"))
+			manifest.Failures = append(manifest.Failures, row.failure("asset_not_found", excelPackageNoMatchMessage(formatFilter)))
 			continue
 		}
 
@@ -210,8 +211,12 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 func applyExcelPackageRow(item ExcelPackageItem, row ExcelPackageRow) ExcelPackageItem {
 	item.RowNumber = row.RowNumber
 	item.OrderNo = row.OrderNo
-	item.SKUCode = row.SKUCode
-	item.SKUName = row.SKUName
+	if item.SKUCode == "" {
+		item.SKUCode = row.SKUCode
+	}
+	if item.SKUName == "" {
+		item.SKUName = row.SKUName
+	}
 	item.Quantity = row.Quantity
 	item.Address = row.Address
 	return item
@@ -250,7 +255,7 @@ func (r ExcelPackageRow) failure(reason, message string) ExcelPackageFailure {
 	}
 }
 
-func (s *Service) matchExcelPackageAssets(ctx context.Context, row ExcelPackageRow) ([]scoredExcelAsset, *domain.AppError) {
+func (s *Service) matchExcelPackageAssets(ctx context.Context, row ExcelPackageRow, formatFilter string) ([]scoredExcelAsset, *domain.AppError) {
 	keyword := firstExcelPackageKeyword(row.SKUCode, row.SKUName)
 	resultRows, _, err := s.searchRepo.Search(ctx, domain.AssetSearchQuery{
 		Keyword:    keyword,
@@ -263,9 +268,9 @@ func (s *Service) matchExcelPackageAssets(ctx context.Context, row ExcelPackageR
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
 
-	candidates := make([]scoredExcelAsset, 0, len(resultRows))
+	systemCandidates := make([]scoredExcelAsset, 0, len(resultRows))
 	for _, candidate := range resultRows {
-		score := scoreExcelPackageAsset(candidate, row)
+		score := scoreExcelPackageAsset(candidate, row, formatFilter)
 		if score <= 0 {
 			continue
 		}
@@ -274,23 +279,43 @@ func (s *Service) matchExcelPackageAssets(ctx context.Context, row ExcelPackageR
 			updated = candidate.Asset.CreatedAt
 		}
 		ready := candidate != nil && candidate.Asset != nil && strings.TrimSpace(stringPtrValue(candidate.Asset.StorageKey)) != ""
-		candidates = append(candidates, scoredExcelAsset{system: candidate, score: score, ready: ready, updated: updated})
+		systemCandidates = append(systemCandidates, scoredExcelAsset{system: candidate, score: score, ready: ready, updated: updated})
 	}
-	externalRows, externalErr := s.batchSearchExternalRows(ctx, keyword, "image")
+	sortExcelPackageCandidates(systemCandidates)
+	systemCandidates = chooseExcelPackageRendition(systemCandidates, formatFilter)
+	if len(systemCandidates) > 0 {
+		if setCandidates := excelPackageSystemSetCandidates(systemCandidates, row); len(setCandidates) > 0 {
+			return setCandidates, nil
+		}
+		return []scoredExcelAsset{systemCandidates[0]}, nil
+	}
+
+	externalRows, externalErr := s.batchSearchExternalRows(ctx, keyword, formatFilter)
 	if externalErr != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, externalErr.Error(), nil)
 	}
+	externalCandidates := make([]scoredExcelAsset, 0, len(externalRows))
 	for _, candidate := range externalRows {
-		score := scoreExcelPackageExternalAsset(candidate, row)
+		score := scoreExcelPackageExternalAsset(candidate, row, formatFilter)
 		if score <= 0 {
 			continue
 		}
 		ready := strings.EqualFold(strings.TrimSpace(candidate.OSSSyncStatus), string(domain.ExternalAssetOSSStatusReady))
-		candidates = append(candidates, scoredExcelAsset{external: candidate, score: score, ready: ready, updated: candidate.UpdatedAt})
+		externalCandidates = append(externalCandidates, scoredExcelAsset{external: candidate, score: score, ready: ready, updated: candidate.UpdatedAt})
 	}
-	if len(candidates) == 0 {
+	if len(externalCandidates) == 0 {
 		return nil, nil
 	}
+	sortExcelPackageCandidates(externalCandidates)
+	externalCandidates = dedupeExcelPackageExternalFileCandidates(externalCandidates)
+	externalCandidates = chooseExcelPackageRendition(externalCandidates, formatFilter)
+	if setCandidates := excelPackageExternalSetCandidates(externalCandidates, row); len(setCandidates) >= 2 {
+		return setCandidates, nil
+	}
+	return []scoredExcelAsset{externalCandidates[0]}, nil
+}
+
+func sortExcelPackageCandidates(candidates []scoredExcelAsset) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].ready != candidates[j].ready {
 			return candidates[i].ready
@@ -300,26 +325,25 @@ func (s *Service) matchExcelPackageAssets(ctx context.Context, row ExcelPackageR
 		}
 		return candidates[i].updated.After(candidates[j].updated)
 	})
-	candidates = dedupeExcelPackageExternalFileCandidates(candidates)
-	if setCandidates := excelPackageExternalSetCandidates(candidates, row.SKUCode); len(setCandidates) >= 2 {
-		return setCandidates, nil
-	}
-	if setCandidates := excelPackageSystemSetCandidates(candidates, row.SKUCode); len(setCandidates) > 0 {
-		return setCandidates, nil
-	}
-	return []scoredExcelAsset{candidates[0]}, nil
 }
 
-func excelPackageSystemSetCandidates(candidates []scoredExcelAsset, skuCode string) []scoredExcelAsset {
-	folder := sanitizeBatchFilename(strings.TrimSpace(skuCode))
+func excelPackageSystemSetCandidates(candidates []scoredExcelAsset, row ExcelPackageRow) []scoredExcelAsset {
+	folder := ""
 	if folder == "" {
-		return nil
+		folder = sanitizeProductionPackageBusinessName(row.SKUCode, row.SKUName)
 	}
 	for index, candidate := range candidates {
 		if candidate.system == nil || candidate.system.Asset == nil || candidate.system.Task == nil || !candidate.ready {
 			continue
 		}
 		asset := candidate.system.Asset
+		folder = sanitizeProductionPackageBusinessName(
+			firstNonEmptyExcelPackage(row.SKUCode, stringPtrValue(asset.ScopeSKUCode), candidate.system.Task.SKUCode, candidate.system.Task.PrimarySKUCode),
+			firstNonEmptyExcelPackage(candidate.system.Task.ProductNameSnapshot, row.SKUName),
+		)
+		if folder == "" {
+			continue
+		}
 		scope := strings.ToUpper(strings.TrimSpace(firstNonEmptyExcelPackage(
 			stringPtrValue(asset.ScopeSKUCode),
 			candidate.system.Task.SKUCode,
@@ -364,7 +388,7 @@ func excelPackageSystemSetCandidates(candidates []scoredExcelAsset, skuCode stri
 	return nil
 }
 
-var productionPackageSetPattern = regexp.MustCompile(`(?i)(?:[2-9]|[1-9][0-9]+)\s*(?:个装|件套)|套装`)
+var productionPackageSetPattern = regexp.MustCompile(`(?i)(?:[2-9]|[1-9][0-9]+)\s*(?:(?:个|条|张|片|只|枚|套)装|件套)|套装`)
 
 func productionPackageSetIntent(values ...string) bool {
 	for _, value := range values {
@@ -375,8 +399,8 @@ func productionPackageSetIntent(values ...string) bool {
 	return false
 }
 
-func excelPackageExternalSetCandidates(candidates []scoredExcelAsset, skuCode string) []scoredExcelAsset {
-	skuCode = strings.ToUpper(strings.TrimSpace(skuCode))
+func excelPackageExternalSetCandidates(candidates []scoredExcelAsset, row ExcelPackageRow) []scoredExcelAsset {
+	skuCode := strings.ToUpper(strings.TrimSpace(row.SKUCode))
 	if skuCode == "" {
 		return nil
 	}
@@ -400,7 +424,13 @@ func excelPackageExternalSetCandidates(candidates []scoredExcelAsset, skuCode st
 		if len(group) < 2 {
 			continue
 		}
-		packageFolder := strings.TrimSpace(pathpkg.Base(parentPath))
+		packageFolder := sanitizeProductionPackageBusinessName(
+			skuCode,
+			resolveExternalProductionProductName(candidate.external, row.SKUName, skuCode),
+		)
+		if packageFolder == "" {
+			continue
+		}
 		for index := range group {
 			group[index].packageFolder = packageFolder
 		}
@@ -464,7 +494,7 @@ func firstExcelPackageKeyword(skuCode, skuName string) string {
 	return strings.TrimSpace(skuName)
 }
 
-func scoreExcelPackageAsset(row *repo.TaskAssetSearchRow, req ExcelPackageRow) int {
+func scoreExcelPackageAsset(row *repo.TaskAssetSearchRow, req ExcelPackageRow, formatFilter string) int {
 	if row == nil || row.Asset == nil || row.Task == nil {
 		return 0
 	}
@@ -475,7 +505,7 @@ func scoreExcelPackageAsset(row *repo.TaskAssetSearchRow, req ExcelPackageRow) i
 	if asset.UploadStatus == nil || domain.DesignAssetUploadStatus(strings.TrimSpace(*asset.UploadStatus)) != domain.DesignAssetUploadStatusUploaded {
 		return 0
 	}
-	if !isExcelPackageImage(asset) {
+	if asset.AssetType.Canonical() != domain.TaskAssetTypeDelivery || !matchesExcelPackageAssetFormat(asset, formatFilter) {
 		return 0
 	}
 
@@ -516,24 +546,15 @@ func scoreExcelPackageAsset(row *repo.TaskAssetSearchRow, req ExcelPackageRow) i
 		}
 	}
 
-	switch asset.AssetType.Canonical() {
-	case domain.TaskAssetTypeDelivery:
-		score += 40
-	case domain.TaskAssetTypePreview:
-		score += 25
-	case domain.TaskAssetTypeDesignThumb:
-		score += 20
-	case domain.TaskAssetTypeReference:
-		score += 10
-	}
+	score += 40
 	return score
 }
 
-func scoreExcelPackageExternalAsset(asset *AssetDetail, req ExcelPackageRow) int {
+func scoreExcelPackageExternalAsset(asset *AssetDetail, req ExcelPackageRow, formatFilter string) int {
 	if asset == nil || asset.SourceType != string(domain.AssetResourceSourceExternal) {
 		return 0
 	}
-	if !isExcelPackageExternalImage(asset) {
+	if !matchesExcelPackageExternalFormat(asset, formatFilter) || !isExternalProductionDeliveryCandidate(asset) {
 		return 0
 	}
 	sku := strings.ToUpper(strings.TrimSpace(req.SKUCode))
@@ -620,6 +641,17 @@ func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req 
 	}
 	asset := row.Asset
 	assetID := valueInt64(asset.AssetID, asset.ID)
+	skuCode := strings.ToUpper(strings.TrimSpace(firstNonEmptyExcelPackage(
+		req.SKUCode,
+		stringPtrValue(asset.ScopeSKUCode),
+		row.Task.SKUCode,
+		row.Task.PrimarySKUCode,
+	)))
+	skuName := strings.TrimSpace(firstNonEmptyExcelPackage(row.Task.ProductNameSnapshot, req.SKUName))
+	if skuCode == "" || skuName == "" {
+		f := req.failure("business_naming_unavailable", "系统缺少商品编码或商品名称，无法生成规范生产文件名")
+		return ExcelPackageItem{}, &f
+	}
 	filename := resolveBatchFilename(asset, assetID)
 	storageKey := stringPtrValue(asset.StorageKey)
 	if strings.TrimSpace(storageKey) == "" {
@@ -643,8 +675,8 @@ func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req 
 	return ExcelPackageItem{
 		RowNumber:   req.RowNumber,
 		OrderNo:     req.OrderNo,
-		SKUCode:     req.SKUCode,
-		SKUName:     req.SKUName,
+		SKUCode:     skuCode,
+		SKUName:     skuName,
 		Quantity:    req.Quantity,
 		AssetID:     assetID,
 		ResourceID:  strconv.FormatInt(assetID, 10),
@@ -678,13 +710,19 @@ func (s *Service) buildExternalExcelPackageItem(ctx context.Context, asset *Asse
 		f := req.failure(reason, "外部素材正在准备下载，请稍后重试")
 		return ExcelPackageItem{}, &f
 	}
+	skuCode := strings.ToUpper(strings.TrimSpace(req.SKUCode))
+	skuName := resolveExternalProductionProductName(asset, req.SKUName, skuCode)
+	if skuCode == "" || skuName == "" {
+		f := req.failure("business_naming_unavailable", "系统缺少商品编码或商品名称，无法生成规范生产文件名")
+		return ExcelPackageItem{}, &f
+	}
 	fileSize := info.FileSize
 	expiresAt := info.ExpiresAt
 	return ExcelPackageItem{
 		RowNumber:   req.RowNumber,
 		OrderNo:     req.OrderNo,
-		SKUCode:     req.SKUCode,
-		SKUName:     req.SKUName,
+		SKUCode:     skuCode,
+		SKUName:     skuName,
 		Quantity:    req.Quantity,
 		AssetID:     asset.ID,
 		ResourceID:  asset.ResourceID,
@@ -722,6 +760,169 @@ func isExcelPackageExternalImage(asset *AssetDetail) bool {
 	}
 	ext := strings.ToLower(filepath.Ext(firstNonEmptyExcelPackage(asset.FileName, asset.OriginalFilename)))
 	return ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".tif" || ext == ".tiff"
+}
+
+func normalizeExcelPackageFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "tif", "jpg", "png", "jpg_png", "image":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "image"
+	}
+}
+
+func excelPackageNoMatchMessage(formatFilter string) string {
+	switch normalizeExcelPackageFormat(formatFilter) {
+	case "tif":
+		return "未找到匹配的最终成品 TIF 文件"
+	case "jpg":
+		return "未找到匹配的最终成品 JPG 文件"
+	case "png":
+		return "未找到匹配的最终成品 PNG 文件"
+	case "jpg_png":
+		return "未找到匹配的最终成品 JPG/PNG 文件"
+	default:
+		return "未找到匹配的最终成品图片（JPG/PNG/TIF/TIFF）"
+	}
+}
+
+func matchesExcelPackageAssetFormat(asset *domain.TaskAsset, formatFilter string) bool {
+	if asset == nil || !isExcelPackageImage(asset) {
+		return false
+	}
+	ext := normalizeExcelPackageExtension(firstNonEmptyExcelPackage(asset.FileName, stringPtrValue(asset.OriginalName)), stringPtrValue(asset.MimeType))
+	return matchesExcelPackageExtension(ext, formatFilter)
+}
+
+func matchesExcelPackageExternalFormat(asset *AssetDetail, formatFilter string) bool {
+	if asset == nil || !isExcelPackageExternalImage(asset) {
+		return false
+	}
+	ext := normalizeExcelPackageExtension(firstNonEmptyExcelPackage(asset.FileName, asset.OriginalFilename), asset.MimeType)
+	return matchesExcelPackageExtension(ext, formatFilter)
+}
+
+func matchesExcelPackageExtension(ext, formatFilter string) bool {
+	switch normalizeExcelPackageFormat(formatFilter) {
+	case "tif":
+		return ext == "tif"
+	case "jpg":
+		return ext == "jpg"
+	case "png":
+		return ext == "png"
+	case "jpg_png":
+		return ext == "jpg" || ext == "png"
+	default:
+		return ext == "jpg" || ext == "png" || ext == "tif"
+	}
+}
+
+func normalizeExcelPackageExtension(filename, mimeType string) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(strings.TrimSpace(filename))), ".")
+	switch ext {
+	case "jpeg":
+		return "jpg"
+	case "tiff":
+		return "tif"
+	case "jpg", "png", "tif":
+		return ext
+	}
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg":
+		return "jpg"
+	case "image/png":
+		return "png"
+	case "image/tif", "image/tiff":
+		return "tif"
+	default:
+		return ""
+	}
+}
+
+func chooseExcelPackageRendition(candidates []scoredExcelAsset, formatFilter string) []scoredExcelAsset {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	normalized := normalizeExcelPackageFormat(formatFilter)
+	if normalized == "tif" || normalized == "jpg" || normalized == "png" {
+		return candidates
+	}
+	selectedExt := excelPackageCandidateExtension(candidates[0])
+	if selectedExt == "" {
+		return candidates[:1]
+	}
+	filtered := make([]scoredExcelAsset, 0, len(candidates))
+	for _, candidate := range candidates {
+		if excelPackageCandidateExtension(candidate) == selectedExt {
+			filtered = append(filtered, candidate)
+		}
+	}
+	return filtered
+}
+
+func excelPackageCandidateExtension(candidate scoredExcelAsset) string {
+	if candidate.system != nil && candidate.system.Asset != nil {
+		return normalizeExcelPackageExtension(
+			firstNonEmptyExcelPackage(candidate.system.Asset.FileName, stringPtrValue(candidate.system.Asset.OriginalName)),
+			stringPtrValue(candidate.system.Asset.MimeType),
+		)
+	}
+	if candidate.external != nil {
+		return normalizeExcelPackageExtension(
+			firstNonEmptyExcelPackage(candidate.external.FileName, candidate.external.OriginalFilename),
+			candidate.external.MimeType,
+		)
+	}
+	return ""
+}
+
+func isExternalProductionDeliveryCandidate(asset *AssetDetail) bool {
+	if asset == nil {
+		return false
+	}
+	value := strings.ToLower(strings.Join([]string{asset.FileName, asset.OriginalFilename, asset.OriginPath}, " "))
+	for _, marker := range []string{"参考图", "效果图", "预览图", "设计源文件", "源文件", "reference", "preview", "mockup"} {
+		if strings.Contains(value, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+func sanitizeProductionPackageBusinessName(skuCode, skuName string) string {
+	code := sanitizeBatchFilename(strings.ToUpper(strings.TrimSpace(skuCode)))
+	name := sanitizeBatchFilename(strings.TrimSpace(skuName))
+	if code == "" || name == "" {
+		return ""
+	}
+	if strings.Contains(strings.ToUpper(name), code) {
+		return name
+	}
+	return code + "_" + name
+}
+
+func resolveExternalProductionProductName(asset *AssetDetail, requestedName, skuCode string) string {
+	if name := strings.TrimSpace(requestedName); name != "" {
+		return name
+	}
+	if asset == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(asset.ProductName); name != "" &&
+		!strings.ContainsAny(name, `/\`) &&
+		filepath.Ext(name) == "" {
+		return name
+	}
+	parentName := strings.TrimSpace(pathpkg.Base(pathpkg.Dir(cleanExcelPackageOriginPath(asset.OriginPath))))
+	if parentName == "" || parentName == "." || parentName == "/" {
+		return ""
+	}
+	upperParent := strings.ToUpper(parentName)
+	upperSKU := strings.ToUpper(strings.TrimSpace(skuCode))
+	if upperSKU != "" && strings.HasPrefix(upperParent, upperSKU) {
+		parentName = strings.TrimLeft(parentName[len(strings.TrimSpace(skuCode)):], " _-—–·")
+	}
+	return strings.TrimSpace(parentName)
 }
 
 func firstNonEmptyExcelPackage(values ...string) string {

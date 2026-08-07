@@ -173,11 +173,7 @@ export interface ReferenceFileRef {
   [key: string]: unknown
 }
 
-function emitUploadProgress(
-  options: AssetUploadOptions | undefined,
-  loaded = 0,
-  total?: number,
-) {
+function emitUploadProgress(options: AssetUploadOptions | undefined, loaded = 0, total?: number) {
   if (!options?.onProgress) return
   const safeTotal = typeof total === 'number' && total > 0 ? total : loaded
   options.onProgress({
@@ -260,7 +256,7 @@ export type AssetBatchSearchStatus = 'matched' | 'not_found' | 'error'
 
 export interface AssetBatchSearchPayload {
   terms: string[]
-  format_filter?: 'jpg_png' | 'jpg' | 'png' | 'webp' | 'image' | 'design' | 'pdf' | 'archive' | 'all'
+  format_filter?: 'jpg_png' | 'jpg' | 'png' | 'tif' | 'webp' | 'image' | 'design' | 'pdf' | 'archive' | 'all'
   asset_kind?: 'auto' | 'all' | 'delivery' | 'reference' | 'source' | 'preview' | 'other'
 }
 
@@ -340,13 +336,14 @@ export interface AssetExcelPackagePreviewResponse {
   data?: AssetExcelPackageManifest
 }
 
+export type AssetExcelPackageFormat = 'tif' | 'jpg' | 'png' | 'jpg_png' | 'image'
+
 export const assetsApi = {
   /**
    * 任务上下文资产列表
    * GET /v1/tasks/{id}/assets
    */
-  list: (taskId: string, signal?: AbortSignal) =>
-    http.get<BackendAsset[]>(`/v1/tasks/${taskId}/assets`, { signal }),
+  list: (taskId: string, signal?: AbortSignal) => http.get<BackendAsset[]>(`/v1/tasks/${taskId}/assets`, { signal }),
 
   /**
    * 创建资产上传会话（后端返回 upload_strategy 与远端计划）
@@ -364,35 +361,32 @@ export const assetsApi = {
   /**
    * POST /v1/assets/upload-sessions/{session_id}/complete
    */
-  completeAssetUploadSession: (
-    sessionId: string,
-    payload?: CompleteAssetUploadSessionPayload,
-    signal?: AbortSignal,
-  ) =>
-    http.post<AssetCenterUploadCompleteResponse>(
-      `/v1/assets/upload-sessions/${sessionId}/complete`,
-      payload ?? {},
-      { signal },
-    ),
+  completeAssetUploadSession: (sessionId: string, payload?: CompleteAssetUploadSessionPayload, signal?: AbortSignal) =>
+    http.post<AssetCenterUploadCompleteResponse>(`/v1/assets/upload-sessions/${sessionId}/complete`, payload ?? {}, {
+      signal,
+    }),
 
   completeAssetUploadSessionAtEndpoint: (
     endpoint: string,
     payload?: CompleteAssetUploadSessionPayload,
     signal?: AbortSignal,
-  ) => http.post<AssetCenterUploadCompleteResponse>(endpoint, payload ?? {}, { signal }),
+  ) =>
+    http.post<AssetCenterUploadCompleteResponse>(endpoint, payload ?? {}, {
+      signal,
+    }),
 
   /**
    * POST /v1/assets/upload-sessions/{session_id}/cancel
    */
-  cancelAssetUploadSession: (
-    sessionId: string,
-    payload?: Record<string, unknown>,
-    signal?: AbortSignal,
-  ) =>
-    http.post(`/v1/assets/upload-sessions/${sessionId}/cancel`, payload ?? {}, { signal }),
+  cancelAssetUploadSession: (sessionId: string, payload?: Record<string, unknown>, signal?: AbortSignal) =>
+    http.post(`/v1/assets/upload-sessions/${sessionId}/cancel`, payload ?? {}, {
+      signal,
+    }),
 
   batchSearchAssets: (payload: AssetBatchSearchPayload, signal?: AbortSignal) =>
-    http.post<AssetBatchSearchResponse>('/v1/assets/search/batch', payload, { signal }),
+    http.post<AssetBatchSearchResponse>('/v1/assets/search/batch', payload, {
+      signal,
+    }),
 
   batchDownload: (
     assetRefs: Array<number | string>,
@@ -419,22 +413,29 @@ export const assetsApi = {
     )
   },
 
-  excelPackagePreview: (rows: AssetExcelPackageRow[], signal?: AbortSignal) =>
-    http.post<AssetExcelPackagePreviewResponse>('/v1/assets/excel-package/preview', { rows }, { signal }),
+  excelPackagePreview: (
+    rows: AssetExcelPackageRow[],
+    formatFilter: AssetExcelPackageFormat = 'image',
+    signal?: AbortSignal,
+  ) =>
+    http.post<AssetExcelPackagePreviewResponse>(
+      '/v1/assets/excel-package/preview',
+      { rows, format_filter: formatFilter },
+      { signal },
+    ),
 
-  excelPackagePreviewFile: (file: File, signal?: AbortSignal) => {
+  excelPackagePreviewFile: (file: File, formatFilter: AssetExcelPackageFormat = 'image', signal?: AbortSignal) => {
     const form = new FormData()
     form.append('file', file)
-    return http.post<AssetExcelPackagePreviewResponse>(
-      '/v1/assets/excel-package/preview-file',
-      form,
-      { signal, headers: { 'Content-Type': 'multipart/form-data' } },
-    )
+    form.append('format_filter', formatFilter)
+    return http.post<AssetExcelPackagePreviewResponse>('/v1/assets/excel-package/preview-file', form, {
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
   },
 
   /** GET /v1/assets/{id} */
-  getAsset: (assetId: string, signal?: AbortSignal) =>
-    http.get<BackendAsset>(`/v1/assets/${assetId}`, { signal }),
+  getAsset: (assetId: string, signal?: AbortSignal) => http.get<BackendAsset>(`/v1/assets/${assetId}`, { signal }),
 
   /**
    * GET /v1/assets/{id}/download
@@ -461,22 +462,14 @@ export const assetsApi = {
   uploadReferenceForNewTask: (file: File, signal?: AbortSignal) => {
     const form = new FormData()
     form.append('file', file)
-    return http.post<UploadReferenceForNewTaskResponse>(
-      '/v1/tasks/reference-upload',
-      form,
-      {
-        timeout: 90_000,
-        signal,
-        headers: { 'Content-Type': 'multipart/form-data' },
-      },
-    )
+    return http.post<UploadReferenceForNewTaskResponse>('/v1/tasks/reference-upload', form, {
+      timeout: 90_000,
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
   },
 
-  uploadToRemoteUrl: (
-    uploadUrl: string,
-    file: File,
-    options?: AssetUploadOptions,
-  ) => {
+  uploadToRemoteUrl: (uploadUrl: string, file: File, options?: AssetUploadOptions) => {
     const method = (options?.method ?? 'PUT').toUpperCase()
     const headers: Record<string, string> = {
       'Content-Type': file.type || 'application/octet-stream',

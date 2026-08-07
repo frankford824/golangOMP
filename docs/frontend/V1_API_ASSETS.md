@@ -35,7 +35,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `terms` | array<string> | 是 | - |
-| `format_filter` | enum(jpg_png/jpg/png/webp/image/design/pdf/archive/all) | 否 | - |
+| `format_filter` | enum(jpg_png/jpg/png/tif/webp/image/design/pdf/archive/all) | 否 | - |
 | `asset_kind` | enum(auto/all/delivery/reference/source/preview/other) | 否 | - |
 
 ### 响应体 schema
@@ -82,7 +82,7 @@ curl -X POST https://api.example.com/v1/assets/search/batch \
 ### 简介
 支持方法: POST。
 
-- `POST`: Matches system and OSS-ready external JPG, PNG, TIF, and TIFF resources. Complete multi-file sets include package_folder so the frontend preserves the set as one folder.
+- `POST`: Matches one requested JPG, PNG, or TIF/TIFF final-product rendition per Excel row. PSD sources, references, previews, and mockups are excluded. Duplicate rows remain separate delivery items; single images stay flat while sets include a business-named package_folder.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -99,6 +99,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `rows` | array<AssetExcelPackageRow> | 是 | - |
+| `format_filter` | enum(tif/jpg/png/jpg_png/image) | 否 | Selects one production rendition family. Only current final-product assets are eligible; PSD sources |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -163,6 +164,7 @@ Content-Type: `multipart/form-data`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `file` | string | 是 | XLS or XLSX file up to 10 MiB. |
+| `format_filter` | enum(tif/jpg/png/jpg_png/image) | 否 | Selects one final-product rendition family for the generated package manifest. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

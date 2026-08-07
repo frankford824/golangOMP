@@ -3725,7 +3725,7 @@ components:
       required: [terms]
       properties:
         terms: { type: array, minItems: 1, maxItems: 200, items: { type: string } }
-        format_filter: { type: string, enum: [jpg_png, jpg, png, webp, image, design, pdf, archive, all], default: image }
+        format_filter: { type: string, enum: [jpg_png, jpg, png, tif, webp, image, design, pdf, archive, all], default: image }
         asset_kind: { type: string, enum: [auto, all, delivery, reference, source, preview, other], default: delivery }
     AssetBatchSearchResult:
       type: object
@@ -3761,6 +3761,7 @@ components:
       required: [rows]
       properties:
         rows: { type: array, minItems: 1, maxItems: 500, items: { $ref: '#/components/schemas/AssetExcelPackageRow' } }
+        format_filter: { type: string, enum: [tif, jpg, png, jpg_png, image], default: image, description: Selects one production rendition family. Only current final-product assets are eligible; PSD sources, references, previews, and mockups are excluded. }
     AssetExcelPackageItem:
       type: object
       required: [order_no, sku_code, quantity, asset_id, task_id, filename, file_size, download_url]
@@ -9519,7 +9520,7 @@ paths:
   /v1/assets/excel-package/preview:
     post:
       summary: Build a production package manifest from normalized Excel rows
-      description: Matches system and OSS-ready external JPG, PNG, TIF, and TIFF resources. Complete multi-file sets include package_folder so the frontend preserves the set as one folder.
+      description: Matches one requested JPG, PNG, or TIF/TIFF final-product rendition per Excel row. PSD sources, references, previews, and mockups are excluded. Duplicate rows remain separate delivery items; single images stay flat while sets include a business-named package_folder.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [asset.view]
@@ -9554,6 +9555,7 @@ paths:
               required: [file]
               properties:
                 file: { type: string, format: binary, description: XLS or XLSX file up to 10 MiB. }
+                format_filter: { type: string, enum: [tif, jpg, png, jpg_png, image], default: image, description: Selects one final-product rendition family for the generated package manifest. }
       responses:
         '200':
           description: Production package manifest

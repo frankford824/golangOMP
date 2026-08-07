@@ -232,10 +232,11 @@ export interface paths {
         put?: never;
         /**
          * Approve and finalize, or return the task to design
-         * @description Approval uploads a complete final set for every resource group using the designer-selected mode.
-         *     The auditor may replace the source file; otherwise the designer source remains effective. Approval
-         *     finalizes resources and returns only after the task is `Completed`. Return requires a reason and
-         *     restores the design stage without accepting a partial final set.
+         * @description Approval uploads a complete final set for every resource group. The auditor may retain or revise
+         *     each designer-selected single/set mode and may replace the source file; otherwise the designer source
+         *     remains effective without copying its file bytes. Approval finalizes resources and returns only after
+         *     the task is `Completed`. Return requires a reason and restores the design stage without accepting a
+         *     partial final set.
          */
         post: operations["decideTaskAuditV8"];
         delete?: never;
@@ -2663,6 +2664,8 @@ export interface paths {
          *     - first tries direct bridge detail lookup
          *     - when direct bridge detail returns 404, MAIN performs a compatible search-based fallback so list -> detail -> task binding remains stable for result-page integration
          *     - returns 404 only when MAIN cannot resolve the list-emitted lookup key anymore
+         *     Browser callers require `catalog.view`; same-host MAIN filing workers may
+         *     use the loopback-only `X-ERP-Bridge-Internal-Token` for post-upsert readback.
          */
         get: {
             parameters: {
@@ -2721,6 +2724,8 @@ export interface paths {
          * List ERP Bridge categories
          * @description Normalized categories for **exact** product filters on /v1/erp/products. Source is local configurable mapping layer (categories table; current 31 rows are sample data, not production category center). Business classification primary semantic = style code (i_id); JST category field is ERP raw field. Do NOT use jst_inventory or any large sync table scan.
          *     For **global** category pickers (rules, filters, dropdowns), prefer **GET /v1/categories** or **GET /v1/categories/search** as the primary API. See docs/TRUTH_SOURCE_ALIGNMENT.md.
+         *     Browser callers require `catalog.view`; same-host MAIN filing workers may use
+         *     the loopback-only `X-ERP-Bridge-Internal-Token` while resolving category metadata.
          */
         get: {
             parameters: {
@@ -2843,7 +2848,11 @@ export interface paths {
          *     remote success without upstream response evidence for that endpoint.
          *     This route was added in ITERATION_070 to fix a 404 gap that prevented all
          *     MAIN -> Bridge filing calls from succeeding.
-         *     Requires session authentication (Bearer token forwarded from MAIN).
+         *     Browser callers require session authentication and `erp.manage`.
+         *     Same-host MAIN workers may instead send `X-ERP-Bridge-Internal-Token`;
+         *     Bridge accepts that credential only from a loopback peer and only on the
+         *     explicitly registered ERP mutation routes. The internal token must never
+         *     be exposed to frontend code.
          */
         post: {
             parameters: {
@@ -2913,6 +2922,8 @@ export interface paths {
          *     where SKU remains unchanged but style-level data (picture/style fields) needs update.
          *     OpenWeb remote mapping:
          *     `POST /v1/erp/products/style/update` -> `/open/webapi/itemapi/itemskuim/itemupload`.
+         *     Browser callers require session authentication and `erp.manage`; same-host
+         *     MAIN workers may use the loopback-only `X-ERP-Bridge-Internal-Token`.
          */
         post: {
             parameters: {
@@ -3094,6 +3105,8 @@ export interface paths {
          *     Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but
          *     upstream currently rejects with business response `code=100, msg=涓婃灦浠撲綅涓嶈兘涓虹┖`
          *     for tested payloads; in `hybrid` mode Bridge falls back to local write path.
+         *     Same-host MAIN workers may use the loopback-only
+         *     `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`.
          */
         post: {
             parameters: {
@@ -3148,6 +3161,8 @@ export interface paths {
          * @description Bridge-owned ERP batch unshelve mutation boundary for MAIN integration.
          *     OpenWeb official mapping in remote/hybrid mode:
          *     `POST /v1/erp/products/unshelve/batch` -> `/open/webapi/wmsapi/openoffshelve/skubatchoffshelve`.
+         *     Same-host MAIN workers may use the loopback-only
+         *     `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`.
          *     Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but
          *     upstream currently rejects with business response `code=100, msg=鎸囧畾绠变笉瀛樺湪`
          *     for tested payloads; in `hybrid` mode Bridge falls back to local write path.
@@ -3205,6 +3220,8 @@ export interface paths {
          * @description Bridge-owned ERP virtual inventory mutation boundary for MAIN integration.
          *     OpenWeb official mapping in remote/hybrid mode:
          *     `POST /v1/erp/inventory/virtual-qty` -> `/open/webapi/itemapi/iteminventory/batchupdatewmsvirtualqtys`.
+         *     Same-host MAIN workers may use the loopback-only
+         *     `X-ERP-Bridge-Internal-Token`; browser callers still require `erp.manage`.
          *     Current live boundary (`v0.4`, ITERATION_077): remote request is sent, but
          *     upstream raw body in tested cases returns `code=0, msg=鏈幏鍙栧埌鏈夋晥鐨勪紶鍏ユ暟鎹? data=null`.
          *     Bridge classifies this as business rejection and in `hybrid` mode falls back
@@ -4362,7 +4379,7 @@ export interface paths {
         put?: never;
         /**
          * Build a production package manifest from normalized Excel rows
-         * @description Matches system and OSS-ready external JPG, PNG, TIF, and TIFF resources. Complete multi-file sets include package_folder so the frontend preserves the set as one folder.
+         * @description Matches one requested JPG, PNG, or TIF/TIFF final-product rendition per Excel row. PSD sources, references, previews, and mockups are excluded. Duplicate rows remain separate delivery items; single images stay flat while sets include a business-named package_folder.
          */
         post: {
             parameters: {
@@ -4435,6 +4452,12 @@ export interface paths {
                          * @description XLS or XLSX file up to 10 MiB.
                          */
                         file: string;
+                        /**
+                         * @description Selects one final-product rendition family for the generated package manifest.
+                         * @default image
+                         * @enum {string}
+                         */
+                        format_filter?: "tif" | "jpg" | "png" | "jpg_png" | "image";
                     };
                 };
             };
@@ -20045,7 +20068,7 @@ export interface components {
              * @default image
              * @enum {string}
              */
-            format_filter: "jpg_png" | "jpg" | "png" | "webp" | "image" | "design" | "pdf" | "archive" | "all";
+            format_filter: "jpg_png" | "jpg" | "png" | "tif" | "webp" | "image" | "design" | "pdf" | "archive" | "all";
             /**
              * @default delivery
              * @enum {string}
@@ -20079,6 +20102,12 @@ export interface components {
         };
         AssetExcelPackagePreviewRequest: {
             rows: components["schemas"]["AssetExcelPackageRow"][];
+            /**
+             * @description Selects one production rendition family. Only current final-product assets are eligible; PSD sources
+             * @default image
+             * @enum {string}
+             */
+            format_filter: "tif" | "jpg" | "png" | "jpg_png" | "image";
         };
         AssetExcelPackageItem: {
             row_number?: number;
@@ -21657,8 +21686,8 @@ export interface components {
         /**
          * @description One complete resource-group input. For ordinary and customization tasks, the designer selects
          *     `mode` and submits exactly one editable source while `final_task_asset_ids` MUST be empty.
-         *     During audit, `mode` MUST equal the designer-selected mode; each group supplies a newly staged
-         *     complete final set (`single` exactly one, `set` at least two in array order). Omitting
+         *     During audit, the auditor may retain or revise `mode`; each group supplies a newly staged complete
+         *     final set (`single` exactly one, `set` at least two in array order). Omitting
          *     `source_task_asset_id` during audit inherits the designer source; supplying it replaces that source.
          *     Retouch submissions provide final files directly and may omit the source.
          */
@@ -21668,7 +21697,7 @@ export interface components {
             /** Format: int64 */
             expected_group_lock_version: number;
             /**
-             * @description Selected by the designer for ordinary/customization tasks and read-only during audit.
+             * @description Selected by the designer for ordinary/customization tasks and may be revised by the auditor when finalizing.
              * @enum {string}
              */
             mode: "single" | "set";
@@ -21694,8 +21723,9 @@ export interface components {
         };
         /**
          * @description `approve` requires a complete `groups` array covering every resource group. Final files must be
-         *     newly staged by the current auditor and match the designer-selected mode. The auditor may replace
-         *     the source, but cannot change single/set; an incorrect mode must be returned to design.
+         *     newly staged by the current auditor and match the submitted audit mode. The auditor may retain or
+         *     revise single/set per group and may replace the source; omitted sources continue to reference the
+         *     existing asset without copying file bytes.
          *     `return_to_design` requires `reason` and does not accept partial resource replacement.
          */
         AuditDecisionV2Request: {

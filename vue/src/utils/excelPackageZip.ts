@@ -8,6 +8,7 @@ type ExcelPackageZipItem = Pick<
   | 'filename'
   | 'order_no'
   | 'package_folder'
+  | 'quantity'
   | 'resource_id'
   | 'row_number'
   | 'sku_code'
@@ -17,58 +18,50 @@ type ExcelPackageZipItem = Pick<
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
-function normalizedIncludes(value: string, expected: string): boolean {
-  const normalizedValue = value.trim().toUpperCase()
-  const normalizedExpected = expected.trim().toUpperCase()
-  return normalizedExpected !== '' && normalizedValue.includes(normalizedExpected)
+export interface ExcelPackageZipEntry {
+  key: string
+  filename: string
+  zipPath?: string
+  downloadURL: string
+  failureHint: string
+}
+
+export function resolveExcelPackageBusinessName(item: ExcelPackageZipItem): string {
+  const fallback = `asset-${item.asset_id}`
+  const skuCode = sanitizeZipEntryName(String(item.sku_code ?? '').trim(), fallback)
+  const skuName = sanitizeZipEntryName(String(item.sku_name ?? '').trim(), '未命名商品')
+  if (skuName.toUpperCase().includes(skuCode.toUpperCase())) return skuName
+  return `${skuCode}_${skuName}`
 }
 
 export function resolveExcelPackageZipFilename(
   item: ExcelPackageZipItem,
   sequence: number,
-  options?: { includeBusinessPrefix?: boolean },
+  options?: { setComponent?: boolean },
 ): string {
   const rawFilename = String(item.filename ?? '').trim()
   const extensionMatch = rawFilename.match(/\.[A-Za-z0-9]{1,10}$/)
   const extension = extensionMatch?.[0] ?? '.jpg'
-  const rawSourceBase = extensionMatch ? rawFilename.slice(0, -extension.length) : rawFilename
-  const fallback = `asset-${item.asset_id}`
-  const sourceBase = sanitizeZipEntryName(rawSourceBase, fallback)
-  const rawSku = String(item.sku_code || item.sku_name || fallback).trim()
-  const rawOrder = String(item.order_no ?? '').trim()
-  const parts: string[] = []
-
-  if (options?.includeBusinessPrefix !== false) {
-    if (rawOrder && rawOrder.toUpperCase() !== rawSku.toUpperCase() && !normalizedIncludes(sourceBase, rawOrder)) {
-      parts.push(sanitizeZipEntryName(rawOrder, '未知订单'))
-    }
-    if (rawSku && !normalizedIncludes(sourceBase, rawSku)) {
-      parts.push(sanitizeZipEntryName(rawSku, fallback))
-    }
-  }
-  parts.push(sourceBase)
-
-  const base = parts.filter((part, index) => part && parts.indexOf(part) === index).join('_') || fallback
-  return `${base}_${Math.max(1, Math.trunc(sequence))}${extension}`
+  const base = resolveExcelPackageBusinessName(item)
+  if (!options?.setComponent) return `${base}${extension}`
+  return `${base}_${String(Math.max(1, Math.trunc(sequence))).padStart(2, '0')}${extension}`
 }
 
 export function resolveExcelPackageSetFolders(items: ExcelPackageZipItem[]): string[] {
   const folders = new Array<string>(items.length).fill('')
-  const groups = new Map<string, { base: string; indexes: number[]; sources: Set<string> }>()
+  const groups = new Map<string, { base: string; indexes: number[] }>()
   items.forEach((item, index) => {
     const rawFolder = String(item.package_folder ?? '').trim()
     if (!rawFolder) return
-    const base = sanitizeZipEntryName(rawFolder, String(item.sku_code ?? '').trim() || '套装')
+    const base = resolveExcelPackageBusinessName(item)
     const key = [item.row_number ?? index, item.order_no, item.sku_code, rawFolder].join('\u0000')
-    const group = groups.get(key) ?? { base, indexes: [], sources: new Set<string>() }
+    const group = groups.get(key) ?? { base, indexes: [] }
     group.indexes.push(index)
-    group.sources.add(excelPackageSourceKey(item))
     groups.set(key, group)
   })
 
   const usedFolders = new Map<string, number>()
   for (const group of groups.values()) {
-    if (group.sources.size < 2) continue
     const count = (usedFolders.get(group.base) ?? 0) + 1
     usedFolders.set(group.base, count)
     const folder = count === 1 ? group.base : `${group.base} (${count})`
@@ -77,6 +70,47 @@ export function resolveExcelPackageSetFolders(items: ExcelPackageZipItem[]): str
     })
   }
   return folders
+}
+
+export function buildExcelPackageZipEntries(items: ExcelPackageZipItem[]): ExcelPackageZipEntry[] {
+  const groups = new Map<string, ExcelPackageZipItem[]>()
+  items.forEach((item, index) => {
+    const key = [item.row_number ?? index, item.order_no, item.sku_code, item.sku_name].join('\u0000')
+    const group = groups.get(key) ?? []
+    group.push(item)
+    groups.set(key, group)
+  })
+
+  const usedFolders = new Map<string, number>()
+  const entries: ExcelPackageZipEntry[] = []
+  for (const group of groups.values()) {
+    if (!group.length) continue
+    const first = group[0]
+    const isSet = group.some((item) => String(item.package_folder ?? '').trim() !== '')
+    const sourceItems = isSet ? group : [first]
+    const quantity = Math.max(1, Math.trunc(Number(first.quantity) || 1))
+    for (let copyIndex = 0; copyIndex < quantity; copyIndex += 1) {
+      let zipPath: string | undefined
+      if (isSet) {
+        const base = resolveExcelPackageBusinessName(first)
+        const occurrence = (usedFolders.get(base) ?? 0) + 1
+        usedFolders.set(base, occurrence)
+        zipPath = occurrence === 1 ? base : `${base} (${occurrence})`
+      }
+      sourceItems.forEach((item, componentIndex) => {
+        entries.push({
+          key: `${item.resource_id || item.asset_id}-row-${item.row_number || 0}-copy-${copyIndex + 1}-component-${componentIndex + 1}`,
+          filename: resolveExcelPackageZipFilename(item, componentIndex + 1, {
+            setComponent: isSet,
+          }),
+          zipPath,
+          downloadURL: item.download_url,
+          failureHint: `${item.sku_code || item.sku_name}: download_failed`,
+        })
+      })
+    }
+  }
+  return entries
 }
 
 export function countExcelPackageRows(items: Array<{ row_number?: number }>): number {
@@ -112,7 +146,10 @@ async function fetchExcelPackageBlob(url: string, fetcher: FetchLike): Promise<B
   let lastError: unknown
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetcher(url, { credentials: 'omit', mode: 'cors' })
+      const response = await fetcher(url, {
+        credentials: 'omit',
+        mode: 'cors',
+      })
       if (response.ok) return response.blob()
       lastError = new Error(`http_${response.status}`)
       if (!shouldRetryExcelPackageDownload(response.status)) throw lastError

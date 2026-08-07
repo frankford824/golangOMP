@@ -16,7 +16,8 @@ type assetBatchDownloadReq struct {
 }
 
 type assetExcelPackagePreviewReq struct {
-	Rows []assetExcelPackageRowReq `json:"rows"`
+	Rows         []assetExcelPackageRowReq `json:"rows"`
+	FormatFilter string                    `json:"format_filter,omitempty"`
 }
 
 type assetExcelPackageRowReq struct {
@@ -70,7 +71,7 @@ func (h *TaskAssetCenterHandler) PreviewExcelPackage(c *gin.Context) {
 			SKUName: row.SKUName, Quantity: row.Quantity, Address: row.Address, Keyword: row.Keyword,
 		})
 	}
-	manifest, appErr := h.globalSvc.BuildExcelPackageManifest(c.Request.Context(), rows)
+	manifest, appErr := h.globalSvc.BuildExcelPackageManifest(c.Request.Context(), rows, req.FormatFilter)
 	if appErr != nil {
 		respondAssetCenterError(c, appErr)
 		return
@@ -108,7 +109,7 @@ func (h *TaskAssetCenterHandler) PreviewExcelPackageFile(c *gin.Context) {
 		respondAssetCenterError(c, appErr)
 		return
 	}
-	manifest, appErr := h.globalSvc.BuildExcelPackageManifest(c.Request.Context(), rows)
+	manifest, appErr := h.globalSvc.BuildExcelPackageManifest(c.Request.Context(), rows, c.PostForm("format_filter"))
 	if appErr != nil {
 		respondAssetCenterError(c, appErr)
 		return

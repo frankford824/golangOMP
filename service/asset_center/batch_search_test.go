@@ -81,6 +81,40 @@ func TestBatchSearchMatchesDeliveryImageBySKU(t *testing.T) {
 	}
 }
 
+func TestBatchSearchSupportsTIFOnlyFilter(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scopeSKU := "HSC-TIF-01"
+	tifMime := "image/tiff"
+	jpgMime := "image/jpeg"
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	makeRow := func(id int64, filename, mime string) *repo.TaskAssetSearchRow {
+		return &repo.TaskAssetSearchRow{
+			Asset: &domain.TaskAsset{
+				ID: id, TaskID: 501, AssetID: int64PtrExcelPkg(id), ScopeSKUCode: &scopeSKU,
+				AssetType: domain.TaskAssetTypeDelivery, FileName: filename, MimeType: &mime,
+				UploadStatus: &uploaded, CreatedAt: now,
+			},
+			Task: &domain.Task{ID: 501, TaskNo: "RW-TIF-01", SKUCode: scopeSKU, ProductNameSnapshot: "镂空模板"},
+		}
+	}
+	svc := NewService(&excelPackageRepoStub{rowsByKeyword: map[string][]*repo.TaskAssetSearchRow{
+		scopeSKU: {
+			makeRow(101, "镂空模板.tif", tifMime),
+			makeRow(102, "效果预览.jpg", jpgMime),
+		},
+	}}, excelPackagePresignerStub{}, nil)
+
+	result, appErr := svc.BatchSearch(context.Background(), BatchSearchRequest{
+		Terms: []string{scopeSKU}, FormatFilter: "tif", AssetKind: "delivery",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchSearch error = %+v", appErr)
+	}
+	if len(result.Results) != 1 || len(result.Results[0].Assets) != 1 || result.Results[0].Assets[0].ID != 101 {
+		t.Fatalf("result = %+v, want only the TIF delivery", result)
+	}
+}
+
 func TestBatchSearchReturnsAllMatchingDeliveryImagesForTerm(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	scopeSKU := "CGP000155"
