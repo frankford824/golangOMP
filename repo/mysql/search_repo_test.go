@@ -136,7 +136,7 @@ func TestSearchProductsFromDocumentsCodeKeywordUsesUnionWithoutFullText(t *testi
 	}
 }
 
-func TestSearchProductsFromDocumentsTextKeywordUsesFullText(t *testing.T) {
+func TestSearchProductsFromDocumentsTextKeywordUsesBoundedSubstring(t *testing.T) {
 	mysqlSchemaPresenceCache = sync.Map{}
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
 	if err != nil {
@@ -151,12 +151,12 @@ func TestSearchProductsFromDocumentsTextKeywordUsesFullText(t *testing.T) {
 		WithArgs("product_search_documents", "semantic_text").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("product-doc-text").
-		WithArgs(`"常规kt板"`, `"常规kt板"`, 20).
+		WithArgs("%poster%board%", "%poster%board%", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}).
-			AddRow("CGK000181", "常规kt板", "IID-1", "KT板"))
+			AddRow("CGK000181", "poster board", "IID-1", "board"))
 
 	repo := NewSearchRepo(New(db))
-	items, err := repo.SearchProducts(context.Background(), "常规kt板", 20)
+	items, err := repo.SearchProducts(context.Background(), "poster board", 20)
 	if err != nil {
 		t.Fatalf("SearchProducts() error = %v", err)
 	}
@@ -168,7 +168,7 @@ func TestSearchProductsFromDocumentsTextKeywordUsesFullText(t *testing.T) {
 	}
 }
 
-func TestSearchProductsFromDocumentsTextKeywordFallsBackToNaturalWhenPhraseEmpty(t *testing.T) {
+func TestSearchProductsFromDocumentsTextKeywordIncludesSemanticSubstring(t *testing.T) {
 	mysqlSchemaPresenceCache = sync.Map{}
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
 	if err != nil {
@@ -181,17 +181,14 @@ func TestSearchProductsFromDocumentsTextKeywordFallsBackToNaturalWhenPhraseEmpty
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery("schema-column").
 		WithArgs("product_search_documents", "semantic_text").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery("product-doc-text").
-		WithArgs(`"冷门词"`, `"冷门词"`, 20).
-		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}))
-	mock.ExpectQuery("product-doc-text-natural").
-		WithArgs("冷门词", "冷门词", 20).
+		WithArgs("%rare%term%", "%rare%term%", "%rare%term%", "%rare%term%", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}).
-			AddRow("CGK000999", "冷门词产品", "IID-999", "其他"))
+			AddRow("CGK000999", "semantic match", "IID-999", "other"))
 
 	repo := NewSearchRepo(New(db))
-	items, err := repo.SearchProducts(context.Background(), "冷门词", 20)
+	items, err := repo.SearchProducts(context.Background(), "rare term", 20)
 	if err != nil {
 		t.Fatalf("SearchProducts() error = %v", err)
 	}
@@ -337,22 +334,13 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 				return fmt.Errorf("product code query must not use fulltext match: %s", normalized)
 			}
 		case "product-doc-text":
-			for _, fragment := range []string{
-				"MATCH(search_text) AGAINST (? IN BOOLEAN MODE)",
-			} {
+			for _, fragment := range []string{"FROM product_search_documents", "search_text LIKE ?", "product_name LIKE ?"} {
 				if !strings.Contains(normalized, fragment) {
 					return fmt.Errorf("product text query missing %q: %s", fragment, normalized)
 				}
 			}
-			if strings.Contains(normalized, "IN NATURAL LANGUAGE MODE") {
-				return fmt.Errorf("product phrase query must not run natural fallback in same SQL: %s", normalized)
-			}
-		case "product-doc-text-natural":
-			if !strings.Contains(normalized, "MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
-				return fmt.Errorf("product natural fallback query missing fulltext match: %s", normalized)
-			}
-			if strings.Contains(normalized, "IN BOOLEAN MODE") {
-				return fmt.Errorf("product natural fallback query must not run boolean phrase in same SQL: %s", normalized)
+			if strings.Contains(normalized, "MATCH(") {
+				return fmt.Errorf("product text query must avoid the slow fulltext path: %s", normalized)
 			}
 		case "task-doc-scoped":
 			for _, fragment := range []string{"FROM task_search_documents d JOIN tasks t", "t.creator_id = ?", "t.owner_department_id IN (?)", "t.owner_team_id IN (?)"} {

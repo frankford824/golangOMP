@@ -710,76 +710,26 @@ func (r *searchRepo) searchProductDocumentsByCode(ctx context.Context, kw normal
 }
 
 func (r *searchRepo) searchProductDocumentsByText(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchProduct, error) {
-	items, err := r.searchProductDocumentsByTextMode(ctx, kw, limit, true, nil)
-	if err != nil {
-		return nil, err
-	}
-	if len(items) >= limit || len(items) >= searchNaturalFallbackThreshold {
-		return items, nil
-	}
-	fallback, err := r.searchProductDocumentsByTextMode(ctx, kw, limit-len(items), false, searchProductResultCodes(items))
-	if err != nil {
-		return nil, err
-	}
-	return appendSearchProductsUnique(items, fallback, limit), nil
-}
-
-func (r *searchRepo) searchProductDocumentsByTextMode(ctx context.Context, kw normalizedSearchKeyword, limit int, booleanMode bool, excludeSKUs []string) ([]domain.SearchProduct, error) {
-	if limit <= 0 {
-		return []domain.SearchProduct{}, nil
-	}
-	matchQuery := kw.Raw
-	matchMode := "NATURAL LANGUAGE"
-	searchRank := 20
-	semanticRank := 40
-	if booleanMode {
-		matchQuery = booleanPhraseSearchQuery(kw.Raw)
-		matchMode = "BOOLEAN"
-		searchRank = 10
-		semanticRank = 30
-	}
-	excludePredicate := ""
-	excludeArgs := make([]interface{}, 0, len(excludeSKUs))
-	if len(excludeSKUs) > 0 {
-		excludePredicate = " AND sku_code NOT IN (" + searchPlaceholders(len(excludeSKUs)) + ")"
-		for _, sku := range excludeSKUs {
-			excludeArgs = append(excludeArgs, sku)
-		}
-	}
-	branches := []string{fmt.Sprintf(`SELECT sku_code, %d AS match_rank,
-		               MATCH(search_text) AGAINST (? IN %s MODE) AS match_score,
-		               source_updated_at
-		          FROM product_search_documents
-		         WHERE MATCH(search_text) AGAINST (? IN %s MODE)%s`, searchRank, matchMode, matchMode, excludePredicate)}
-	args := []interface{}{matchQuery, matchQuery}
-	args = append(args, excludeArgs...)
-	if productSearchDocumentsSemanticTextExists(ctx, r.db.db) {
-		branches = append(branches, fmt.Sprintf(`SELECT sku_code, %d AS match_rank,
-			               MATCH(semantic_text) AGAINST (? IN %s MODE) AS match_score,
-			               source_updated_at
-			          FROM product_search_documents
-			         WHERE MATCH(semantic_text) AGAINST (? IN %s MODE)%s`, semanticRank, matchMode, matchMode, excludePredicate))
-		args = append(args, matchQuery, matchQuery)
-		args = append(args, excludeArgs...)
+	limit = normalizeSearchLimit(limit)
+	likePattern := "%" + strings.Join(strings.Fields(kw.Raw), "%") + "%"
+	hasSemanticText := productSearchDocumentsSemanticTextExists(ctx, r.db.db)
+	where := "search_text LIKE ?"
+	order := "CASE WHEN product_name LIKE ? THEN 0 ELSE 1 END"
+	args := []interface{}{likePattern, likePattern}
+	if hasSemanticText {
+		where = "(search_text LIKE ? OR semantic_text LIKE ?)"
+		order = "CASE WHEN product_name LIKE ? THEN 0 WHEN search_text LIKE ? THEN 1 ELSE 2 END"
+		args = []interface{}{likePattern, likePattern, likePattern, likePattern}
 	}
 	args = append(args, limit)
 	qctx, cancel := mysqlReadQueryContext(ctx)
 	defer cancel()
 	rows, err := r.db.db.QueryContext(qctx, `
-		SELECT d.sku_code AS erp_code, d.product_name, d.i_id, d.category
-		  FROM product_search_documents d
-		  JOIN (
-		    SELECT sku_code, MIN(match_rank) AS match_rank, MAX(match_score) AS match_score,
-		           MAX(source_updated_at) AS source_updated_at
-		      FROM (
-		        `+strings.Join(branches, "\n		        UNION ALL\n		        ")+`
-		      ) u
-		     GROUP BY sku_code
-		     ORDER BY match_rank ASC, match_score DESC, source_updated_at DESC, sku_code DESC
-		     LIMIT ?
-		  ) m ON m.sku_code = d.sku_code
-		 ORDER BY m.match_rank ASC, m.match_score DESC, d.source_updated_at DESC, d.sku_code DESC
-		`, args...)
+		SELECT sku_code AS erp_code, product_name, i_id, category
+		  FROM product_search_documents
+		 WHERE `+where+`
+		 ORDER BY `+order+`, source_updated_at DESC, sku_code DESC
+		 LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search product documents by text: %w", err)
 	}
