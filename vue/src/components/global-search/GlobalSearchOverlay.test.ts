@@ -106,4 +106,35 @@ describe('GlobalSearchOverlay performance states', () => {
     expect(wrapper.text()).toContain('当前网络较慢，已启用省流量模式')
     expect(wrapper.text()).not.toContain('没有找到匹配内容')
   })
+
+  it('labels retained results while a new weak-network query is updating', async () => {
+    Object.defineProperty(navigator, 'connection', {
+      configurable: true,
+      value: {
+        effectiveType: '3g',
+        saveData: false,
+        rtt: 450,
+        downlink: 0.4,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    })
+    const wrapper = mount(GlobalSearchOverlay, {
+      props: { open: true },
+      global: { stubs: { Teleport: true } },
+    })
+    const input = wrapper.get('input[placeholder="搜索任务、资产、产品、用户"]')
+
+    await input.setValue('医师节')
+    await vi.advanceTimersByTimeAsync(480)
+    await flushPromises()
+    expect(wrapper.text()).toContain('RW-20260806-A-003711')
+
+    mocks.query.mockImplementationOnce(() => new Promise(() => undefined))
+    await input.setValue('CGK001543')
+    await vi.advanceTimersByTimeAsync(480)
+
+    expect(wrapper.text()).toContain('正在更新“CGK001543”的结果，当前保留上一轮结果。')
+    expect(wrapper.text()).toContain('当前网络较慢，已启用省流量模式。')
+  })
 })

@@ -114,7 +114,9 @@
       </div>
       <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--v1-text-muted)]">
         <p v-if="slowHintVisible">搜索仍在进行，已自动减少弱网传输量...</p>
-        <p v-else-if="requestState === 'refreshing'">已显示最近结果，正在后台更新。</p>
+        <p v-else-if="isSearching && hasAnyResults">
+          正在更新“{{ normalizedKeyword }}”的结果，当前保留上一轮结果。
+        </p>
         <p v-if="networkConstrained">当前网络较慢，已启用省流量模式。</p>
       </div>
     </div>
