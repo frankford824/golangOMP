@@ -726,11 +726,26 @@ const statusFilterOptions = computed<BaseSelectOption[]>(() => [
 ])
 const accessRoleByCode = computed(() => new Map(accessRoles.value.map((role) => [role.code, role])))
 const accessRoleByID = computed(() => new Map(accessRoles.value.map((role) => [role.id, role])))
+const visibleAssignableRoleCodes = new Set([
+  'super_admin',
+  'department_admin',
+  'operations',
+  'auditor',
+  'designer',
+  'customization_operator',
+  'asset_submitter',
+  'asset_manager',
+  'asset_profile_admin',
+  'asset_template_admin',
+  'asset_settlement',
+])
 const detailDirectScopeByRoleID = computed(() => new Map(
   detailDirectAssignments.value.map((assignment) => [assignment.role_id, assignment.scope_mode]),
 ))
 const accessRoleGroups = computed<RoleOptionGroup[]>(() => groupRoleOptions(
-  accessRoles.value.map((role) => ({
+  accessRoles.value
+    .filter((role) => visibleAssignableRoleCodes.has(role.code))
+    .map((role) => ({
     code: role.code,
     display: accessRoleDisplayName(role.code, role.name),
     category: accessRoleCategory(role.code),
@@ -753,7 +768,8 @@ const orgPolicyRoleGroups = computed<RoleOptionGroup[]>(() => accessRoleGroups.v
 const canAssignAccessRoles = computed(() => canManageAccess.value && accessRoles.value.length > 0)
 const inheritedAccessRoleOptions = computed<RoleOption[]>(() => detailInheritedAssignments.value
   .map((assignment) => accessRoleByID.value.get(assignment.role_id))
-  .filter((role): role is AccessRole => !!role)
+  .filter((role): role is AccessRole => !!role && role.code !== 'member' && visibleAssignableRoleCodes.has(role.code))
+  .filter((role, index, roles) => roles.findIndex((candidate) => candidate.code === role.code) === index)
   .map((role) => ({
     code: role.code,
     display: accessRoleDisplayName(role.code, role.name),
@@ -768,9 +784,11 @@ const detailAccessRoleNames = computed(() => {
   const names = new Set<string>()
   for (const assignment of [...detailDirectAssignments.value, ...detailInheritedAssignments.value]) {
     const role = accessRoleByID.value.get(assignment.role_id)
-    if (role) names.add(accessRoleDisplayName(role.code, role.name))
+    if (role && role.code !== 'member' && visibleAssignableRoleCodes.has(role.code)) {
+      names.add(accessRoleDisplayName(role.code, role.name))
+    }
   }
-  return Array.from(names).join('、') || '成员'
+  return Array.from(names).join('、') || '系统基础角色'
 })
 const orgActionIsDelete = computed(() =>
   orgAction.value?.mode === 'deleteDepartment' ||
@@ -1038,19 +1056,19 @@ function mapRawUser(raw: Record<string, unknown>): UserRow {
 
 function accessRoleCategory(code: string): RoleOption['category'] {
   if (code.startsWith('asset_')) return 'asset_workbench'
-  if (['super_admin', 'access_admin', 'department_admin', 'team_lead', 'design_director'].includes(code)) {
+  if (['super_admin', 'department_admin'].includes(code)) {
     return 'management'
   }
   return 'business'
 }
 
 const accessRoleDisplayNames: Record<string, string> = {
-  member: '成员',
+  member: '系统基础角色',
   super_admin: '超级管理员',
   operations: '运营',
-  designer: '设计师',
-  customization_operator: '定制设计',
-  auditor: '审核员',
+  designer: '常规设计师',
+  customization_operator: '定制设计师',
+  auditor: '审核',
   asset_submitter: '素材提交员',
   asset_manager: '素材管理员',
   asset_profile_admin: '素材人员管理员',
@@ -1064,12 +1082,12 @@ const accessRoleDisplayNames: Record<string, string> = {
 }
 
 const accessRoleDescriptions: Record<string, string> = {
-  member: '系统默认基础角色',
-  super_admin: '系统保护的全局管理角色',
-  operations: '任务创建和运营处理',
-  designer: '设计处理和资源提交',
-  customization_operator: '定制设计内部处理',
-  auditor: '统一任务审核',
+  member: '系统自动赋予的隐藏基础角色',
+  super_admin: '全局系统、权限与 ERP 管理',
+  operations: '任务创建、指派与运营处理',
+  designer: '常规设计处理与源文件上传',
+  customization_operator: '定制设计处理与源文件上传',
+  auditor: '任务审核、交班与重开',
 }
 
 function accessRoleDisplayName(code: string, fallback: string): string {
@@ -1082,11 +1100,10 @@ function accessRoleDescription(code: string, fallback: string): string {
 
 function defaultAccessScope(code: string): ScopeMode {
   // 设计师需要看到全部任务才能协作排期，与运营、审核同为全局范围。
-  if (['super_admin', 'access_admin', 'operations', 'auditor', 'asset_manager', 'erp_operator', 'designer'].includes(code)) {
+  if (['super_admin', 'operations', 'auditor', 'asset_manager', 'designer'].includes(code)) {
     return 'global'
   }
-  if (['department_admin', 'design_director'].includes(code)) return 'own_department'
-  if (code === 'team_lead') return 'own_team'
+  if (code === 'department_admin') return 'own_department'
   return 'self'
 }
 

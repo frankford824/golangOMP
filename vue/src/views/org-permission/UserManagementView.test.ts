@@ -189,6 +189,13 @@ describe('UserManagementView role governance', () => {
       { id: 3, code: 'auditor', name: '审核员', description: '统一任务审核', system_protected: false, version: 1, permissions: [] },
       { id: 4, code: 'asset_manager', name: '素材管理员', description: '素材管理与发布', system_protected: false, version: 1, permissions: [] },
       { id: 5, code: 'super_admin', name: '超级管理员', description: '系统保护角色', system_protected: true, version: 1, permissions: [] },
+      { id: 6, code: 'department_admin', name: '部门管理员', description: '部门任务管理', system_protected: false, version: 1, permissions: [] },
+      { id: 7, code: 'designer', name: '设计', description: '常规设计处理', system_protected: false, version: 1, permissions: [] },
+      { id: 8, code: 'customization_operator', name: '定制设计', description: '定制设计处理', system_protected: false, version: 1, permissions: [] },
+      { id: 9, code: 'team_lead', name: '团队负责人', description: '历史团队管理', system_protected: false, version: 1, permissions: [] },
+      { id: 10, code: 'design_director', name: '设计负责人', description: '历史设计管理', system_protected: false, version: 1, permissions: [] },
+      { id: 11, code: 'access_admin', name: '权限管理员', description: '历史权限管理', system_protected: false, version: 1, permissions: [] },
+      { id: 12, code: 'erp_operator', name: 'ERP 操作员', description: '历史 ERP 管理', system_protected: false, version: 1, permissions: [] },
     ])
     vi.mocked(accessPolicyApi.effective).mockImplementation(async (userId: number) => ({
       user_id: userId,
@@ -245,13 +252,24 @@ describe('UserManagementView role governance', () => {
     const checkboxes = Array.from(
       document.body.querySelectorAll<HTMLInputElement>('.um-modal input[type="checkbox"]'),
     )
-    expect(checkboxes.map((item) => item.value)).toEqual(['super_admin', 'member', 'operations', 'auditor', 'asset_manager'])
-    expect(checkboxes.find((item) => item.value === 'member')?.disabled).toBe(true)
+    expect(checkboxes.map((item) => item.value)).toEqual([
+      'super_admin',
+      'department_admin',
+      'operations',
+      'auditor',
+      'designer',
+      'customization_operator',
+      'asset_manager',
+    ])
+    expect(checkboxes.some((item) => item.value === 'member')).toBe(false)
+    expect(checkboxes.some((item) => ['team_lead', 'design_director', 'access_admin', 'erp_operator'].includes(item.value))).toBe(false)
     expect(checkboxes.find((item) => item.value === 'operations')?.checked).toBe(true)
     expect(checkboxes.find((item) => item.value === 'auditor')?.checked).toBe(false)
     const modalText = modal?.textContent ?? ''
     expect(modalText).toContain('由部门或小组自动应用')
-    expect(modalText).toContain('审核员')
+    expect(modalText).toContain('审核')
+    expect(modalText).toContain('常规设计师')
+    expect(modalText).toContain('定制设计师')
     expect(modalText).not.toContain('权限与范围')
 
     checkboxes.find((item) => item.value === 'asset_manager')?.click()
