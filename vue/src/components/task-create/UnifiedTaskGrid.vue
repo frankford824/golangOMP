@@ -272,6 +272,7 @@ async function boot() {
       rows: () => props.rows,
       worksheet: () => facade.getActiveSheet()?.worksheet ?? null,
       hooks: facade.getSheetHooks(),
+      onBeforeFiles: readRowsFromWorkbook,
       onFiles(rowId, column, files) {
         const field = column === 'source_assets' ? 'source_assets' : 'reference_assets'
         emit('files', { rowId, field, files })

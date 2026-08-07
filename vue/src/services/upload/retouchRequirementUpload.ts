@@ -30,6 +30,24 @@ export interface UploadRetouchRequirementPendingAssetsOptions {
   signal?: AbortSignal
 }
 
+export const RETOUCH_SOURCE_UPLOAD_CONCURRENCY = 3
+
+async function forEachWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+) {
+  let nextIndex = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex]
+      nextIndex += 1
+      await worker(item)
+    }
+  })
+  await Promise.all(workers)
+}
+
 export async function uploadRetouchRequirementPendingAssets(
   taskId: string,
   createdRequirements: RetouchRequirement[],
@@ -94,7 +112,7 @@ export async function uploadRetouchRequirementPendingAssets(
     }
 
     const sourceFiles = draft.pendingSourceFiles ?? []
-    for (const file of sourceFiles) {
+    await forEachWithConcurrency(sourceFiles, RETOUCH_SOURCE_UPLOAD_CONCURRENCY, async (file) => {
       options?.onStatusMessage?.(`正在上传需求 ${index + 1} 素材：${file.name}`)
       try {
         await uploadTaskFileViaAssetSession(
@@ -112,7 +130,7 @@ export async function uploadRetouchRequirementPendingAssets(
           message: formatUploadFailureMessage('main_complete', error),
         })
       }
-    }
+    })
   }
 
   return { failures, referenceUploaded, sourceUploaded }

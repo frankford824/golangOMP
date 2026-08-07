@@ -178,6 +178,37 @@ describe('unified task compose domain', () => {
     expect(buildPlanningInputs([planning], true)[0]?.sku_code_type).toBe('customization')
   })
 
+  it('allows a 40-file retouch batch but rejects more than 50 or a source over 300 MB', () => {
+    const source = (index: number, size = 1024) => ({
+      id: `source-${index}`,
+      name: `source-${index}.psd`,
+      status: 'local' as const,
+      file: { size } as File,
+    })
+    const forty = createComposeRow({
+      id: 'retouch-40',
+      design_requirement: '批量修图',
+      source_assets: Array.from({ length: 40 }, (_, index) => source(index)),
+    })
+    expect(validateCompose('retouch', common, [forty], new Date('2026-07-16T00:00:00Z'))).toEqual([])
+
+    const fiftyOne = createComposeRow({
+      id: 'retouch-51',
+      design_requirement: '批量修图',
+      source_assets: Array.from({ length: 51 }, (_, index) => source(index)),
+    })
+    expect(validateCompose('retouch', common, [fiftyOne], new Date('2026-07-16T00:00:00Z')))
+      .toContainEqual(expect.objectContaining({ field: 'source_assets', message: '每项待修素材最多 50 个文件' }))
+
+    const oversized = createComposeRow({
+      id: 'retouch-large',
+      design_requirement: '批量修图',
+      source_assets: [source(1, 300 * 1024 * 1024 + 1)],
+    })
+    expect(validateCompose('retouch', common, [oversized], new Date('2026-07-16T00:00:00Z')))
+      .toContainEqual(expect.objectContaining({ field: 'source_assets', message: expect.stringContaining('超过 300 MB') }))
+  })
+
   it('rejects expired deadlines and preserves single-task dimensions and row notes', () => {
     const row = createComposeRow({
       id: 'dimension-row',

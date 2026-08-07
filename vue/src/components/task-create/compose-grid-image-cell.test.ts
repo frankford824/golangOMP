@@ -17,6 +17,7 @@ describe('compose grid image cell bridge', () => {
     const element = document.createElement('div')
     const insert = vi.fn().mockResolvedValue(true)
     const onFiles = vi.fn()
+    const calls: string[] = []
     const columns: ComposeColumn[] = [{ key: 'reference_assets', label: '参考图', width: 120, kind: 'asset' }]
     const binding = bindComposeGridImageCells({
       element,
@@ -27,7 +28,8 @@ describe('compose grid image cell bridge', () => {
         onCellDragOver: () => ({ dispose: vi.fn() }),
         onCellDrop: () => ({ dispose: vi.fn() }),
       },
-      onFiles,
+      onBeforeFiles: () => calls.push('flush'),
+      onFiles: (...args) => { calls.push('files'); onFiles(...args) },
     })
     binding.setActive({ row: 1, col: 0 })
     const file = new File(['image'], 'reference.png', { type: 'image/png' })
@@ -39,6 +41,7 @@ describe('compose grid image cell bridge', () => {
 
     expect(insert).toHaveBeenCalledWith(file)
     expect(onFiles).toHaveBeenCalledWith('row-1', 'reference_assets', [file])
+    expect(calls).toEqual(['flush', 'files'])
     binding.dispose()
   })
 
@@ -70,6 +73,31 @@ describe('compose grid image cell bridge', () => {
     await Promise.resolve()
 
     expect(onFiles).toHaveBeenCalledWith('row-1', 'source_assets', [source])
+    binding.dispose()
+  })
+
+  it('keeps a forty-file source drop instead of applying the five-image reference limit', async () => {
+    const element = document.createElement('div')
+    const onFiles = vi.fn()
+    const files = Array.from({ length: 40 }, (_, index) => new File(['psd'], `source-${index + 1}.psd`, { type: 'application/octet-stream' }))
+    const binding = bindComposeGridImageCells({
+      element,
+      columns: [{ key: 'source_assets', label: '待修素材', width: 140, kind: 'asset' }],
+      rows: () => [createComposeRow({ id: 'row-1' })],
+      worksheet: () => null,
+      hooks: {
+        onCellDragOver: () => ({ dispose: vi.fn() }),
+        onCellDrop: () => ({ dispose: vi.fn() }),
+      },
+      onFiles,
+    })
+    binding.setActive({ row: 1, col: 0 })
+    const event = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'dataTransfer', { value: { files, dropEffect: 'none' } })
+    element.dispatchEvent(event)
+    await Promise.resolve()
+
+    expect(onFiles).toHaveBeenCalledWith('row-1', 'source_assets', files)
     binding.dispose()
   })
 })

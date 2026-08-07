@@ -155,7 +155,7 @@
                   <textarea v-else-if="longTextColumn(column.key)" :value="String(row[column.key as keyof ComposeRow] || '')" rows="2" @input="updateRowField(row.id, column.key, ($event.target as HTMLTextAreaElement).value)" />
                   <input v-else :type="column.kind === 'number' ? 'number' : 'text'" :value="String(row[column.key as keyof ComposeRow] || '')" @input="updateRowField(row.id, column.key, ($event.target as HTMLInputElement).value)" />
                 </label>
-                <label v-if="showSetHint" class="mobile-switch">建议做成套装<input v-model="row.set_mode_hint" type="checkbox" /></label>
+                <label v-if="showSetHint" class="mobile-switch">建议做成套装<input :checked="row.set_mode_hint" type="checkbox" @change="updateRowField(row.id, 'set_mode_hint', ($event.target as HTMLInputElement).checked)" /></label>
                 <button class="asset-button" type="button" @click.stop="openFilePicker(row.id, 'reference_assets')"><ImagePlus :size="16" />参考图 {{ row.reference_assets.length ? `(${row.reference_assets.length})` : '' }}</button>
                 <button v-if="intent === 'retouch'" class="asset-button" type="button" @click.stop="openFilePicker(row.id, 'source_assets')"><Paperclip :size="16" />待修素材 {{ row.source_assets.length ? `(${row.source_assets.length})` : '' }}</button>
               </div>
@@ -177,7 +177,7 @@
           </section>
           <section v-if="showSetHint" class="drawer-section hint-section">
             <div><h4>建议做成套装</h4><p>给设计师的参考：最终做单图还是套装，由设计师在设计时决定。</p></div>
-            <input v-model="selectedRow.set_mode_hint" type="checkbox" aria-label="建议按套装设计" />
+            <input :checked="selectedRow.set_mode_hint" type="checkbox" aria-label="建议按套装设计" @change="updateSelected('set_mode_hint', ($event.target as HTMLInputElement).checked)" />
           </section>
           <section v-if="intent === 'modify_existing' || intent === 'new_design'" class="drawer-section spec-section">
             <h4>生产规格</h4>
@@ -194,7 +194,7 @@
             <p>宽、高、面积与这里的形态/工艺会随 SKU 保存，并参与成本规则匹配和 ERP 同步。</p>
           </section>
           <section class="drawer-section"><h4>{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</h4><div class="asset-list"><article v-for="asset in selectedRow.reference_assets" :key="asset.id"><img v-if="asset.preview_url" :src="asset.preview_url" alt="" /><FileImage v-else :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ assetStatusText(asset.status) }}</span></div><button type="button" aria-label="移除文件" @click="removeAsset(selectedRow.id, 'reference_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'reference_assets')"><ImagePlus :size="16" />添加{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</button></section>
-          <section v-if="intent === 'retouch'" class="drawer-section"><h4>待修素材</h4><div class="asset-list"><article v-for="asset in selectedRow.source_assets" :key="asset.id"><FileArchive :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ asset.error || assetStatusText(asset.status) }}</span></div><button type="button" @click="removeAsset(selectedRow.id, 'source_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'source_assets')"><Paperclip :size="16" />添加图片、PSD / AI 或 ZIP 素材</button></section>
+          <section v-if="intent === 'retouch'" class="drawer-section"><h4>待修素材</h4><p>支持图片、PSD / AI、ZIP / RAR 等源文件；每项可一次多选，最多 50 个文件，单文件不超过 300 MB。</p><div class="asset-list"><article v-for="asset in selectedRow.source_assets" :key="asset.id"><FileArchive :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ asset.error || assetStatusText(asset.status) }}</span></div><button type="button" @click="removeAsset(selectedRow.id, 'source_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'source_assets')"><Paperclip :size="16" />批量添加待修素材</button></section>
           <section class="drawer-section"><h4>本行提示</h4><ul v-if="selectedRowViolations.length" class="drawer-errors"><li v-for="issue in selectedRowViolations" :key="`${issue.field}-${issue.message}`">{{ issue.message }}</li></ul><p v-else class="drawer-ok"><CheckCircle2 :size="15" />本行信息已完整</p></section>
         </aside>
       </div>
@@ -482,13 +482,14 @@ function replaceRows(next: ComposeRow[]) {
   else if (next[0]) selectRow(next[0].id)
 }
 function longTextColumn(key: ComposeColumnKey) { return key === 'design_requirement' || key === 'description_spec' || key === 'note' || key === 'special_note' }
-function updateRowField(rowId: string, key: ComposeColumnKey, value: string) {
+function updateRowField(rowId: string, key: ComposeColumnKey, value: string | boolean) {
   const row = rows.value.find((item) => item.id === rowId)
   if (!row) return
-  if (['quantity', 'width', 'height', 'area'].includes(key)) (row as Record<string, unknown>)[key] = value.trim() ? Number(value) : undefined
+  if (['quantity', 'width', 'height', 'area'].includes(key)) (row as Record<string, unknown>)[key] = String(value).trim() ? Number(value) : undefined
   else (row as Record<string, unknown>)[key] = value
 }
 function updateSelected(key: ComposeColumnKey, value: unknown) {
+  gridRef.value?.readRowsFromWorkbook?.()
   if (!selectedRow.value) return
   ;(selectedRow.value as Record<string, unknown>)[key] = value
   // The drawer edits the row model outside Univer. Rebuild only for this
@@ -498,6 +499,7 @@ function updateSelected(key: ComposeColumnKey, value: unknown) {
 function mobileRowTitle(row: ComposeRow) { return row.product_name || row.description_spec || row.design_requirement || row.erp_sku || '待完善' }
 
 function openFilePicker(rowId: string, field: 'reference_assets' | 'source_assets') {
+  gridRef.value?.readRowsFromWorkbook?.()
   pendingFileRowId.value = rowId
   ;(field === 'source_assets' ? sourceInput.value : referenceInput.value)?.click()
 }
@@ -511,8 +513,13 @@ function handleFileInput(event: Event, field: 'reference_assets' | 'source_asset
 async function addFiles(payload: { rowId: string; field: 'reference_assets' | 'source_assets'; files: File[] }) {
   const row = rows.value.find((item) => item.id === payload.rowId)
   if (!row) return
-  const limit = intent.value === 'planning_sku' ? 1 : 5
+  const limit = intent.value === 'planning_sku' ? 1 : intent.value === 'retouch' && payload.field === 'source_assets' ? 50 : 5
   const remaining = Math.max(0, limit - row[payload.field].length)
+  if (payload.files.length > remaining) {
+    submitError.value = remaining > 0
+      ? `本次只加入前 ${remaining} 个文件；${payload.field === 'source_assets' ? '每项待修素材最多 50 个文件' : intent.value === 'planning_sku' ? '每个 SKU 只能上传 1 张产品图' : '每行最多上传 5 张参考图'}。`
+      : payload.field === 'source_assets' ? '每项待修素材最多 50 个文件。' : intent.value === 'planning_sku' ? '每个 SKU 只能上传 1 张产品图。' : '每行最多上传 5 张参考图。'
+  }
   const drafts = payload.files.slice(0, remaining).map<ComposeAssetDraft>((file) => ({ id: generateActionId(), file, name: file.name, preview_url: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, status: intent.value === 'retouch' && payload.field === 'source_assets' ? 'local' : 'uploading' }))
   row[payload.field].push(...drafts)
   if (intent.value === 'retouch') {

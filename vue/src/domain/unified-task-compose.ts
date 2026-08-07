@@ -239,10 +239,12 @@ export function validateCompose(
       for (const asset of assets) {
         if (asset.status === 'uploading') add(field, '仍有文件正在上传')
         if (asset.status === 'failed') add(field, asset.error || '文件上传失败，请重试')
-        if (asset.file && asset.file.size > 20 * 1024 * 1024) add(field, `${asset.name} 超过 20 MB，请压缩或拆分后重试`)
+        const maxBytes = intent === 'retouch' && field === 'source_assets' ? 300 * 1024 * 1024 : 20 * 1024 * 1024
+        if (asset.file && asset.file.size > maxBytes) add(field, `${asset.name} 超过 ${maxBytes / 1024 / 1024} MB，请压缩或拆分后重试`)
       }
     }
     if (row.reference_assets.length > (intent === 'planning_sku' ? 1 : 5)) add('reference_assets', intent === 'planning_sku' ? '每个策划 SKU 只能上传一张产品图' : '每行最多上传 5 张参考图')
+    if (intent === 'retouch' && row.source_assets.length > 50) add('source_assets', '每项待修素材最多 50 个文件')
   })
   return violations
 }

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { RetouchRequirement, RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
-import { uploadRetouchRequirementPendingAssets } from '../retouchRequirementUpload'
+import {
+  RETOUCH_SOURCE_UPLOAD_CONCURRENCY,
+  uploadRetouchRequirementPendingAssets,
+} from '../retouchRequirementUpload'
 
 vi.mock('@/services/upload/assetUploadFlow', () => ({
   uploadReferenceFileRef: vi.fn(),
@@ -68,5 +71,29 @@ describe('uploadRetouchRequirementPendingAssets', () => {
 
     expect(result.failures.length).toBeGreaterThan(0)
     expect(uploadReferenceFileRef).not.toHaveBeenCalled()
+  })
+
+  it('uploads a large source-file batch with bounded concurrency', async () => {
+    const sourceFiles = Array.from({ length: 8 }, (_, index) => new File(['s'], `src-${index + 1}.psd`))
+    const drafts: RetouchRequirementDraft[] = [
+      { description: 'batch', sortOrder: 1, pendingSourceFiles: sourceFiles },
+    ]
+    const created: RetouchRequirement[] = [{ id: 10, taskId: 1, description: 'batch', sortOrder: 1 }]
+    let active = 0
+    let maxActive = 0
+    vi.mocked(uploadTaskFileViaAssetSession).mockImplementation(async () => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      active -= 1
+      return {} as never
+    })
+
+    const result = await uploadRetouchRequirementPendingAssets('task-3', created, drafts)
+
+    expect(result.failures).toHaveLength(0)
+    expect(result.sourceUploaded).toBe(8)
+    expect(maxActive).toBe(RETOUCH_SOURCE_UPLOAD_CONCURRENCY)
+    expect(uploadTaskFileViaAssetSession).toHaveBeenCalledTimes(8)
   })
 })

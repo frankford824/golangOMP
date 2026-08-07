@@ -29,6 +29,7 @@ export interface ComposeImageCellOptions {
   rows: () => ComposeRow[]
   worksheet: () => UniverWorksheetLike | null
   hooks: SheetHookLike
+  onBeforeFiles?(): void
   onFiles(rowId: string, column: ComposeColumnKey, files: File[]): void
   onActiveCell?(position: ComposeGridCellPosition): void
 }
@@ -65,8 +66,13 @@ export function bindComposeGridImageCells(options: ComposeImageCellOptions): Com
     if (!isComposeImageColumn(column)) return
     const row = options.rows()[target.row - 1]
     if (!row) return
-    const accepted = files.filter((file) => composeImageColumnAccepts(column, file)).slice(0, 5)
+    const limit = column.key === 'source_assets' ? 50 : 5
+    const accepted = files.filter((file) => composeImageColumnAccepts(column, file)).slice(0, limit)
     if (!accepted.length) return
+    // SheetEditEnded is debounced. If the operator types a requirement and
+    // immediately pastes an image, rebuilding the workbook for the new asset
+    // can otherwise restore the older row model and erase the fresh text.
+    options.onBeforeFiles?.()
     const worksheet = options.worksheet()
     if (worksheet && accepted[0].type.startsWith('image/')) {
       await worksheet.getRange(target.row, target.col, 1, 1).insertCellImageAsync(accepted[0]).catch(() => false)

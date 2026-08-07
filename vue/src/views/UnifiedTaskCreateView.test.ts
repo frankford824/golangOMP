@@ -308,6 +308,53 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
+  it('flushes pending grid text before a drawer checkbox rebuilds the workbook', async () => {
+    mocks.route.query = { intent: 'modify_existing' }
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: {
+            props: ['rows'],
+            emits: ['update:rows'],
+            methods: {
+              readRowsFromWorkbook() {
+                this.$emit('update:rows', this.rows.map((row: Record<string, unknown>) => ({ ...row, design_requirement: '刚输入且必须保留的修改要求' })))
+              },
+            },
+            template: '<div class="grid-stub">{{ rows[0].design_requirement }}|{{ rows[0].set_mode_hint }}</div>',
+          },
+          IIdSelector: true,
+          RouterLink: true,
+        },
+      },
+    })
+
+    await wrapper.get('input[aria-label="建议按套装设计"]').setValue(true)
+    await flushPromises()
+
+    expect(wrapper.get('.grid-stub').text()).toContain('刚输入且必须保留的修改要求')
+    expect(wrapper.get('.grid-stub').text()).toContain('true')
+    wrapper.unmount()
+  })
+
+  it('accepts forty retouch source files in one multi-select operation', async () => {
+    mocks.route.query = { intent: 'retouch' }
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
+    })
+    await wrapper.findAll('.asset-button').find((button) => button.text().includes('待修素材'))?.trigger('click')
+    const input = wrapper.get('input[aria-label="上传待修素材文件"]')
+    const files = Array.from({ length: 40 }, (_, index) => new File([`source-${index}`], `source-${index + 1}.psd`, { type: 'application/octet-stream' }))
+    Object.defineProperty(input.element, 'files', { configurable: true, value: files })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.findAll('.row-drawer .asset-list article')).toHaveLength(40)
+    expect(wrapper.text()).toContain('最多 50 个文件')
+    expect(wrapper.text()).not.toContain('每项待修素材最多 50 个文件。')
+    wrapper.unmount()
+  })
+
   it('deletes a multi-row Univer selection in one operation and keeps one editable row', async () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
