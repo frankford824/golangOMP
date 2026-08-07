@@ -17,6 +17,9 @@ import (
 
 const (
 	CodeInvalidQuery = "invalid_query"
+
+	externalSearchBudget = 650 * time.Millisecond
+	autoHybridBudget     = 700 * time.Millisecond
 )
 
 type Service struct {
@@ -194,34 +197,55 @@ func (s *Service) SearchWithMode(ctx context.Context, actor domain.RequestActor,
 		meta.Mode, meta.Degraded, meta.Reason = "exact", true, "hybrid_not_configured"
 		return result, meta, nil
 	}
-	var result *domain.SearchResultGroup
-	var appErr *domain.AppError
-	var hits []domain.AIRetrievalHit
-	var retrievalMeta domain.AIRetrievalMeta
-	var retrievalErr error
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		result, appErr = s.Search(ctx, actor, q, scope, limit)
-	}()
-	go func() {
-		defer wg.Done()
-		hits, retrievalMeta, retrievalErr = s.retrieval.Search(ctx, actor, q, min(limit, 20))
-	}()
-	wg.Wait()
-	if appErr != nil {
-		return nil, meta, appErr
+	type exactOutcome struct {
+		result *domain.SearchResultGroup
+		err    *domain.AppError
 	}
-	if retrievalErr != nil {
+	type retrievalOutcome struct {
+		hits []domain.AIRetrievalHit
+		meta domain.AIRetrievalMeta
+		err  error
+	}
+	exactCh := make(chan exactOutcome, 1)
+	retrievalCh := make(chan retrievalOutcome, 1)
+	retrievalCtx := ctx
+	cancelRetrieval := func() {}
+	if requestedMode == "auto" {
+		retrievalCtx, cancelRetrieval = context.WithTimeout(ctx, autoHybridBudget)
+	}
+	defer cancelRetrieval()
+	go func() {
+		result, appErr := s.Search(ctx, actor, q, scope, limit)
+		exactCh <- exactOutcome{result: result, err: appErr}
+	}()
+	go func() {
+		hits, retrievalMeta, retrievalErr := s.retrieval.Search(retrievalCtx, actor, q, min(limit, 20))
+		retrievalCh <- retrievalOutcome{hits: hits, meta: retrievalMeta, err: retrievalErr}
+	}()
+	exact := <-exactCh
+	if exact.err != nil {
+		return nil, meta, exact.err
+	}
+	var retrieval retrievalOutcome
+	if requestedMode == "auto" {
+		select {
+		case retrieval = <-retrievalCh:
+		case <-retrievalCtx.Done():
+			meta.Mode, meta.Degraded, meta.Reason = "exact", true, "hybrid_timeout"
+			return exact.result, meta, nil
+		}
+	} else {
+		retrieval = <-retrievalCh
+	}
+	if retrieval.err != nil {
 		meta.Mode, meta.Degraded, meta.Reason = "exact", true, "hybrid_unavailable"
-		s.logger.Warn("hybrid global search degraded", zap.Error(retrievalErr))
-		return result, meta, nil
+		s.logger.Warn("hybrid global search degraded", zap.Error(retrieval.err))
+		return exact.result, meta, nil
 	}
-	meta.Mode, meta.Degraded, meta.Candidates, meta.Reason = retrievalMeta.Mode, retrievalMeta.Degraded, retrievalMeta.Candidates, retrievalMeta.Reason
-	mergeRetrievalHits(result, hits, strings.TrimSpace(scope), normalizeSearchLimit(limit))
-	normalizeNilSlices(result)
-	return result, meta, nil
+	meta.Mode, meta.Degraded, meta.Candidates, meta.Reason = retrieval.meta.Mode, retrieval.meta.Degraded, retrieval.meta.Candidates, retrieval.meta.Reason
+	mergeRetrievalHits(exact.result, retrieval.hits, strings.TrimSpace(scope), normalizeSearchLimit(limit))
+	normalizeNilSlices(exact.result)
+	return exact.result, meta, nil
 }
 
 var deterministicQueryPattern = regexp.MustCompile(`(?i)^(?:[a-z]{1,8}[-_/])?[a-z0-9][a-z0-9._/-]{2,63}$`)
@@ -373,7 +397,9 @@ func (s *Service) searchExternalAssets(ctx context.Context, actor domain.Request
 	if s.external == nil || !domain.ActorHasPermission(actor, domain.PermissionAssetView) || publishedAssetSearchOnly(actor) {
 		return []domain.SearchAsset{}, nil
 	}
-	items, err := s.external.SearchGlobal(ctx, q, limit)
+	searchCtx, cancel := context.WithTimeout(ctx, externalSearchBudget)
+	defer cancel()
+	items, err := s.external.SearchGlobal(searchCtx, q, limit)
 	if err != nil {
 		return []domain.SearchAsset{}, nil
 	}
@@ -422,6 +448,7 @@ func runSearchJobs(logger *zap.Logger, jobs ...searchJob) error {
 					zap.String("branch", job.name),
 					zap.Int64("duration_ms", duration.Milliseconds()),
 					zap.Bool("error", err != nil),
+					zap.Error(err),
 				)
 			}
 			if err != nil {

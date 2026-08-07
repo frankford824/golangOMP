@@ -74,8 +74,13 @@ function resourceGroup(id: number) {
 }
 
 const roles = [
-  { id: 1, code: 'member', name: '成员', description: '基础访问', system_protected: true, version: 1, permissions: ['account.use'] },
-  { id: 2, code: 'reviewer', name: '审核人员', description: '审核任务', system_protected: false, version: 1, permissions: ['task.audit'] },
+  { id: 1, code: 'member', name: '系统基础角色', description: '基础访问', system_protected: true, version: 1, permissions: ['account.use'] },
+  { id: 2, code: 'super_admin', name: '超级管理员', description: '全局系统管理', system_protected: true, version: 1, permissions: ['account.use', 'access.manage'] },
+  { id: 3, code: 'department_admin', name: '部门管理员', description: '部门任务管理', system_protected: false, version: 1, permissions: ['account.use', 'task.assign'] },
+  { id: 4, code: 'operations', name: '运营', description: '运营处理', system_protected: false, version: 1, permissions: ['account.use', 'task.create'] },
+  { id: 5, code: 'auditor', name: '审核', description: '审核任务', system_protected: false, version: 1, permissions: ['account.use', 'task.audit'] },
+  { id: 6, code: 'designer', name: '常规设计师', description: '常规设计处理', system_protected: false, version: 1, permissions: ['account.use', 'task.design.submit'] },
+  { id: 7, code: 'customization_operator', name: '定制设计师', description: '定制设计处理', system_protected: false, version: 1, permissions: ['account.use', 'task.design.submit'] },
 ]
 
 export const v8Handler: MockHandler = (request) => {

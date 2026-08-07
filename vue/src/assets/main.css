@@ -1,16 +1,8 @@
 @font-face {
-  font-family: 'YB Source Han Sans';
-  font-style: normal;
-  font-weight: 400 900;
-  font-display: block;
-  src: url('@fontpkg/source-han-sans-cn-vf/SourceHanSansCN-VF.ttf.woff2') format('woff2');
-}
-
-@font-face {
   font-family: 'YB JetBrains Mono';
   font-style: normal;
   font-weight: 400;
-  font-display: block;
+  font-display: optional;
   src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2') format('woff2');
 }
 
@@ -18,7 +10,7 @@
   font-family: 'YB JetBrains Mono';
   font-style: normal;
   font-weight: 500;
-  font-display: block;
+  font-display: optional;
   src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2') format('woff2');
 }
 
@@ -26,7 +18,7 @@
   font-family: 'YB JetBrains Mono';
   font-style: normal;
   font-weight: 700;
-  font-display: block;
+  font-display: optional;
   src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2') format('woff2');
 }
 
@@ -44,10 +36,10 @@
 
 :root {
   color-scheme: light;
-  --yb-font-display: 'YB Source Han Sans';
-  --yb-font-text: 'YB Source Han Sans';
-  --yb-font-data: 'YB JetBrains Mono', 'YB Source Han Sans';
-  --yb-font-mono: 'YB JetBrains Mono', 'YB Source Han Sans';
+  --yb-font-display: Inter, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --yb-font-text: Inter, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --yb-font-data: 'YB JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --yb-font-mono: 'YB JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   --yb-bg-page: 245 246 248;
   --yb-bg-detail: 238 242 248;
   --yb-surface: 255 255 255;

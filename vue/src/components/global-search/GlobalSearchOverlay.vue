@@ -9,6 +9,7 @@
       <input
         ref="inputRef"
         v-model="keyword"
+        :aria-busy="isSearching"
         class="w-full rounded-md border border-[var(--v1-border)] bg-[var(--v1-bg-surface-soft)] px-3 py-2 text-sm text-[var(--v1-text-primary)] outline-none"
         placeholder="搜索任务、资产、产品、用户"
       />
@@ -29,15 +30,36 @@
         </button>
       </div>
       <div class="mt-4 max-h-[min(70vh,640px)] space-y-4 overflow-y-auto pr-1">
+        <div v-if="showMinimumHint" class="search-state-card" role="status">
+          请输入至少 2 个字或完整编号，减少无效扫描。
+        </div>
+        <div v-else-if="isSearching && !hasAnyResults" class="search-skeleton" role="status" aria-live="polite">
+          <span class="sr-only">正在搜索</span>
+          <div v-for="index in 4" :key="index" class="search-skeleton-row">
+            <span />
+            <span />
+          </div>
+        </div>
+        <div v-else-if="requestState === 'error'" class="search-state-card search-state-card--error" role="alert">
+          <div>
+            <strong>搜索暂时不可用</strong>
+            <p>{{ errorMessage }}</p>
+          </div>
+          <button type="button" @click="retrySearch">重试</button>
+        </div>
+        <div v-else-if="requestState === 'success' && !hasAnyResults" class="search-state-card" role="status">
+          没有找到匹配内容，可以换完整编号或更具体的关键词。
+        </div>
         <section
           v-for="group in panelGroups"
+          v-show="hasAnyResults"
           :key="group.key"
           class="rounded-lg border border-[var(--v1-border)] bg-[var(--v1-bg-surface-soft)] p-3"
         >
           <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
             <p class="text-xs font-semibold text-[var(--v1-text-secondary)]">
               {{ group.label }}
-              <span class="font-normal text-[var(--v1-text-muted)]">（{{ group.totalCount }}）</span>
+              <span class="font-normal text-[var(--v1-text-muted)]">（{{ group.countLabel }}）</span>
             </p>
             <button
               v-if="group.hasMore"
@@ -87,13 +109,14 @@
                 </span>
               </div>
             </button>
-            <p v-if="group.totalCount === 0" class="px-2 py-3 text-xs text-[var(--v1-text-muted)]">
-              无结果
-            </p>
           </div>
         </section>
       </div>
-      <p v-if="slowHintVisible" class="mt-2 text-xs text-[var(--v1-text-muted)]">搜索较慢，正在查询...</p>
+      <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--v1-text-muted)]">
+        <p v-if="slowHintVisible">搜索仍在进行，已自动减少弱网传输量...</p>
+        <p v-else-if="requestState === 'refreshing'">已显示最近结果，正在后台更新。</p>
+        <p v-if="networkConstrained">当前网络较慢，已启用省流量模式。</p>
+      </div>
     </div>
   </div>
 </template>
@@ -106,6 +129,7 @@ import {
   mapV1SearchResultsToOverlayBundle,
   parseV1GlobalSearchResponse,
   type GlobalSearchOverlayHit,
+  type GlobalSearchOverlayBundle,
   type V1GlobalSearchScope,
 } from '@/domain/global-search'
 import { searchApi } from '@/services/api/searchApi'
@@ -113,6 +137,26 @@ import { usePermission } from '@/composables/usePermission'
 import { PermissionEnum } from '@/types'
 
 const PREVIEW_LIMIT = 5
+const PREVIEW_FETCH_LIMIT = PREVIEW_LIMIT + 1
+const CACHE_TTL_MS = 30_000
+const CACHE_MAX_ENTRIES = 24
+const FAST_DEBOUNCE_MS = 220
+const CONSTRAINED_DEBOUNCE_MS = 480
+
+type SearchRequestState = 'idle' | 'debouncing' | 'loading' | 'refreshing' | 'success' | 'error'
+type NetworkInformationLike = EventTarget & {
+  effectiveType?: string
+  saveData?: boolean
+  rtt?: number
+  downlink?: number
+}
+type NavigatorWithConnection = Navigator & {
+  connection?: NetworkInformationLike
+}
+type CacheEntry = {
+  bundle: GlobalSearchOverlayBundle
+  savedAt: number
+}
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [boolean] }>()
@@ -125,6 +169,11 @@ const scope = ref<V1GlobalSearchScope>('all')
 const slowHintVisible = ref(false)
 const resultBundle = ref(emptyGlobalSearchBundle())
 const activeFlatIndex = ref(0)
+const requestState = ref<SearchRequestState>('idle')
+const errorMessage = ref('')
+const networkConstrained = ref(false)
+const online = ref(true)
+const resultCache = new Map<string, CacheEntry>()
 
 const scopes: V1GlobalSearchScope[] = ['all', 'tasks', 'assets', 'products', 'users']
 
@@ -160,6 +209,7 @@ type PanelGroup = {
   label: string
   items: GlobalSearchOverlayHit[]
   totalCount: number
+  countLabel: string
   hasMore: boolean
 }
 
@@ -173,10 +223,25 @@ const panelGroups = computed((): PanelGroup[] => {
       label: g.label,
       items,
       totalCount: full.length,
+      countLabel: isPreview && full.length > PREVIEW_LIMIT ? `${PREVIEW_LIMIT}+` : String(full.length),
       hasMore: isPreview && full.length > PREVIEW_LIMIT,
     }
   })
 })
+
+const hasAnyResults = computed(() =>
+  panelGroups.value.some((group) => group.items.length > 0),
+)
+
+const normalizedKeyword = computed(() => keyword.value.trim())
+const showMinimumHint = computed(() =>
+  normalizedKeyword.value.length > 0 && Array.from(normalizedKeyword.value).length < 2,
+)
+const isSearching = computed(() =>
+  requestState.value === 'debouncing' ||
+  requestState.value === 'loading' ||
+  requestState.value === 'refreshing',
+)
 
 const flatResults = computed(() => {
   const out: { groupKey: string; index: number; result: GlobalSearchOverlayHit }[] = []
@@ -203,48 +268,134 @@ function clearSearchTimers(): void {
   }
 }
 
-watch([keyword, scope, open], () => {
-  if (!open.value || !keyword.value.trim()) {
+function cacheKey(q: string, searchScope: V1GlobalSearchScope, limit: number): string {
+  return `${searchScope}:${limit}:${q.toLocaleLowerCase()}`
+}
+
+function readCachedResult(key: string): GlobalSearchOverlayBundle | null {
+  const cached = resultCache.get(key)
+  if (!cached) return null
+  if (Date.now() - cached.savedAt > CACHE_TTL_MS) {
+    resultCache.delete(key)
+    return null
+  }
+  resultCache.delete(key)
+  resultCache.set(key, cached)
+  return cached.bundle
+}
+
+function writeCachedResult(key: string, bundle: GlobalSearchOverlayBundle): void {
+  resultCache.delete(key)
+  resultCache.set(key, { bundle, savedAt: Date.now() })
+  while (resultCache.size > CACHE_MAX_ENTRIES) {
+    const oldest = resultCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    resultCache.delete(oldest)
+  }
+}
+
+function requestLimit(searchScope: V1GlobalSearchScope): number {
+  if (searchScope === 'all') return PREVIEW_FETCH_LIMIT
+  return networkConstrained.value ? 10 : 20
+}
+
+function syncNetworkProfile(): void {
+  if (typeof navigator === 'undefined') return
+  online.value = navigator.onLine
+  const connection = (navigator as NavigatorWithConnection).connection
+  const effectiveType = connection?.effectiveType?.toLowerCase() ?? ''
+  networkConstrained.value =
+    !navigator.onLine ||
+    connection?.saveData === true ||
+    ['slow-2g', '2g', '3g'].includes(effectiveType) ||
+    Number(connection?.rtt ?? 0) >= 600 ||
+    (Number(connection?.downlink ?? 0) > 0 && Number(connection?.downlink ?? 0) < 1.5)
+}
+
+async function performSearch(q: string, searchScope: V1GlobalSearchScope): Promise<void> {
+  if (!online.value) {
+    requestState.value = 'error'
+    errorMessage.value = '当前处于离线状态，请恢复网络后重试。'
+    return
+  }
+  const limit = requestLimit(searchScope)
+  const key = cacheKey(q, searchScope, limit)
+  const cached = readCachedResult(key)
+  if (cached) {
+    resultBundle.value = cached
+    requestState.value = 'refreshing'
+  } else {
+    requestState.value = 'loading'
+  }
+  searchAbort?.abort()
+  const ac = new AbortController()
+  searchAbort = ac
+  slowHintVisible.value = false
+  slowHintTimer = window.setTimeout(() => {
+    if (!ac.signal.aborted && open.value) slowHintVisible.value = true
+  }, networkConstrained.value ? 900 : 650)
+  try {
+    const res = await searchApi.query({ keyword: q, scope: searchScope, limit }, ac.signal)
+    if (ac.signal.aborted || normalizedKeyword.value !== q || scope.value !== searchScope) return
+    const body = parseV1GlobalSearchResponse(res.data)
+    const bundle = body
+      ? mapV1SearchResultsToOverlayBundle(body.results)
+      : emptyGlobalSearchBundle()
+    resultBundle.value = bundle
+    writeCachedResult(key, bundle)
+    activeFlatIndex.value = 0
+    requestState.value = 'success'
+    errorMessage.value = ''
+  } catch {
+    if (ac.signal.aborted) return
+    if (!cached) resultBundle.value = emptyGlobalSearchBundle()
+    requestState.value = 'error'
+    errorMessage.value = navigator.onLine
+      ? '服务响应失败，已有结果不会被清空。'
+      : '网络已断开，请恢复后重试。'
+  } finally {
+    if (!ac.signal.aborted) {
+      if (slowHintTimer !== undefined) {
+        window.clearTimeout(slowHintTimer)
+        slowHintTimer = undefined
+      }
+      slowHintVisible.value = false
+    }
+  }
+}
+
+function scheduleSearch(): void {
+  const q = normalizedKeyword.value
+  if (!open.value || !q || Array.from(q).length < 2) {
     clearSearchTimers()
     searchAbort?.abort()
     searchAbort = undefined
     resultBundle.value = emptyGlobalSearchBundle()
     slowHintVisible.value = false
+    errorMessage.value = ''
+    requestState.value = 'idle'
     return
   }
   clearSearchTimers()
   searchAbort?.abort()
-  searchAbort = new AbortController()
-  const ac = searchAbort
-  slowHintVisible.value = false
-  slowHintTimer = window.setTimeout(() => {
-    if (open.value && keyword.value.trim()) slowHintVisible.value = true
-  }, 600)
-  debounceTimer = window.setTimeout(async () => {
-    const q = keyword.value.trim()
-    const sc = scope.value
-    try {
-      const res = await searchApi.query({ keyword: q, scope: sc }, ac.signal)
-      if (ac.signal.aborted) return
-      const body = parseV1GlobalSearchResponse(res.data)
-      resultBundle.value = body
-        ? mapV1SearchResultsToOverlayBundle(body.results)
-        : emptyGlobalSearchBundle()
-      activeFlatIndex.value = 0
-    } catch {
-      if (ac.signal.aborted) return
-      resultBundle.value = emptyGlobalSearchBundle()
-    } finally {
-      if (!ac.signal.aborted) {
-        if (slowHintTimer !== undefined) {
-          window.clearTimeout(slowHintTimer)
-          slowHintTimer = undefined
-        }
-        slowHintVisible.value = false
-      }
-    }
-  }, 300)
-})
+  requestState.value = 'debouncing'
+  errorMessage.value = ''
+  const qAtSchedule = q
+  const scopeAtSchedule = scope.value
+  debounceTimer = window.setTimeout(
+    () => void performSearch(qAtSchedule, scopeAtSchedule),
+    networkConstrained.value ? CONSTRAINED_DEBOUNCE_MS : FAST_DEBOUNCE_MS,
+  )
+}
+
+watch([keyword, scope, open, networkConstrained], scheduleSearch)
+
+function retrySearch(): void {
+  clearSearchTimers()
+  syncNetworkProfile()
+  const q = normalizedKeyword.value
+  if (q && Array.from(q).length >= 2) void performSearch(q, scope.value)
+}
 
 function goToScope(s: Exclude<V1GlobalSearchScope, 'all'>): void {
   scope.value = s
@@ -344,9 +495,26 @@ watch(open, async (value) => {
   inputRef.value?.focus()
 })
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+function onOnlineStateChange(): void {
+  const wasOffline = !online.value
+  syncNetworkProfile()
+  if (wasOffline && online.value && open.value && normalizedKeyword.value.length >= 2) {
+    retrySearch()
+  }
+}
+
+onMounted(() => {
+  syncNetworkProfile()
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('online', onOnlineStateChange)
+  window.addEventListener('offline', onOnlineStateChange)
+  ;(navigator as NavigatorWithConnection).connection?.addEventListener('change', syncNetworkProfile)
+})
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('online', onOnlineStateChange)
+  window.removeEventListener('offline', onOnlineStateChange)
+  ;(navigator as NavigatorWithConnection).connection?.removeEventListener('change', syncNetworkProfile)
   clearSearchTimers()
   searchAbort?.abort()
 })
@@ -356,6 +524,90 @@ onUnmounted(() => {
 .global-search-overlay.fixed.inset-0 {
   z-index: 7000;
   background: rgb(var(--yb-shadow) / 0.16);
+}
+
+.search-state-card {
+  display: flex;
+  min-height: 5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--v1-border);
+  border-radius: 0.75rem;
+  background: var(--v1-bg-surface-soft);
+  padding: 1rem;
+  color: var(--v1-text-secondary);
+  font-size: 0.82rem;
+}
+
+.search-state-card strong {
+  display: block;
+  color: var(--v1-text-primary);
+}
+
+.search-state-card p {
+  margin: 0.2rem 0 0;
+}
+
+.search-state-card button {
+  flex: none;
+  border: 1px solid var(--v1-border);
+  border-radius: 0.55rem;
+  background: rgb(var(--yb-surface));
+  padding: 0.45rem 0.8rem;
+  color: var(--v1-text-primary);
+  font-weight: 700;
+}
+
+.search-state-card--error {
+  border-color: rgb(var(--yb-danger) / 0.3);
+  background: rgb(var(--yb-danger-soft));
+}
+
+.search-skeleton {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid var(--v1-border);
+  border-radius: 0.75rem;
+  padding: 0.9rem;
+}
+
+.search-skeleton-row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.search-skeleton-row span {
+  height: 0.72rem;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgb(var(--yb-surface-muted)),
+    rgb(var(--yb-surface)),
+    rgb(var(--yb-surface-muted))
+  );
+  background-size: 220% 100%;
+  animation: search-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+.search-skeleton-row span:first-child {
+  width: min(65%, 25rem);
+}
+
+.search-skeleton-row span:last-child {
+  width: min(42%, 17rem);
+}
+
+@keyframes search-skeleton-shimmer {
+  to {
+    background-position: -220% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-skeleton-row span {
+    animation: none;
+  }
 }
 
 .global-search-panel.mx-auto.max-w-4xl {

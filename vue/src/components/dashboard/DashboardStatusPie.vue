@@ -34,7 +34,7 @@ const props = withDefaults(
 
 const chartRef = ref<HTMLDivElement | null>(null)
 let chart: ECharts | null = null
-const chartFontFamily = 'YB Source Han Sans'
+const chartFontFamily = 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif'
 
 const option = computed<EChartsCoreOption>(() => {
   const data = props.series.filter((d) => d.value > 0)

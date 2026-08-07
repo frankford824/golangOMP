@@ -6,9 +6,9 @@ The asset workbench uses self-hosted fonts only. No runtime font CDN is used.
 
 | Font | Package | Version | License | Usage |
 | --- | --- | --- | --- | --- |
-| Alibaba PuHuiTi 2.0 | user-provided local font package | 2.0 | Alibaba font legal statement | Global asset workbench UI font |
+| Alibaba PuHuiTi 2.0 | user-provided local font package | 2.0 | Alibaba font legal statement | Retained legacy font asset; not shipped by the current workbench build |
 | Source Han Sans CN AW Core | generated from `@fontpkg/source-han-sans-cn-vf` | `2.5.2` | OFL-1.1 | Asset workbench Chinese UI subset |
-| Source Han Sans CN VF Fallback | `@fontpkg/source-han-sans-cn-vf` | `2.5.2` | OFL-1.1 | On-demand fallback for CJK glyphs outside the UI subset |
+| Source Han Sans CN VF Fallback | `@fontpkg/source-han-sans-cn-vf` | `2.5.2` | OFL-1.1 | Historical source only; not shipped by the current workbench build |
 | Geist Sans | `@fontsource/geist-sans` | `5.2.5` | OFL-1.1 | Latin UI text |
 | Geist Mono | `@fontsource/geist-mono` | `5.2.8` | OFL-1.1 | Numbers, IDs, money, hashes, dates |
 
@@ -26,7 +26,7 @@ The Alibaba PuHuiTi 2.0 files are copied from a user-provided local package. The
 
 ## Loading Policy
 
-The workbench loads a locally generated full-glyph Alibaba PuHuiTi 2.0 Regular WOFF2 as the global UI face. The browser synthesizes heavier UI weights until a compressed multi-weight WOFF2 package is provided. Source Han Sans CN remains available as the CJK fallback for glyphs not covered by Alibaba PuHuiTi 2.0. `SourceHanSansCN-AW-Core.woff2` is generated from the installed Source Han Sans CN VF package and contains only the workbench UI glyph set plus common business text. The full Source Han Sans CN VF file remains available through a separate `unicode-range` fallback face and should load only when user/content text uses CJK glyphs outside the core subset.
+The current workbench build ships `SourceHanSansCN-AW-Core.woff2`, generated from the installed Source Han Sans CN VF package and containing the workbench UI glyph set plus common business text. Content outside that subset uses the local operating-system CJK font stack. The retained full-glyph Alibaba and Source Han files are no longer imported into the build, avoiding 11.8 MB of optional font transfer on constrained networks.
 
 Regenerate the subset from the `vue/` directory after adding substantial new Chinese UI copy:
 

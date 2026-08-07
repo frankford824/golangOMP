@@ -103,6 +103,42 @@ func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAss
 	return items, total, err
 }
 
+// SearchPreview serves latency-sensitive global-search suggestions. Unlike the
+// paginated asset-center query it does not calculate an exact total, because a
+// COUNT plus a substring fallback over hundreds of thousands of external
+// records can hold the shared request pool for seconds even though the caller
+// only renders a handful of suggestions.
+func (r *externalAssetRepo) SearchPreview(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, error) {
+	query = query.Normalized()
+	items, err := r.searchPreviewWithMode(ctx, query, true)
+	if err != nil {
+		if !isMySQLFullTextIndexMissing(err) {
+			return nil, err
+		}
+		return r.searchPreviewWithMode(ctx, query, false)
+	}
+	if len(items) > 0 || strings.TrimSpace(query.Keyword) == "" || ctx.Err() != nil {
+		return items, nil
+	}
+	// Preserve substring recall for filenames that the full-text parser cannot
+	// tokenize. The caller gives this fallback a small context budget, so a
+	// no-match scan degrades to no external suggestions instead of blocking the
+	// entire global search.
+	return r.searchPreviewWithMode(ctx, query, false)
+}
+
+func (r *externalAssetRepo) searchPreviewWithMode(ctx context.Context, query domain.ExternalAssetSearchQuery, preferFullText bool) ([]*domain.ExternalAssetRecord, error) {
+	where, args, orderBy := buildExternalAssetWhereWithMode(query, preferFullText)
+	args = append(args, (query.Page-1)*query.Size, query.Size)
+	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+where+orderBy+`
+		LIMIT ?, ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search external asset preview: %w", err)
+	}
+	defer rows.Close()
+	return scanExternalAssetRows(rows)
+}
+
 func (r *externalAssetRepo) ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int, formatCategory domain.AssetFormatCategoryFilter) ([]domain.ExternalAssetDirectoryEntry, error) {
 	parentPath = cleanExternalAssetBrowsePath(parentPath)
 	if limit <= 0 || limit > 2000 {

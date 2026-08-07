@@ -112,13 +112,12 @@
     </main>
     <GlobalSearchOverlay v-model:open="searchOpen" />
     <NotificationCenter v-model:open="notificationOpen" />
-    <BaseLoadingOverlay
-      :active="routeLoading"
-      fixed
-      teleport
-      label="页面加载中"
-      description="正在切换业务页面"
-    />
+    <transition name="route-progress">
+      <div v-if="routeLoading" class="route-progress" role="status" aria-live="polite">
+        <span class="route-progress__bar" />
+        <span class="sr-only">正在切换业务页面，当前页面仍可使用。</span>
+      </div>
+    </transition>
     <Teleport to="body">
       <transition name="mobile-sidebar">
         <div
@@ -169,7 +168,6 @@ import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
-import BaseLoadingOverlay from '@/components/base/BaseLoadingOverlay.vue'
 
 const permissionsStore = usePermissionsStore()
 const router = useRouter()
@@ -451,6 +449,52 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 
 .app-main {
   min-width: 0;
+}
+
+.route-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 7600;
+  height: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  background: rgb(var(--yb-brand-soft));
+}
+
+.route-progress__bar {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: 999px;
+  background: rgb(var(--yb-brand));
+  animation: route-progress-slide 1s ease-in-out infinite;
+  will-change: transform;
+}
+
+.route-progress-enter-active,
+.route-progress-leave-active {
+  transition: opacity 0.12s ease;
+}
+
+.route-progress-enter-from,
+.route-progress-leave-to {
+  opacity: 0;
+}
+
+@keyframes route-progress-slide {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-progress__bar {
+    width: 100%;
+    animation: none;
+  }
 }
 
 .sidebar::before {

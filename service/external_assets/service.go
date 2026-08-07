@@ -98,6 +98,10 @@ type directoryBrowserRepo interface {
 	ListDirectoryFiles(ctx context.Context, parentPath string, mountPaths []string, page int, size int, formatCategory domain.AssetFormatCategoryFilter) ([]*domain.ExternalAssetRecord, int64, error)
 }
 
+type globalSearchPreviewRepo interface {
+	SearchPreview(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, error)
+}
+
 type Service struct {
 	cfg             Config
 	repo            repo.ExternalAssetRepo
@@ -832,7 +836,19 @@ func (s *Service) SearchGlobal(ctx context.Context, q string, limit int) ([]doma
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, _, err := s.Search(ctx, domain.ExternalAssetSearchQuery{Keyword: q, Page: 1, Size: limit})
+	query := domain.ExternalAssetSearchQuery{Keyword: q, Page: 1, Size: limit}.Normalized()
+	visiblePrefixes, matched := s.visibleOriginPrefixes(query.MountPath)
+	if !matched {
+		return []domain.SearchAsset{}, nil
+	}
+	query.OriginPrefixes = visiblePrefixes
+	var rows []*domain.ExternalAssetRecord
+	var err error
+	if previewRepo, ok := s.repo.(globalSearchPreviewRepo); ok {
+		rows, err = previewRepo.SearchPreview(ctx, query)
+	} else {
+		rows, _, err = s.Search(ctx, query)
+	}
 	if err != nil {
 		return nil, err
 	}

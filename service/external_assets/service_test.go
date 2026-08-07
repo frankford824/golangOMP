@@ -1420,6 +1420,11 @@ func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalA
 	return r.searchRows, total, nil
 }
 
+func (r *externalAssetRepoStub) SearchPreview(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, error) {
+	rows, _, err := r.Search(ctx, query)
+	return rows, err
+}
+
 func (r *externalAssetRepoStub) Upsert(_ context.Context, item domain.ExternalAssetUpsert) (*domain.ExternalAssetRecord, error) {
 	r.upserts = append(r.upserts, item)
 	id := int64(len(r.upserts))

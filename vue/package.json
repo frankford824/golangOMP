@@ -31,7 +31,6 @@
     "lint:object-key": "npx tsx scripts/check_object_key_usage.ts"
   },
   "dependencies": {
-    "@fontpkg/source-han-sans-cn-vf": "^2.5.2",
     "@fontsource/geist-mono": "^5.2.8",
     "@fontsource/geist-sans": "^5.2.5",
     "@fontsource/jetbrains-mono": "^5.2.8",

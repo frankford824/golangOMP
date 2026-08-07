@@ -1133,13 +1133,11 @@ func (s *experienceService) processRecentAttributionOutcomes(ctx context.Context
 		return nil
 	}
 	recentSince := time.Now().UTC().Add(-experienceAttributionLookback)
-	recentLimit := limit * 10
-	if recentLimit < limit {
-		recentLimit = limit
-	}
-	if recentLimit < 50 {
-		recentLimit = 50
-	}
+	// This path performs one attribution-candidate query per outcome. Keep the
+	// reprocess batch aligned with the configured worker batch instead of
+	// multiplying it by ten; the watermark continues the remaining work on the
+	// next tick without monopolizing the shared request connection pool.
+	recentLimit := limit
 	if recentLimit > experienceAttributionRecentReprocessMax {
 		recentLimit = experienceAttributionRecentReprocessMax
 	}

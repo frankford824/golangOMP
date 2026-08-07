@@ -168,6 +168,14 @@ func (s *hybridRetrievalStub) Search(context.Context, domain.RequestActor, strin
 	return append([]domain.AIRetrievalHit{}, s.hits...), s.meta, s.err
 }
 
+type contextBoundHybridRetrieval struct{}
+
+func (contextBoundHybridRetrieval) HybridReady() bool { return true }
+func (contextBoundHybridRetrieval) Search(ctx context.Context, _ domain.RequestActor, _ string, _ int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error) {
+	<-ctx.Done()
+	return nil, domain.AIRetrievalMeta{}, ctx.Err()
+}
+
 func TestSearchWithModeAutoAndHybridDegradation(t *testing.T) {
 	t.Run("deterministic input stays exact", func(t *testing.T) {
 		hybrid := &hybridRetrievalStub{}
@@ -194,6 +202,18 @@ func TestSearchWithModeAutoAndHybridDegradation(t *testing.T) {
 		result, meta, appErr := svc.SearchWithMode(context.Background(), fullyScopedActor(7), "需求趋势", "tasks", 20, "hybrid")
 		if appErr != nil || len(result.Tasks) != 1 || !meta.Degraded || meta.Mode != "exact" || meta.Reason != "hybrid_unavailable" {
 			t.Fatalf("result=%+v meta=%+v err=%+v", result, meta, appErr)
+		}
+	})
+	t.Run("auto mode bounds slow hybrid retrieval", func(t *testing.T) {
+		svc := NewService(&stubSearchRepo{})
+		svc.SetHybridRetrievalProvider(contextBoundHybridRetrieval{})
+		started := time.Now()
+		result, meta, appErr := svc.SearchWithMode(context.Background(), fullyScopedActor(7), "交付风险趋势", "tasks", 20, "auto")
+		if appErr != nil || len(result.Tasks) != 1 || !meta.Degraded || meta.Mode != "exact" || meta.Reason != "hybrid_timeout" {
+			t.Fatalf("result=%+v meta=%+v err=%+v", result, meta, appErr)
+		}
+		if elapsed := time.Since(started); elapsed > 2*time.Second {
+			t.Fatalf("auto hybrid degradation took %s", elapsed)
 		}
 	})
 }
