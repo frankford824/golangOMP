@@ -2519,8 +2519,8 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	if task == nil {
 		return nil, domain.ErrNotFound
 	}
-	if !isBatchNewProductTask(task) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "sku item edit is only supported for batch new-product tasks", nil)
+	if task.TaskType != domain.TaskTypeNewProductDevelopment {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "sku item edit is only supported for new-product tasks", nil)
 	}
 	if appErr := authorizeTaskSKUItemBusinessInfoUpdate(ctx, task); appErr != nil {
 		return nil, appErr

@@ -51,7 +51,7 @@ func TestAssetObjectDeletionOutboxProducersUseAdapterSnapshot(t *testing.T) {
 	}
 }
 
-func TestFinalizeGroupQueuesReplacedSourceWithAdapterSnapshot(t *testing.T) {
+func TestFinalizeGroupQueuesAllSupersededResourceObjectsWithAdapterSnapshot(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -86,12 +86,15 @@ func TestFinalizeGroupQueuesReplacedSourceWithAdapterSnapshot(t *testing.T) {
 	mock.ExpectExec(`UPDATE task_asset_groups[\s\S]+finalized_revision_id`).
 		WithArgs(nextRevisionID, nextRevisionID, groupID, expectedVersion).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE task_assets SET access_revoked_at`).
-		WithArgs(sqlmock.AnyArg(), previousSource).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT DISTINCT candidate\.task_asset_id[\s\S]+resource_revision_superseded|SELECT DISTINCT candidate\.task_asset_id`).
+		WithArgs(groupID, groupID, groupID).
+		WillReturnRows(sqlmock.NewRows([]string{"task_asset_id"}).AddRow(previousSource).AddRow(int64(103)).AddRow(int64(104)))
+	mock.ExpectExec(`UPDATE task_assets[\s\S]+resource_revision_superseded`).
+		WithArgs(sqlmock.AnyArg(), previousSource, int64(103), int64(104)).
+		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec(`INSERT INTO asset_object_deletion_outbox[\s\S]+storage_ref_id, storage_adapter, storage_is_placeholder`).
-		WithArgs(previousSource, previousSource).
-		WillReturnResult(sqlmock.NewResult(0, 2))
+		WithArgs(previousSource, int64(103), int64(104), previousSource, int64(103), int64(104)).
+		WillReturnResult(sqlmock.NewResult(0, 6))
 	mock.ExpectExec(`INSERT INTO task_asset_group_search_documents`).
 		WithArgs(groupID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -143,7 +146,10 @@ func TestFinalizeGroupFirstApprovalQueuesReplacedSubmittedDesignSource(t *testin
 	mock.ExpectExec(`UPDATE task_asset_groups[\s\S]+finalized_revision_id`).
 		WithArgs(nextRevisionID, nextRevisionID, groupID, expectedVersion).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE task_assets SET access_revoked_at`).
+	mock.ExpectQuery(`SELECT DISTINCT candidate\.task_asset_id`).
+		WithArgs(groupID, groupID, groupID).
+		WillReturnRows(sqlmock.NewRows([]string{"task_asset_id"}).AddRow(designSource))
+	mock.ExpectExec(`UPDATE task_assets[\s\S]+resource_revision_superseded`).
 		WithArgs(sqlmock.AnyArg(), designSource).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO asset_object_deletion_outbox[\s\S]+storage_ref_id, storage_adapter, storage_is_placeholder`).

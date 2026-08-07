@@ -212,7 +212,7 @@
             />
           </div>
 
-          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :enable-revision-history="can('asset.view')" /></div>
+          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles" :enable-revision-history="can('asset.view')" /></div>
 
           <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
             <TaskAttachmentWorkspace :files="displayReferenceFiles" :can-upload="canManageReferences" :uploading="referenceUploading" @upload="referenceInput?.click()" />

@@ -64,6 +64,34 @@ const bundle: ResourceBundle = {
 }
 
 describe('SkuResourceMatrix', () => {
+  it('uses task-level references only as a fallback for an empty legacy resource shell', () => {
+    const emptyBundle = structuredClone(bundle)
+    emptyBundle.groups[0].finalized_revision = null
+    emptyBundle.groups[0].working_revision = null
+    const wrapper = mount(SkuResourceMatrix, {
+      props: {
+        bundle: emptyBundle,
+        taskReferences: [{ file_name: 'legacy-task-reference.png', preview_url: '/legacy-task-reference' }],
+      },
+      global: { stubs: { Teleport: true } },
+    })
+
+    expect(wrapper.get('.reference-stage .tile-caption').text()).toContain('legacy-task-reference.png')
+    expect(wrapper.get('.reference-stage .asset-preview-media-stub').attributes('src')).toBe('/legacy-task-reference')
+  })
+
+  it('does not mix task-level references into a resource group that already has a revision', () => {
+    const wrapper = mount(SkuResourceMatrix, {
+      props: {
+        bundle,
+        taskReferences: [{ file_name: 'task-only.png', preview_url: '/task-only' }],
+      },
+      global: { stubs: { Teleport: true } },
+    })
+
+    expect(wrapper.text()).not.toContain('task-only.png')
+  })
+
   it('shows per-SKU reference images uploaded at creation time alongside revision references', () => {
     const wrapper = mount(SkuResourceMatrix, {
       props: {

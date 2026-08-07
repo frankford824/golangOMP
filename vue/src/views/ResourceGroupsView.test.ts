@@ -19,7 +19,17 @@ vi.mock('@/composables/useTaskFilterOptions', async () => {
 
 import ResourceGroupsView from './ResourceGroupsView.vue'
 
-const mountView = () => mount(ResourceGroupsView, { global: { stubs: { Teleport: true } } })
+const mountView = () => mount(ResourceGroupsView, {
+  global: {
+    stubs: {
+      Teleport: true,
+      AssetPreviewMedia: {
+        props: ['assetId', 'taskAssetId', 'fallbackSrc', 'alt'],
+        template: '<img class="asset-preview-media-stub" :data-asset-id="assetId || undefined" :data-task-asset-id="taskAssetId || undefined" :src="fallbackSrc || undefined" :alt="alt" />',
+      },
+    },
+  },
+})
 
 const group = {
   id: 8,
@@ -160,6 +170,19 @@ describe('ResourceGroupsView', () => {
     expect(card.element.tagName).toBe('BUTTON')
     await card.trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+  })
+
+  it('resolves protected cover previews by immutable task-asset id', async () => {
+    const protectedGroup = structuredClone(group)
+    protectedGroup.finalized_revision.items[0].file.preview_url = '/v1/task-assets/1001/preview'
+    mocks.list.mockResolvedValueOnce({ items: [protectedGroup], view_mode: 'group', flat_items: [], page: 1, page_size: 24, total: 1 })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const preview = wrapper.get('.asset-preview-media-stub')
+    expect(preview.attributes('data-task-asset-id')).toBe('1001')
+    expect(preview.attributes('data-asset-id')).toBeUndefined()
   })
 
   it('shows exact external SKU matches in the same asset center and opens their read-only detail', async () => {

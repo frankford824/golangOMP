@@ -155,7 +155,12 @@ interface DisplayReference {
   formal_task_asset_id?: number | null
 }
 
-const props = defineProps<{ bundle: ResourceBundle; enableRevisionHistory?: boolean; skuItems?: SkuResourceMatrixItem[] }>()
+const props = defineProps<{
+  bundle: ResourceBundle
+  enableRevisionHistory?: boolean
+  skuItems?: SkuResourceMatrixItem[]
+  taskReferences?: unknown[]
+}>()
 
 const preview = reactive({ url: '', name: '', open: false })
 const previewItems = computed(() => preview.url ? [{
@@ -224,6 +229,18 @@ function skuItemReferences(group: ResourceGroup): DisplayReference[] {
   return out
 }
 
+const bundleHasRevision = computed(() => props.bundle.groups.some((group) => Boolean(revision(group))))
+
+function taskLevelReferences(group: ResourceGroup): DisplayReference[] {
+  if (bundleHasRevision.value || props.bundle.groups[0]?.id !== group.id) return []
+  const out: DisplayReference[] = []
+  for (const [referenceIndex, entry] of (props.taskReferences || []).entries()) {
+    const file = toDisplayReference(entry, `task:${referenceIndex}`)
+    if (file) out.push(file)
+  }
+  return out
+}
+
 const references = (group: ResourceGroup): DisplayReference[] => {
   const revisionRefs = [...(revision(group)?.references || [])]
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
@@ -240,7 +257,7 @@ const references = (group: ResourceGroup): DisplayReference[] => {
       return file
     })
   const seen = new Set(revisionRefs.flatMap((reference) => referenceIdentities(reference)))
-  for (const file of skuItemReferences(group)) {
+  for (const file of [...skuItemReferences(group), ...taskLevelReferences(group)]) {
     const identities = referenceIdentities(file)
     if (identities.some((identity) => seen.has(identity))) continue
     identities.forEach((identity) => seen.add(identity))

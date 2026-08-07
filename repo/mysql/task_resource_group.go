@@ -1535,15 +1535,8 @@ func (r *TaskResourceGroupRepo) FinalizeGroup(ctx context.Context, tx repo.Tx, g
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return repo.ErrConflict
 	}
-	if previousSourceID.Valid && (!nextSourceID.Valid || previousSourceID.Int64 != nextSourceID.Int64) {
-		if _, err := sqlTx.ExecContext(ctx, `
-			UPDATE task_assets SET access_revoked_at = ?, access_revoked_reason = 'source_replaced_by_audit'
-			WHERE id = ?`, now, previousSourceID.Int64); err != nil {
-			return err
-		}
-		if err := enqueueTaskAssetObjectDeletions(ctx, sqlTx, []int64{previousSourceID.Int64}); err != nil {
-			return err
-		}
+	if err := revokeSupersededResourceGroupObjects(ctx, sqlTx, groupID, now); err != nil {
+		return err
 	}
 	if err := reindexTaskAssetGroupSearchDocument(ctx, sqlTx, groupID); err != nil {
 		return err
@@ -1553,6 +1546,93 @@ func (r *TaskResourceGroupRepo) FinalizeGroup(ctx context.Context, tx repo.Tx, g
 		VALUES ('task_resource_group', ?, ?)
 		ON DUPLICATE KEY UPDATE status = 'pending', next_retry_at = NULL`, groupID, fmt.Sprintf("task_resource_group:%d:%d", groupID, revisionID))
 	return err
+}
+
+// revokeSupersededResourceGroupObjects keeps revision metadata but removes the
+// bytes for every reference, source, and final asset that is no longer part of
+// any resource group's current working/finalized snapshot.
+func revokeSupersededResourceGroupObjects(ctx context.Context, sqlTx *sql.Tx, groupID int64, revokedAt time.Time) error {
+	rows, err := sqlTx.QueryContext(ctx, `
+		SELECT DISTINCT candidate.task_asset_id
+		FROM (
+			SELECT revision.source_task_asset_id AS task_asset_id
+			FROM task_asset_group_revisions revision
+			WHERE revision.group_id = ?
+			UNION
+			SELECT item.task_asset_id
+			FROM task_asset_group_revision_items item
+			JOIN task_asset_group_revisions revision ON revision.id = item.revision_id
+			WHERE revision.group_id = ?
+			UNION
+			SELECT reference.formal_task_asset_id
+			FROM task_asset_group_revision_references reference
+			JOIN task_asset_group_revisions revision ON revision.id = reference.revision_id
+			WHERE revision.group_id = ?
+		) candidate
+		JOIN task_assets asset ON asset.id = candidate.task_asset_id
+		WHERE candidate.task_asset_id IS NOT NULL
+		  AND asset.deleted_at IS NULL
+		  AND asset.cleaned_at IS NULL
+		  AND asset.object_deleted_at IS NULL
+		  AND asset.access_revoked_at IS NULL
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_asset_groups current_group
+			JOIN task_asset_group_revisions current_revision
+			  ON current_revision.id = current_group.working_revision_id
+			  OR current_revision.id = current_group.finalized_revision_id
+			WHERE current_revision.source_task_asset_id = candidate.task_asset_id
+			   OR EXISTS (
+					SELECT 1 FROM task_asset_group_revision_items current_item
+					WHERE current_item.revision_id = current_revision.id
+					  AND current_item.task_asset_id = candidate.task_asset_id
+			   )
+			   OR EXISTS (
+					SELECT 1 FROM task_asset_group_revision_references current_reference
+					WHERE current_reference.revision_id = current_revision.id
+					  AND current_reference.formal_task_asset_id = candidate.task_asset_id
+			   )
+		  )
+		ORDER BY candidate.task_asset_id`, groupID, groupID, groupID)
+	if err != nil {
+		return fmt.Errorf("list superseded resource group objects: %w", err)
+	}
+	defer rows.Close()
+
+	taskAssetIDs := make([]int64, 0)
+	for rows.Next() {
+		var taskAssetID int64
+		if err := rows.Scan(&taskAssetID); err != nil {
+			return fmt.Errorf("scan superseded resource group object: %w", err)
+		}
+		taskAssetIDs = append(taskAssetIDs, taskAssetID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate superseded resource group objects: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close superseded resource group objects: %w", err)
+	}
+	if len(taskAssetIDs) == 0 {
+		return nil
+	}
+
+	marks, args := int64MutationArgs(taskAssetIDs)
+	updateArgs := make([]interface{}, 0, len(args)+1)
+	updateArgs = append(updateArgs, revokedAt)
+	updateArgs = append(updateArgs, args...)
+	if _, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_assets
+		SET access_revoked_at = ?, access_revoked_reason = 'resource_revision_superseded'
+		WHERE id IN (`+marks+`)
+		  AND access_revoked_at IS NULL
+		  AND object_deleted_at IS NULL`, updateArgs...); err != nil {
+		return fmt.Errorf("revoke superseded resource group objects: %w", err)
+	}
+	if err := enqueueTaskAssetObjectDeletions(ctx, sqlTx, taskAssetIDs); err != nil {
+		return err
+	}
+	return nil
 }
 
 func reindexTaskAssetGroupSearchDocument(ctx context.Context, q taskSearchDocumentSQL, groupID int64) error {

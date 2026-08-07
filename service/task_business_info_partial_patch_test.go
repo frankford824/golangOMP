@@ -408,7 +408,7 @@ func TestUpdateBusinessInfoBatchParentNameDoesNotTouchSKUItemsOrQueueSync(t *tes
 	}
 }
 
-func TestUpdateSKUItemInfoProductNameUpdatesShortNameAndQueuesProductManagementSync(t *testing.T) {
+func TestUpdateSKUItemInfoAllowsSingleNewProductTaskAndQueuesProductManagementSync(t *testing.T) {
 	const taskID int64 = 9111
 	taskRepo := &prdTaskRepo{
 		tasks: map[int64]*domain.Task{
@@ -419,7 +419,7 @@ func TestUpdateSKUItemInfoProductNameUpdatesShortNameAndQueuesProductManagementS
 				ProductNameSnapshot: "批量母任务",
 				TaskStatus:          domain.TaskStatusPendingAssign,
 				Priority:            domain.TaskPriorityNormal,
-				IsBatchTask:         true,
+				IsBatchTask:         false,
 				BatchItemCount:      1,
 			},
 		},

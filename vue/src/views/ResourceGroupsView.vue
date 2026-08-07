@@ -65,7 +65,7 @@
           <span class="cover">
             <AssetPreviewMedia
               v-if="protectedCoverURL(group) && !brokenImages.has(group.id)"
-              :asset-id="String(coverAssetID(group))"
+              :task-asset-id="String(coverAssetID(group))"
               :fallback-src="protectedCoverURL(group)"
               :alt="coverName(group)"
               img-class="resource-cover-media"

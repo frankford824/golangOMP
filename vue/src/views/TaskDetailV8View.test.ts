@@ -61,7 +61,7 @@ function mountView() {
       stubs: {
         WorkflowProgress: { template: '<div class="progress-stub">四步流程</div>' },
         TaskStatusTag: { template: '<span class="status-stub">状态</span>' },
-        SkuResourceMatrix: { template: '<div class="matrix-stub">资源矩阵</div>' },
+        SkuResourceMatrix: { props: ['taskReferences'], template: '<div class="matrix-stub">资源矩阵 {{ taskReferences?.length || 0 }}</div>' },
         ResourceWorkflowPanel: { props: ['skuModeHints'], template: '<div class="workflow-stub">{{ skuModeHints?.[\'\'] ? \'任务级套装提示\' : \'审核动作\' }}</div>' },
         TaskDetailAtmosphere: { template: '<div class="atmosphere-stub" />' },
       },
@@ -126,7 +126,7 @@ describe('TaskDetailV8View business context', () => {
     ;(dialog().querySelector<HTMLButtonElement>('.close-button'))?.click()
     await flushPromises()
     await wrapper.findAll('button').find((item) => item.text().includes('SKU 资源总览'))?.trigger('click')
-    expect(bodyText()).toContain('资源矩阵')
+    expect(bodyText()).toContain('资源矩阵 1')
   })
 
   it('uses a contextual back label when task detail was opened from the dashboard', async () => {

@@ -248,8 +248,12 @@ async function boot() {
     })
     resizeObserver.observe(canvasRef.value)
     eventDisposables.push(facade.addEvent(facade.Event.SheetEditEnded, () => scheduleRead()))
+    if (facade.Event.SheetValueChanged) {
+      eventDisposables.push(facade.addEvent(facade.Event.SheetValueChanged, () => scheduleRead()))
+    }
     eventDisposables.push(facade.addEvent(facade.Event.CommandExecuted, () => scheduleRead()))
     eventDisposables.push(facade.addEvent(facade.Event.CellClicked, (params) => {
+      readRowsFromWorkbook()
       const position = { row: Number(params.row), col: Number(params.column) }
       imageBinding?.setActive?.(position)
       const row = props.rows[position.row - 1]
@@ -260,6 +264,7 @@ async function boot() {
     }))
     if (facade.Event.SelectionChanged) {
       eventDisposables.push(facade.addEvent(facade.Event.SelectionChanged, (params) => {
+        readRowsFromWorkbook()
         const rowIds = composeRowIdsFromSelection(props.rows, params)
         if (!rowIds.length) return
         activeRowId.value = rowIds[rowIds.length - 1]
