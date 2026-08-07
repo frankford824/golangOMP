@@ -377,6 +377,39 @@ func TestSearchServiceExternalAssetErrorDoesNotFailSearch(t *testing.T) {
 	}
 }
 
+func TestSearchAllBoundsExternalPreviewWithoutNarrowingAssetScope(t *testing.T) {
+	provider := delayedExternalAssetSearch{delay: 350 * time.Millisecond}
+	svc := NewService(&stubSearchRepo{})
+	svc.SetExternalAssetSearchProvider(provider)
+	searchActor := actor(domain.RoleSuperAdmin)
+
+	started := time.Now()
+	allResult, appErr := svc.Search(context.Background(), searchActor, "CGK001543", "all", 20)
+	allElapsed := time.Since(started)
+	if appErr != nil {
+		t.Fatalf("all Search() appErr=%+v", appErr)
+	}
+	if allElapsed >= 500*time.Millisecond {
+		t.Fatalf("global preview waited %s, want bounded below 500ms", allElapsed)
+	}
+	if len(allResult.Assets) != 1 || allResult.Assets[0].SourceType == string(domain.AssetResourceSourceExternal) {
+		t.Fatalf("global preview assets=%+v, want available system result only", allResult.Assets)
+	}
+
+	started = time.Now()
+	assetResult, appErr := svc.Search(context.Background(), searchActor, "CGK001543", "assets", 20)
+	assetElapsed := time.Since(started)
+	if appErr != nil {
+		t.Fatalf("assets Search() appErr=%+v", appErr)
+	}
+	if assetElapsed < 300*time.Millisecond || assetElapsed >= externalSearchBudget {
+		t.Fatalf("asset scope elapsed=%s, want provider completion within %s", assetElapsed, externalSearchBudget)
+	}
+	if len(assetResult.Assets) != 2 {
+		t.Fatalf("asset scope assets=%+v, want system and external results", assetResult.Assets)
+	}
+}
+
 func TestSearchAllDegradesSlowProductBranch(t *testing.T) {
 	repository := &contextBoundProductSearchRepo{}
 	svc := NewService(repository)
@@ -414,6 +447,21 @@ type errorExternalAssetSearch struct{}
 
 func (errorExternalAssetSearch) SearchGlobal(context.Context, string, int) ([]domain.SearchAsset, error) {
 	return nil, errors.New("external down")
+}
+
+type delayedExternalAssetSearch struct {
+	delay time.Duration
+}
+
+func (s delayedExternalAssetSearch) SearchGlobal(ctx context.Context, _ string, _ int) ([]domain.SearchAsset, error) {
+	timer := time.NewTimer(s.delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return []domain.SearchAsset{{AssetID: 99, ResourceID: "ext-99", SourceType: string(domain.AssetResourceSourceExternal), FileName: "external.png"}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func actor(role domain.Role) domain.RequestActor {

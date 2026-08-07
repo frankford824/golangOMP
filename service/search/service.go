@@ -18,9 +18,10 @@ import (
 const (
 	CodeInvalidQuery = "invalid_query"
 
-	externalSearchBudget = 650 * time.Millisecond
-	productSearchBudget  = 900 * time.Millisecond
-	autoHybridBudget     = 700 * time.Millisecond
+	globalExternalPreviewBudget = 250 * time.Millisecond
+	externalSearchBudget        = 650 * time.Millisecond
+	productSearchBudget         = 900 * time.Millisecond
+	autoHybridBudget            = 700 * time.Millisecond
 )
 
 type Service struct {
@@ -106,7 +107,7 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 				return err
 			}},
 			searchJob{name: "external", run: func() error {
-				rows, err := s.searchExternalAssets(ctx, actor, q, limit)
+				rows, err := s.searchExternalAssetsWithBudget(ctx, actor, q, limit, globalExternalPreviewBudget)
 				externalAssets = rows
 				return err
 			}},
@@ -406,10 +407,17 @@ func (s *Service) searchProducts(ctx context.Context, actor domain.RequestActor,
 }
 
 func (s *Service) searchExternalAssets(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchAsset, error) {
+	return s.searchExternalAssetsWithBudget(ctx, actor, q, limit, externalSearchBudget)
+}
+
+func (s *Service) searchExternalAssetsWithBudget(ctx context.Context, actor domain.RequestActor, q string, limit int, budget time.Duration) ([]domain.SearchAsset, error) {
 	if s.external == nil || !domain.ActorHasPermission(actor, domain.PermissionAssetView) || publishedAssetSearchOnly(actor) {
 		return []domain.SearchAsset{}, nil
 	}
-	searchCtx, cancel := context.WithTimeout(ctx, externalSearchBudget)
+	if budget <= 0 {
+		budget = externalSearchBudget
+	}
+	searchCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	items, err := s.external.SearchGlobal(searchCtx, q, limit)
 	if err != nil {
