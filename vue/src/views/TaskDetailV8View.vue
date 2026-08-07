@@ -204,6 +204,7 @@
               :business-lane="task.business_lane"
               :bundle="bundle"
               :reference-count="displayReferenceFiles.length"
+              :task-references="displayReferenceFiles"
               :sku-mode-hints="skuModeHints"
               :allowed-actions="task.allowed_actions || []"
               @updated="onWorkflowUpdated"
@@ -720,7 +721,7 @@ const currentStageDescription = computed(() => {
   return '在这里查看任务全貌、资源与最新处理动态。'
 })
 const workflowButtonLabel = computed(() => {
-  if (actionSet.value.has('task.reopen')) return '重开任务'
+  if (actionSet.value.has('task.reopen')) return '修改结单文件'
   if (task.value?.task_status === 'PendingAudit') return '进入审核工作台'
   if (isRetouch.value) return '提交修图成品'
   if (task.value?.task_status === 'Completed') return '查看结单资源'

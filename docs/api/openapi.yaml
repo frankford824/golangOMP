@@ -5849,8 +5849,8 @@ components:
       description: |
         One complete resource-group input. For ordinary and customization tasks, the designer selects
         `mode` and submits exactly one editable source while `final_task_asset_ids` MUST be empty.
-        During audit, `mode` MUST equal the designer-selected mode; each group supplies a newly staged
-        complete final set (`single` exactly one, `set` at least two in array order). Omitting
+        During audit, the auditor may retain or revise `mode`; each group supplies a newly staged complete
+        final set (`single` exactly one, `set` at least two in array order). Omitting
         `source_task_asset_id` during audit inherits the designer source; supplying it replaces that source.
         Retouch submissions provide final files directly and may omit the source.
       properties:
@@ -5859,7 +5859,7 @@ components:
         mode:
           type: string
           enum: [single, set]
-          description: Selected by the designer for ordinary/customization tasks and read-only during audit.
+          description: Selected by the designer for ordinary/customization tasks and may be revised by the auditor when finalizing.
         source_task_asset_id:
           type: integer
           format: int64
@@ -5888,8 +5888,9 @@ components:
       type: object
       description: |
         `approve` requires a complete `groups` array covering every resource group. Final files must be
-        newly staged by the current auditor and match the designer-selected mode. The auditor may replace
-        the source, but cannot change single/set; an incorrect mode must be returned to design.
+        newly staged by the current auditor and match the submitted audit mode. The auditor may retain or
+        revise single/set per group and may replace the source; omitted sources continue to reference the
+        existing asset without copying file bytes.
         `return_to_design` requires `reason` and does not accept partial resource replacement.
       required: [decision, expected_workflow_revision, idempotency_key]
       properties:
@@ -6485,10 +6486,11 @@ paths:
       tags: [TaskResourceWorkflow]
       summary: Approve and finalize, or return the task to design
       description: |
-        Approval uploads a complete final set for every resource group using the designer-selected mode.
-        The auditor may replace the source file; otherwise the designer source remains effective. Approval
-        finalizes resources and returns only after the task is `Completed`. Return requires a reason and
-        restores the design stage without accepting a partial final set.
+        Approval uploads a complete final set for every resource group. The auditor may retain or revise
+        each designer-selected single/set mode and may replace the source file; otherwise the designer source
+        remains effective without copying its file bytes. Approval finalizes resources and returns only after
+        the task is `Completed`. Return requires a reason and restores the design stage without accepting a
+        partial final set.
       x-api-readiness: ready_for_frontend
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }

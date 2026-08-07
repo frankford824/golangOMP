@@ -710,7 +710,7 @@ describe('TaskDetailV8View business context', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.findAll('button').some((item) => item.text() === '重开任务')).toBe(true)
+    expect(wrapper.findAll('button').some((item) => item.text() === '修改结单文件')).toBe(true)
     expect(wrapper.text()).not.toContain('提交修图成品')
     expect(wrapper.get('.hero-facts').text()).toContain('任务信息更新时间')
     expect(wrapper.get('.hero-facts').text()).toContain('2026/07/24 10:00')

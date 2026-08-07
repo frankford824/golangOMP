@@ -345,7 +345,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	}
 
 	flatCTE := `WITH flat_resources AS (
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, `+resourceGroupSKUIdentitySQL+` AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
 		       'reference' AS resource_role,
 		       COALESCE(NULLIF(rr.file_name_snapshot, ''), asr.file_name, '') AS file_name,
 		       COALESCE(asr.mime_type, '') AS mime_type,
@@ -396,7 +396,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		    )
 		  )
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, `+resourceGroupSKUIdentitySQL+` AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
 		       'source' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,
@@ -420,7 +420,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		  AND ta.storage_ref_id IS NOT NULL AND asr.ref_id IS NOT NULL
 		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, `+resourceGroupSKUIdentitySQL+` AS sku_code,
+		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
 		       'final' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,
@@ -1448,6 +1448,27 @@ func (r *TaskResourceGroupRepo) CreateRevision(ctx context.Context, tx repo.Tx, 
 				SELECT COUNT(*) FROM task_assets
 				WHERE id = ? AND task_id = ? AND binding_state = 'bound' AND bound_group_id = ? AND bound_role = ?`,
 				assetID, group.TaskID, group.ID, role).Scan(&inherited); err != nil || inherited != 1 {
+				return 0, repo.ErrConflict
+			}
+		} else {
+			// Staged workflow uploads intentionally stay out of the global asset
+			// index. Once the revision binds them, promote that exact task-asset
+			// row as the canonical current version in the same transaction so
+			// audit output is searchable immediately after completion.
+			promoted, err := sqlTx.ExecContext(ctx, `
+				UPDATE design_assets da
+				JOIN task_assets ta ON ta.asset_id = da.id
+				SET da.current_version_id = ta.id,
+				    da.updated_at = CURRENT_TIMESTAMP
+				WHERE ta.id = ?
+				  AND ta.task_id = ?
+				  AND ta.binding_state = 'bound'
+				  AND ta.deleted_at IS NULL
+				  AND ta.cleaned_at IS NULL`, assetID, group.TaskID)
+			if err != nil {
+				return 0, err
+			}
+			if promotedRows, _ := promoted.RowsAffected(); promotedRows != 1 {
 				return 0, repo.ErrConflict
 			}
 		}

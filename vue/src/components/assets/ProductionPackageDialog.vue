@@ -140,9 +140,32 @@ async function searchBatch() {
   try {
     const response = await assetsApi.batchSearchAssets({ terms, format_filter: batchFormat.value, asset_kind: batchKind.value })
     const manifest = unwrap(response)
-    batchRows.value = manifest?.results || []
+    let rows = manifest?.results || []
+    let fallbackMatchedCount = 0
+    const unmatchedTerms = rows.filter((row) => row.status === 'not_found').map((row) => row.term)
+    if (unmatchedTerms.length && (batchFormat.value !== 'all' || batchKind.value !== 'all')) {
+      const fallbackResponse = await assetsApi.batchSearchAssets({
+        terms: unmatchedTerms,
+        format_filter: 'all',
+        asset_kind: 'all',
+      })
+      const fallbackManifest = unwrap(fallbackResponse)
+      const fallbackByTerm = new Map((fallbackManifest?.results || []).map((row) => [row.term, row]))
+      rows = rows.map((row) => {
+        const fallback = fallbackByTerm.get(row.term)
+        if (row.status !== 'not_found' || fallback?.status !== 'matched') return row
+        fallbackMatchedCount += 1
+        return {
+          ...fallback,
+          message: `按全部格式找到 ${fallback.assets?.length || fallback.candidates || 0} 个资源（原筛选无结果）`,
+        }
+      })
+    }
+    batchRows.value = rows
     selectedRefs.value = batchRows.value.flatMap((row) => row.assets || []).map(assetRef).filter(Boolean)
-    status.value = `已匹配 ${manifest?.matched_count || 0} 项，未匹配 ${manifest?.failed_count || 0} 项。`
+    const matchedCount = batchRows.value.filter((row) => row.status === 'matched').length
+    const failedCount = batchRows.value.length - matchedCount
+    status.value = `已匹配 ${matchedCount} 项，未匹配 ${failedCount} 项。${fallbackMatchedCount ? `其中 ${fallbackMatchedCount} 项已自动放宽筛选。` : ''}`
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '批量查询失败。'
   } finally {

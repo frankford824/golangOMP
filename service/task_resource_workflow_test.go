@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -928,6 +929,7 @@ type bindingRollbackRepo struct {
 	group                    domain.TaskAssetGroup
 	staged                   map[int64]domain.StagedTaskAssetBinding
 	createCalls              int
+	createErr                error
 	completeCalls            int
 	customizationReadyErr    error
 	customizationReadyChecks int
@@ -978,6 +980,9 @@ func (r *bindingRollbackRepo) GetRevisionForUpdate(context.Context, repo.Tx, int
 
 func (r *bindingRollbackRepo) CreateRevision(context.Context, repo.Tx, domain.TaskAssetGroup, domain.SubmitResourceGroupInput, domain.TaskAssetGroupRevisionStatus, domain.TaskAssetSourceStage, int64, string) (int64, error) {
 	r.createCalls++
+	if r.createErr != nil {
+		return 0, r.createErr
+	}
 	return 100, nil
 }
 
@@ -1008,7 +1013,7 @@ func TestSubmitDesignRollsBackEntireTransactionWhenFinalOutputIsSentDuringDesign
 	}
 }
 
-func TestAuditDecisionRejectsModeChangeAndBoundDesignFinals(t *testing.T) {
+func TestAuditDecisionAllowsModeChangeButRejectsBoundDesignFinals(t *testing.T) {
 	actorID, sourceID, finalID, revisionID := int64(7), int64(1), int64(2), int64(90)
 	base := func() (*bindingRollbackRepo, *recordingResourceWorkflowTxRunner) {
 		groupID := int64(20)
@@ -1023,14 +1028,22 @@ func TestAuditDecisionRejectsModeChangeAndBoundDesignFinals(t *testing.T) {
 		}, &recordingResourceWorkflowTxRunner{}
 	}
 
-	t.Run("auditor cannot change designer mode", func(t *testing.T) {
+	t.Run("auditor mode change reaches the new audit revision", func(t *testing.T) {
 		repository, runner := base()
+		secondFinalID := finalID + 1
+		repository.staged[finalID] = domain.StagedTaskAssetBinding{
+			TaskAssetID: finalID, TaskID: 10, BindingState: "staged", StagedRole: "final", StagedBy: &actorID,
+		}
+		repository.staged[secondFinalID] = domain.StagedTaskAssetBinding{
+			TaskAssetID: secondFinalID, TaskID: 10, BindingState: "staged", StagedRole: "final", StagedBy: &actorID,
+		}
+		repository.createErr = errors.New("stop after creating the audit revision")
 		svc := NewTaskResourceWorkflowService(repository, runner, nil)
 		_, appErr := svc.AuditDecision(context.Background(), 10, globalCapabilityActor(actorID, domain.PermissionTaskAuditDecision), domain.AuditDecisionRequest{
 			Decision: domain.TaskAuditDecisionApprove, ExpectedWorkflowRevision: 4, IdempotencyKey: "audit-mode-mismatch",
-			Groups: []domain.SubmitResourceGroupInput{{GroupID: 20, ExpectedGroupLockVersion: 2, Mode: domain.TaskAssetGroupModeSet, FinalTaskAssetIDs: []int64{finalID, finalID + 1}}},
+			Groups: []domain.SubmitResourceGroupInput{{GroupID: 20, ExpectedGroupLockVersion: 2, Mode: domain.TaskAssetGroupModeSet, FinalTaskAssetIDs: []int64{finalID, secondFinalID}}},
 		})
-		if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest || repository.createCalls != 0 || runner.rolledBack != 1 {
+		if appErr == nil || repository.createCalls != 1 || runner.rolledBack != 1 {
 			t.Fatalf("error/create/rollback = %+v/%d/%d", appErr, repository.createCalls, runner.rolledBack)
 		}
 	})

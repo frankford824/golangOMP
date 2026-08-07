@@ -126,6 +126,9 @@ const finalCount = computed(() => finals.value.length)
 const setCount = computed(() => groups.value.filter((group) => (group.finalized_revision || group.working_revision)?.mode === 'set').length)
 const finalLocked = computed(() => props.taskStatus === 'InProgress' && !finalCount.value)
 const actionHint = computed(() => {
+  if (props.taskStatus === 'Completed') return isRetouch.value
+    ? '按修图范围提交最终成品；独立源文件可选。需要更换结单文件时，重开到修图阶段后重新提交。'
+    : '需要更换结单文件时，先重开到审核或设计阶段；现有资源会保留并形成可追溯的新版本。'
   if (props.taskStatus === 'PendingAudit') return '审核人员在这里确认模式、上传成品并决定是否替换源文件。'
   if (isRetouch.value) return '修图任务以参考图为输入，按修图范围提交最终成品；独立源文件可选。'
   return '设计人员先判定单图或套装，再为每个 SKU 提交可编辑源文件。'

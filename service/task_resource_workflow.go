@@ -1028,13 +1028,6 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 			if input.Mode == "" {
 				input.Mode = current.Mode
 			}
-			if input.Mode != current.Mode {
-				return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit cannot change the designer-selected resource mode; return the task to design", map[string]interface{}{
-					"group_id":       groups[i].ID,
-					"design_mode":    current.Mode,
-					"requested_mode": input.Mode,
-				})
-			}
 			sourceStage := auditRevisionSourceStage(current, input.SourceTaskAssetID)
 			if input.SourceTaskAssetID == nil {
 				input.SourceTaskAssetID = current.SourceTaskAssetID

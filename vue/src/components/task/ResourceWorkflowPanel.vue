@@ -10,7 +10,7 @@
       </div>
       <div class="workspace-tools">
         <span class="workspace-count"><Boxes :size="15" aria-hidden="true" />{{ rows.length }} 个资源单元</span>
-        <button v-if="isDesignStage && rows.length > 1" class="quiet-button" @click="applyFirstMode"><CopyCheck :size="15" aria-hidden="true" />将首个模式应用到全部</button>
+        <button v-if="canBulkApplyMode && rows.length > 1" class="quiet-button" @click="applyFirstMode"><CopyCheck :size="15" aria-hidden="true" />{{ isAuditStage ? '统一按首个模式变更全部' : '将首个模式应用到全部' }}</button>
       </div>
     </header>
 
@@ -43,6 +43,25 @@
       <span>单图上传 1 张，套装至少上传 2 张并排序。未替换源文件时，默认保留设计师提交的源文件。</span>
     </aside>
 
+    <section v-if="isAuditStage && auditReferences.length" class="audit-references" aria-label="审核参考图">
+      <header><div><strong>运营参考图</strong><small>审核时可直接查看原始参考资料</small></div><span>{{ auditReferences.length }} 份</span></header>
+      <div class="audit-reference-strip">
+        <button v-for="(file, index) in auditReferences" :key="referenceIdentity(file, index)" type="button" @click="openAuditReference(file)">
+          <AssetPreviewMedia
+            v-if="referencePreviewable(file) && referencePreview(file)"
+            class="audit-reference-media"
+            :task-asset-id="referenceTaskAssetID(file)"
+            :fallback-src="referencePreview(file)"
+            :alt="referenceName(file)"
+            img-class="audit-reference-shell"
+            inner-img-class="audit-reference-image"
+          />
+          <FileText v-else :size="24" aria-hidden="true" />
+          <span>{{ referenceName(file) }}</span>
+        </button>
+      </div>
+    </section>
+
     <div
       v-if="showEditor"
       ref="editorViewport"
@@ -58,10 +77,11 @@
               <div>
                 <span>SKU 资源</span>
                 <strong>{{ entry.row.group.sku_code || scopeLabel(entry.row.group) }}</strong>
+                <small v-if="entry.row.group.product_name || entry.row.group.sku_profile?.product_name" class="sku-product-name">{{ entry.row.group.product_name || entry.row.group.sku_profile?.product_name }}</small>
                 <small v-if="skuModeHints[entry.row.group.sku_code || '']" class="operations-hint">运营建议套装 · 最终由设计判定</small>
               </div>
               <div class="mode-control" :aria-label="`${entry.row.group.sku_code || '当前资源'}的成品模式`">
-                <span><LockKeyhole v-if="isAuditStage" :size="13" aria-hidden="true" />{{ isAuditStage ? '设计已判定' : '设计判定' }}</span>
+                <span>{{ isAuditStage ? '审核可调整' : '设计判定' }}</span>
                 <button type="button" :class="{ selected: entry.row.mode === 'single' }" :disabled="!canChooseMode" @click="setMode(entry.row, 'single')">单图</button>
                 <button type="button" :class="{ selected: entry.row.mode === 'set' }" :disabled="!canChooseMode" @click="setMode(entry.row, 'set')">套装</button>
               </div>
@@ -157,9 +177,9 @@
     </footer>
 
     <footer v-if="canReopen" class="command-dock reopen-dock">
-      <label><span>重开目标</span><select v-model="reopenTarget"><option value="design">设计</option><option value="audit">审核</option><option v-if="isRetouch" value="retouch">修图</option></select></label>
-      <label><span>重开原因</span><input v-model.trim="reason" maxlength="1000" placeholder="请说明重开原因" /></label>
-      <button class="quiet-button" :disabled="busy || !reason" @click="openConfirmation('reopen')">重开任务</button>
+      <label><span>修改阶段</span><select v-model="reopenTarget"><option value="audit">审核修改成品/源文件</option><option value="design">设计重新提交</option><option v-if="isRetouch" value="retouch">修图重新提交</option></select></label>
+      <label><span>修改原因</span><input v-model.trim="reason" maxlength="1000" placeholder="请说明需要修改的文件和原因" /></label>
+      <button class="quiet-button" :disabled="busy || !reason" @click="openConfirmation('reopen')">确认重开并修改文件</button>
     </footer>
 
     <div v-if="pendingAction" class="confirm-backdrop" role="presentation" @click.self="cancelConfirmation">
@@ -179,6 +199,14 @@
         </div>
       </section>
     </div>
+
+    <ImagePreviewLightbox
+      v-model="referenceLightboxOpen"
+      :items="referenceLightboxItems"
+      :initial-index="referenceLightboxIndex"
+      aria-label="审核参考图预览"
+      fallback-title="运营参考图"
+    />
   </section>
 </template>
 
@@ -191,6 +219,7 @@ import {
   CopyCheck,
   Download,
   FilePenLine,
+  FileText,
   Images,
   Info,
   LockKeyhole,
@@ -199,8 +228,12 @@ import {
   ShieldCheck,
   UploadCloud,
 } from 'lucide-vue-next'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
+import type { ImagePreviewLightboxItem } from '@/components/media/imagePreviewLightbox'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
-import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode } from '@/services/api/resourceGroupsApi'
+import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode, type ResourceReference } from '@/services/api/resourceGroupsApi'
+import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import { tasksApi } from '@/services/api/tasksApi'
 import { buildSourceBundleFile, expandFinalUploadFiles } from '@/domain/resource-workflow-files'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
@@ -217,7 +250,9 @@ type EditorRow = {
   uploading: string
 }
 
-const props = defineProps<{ taskId: number; taskType: string; businessLane?: string; bundle: ResourceBundle; referenceCount?: number; skuModeHints?: Record<string, boolean>; allowedActions: string[] }>()
+type WorkflowReference = (ResourceReference | ReferenceFileRef) & { preview_url?: string | null }
+
+const props = defineProps<{ taskId: number; taskType: string; businessLane?: string; bundle: ResourceBundle; referenceCount?: number; taskReferences?: ReferenceFileRef[]; skuModeHints?: Record<string, boolean>; allowedActions: string[] }>()
 const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean] }>()
 const skuModeHints = computed(() => props.skuModeHints ?? {})
 const rows = ref<EditorRow[]>([])
@@ -236,7 +271,9 @@ const editorScrollTop = ref(0)
 const editorViewportHeight = ref(560)
 const editorRowHeight = ref(330)
 const editorOverscan = 2
-const reopenTarget = ref<'design' | 'audit' | 'retouch'>('design')
+const reopenTarget = ref<'design' | 'audit' | 'retouch'>('audit')
+const referenceLightboxOpen = ref(false)
+const referenceLightboxIndex = ref(0)
 let confirmationTrigger: HTMLElement | null = null
 let dragged: { groupIndex: number; index: number } | null = null
 
@@ -253,15 +290,40 @@ const isRetouchStage = computed(() => canSubmit.value && isRetouch.value && !can
 const isAuditStage = computed(() => canAudit.value)
 const phase = computed(() => isAuditStage.value ? 'audit' : isDesignStage.value ? 'design' : isRetouchStage.value ? 'retouch' : 'read')
 const showEditor = computed(() => isDesignStage.value || isAuditStage.value || isRetouchStage.value)
-const canChooseMode = computed(() => isDesignStage.value || isRetouchStage.value)
+const canChooseMode = computed(() => isDesignStage.value || isAuditStage.value || isRetouchStage.value)
+const canBulkApplyMode = computed(() => isDesignStage.value || isAuditStage.value)
 const sourceRequired = computed(() => !isRetouch.value)
-const heading = computed(() => isAuditStage.value ? '审核定稿' : isDesignStage.value ? '设计提交' : canReopen.value ? '重开任务' : isRetouchStage.value ? '提交修图成品' : '任务资源')
-const headingHint = computed(() => isAuditStage.value ? '审核人员依据设计判定上传最终成品，必要时替换源文件。' : isDesignStage.value ? '先确定每个 SKU 的单图或套装模式，再提交一份可编辑源文件。' : '参考图、有效源文件与最终成品保持在同一资源链中。')
+const heading = computed(() => isAuditStage.value ? '审核定稿' : isDesignStage.value ? '设计提交' : canReopen.value ? '修改已结单文件' : isRetouchStage.value ? '提交修图成品' : '任务资源')
+const headingHint = computed(() => isAuditStage.value ? '审核人员依据设计判定和运营参考图上传最终成品，必要时替换源文件。' : isDesignStage.value ? '先确定每个 SKU 的单图或套装模式，再提交一份可编辑源文件。' : canReopen.value ? '先重开到需要修改的阶段；现有文件继续保留，重新定稿后形成可追溯的新版本。' : '参考图、有效源文件与最终成品保持在同一资源链中。')
 const finalStageHint = computed(() => isDesignStage.value ? '审核人员上传最终成品' : isAuditStage.value ? '按设计判定上传定稿' : '最终资源')
 const displayReferenceCount = computed(() => {
   if (Number.isSafeInteger(props.referenceCount) && Number(props.referenceCount) >= 0) return Number(props.referenceCount)
   return props.bundle.groups.reduce((total, group) => total + ((group.working_revision || group.finalized_revision)?.references?.length || 0), 0)
 })
+const auditReferences = computed<WorkflowReference[]>(() => {
+  const seen = new Set<string>()
+  const result: WorkflowReference[] = []
+  const append = (file: WorkflowReference, index: number) => {
+    const identity = referenceIdentity(file, index)
+    if (seen.has(identity)) return
+    seen.add(identity)
+    result.push(file)
+  }
+  ;(props.taskReferences || []).forEach((file, index) => append(file, index))
+  props.bundle.groups.forEach((group, groupIndex) => {
+    const revision = group.working_revision || group.finalized_revision
+    ;(revision?.references || []).forEach((file, index) => append(file, (groupIndex + 1) * 1000 + index))
+  })
+  return result
+})
+const previewableAuditReferences = computed(() => auditReferences.value.filter((file) => referencePreviewable(file) && referencePreview(file)))
+const referenceLightboxItems = computed<ImagePreviewLightboxItem[]>(() => previewableAuditReferences.value.map((file) => ({
+  src: referencePreview(file),
+  title: referenceName(file),
+  alt: referenceName(file),
+  downloadUrl: String(file.download_url || '') || undefined,
+  fallbackAssetId: referenceTaskAssetID(file) || undefined,
+})))
 const editorTotalHeight = computed(() => rows.value.length * editorRowHeight.value)
 const editorVisibleStart = computed(() => Math.max(0, Math.floor(editorScrollTop.value / editorRowHeight.value) - editorOverscan))
 const editorVisibleCount = computed(() => Math.ceil(editorViewportHeight.value / editorRowHeight.value) + editorOverscan * 2)
@@ -326,6 +388,28 @@ function refreshEditorMetrics() {
 }
 function onEditorScroll() { editorScrollTop.value = editorViewport.value?.scrollTop || 0 }
 function scopeLabel(group: ResourceGroup) { return group.scope_kind === 'retouch_requirement' ? `修图需求 ${group.retouch_requirement_id}` : '任务资源' }
+function referenceName(file: WorkflowReference) { return String(file.file_name || ('filename' in file ? file.filename : '') || file.ref_id || '参考附件') }
+function referencePreview(file: WorkflowReference) { return String(file.preview_url || file.download_url || '') }
+function referenceTaskAssetID(file: WorkflowReference) { return 'formal_task_asset_id' in file && file.formal_task_asset_id ? String(file.formal_task_asset_id) : null }
+function referencePreviewable(file: WorkflowReference) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
+function referenceIdentity(file: WorkflowReference, index: number) {
+  if (file.ref_id) return `ref:${file.ref_id}`
+  if ('asset_id' in file && file.asset_id) return `asset:${file.asset_id}`
+  if ('reference_file_ref_id' in file && file.reference_file_ref_id != null) return `reference-file-ref:${file.reference_file_ref_id}`
+  if ('formal_task_asset_id' in file && file.formal_task_asset_id != null) return `task-asset:${file.formal_task_asset_id}`
+  if (file.id != null) return `reference:${file.id}`
+  return `fallback:${index}:${referenceName(file)}`
+}
+function openAuditReference(file: WorkflowReference) {
+  const index = previewableAuditReferences.value.indexOf(file)
+  if (index >= 0) {
+    referenceLightboxIndex.value = index
+    referenceLightboxOpen.value = true
+    return
+  }
+  const url = String(file.download_url || '')
+  if (url) window.open(url, '_blank', 'noopener')
+}
 function sourceExtension(name: string) { return name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE' }
 function markChanged(groupId: number) { changedGroups.value = new Set(changedGroups.value).add(groupId) }
 function setMode(row: EditorRow, mode: ResourceMode) { if (!canChooseMode.value || row.mode === mode) return; row.mode = mode; markChanged(row.group.id) }
@@ -474,7 +558,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetric
 </style>
 
 <style scoped>
-.resource-workspace{height:100%;grid-template-rows:auto auto auto minmax(0,1fr) auto;border:0;border-radius:13px;background:rgb(var(--yb-surface-soft));box-shadow:none}
+.resource-workspace{display:flex;height:100%;flex-direction:column;border:0;border-radius:13px;background:rgb(var(--yb-surface-soft));box-shadow:none}
 .workspace-head{align-items:center;padding:14px 16px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}
 .workspace-identity,.workspace-tools{display:flex;align-items:center;gap:11px}
 .workspace-identity>div{display:grid;gap:3px}
@@ -485,9 +569,10 @@ onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetric
 .stage-map{border-top:0;background:rgb(var(--yb-surface));padding-inline:8px}
 .stage-node{min-height:60px;padding:9px 15px}.stage-node:not(:last-child)::after{right:0;width:1px;height:34px;background:rgb(var(--yb-border))}.stage-node.active{background:rgb(var(--yb-brand-soft)/.58)}.stage-node.active::before{content:"";position:absolute;right:12px;bottom:0;left:12px;height:2px;border-radius:999px;background:rgb(var(--yb-brand))}.stage-node.complete .stage-index{border-color:rgb(var(--yb-success-border));background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}.stage-node.locked{opacity:.58}.stage-node strong{font-size:12px}
 .contract-note{display:grid;grid-template-columns:auto auto minmax(0,1fr);margin:10px 12px 0;padding:9px 11px;border-radius:9px;background:rgb(var(--yb-brand-soft));line-height:1.45}.contract-note>svg{color:rgb(var(--yb-brand))}.contract-note strong{font-size:12px}.contract-note span{font-size:11px}.audit-note>svg{color:rgb(var(--yb-success-strong))}
-.editor-viewport{height:auto;min-height:0;margin:10px 12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft));box-shadow:inset 0 1px 0 rgb(var(--yb-surface))}
+.audit-references{display:grid;gap:8px;margin:10px 12px 0;padding:10px 11px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface))}.audit-references>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.audit-references>header>div{display:grid;gap:2px}.audit-references>header strong{font-size:12px}.audit-references>header small,.audit-references>header>span{color:rgb(var(--yb-text-muted));font-size:10px}.audit-reference-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}.audit-reference-strip>button{display:grid;grid-template-rows:64px auto;gap:4px;flex:0 0 104px;min-width:0;border:1px solid rgb(var(--yb-border));border-radius:8px;padding:5px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text));text-align:left;cursor:pointer}.audit-reference-strip>button>svg{box-sizing:border-box;width:100%;height:64px;padding:18px;color:rgb(var(--yb-text-muted))}.audit-reference-strip>button>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.audit-reference-media{pointer-events:none}.audit-reference-strip :deep(.audit-reference-shell){width:100%;height:64px;border-radius:6px;object-fit:cover}.audit-reference-strip :deep(.audit-reference-image){width:100%;height:100%;border-radius:inherit;object-fit:cover}
+.editor-viewport{height:auto;min-height:0;flex:1 1 auto;margin:10px 12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft));box-shadow:inset 0 1px 0 rgb(var(--yb-surface))}
 .sku-workbench{margin:6px;height:calc(var(--editor-row-height) - 12px);padding:14px 15px;border-radius:11px;box-shadow:0 3px 12px rgb(var(--yb-shadow)/.04)}
-.sku-head{padding-bottom:11px;border-bottom:1px solid rgb(var(--yb-border))}.sku-head>div:first-child>span{font-size:10px;font-weight:750;letter-spacing:.06em}.sku-head strong{font:800 14px var(--yb-font-data)}.sku-head .operations-hint{border-radius:7px}
+.sku-head{padding-bottom:11px;border-bottom:1px solid rgb(var(--yb-border))}.sku-head>div:first-child>span{font-size:10px;font-weight:750;letter-spacing:.06em}.sku-head strong{font:800 14px var(--yb-font-data)}.sku-head .sku-product-name{max-width:48rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgb(var(--yb-text));font-size:12px;font-weight:700}.sku-head .operations-hint{border-radius:7px}
 .mode-control>span{display:inline-flex;align-items:center;gap:5px;font-size:10px}.mode-control button{min-width:68px;min-height:34px}.mode-control button.selected{box-shadow:0 1px 4px rgb(var(--yb-brand)/.12)}
 .resource-columns{gap:12px}.source-column,.final-column{min-height:190px;border-radius:10px;background:rgb(var(--yb-surface))}.final-column.locked{border-style:dashed;background:rgb(var(--yb-surface-soft))}.column-title strong{font-size:13px}.replace-toggle{font-weight:650}
 .file-tile{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.file-tile>div{min-width:0}.bundle-members{display:block;max-width:34rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-ready{flex:0 0 auto;margin-left:auto;color:rgb(var(--yb-success-strong))}.drop-zone{grid-template-columns:auto auto;gap:8px;min-height:62px;background:rgb(var(--yb-surface));font-weight:700}.drop-zone:hover{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft)/.34)}.clear-finals{justify-self:end;margin-top:7px;border:0;background:transparent;color:rgb(var(--yb-danger-text));font-size:11px;font-weight:700;cursor:pointer}.clear-finals:disabled{opacity:.5;cursor:not-allowed}.locked-final{min-height:104px;border:1px dashed rgb(var(--yb-border));background:rgb(var(--yb-surface-muted))}.locked-final strong{font-size:13px}.lock-symbol{border-radius:10px}

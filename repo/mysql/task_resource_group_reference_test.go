@@ -87,3 +87,58 @@ func TestCreateRevisionConstrainsRetouchReferencesToTheSameRequirement(t *testin
 		})
 	}
 }
+
+func TestCreateRevisionPromotesNewlyBoundAssetAsCurrentVersion(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expected, actual string) error {
+		for _, token := range strings.Split(expected, "&&") {
+			if !strings.Contains(actual, token) {
+				return fmt.Errorf("query missing %q: %s", token, actual)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	database := New(db)
+	repository := NewTaskResourceGroupRepo(database)
+	mock.ExpectBegin()
+	wrapped, sqlTx, err := database.BeginTx(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery("SELECT COALESCE(MAX(revision_no)&&task_asset_group_revisions&&FOR UPDATE").
+		WithArgs(int64(10)).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_no"}).AddRow(2))
+	mock.ExpectExec("INSERT INTO task_asset_group_revisions").
+		WillReturnResult(sqlmock.NewResult(21, 1))
+	mock.ExpectExec("INSERT INTO task_asset_group_revision_items").
+		WithArgs(int64(21), int64(71), 0).
+		WillReturnResult(sqlmock.NewResult(31, 1))
+	mock.ExpectExec("UPDATE task_assets&&binding_state = 'bound'&&bound_group_id = ?").
+		WithArgs(int64(10), "final", int64(71), int64(40)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE design_assets da&&JOIN task_assets ta&&da.current_version_id = ta.id").
+		WithArgs(int64(71), int64(40)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE task_asset_groups SET working_revision_id").
+		WithArgs(int64(21), int64(10), int64(0)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	revisionID, gotErr := repository.CreateRevision(context.Background(), wrapped, domain.TaskAssetGroup{
+		ID: 10, TaskID: 40, ScopeKind: domain.TaskAssetGroupScopeTask,
+	}, domain.SubmitResourceGroupInput{
+		Mode: domain.TaskAssetGroupModeSingle, FinalTaskAssetIDs: []int64{71},
+	}, domain.TaskAssetGroupRevisionSubmitted, domain.TaskAssetSourceAudit, 60, "audit finalize")
+	if gotErr != nil || revisionID != 21 {
+		t.Fatalf("CreateRevision() revision/error = %d/%v", revisionID, gotErr)
+	}
+	if err := sqlTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

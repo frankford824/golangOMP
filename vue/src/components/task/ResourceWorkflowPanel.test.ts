@@ -56,6 +56,7 @@ function bundle(): ResourceBundle {
       scope_kind: 'sku',
       task_sku_item_id: 51,
       sku_code: 'SKU-001',
+      product_name: '测试商品名称',
       lock_version: 3,
       migration_incomplete: false,
       working_revision: {
@@ -167,9 +168,11 @@ describe('ResourceWorkflowPanel action contract', () => {
       },
     })
 
-    expect(wrapper.get('.workspace-head h2').text()).toBe('重开任务')
+    expect(wrapper.get('.workspace-head h2').text()).toBe('修改已结单文件')
     expect(wrapper.find('.reopen-dock').exists()).toBe(true)
     expect(wrapper.find('.command-dock:not(.reopen-dock):not(.audit-dock)').exists()).toBe(false)
+    expect(wrapper.text()).toContain('审核修改成品/源文件')
+    expect(wrapper.text()).toContain('确认重开并修改文件')
     expect(wrapper.text()).not.toContain('提交修图成品')
   })
 
@@ -229,6 +232,35 @@ describe('ResourceWorkflowPanel action contract', () => {
     expect(wrapper.text()).not.toContain('模式与源文件已就绪')
   })
 
+  it('shows audit references and the SKU product name inside the audit workbench', () => {
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'design',
+        bundle: bundle(),
+        referenceCount: 1,
+        taskReferences: [{
+          asset_id: 'reference-1',
+          filename: '运营参考图.png',
+          mime_type: 'image/png',
+          download_url: 'https://example.test/reference.png',
+        }],
+        allowedActions: ['task.audit.approve'],
+      },
+      global: {
+        stubs: {
+          AssetPreviewMedia: { template: '<img class="reference-preview-stub" />' },
+          ImagePreviewLightbox: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.audit-references').text()).toContain('运营参考图.png')
+    expect(wrapper.get('.sku-product-name').text()).toBe('测试商品名称')
+    expect(wrapper.find('.reference-preview-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('requires a reason before return, cancels safely, and confirms only once', async () => {
     let resolveDecision: ((value: ResourceBundle) => void) | undefined
     mocks.auditDecision.mockReturnValue(new Promise<ResourceBundle>((resolve) => { resolveDecision = resolve }))
@@ -259,7 +291,7 @@ describe('ResourceWorkflowPanel action contract', () => {
   it('uses the designer mode and sends a newly staged final when approving', async () => {
     const wrapper = mountPanel(['task.audit.approve'])
     expect(wrapper.get('.mode-control button.selected').text()).toBe('单图')
-    expect(wrapper.get('.mode-control button.selected').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.mode-control button.selected').attributes('disabled')).toBeUndefined()
     const fileInput = wrapper.get('.final-drop input[type="file"]')
     const replacement = new File(['png'], 'reviewed.png', { type: 'image/png' })
     Object.defineProperty(fileInput.element, 'files', { configurable: true, value: [replacement] })
@@ -283,6 +315,28 @@ describe('ResourceWorkflowPanel action contract', () => {
         final_task_asset_ids: [201],
       }],
     )
+    wrapper.unmount()
+  })
+
+  it('allows the auditor to change one mode and apply the first mode to every SKU', async () => {
+    const auditBundle = bundleWithGroups(3)
+    if (auditBundle.groups[0].working_revision) auditBundle.groups[0].working_revision.mode = 'set'
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'design',
+        bundle: auditBundle,
+        allowedActions: ['task.audit.approve'],
+      },
+    })
+
+    expect(wrapper.text()).toContain('审核可调整')
+    expect(wrapper.text()).toContain('统一按首个模式变更全部')
+    await wrapper.findAll('.mode-control').at(1)?.findAll('button').find((item) => item.text() === '套装')?.trigger('click')
+    await wrapper.findAll('button').find((item) => item.text().includes('统一按首个模式变更全部'))?.trigger('click')
+
+    expect(wrapper.findAll('.mode-control button.selected').every((item) => item.text() === '套装')).toBe(true)
+    expect(wrapper.emitted('dirty-change')?.some((entry) => entry[0] === true)).toBe(true)
     wrapper.unmount()
   })
 

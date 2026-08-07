@@ -920,7 +920,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/submit-design \
 ### 简介
 支持方法: POST。
 
-- `POST`: Approval uploads a complete final set for every resource group using the designer-selected mode. The auditor may replace the source file; otherwise the designer source remains effective. Approval finalizes resources and returns only after the task is `Completed`. Return requires a reason and restores the design stage without accepting a partial final set.
+- `POST`: Approval uploads a complete final set for every resource group. The auditor may retain or revise each designer-selected single/set mode and may replace the source file; otherwise the designer source remains effective without copying its file bytes. Approval finalizes resources and returns only after the task is `Completed`. Return requires a reason and restores the design stage without accepting a partial final set.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   route: { query: { intent: 'planning_sku' } as Record<string, string> },
   push: vi.fn(), replace: vi.fn(),
-  create: vi.fn(), addTask: vi.fn(), getTaskById: vi.fn(), parseBatch: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
+  create: vi.fn(), addTask: vi.fn(), getTaskById: vi.fn(), parseBatch: vi.fn(), getProducts: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
   permissions: new Set(['task.create', 'planning_sku.create']),
   uploadReferenceFileRef: vi.fn(),
   uploadRetouchRequirementPendingAssets: vi.fn(), downloadPlanning: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock('@/services/api/batchSkuApi', () => ({
   normalizeBatchPreviewRow: (row: unknown) => row,
   formatBatchViolationMessage: (issue: { message?: string; code?: string }) => issue.message || issue.code || '请检查这一行',
 }))
-vi.mock('@/services/api/erpApi', () => ({ erpApi: { getProductByCode: mocks.getProductByCode, getIids: mocks.getIids } }))
+vi.mock('@/services/api/erpApi', () => ({ erpApi: { getProducts: mocks.getProducts, getProductByCode: mocks.getProductByCode, getIids: mocks.getIids } }))
 vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: mocks.uploadReferenceFileRef }))
 vi.mock('@/services/upload/retouchRequirementUpload', () => ({ uploadRetouchRequirementPendingAssets: mocks.uploadRetouchRequirementPendingAssets }))
 vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: (permission: string) => mocks.permissions.has(permission) }) }))
@@ -54,6 +54,7 @@ describe('UnifiedTaskCreateView', () => {
       items: [{ task_sku_item_id: 1, sequence_no: 1, sku_code: 'CGH000021', erp_status: 'not_filed' }],
     })
     mocks.getIids.mockResolvedValue({ data: { data: [{ i_id: 'KT_STANDARD' }] } })
+    mocks.getProducts.mockResolvedValue({ data: { data: { items: [] } } })
     mocks.uploadReferenceFileRef.mockResolvedValue({ asset_id: 'reference-default' })
     mocks.addTask.mockResolvedValue({ id: 'task-default', retouchRequirements: [] })
     mocks.getTaskById.mockReturnValue({ id: 'task-default', retouchRequirements: [] })
@@ -93,6 +94,38 @@ describe('UnifiedTaskCreateView', () => {
     expect(wrapper.get('.erp-result').text()).toContain('露陈铝膜气球')
     expect(wrapper.get('.erp-result').text()).toContain('CGH000018')
     wrapper.unmount()
+  })
+
+  it('restores fuzzy ERP suggestions while typing a product keyword', async () => {
+    vi.useFakeTimers()
+    mocks.route.query = { intent: 'modify_existing' }
+    mocks.getProducts.mockResolvedValue({
+      data: {
+        data: {
+          items: [
+            { product_id: 'KT-001', sku_code: 'KT-001-A', product_name: 'KT 常规展示架' },
+            { product_id: 'KT-002', sku_code: 'KT-002-B', product_name: 'KT 亚克力立牌' },
+          ],
+        },
+      },
+    })
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
+    })
+
+    await wrapper.get('.erp-search input').setValue('kt')
+    await vi.advanceTimersByTimeAsync(280)
+    await flushPromises()
+
+    expect(mocks.getProducts).toHaveBeenCalledWith(
+      { keyword: 'kt', page: 1, page_size: 20 },
+      expect.any(AbortSignal),
+    )
+    expect(wrapper.findAll('.erp-result')).toHaveLength(2)
+    expect(wrapper.text()).toContain('找到 2 个商品')
+    expect(mocks.getProductByCode).not.toHaveBeenCalled()
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('renders the create workbench when crypto.randomUUID is unavailable on HTTP', () => {
