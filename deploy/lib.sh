@@ -477,6 +477,7 @@ package_release() {
   local external_asset_worker_output
   local external_asset_nas_watcher_output
   local search_reindex_output
+  local purge_superseded_resource_objects_output
 
   dist_root="$(resolve_path "$root" "$output_root")"
   artifact_dir_name="${artifact_prefix}-${version}-linux-amd64"
@@ -491,6 +492,7 @@ package_release() {
   external_asset_worker_output="$stage_root/external_asset_worker"
   external_asset_nas_watcher_output="$stage_root/external_asset_nas_watcher"
   search_reindex_output="$stage_root/search_reindex"
+  purge_superseded_resource_objects_output="$stage_root/purge_superseded_resource_objects"
 
   rm -rf "$stage_root" "$artifact_path"
   mkdir -p "$stage_root" "$stage_root/config" "$stage_root/db" "$stage_root/docs" "$deploy_root"
@@ -514,6 +516,9 @@ package_release() {
     if [ -f "$root/cmd/tools/search-reindex/main.go" ]; then
       go_build_linux_amd64 "$root" "$go_tool" "$search_reindex_output" "./cmd/tools/search-reindex"
     fi
+    if [ -f "$root/cmd/tools/purge-superseded-resource-objects/main.go" ]; then
+      go_build_linux_amd64 "$root" "$go_tool" "$purge_superseded_resource_objects_output" "./cmd/tools/purge-superseded-resource-objects"
+    fi
   )
 
   wait_for_file "$stage_root/ecommerce-api" "main"
@@ -529,6 +534,9 @@ package_release() {
   fi
   if [ -f "$root/cmd/tools/search-reindex/main.go" ]; then
     wait_for_file "$stage_root/search_reindex" "search reindex tool"
+  fi
+  if [ -f "$root/cmd/tools/purge-superseded-resource-objects/main.go" ]; then
+    wait_for_file "$stage_root/purge_superseded_resource_objects" "superseded resource cleanup tool"
   fi
 
   cp "$root"/config/*.json "$stage_root/config/"
@@ -569,6 +577,9 @@ package_release() {
   if [ -f "$stage_root/search_reindex" ]; then
     chmod +x "$stage_root/search_reindex"
   fi
+  if [ -f "$stage_root/purge_superseded_resource_objects" ]; then
+    chmod +x "$stage_root/purge_superseded_resource_objects"
+  fi
 
   cat >"$stage_root/PACKAGE_INFO.json" <<EOF
 {
@@ -582,6 +593,7 @@ package_release() {
   "external_asset_worker_binary": "external_asset_worker",
   "external_asset_nas_watcher_binary": "external_asset_nas_watcher",
   "search_reindex_binary": "search_reindex",
+  "purge_superseded_resource_objects_binary": "purge_superseded_resource_objects",
   "resolved_entrypoint": "$(json_escape "$entrypoint")",
   "main_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ecommerce-api $(json_escape "$entrypoint")",
   "bridge_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o erp_bridge $(json_escape "$entrypoint")",
@@ -589,6 +601,7 @@ package_release() {
   "external_asset_worker_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external_asset_worker ./cmd/tools/external-asset-worker",
   "external_asset_nas_watcher_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external_asset_nas_watcher ./cmd/tools/external-asset-nas-watcher",
   "search_reindex_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o search_reindex ./cmd/tools/search-reindex",
+  "purge_superseded_resource_objects_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o purge_superseded_resource_objects ./cmd/tools/purge-superseded-resource-objects",
   "runtime_bridge_base_url": "$(json_escape "$bridge_base_url")",
   "suggested_remote_base_dir": "/root/ecommerce_ai",
   "runtime_env_example": ".env.example",
