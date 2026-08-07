@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1130,6 +1132,50 @@ func TestExperienceServiceProcessAttributionsReprocessesRecentOutcomesForLateFee
 	}
 	if watermark := stub.watermarks[domain.ExperienceWorkerAttribution+":"+experienceSourceAttributionRecentReprocess]; watermark == nil || watermark.LastSeenID != 9 {
 		t.Fatalf("recent watermark = %+v, want recent reprocess cursor to advance", watermark)
+	}
+}
+
+func TestExperienceServiceProcessAttributionsBoundsNPlusOneLanes(t *testing.T) {
+	outcomeAt := time.Now().UTC().Add(-2 * time.Hour)
+	forward := make([]*domain.ExperienceAttributionOutcome, 0, 12)
+	recent := make([]*domain.ExperienceAttributionOutcome, 0, 12)
+	for index := 0; index < 12; index++ {
+		forward = append(forward, &domain.ExperienceAttributionOutcome{
+			ID:         int64(index + 1),
+			EventKey:   fmt.Sprintf("forward:%d", index),
+			EventTime:  outcomeAt.Add(time.Duration(index) * time.Second),
+			TargetType: "task",
+			TargetID:   strconv.Itoa(index + 1),
+		})
+		recent = append(recent, &domain.ExperienceAttributionOutcome{
+			ID:         int64(index + 101),
+			EventKey:   fmt.Sprintf("recent:%d", index),
+			EventTime:  outcomeAt.Add(time.Duration(index+20) * time.Second),
+			TargetType: "task",
+			TargetID:   strconv.Itoa(index + 101),
+		})
+	}
+	stub := &experienceRepoStub{
+		attributionOutcomes:       forward,
+		recentAttributionOutcomes: recent,
+	}
+	svc := NewExperienceService(stub, ExperienceServiceConfig{CaptureEnabled: true, WorkerEnabled: true}, zap.NewNop())
+
+	result, appErr := svc.ProcessAttributions(context.Background(), 50)
+	if appErr != nil {
+		t.Fatalf("ProcessAttributions returned app error: %v", appErr)
+	}
+	if stub.attributionOutcomesLimit != experienceAttributionPerLaneBatchMax ||
+		stub.recentAttributionLimit != experienceAttributionPerLaneBatchMax {
+		t.Fatalf("lane limits = %d/%d, want %d/%d",
+			stub.attributionOutcomesLimit,
+			stub.recentAttributionLimit,
+			experienceAttributionPerLaneBatchMax,
+			experienceAttributionPerLaneBatchMax,
+		)
+	}
+	if result.Scanned != experienceAttributionPerLaneBatchMax*2 {
+		t.Fatalf("result=%+v, want bounded scan count %d", result, experienceAttributionPerLaneBatchMax*2)
 	}
 }
 
@@ -2472,6 +2518,8 @@ type experienceRepoStub struct {
 	workerRuns                []*domain.ExperienceWorkerRunRecord
 	attributionOutcomes       []*domain.ExperienceAttributionOutcome
 	recentAttributionOutcomes []*domain.ExperienceAttributionOutcome
+	attributionOutcomesLimit  int
+	recentAttributionLimit    int
 	attributionCandidates     []*domain.ExperienceAttributionCandidate
 	attributions              []*domain.ExperienceAttribution
 	microQuestionAttribution  *domain.ExperienceAttribution
@@ -2697,13 +2745,21 @@ func (s *experienceRepoStub) ListRecentExperienceWorkerRuns(context.Context, int
 	return s.workerRuns, nil
 }
 
-func (s *experienceRepoStub) ListExperienceAttributionOutcomes(context.Context, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceAttributionOutcome, error) {
+func (s *experienceRepoStub) ListExperienceAttributionOutcomes(_ context.Context, _ repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceAttributionOutcome, error) {
 	s.calls++
+	s.attributionOutcomesLimit = limit
+	if len(s.attributionOutcomes) > limit {
+		return s.attributionOutcomes[:limit], nil
+	}
 	return s.attributionOutcomes, nil
 }
 
-func (s *experienceRepoStub) ListRecentExperienceAttributionOutcomes(context.Context, time.Time, repo.ExperienceSourceCursor, int) ([]*domain.ExperienceAttributionOutcome, error) {
+func (s *experienceRepoStub) ListRecentExperienceAttributionOutcomes(_ context.Context, _ time.Time, _ repo.ExperienceSourceCursor, limit int) ([]*domain.ExperienceAttributionOutcome, error) {
 	s.calls++
+	s.recentAttributionLimit = limit
+	if len(s.recentAttributionOutcomes) > limit {
+		return s.recentAttributionOutcomes[:limit], nil
+	}
 	return s.recentAttributionOutcomes, nil
 }
 

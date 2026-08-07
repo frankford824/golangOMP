@@ -377,6 +377,22 @@ func TestSearchServiceExternalAssetErrorDoesNotFailSearch(t *testing.T) {
 	}
 }
 
+func TestSearchAllDegradesSlowProductBranch(t *testing.T) {
+	repository := &contextBoundProductSearchRepo{}
+	svc := NewService(repository)
+	started := time.Now()
+	got, appErr := svc.Search(context.Background(), actor(domain.RoleSuperAdmin), "医师节", "all", 20)
+	if appErr != nil {
+		t.Fatalf("Search() appErr=%+v", appErr)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("global search degradation took %s", elapsed)
+	}
+	if len(got.Tasks) != 1 || len(got.Assets) != 1 || len(got.Users) != 1 || len(got.Products) != 0 {
+		t.Fatalf("degraded result=%+v, want non-product branches preserved", got)
+	}
+}
+
 type errorSearchRepo struct{ stubSearchRepo }
 
 func (e *errorSearchRepo) SearchTasks(context.Context, string, int) ([]domain.SearchTask, error) {
@@ -384,6 +400,14 @@ func (e *errorSearchRepo) SearchTasks(context.Context, string, int) ([]domain.Se
 }
 func (e *errorSearchRepo) SearchTasksScoped(context.Context, string, int, domain.ResourceGroupAccessFilter) ([]domain.SearchTask, error) {
 	return nil, errors.New("boom")
+}
+
+type contextBoundProductSearchRepo struct{ stubSearchRepo }
+
+func (e *contextBoundProductSearchRepo) SearchProducts(ctx context.Context, _ string, _ int) ([]domain.SearchProduct, error) {
+	e.productsCalls++
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 type errorExternalAssetSearch struct{}

@@ -19,6 +19,7 @@ const (
 	CodeInvalidQuery = "invalid_query"
 
 	externalSearchBudget = 650 * time.Millisecond
+	productSearchBudget  = 900 * time.Millisecond
 	autoHybridBudget     = 700 * time.Millisecond
 )
 
@@ -112,7 +113,16 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 			searchJob{name: "products", run: func() error {
 				rows, err := s.searchProducts(ctx, actor, q, limit)
 				result.Products = rows
-				return err
+				if err != nil {
+					// Global search is a multi-source preview. Keep usable task,
+					// asset and user matches when the catalog branch is under
+					// pressure; an explicit products scope still surfaces the
+					// backend error below.
+					s.logger.Warn("global search product branch degraded", zap.Error(err))
+					result.Products = []domain.SearchProduct{}
+					return nil
+				}
+				return nil
 			}},
 			searchJob{name: "users", run: func() error {
 				rows, err := s.searchUsers(ctx, actor, q, limit)
@@ -390,7 +400,9 @@ func (s *Service) searchProducts(ctx context.Context, actor domain.RequestActor,
 	if !domain.ActorHasPermission(actor, domain.PermissionCatalogView) {
 		return []domain.SearchProduct{}, nil
 	}
-	return s.repo.SearchProducts(ctx, q, limit)
+	searchCtx, cancel := context.WithTimeout(ctx, productSearchBudget)
+	defer cancel()
+	return s.repo.SearchProducts(searchCtx, q, limit)
 }
 
 func (s *Service) searchExternalAssets(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchAsset, error) {

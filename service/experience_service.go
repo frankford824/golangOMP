@@ -27,7 +27,7 @@ const (
 	experienceBehaviorBatchMax                = 50
 	experienceRetentionBatchMax               = 1000
 	experienceAttributionLookback             = 7 * 24 * time.Hour
-	experienceAttributionRecentReprocessMax   = 500
+	experienceAttributionPerLaneBatchMax      = 5
 	experienceAttributionCandidatesPerOutcome = 20
 	experienceMicroQuestionDailyLimit         = domain.ExperienceMicroQuestionDailyLimit
 )
@@ -1085,7 +1085,11 @@ func (s *experienceService) processAttributionsLocked(ctx context.Context, limit
 		return result, appErr
 	}
 	cursor := experienceCursorFromWatermark(watermark)
-	outcomes, err := s.repo.ListExperienceAttributionOutcomes(ctx, cursor, limit)
+	// Candidate attribution is an N+1 aggregation over behavior and feedback
+	// history. Keep each forward/reprocess lane intentionally small so this
+	// background worker cannot monopolize MySQL while interactive reads wait.
+	attributionLimit := min(limit, experienceAttributionPerLaneBatchMax)
+	outcomes, err := s.repo.ListExperienceAttributionOutcomes(ctx, cursor, attributionLimit)
 	if err != nil {
 		result.Failed++
 		appErr := infraError("list experience attribution outcomes", err)
@@ -1104,7 +1108,7 @@ func (s *experienceService) processAttributionsLocked(ctx context.Context, limit
 			last = outcome
 		}
 	}
-	if appErr := s.processRecentAttributionOutcomes(ctx, limit, seenOutcomes, &result); appErr != nil {
+	if appErr := s.processRecentAttributionOutcomes(ctx, attributionLimit, seenOutcomes, &result); appErr != nil {
 		s.recordExperienceAttributionWorkerRun(ctx, startedAt, result, appErr)
 		return result, appErr
 	}
@@ -1133,14 +1137,9 @@ func (s *experienceService) processRecentAttributionOutcomes(ctx context.Context
 		return nil
 	}
 	recentSince := time.Now().UTC().Add(-experienceAttributionLookback)
-	// This path performs one attribution-candidate query per outcome. Keep the
-	// reprocess batch aligned with the configured worker batch instead of
-	// multiplying it by ten; the watermark continues the remaining work on the
-	// next tick without monopolizing the shared request connection pool.
-	recentLimit := limit
-	if recentLimit > experienceAttributionRecentReprocessMax {
-		recentLimit = experienceAttributionRecentReprocessMax
-	}
+	// The caller already applies the per-lane N+1 budget. The watermark
+	// continues the remaining recent outcomes on later ticks.
+	recentLimit := min(limit, experienceAttributionPerLaneBatchMax)
 	watermark, err := s.repo.GetExperienceWorkerWatermark(ctx, domain.ExperienceWorkerAttribution, experienceSourceAttributionRecentReprocess)
 	if err != nil {
 		result.Failed++
