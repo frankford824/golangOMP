@@ -4601,6 +4601,8 @@ Content-Type: `application/json`
 | `product_name_snapshot` | string | 否 | Compatibility alias for `product_name`. |
 | `i_id` | string | 否 | Canonical Jushuitan product style/family i_id used by ERP filing. Prefer this over legacy category fields. |
 | `product_i_id` | string | 否 | Compatibility alias for `i_id`. |
+| `deadline_at` | string | 否 | Canonical task deadline. RFC3339 updates the deadline; explicit null or an empty string clears it. |
+| `due_at` | string | 否 | Compatibility alias for `deadline_at`. |
 | `category` | string | 否 | - |
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |

@@ -25,12 +25,23 @@ func TestBuildDetailReferenceFileRefsPrefersTaskDetailJSON(t *testing.T) {
 }
 
 func TestBuildDetailReferenceFileRefsFallsBackToFlatRefs(t *testing.T) {
-	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(&domain.TaskDetail{ReferenceFileRefsJSON: "[]"}, []*domain.ReferenceFileRefFlat{{RefID: "flat-ref"}})
+	fileSize := int64(2048)
+	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(&domain.TaskDetail{ReferenceFileRefsJSON: "[]"}, []*domain.ReferenceFileRefFlat{{
+		RefID:        "flat-ref",
+		FileName:     "补传参考图.png",
+		MimeType:     "image/png",
+		FileSize:     &fileSize,
+		StorageKey:   "tasks/RW-001/assets/reference/补传参考图.png",
+		StorageStatus: string(domain.AssetStorageRefStatusRecorded),
+	}})
 	if len(refs) != 1 {
 		t.Fatalf("refs len = %d, want 1", len(refs))
 	}
-	if refs[0].AssetID != "flat-ref" || refs[0].RefID != "flat-ref" {
-		t.Fatalf("refs[0] = %+v, want flat-ref fallback", refs[0])
+	if refs[0].AssetID != "flat-ref" || refs[0].RefID != "flat-ref" || refs[0].Filename != "补传参考图.png" || refs[0].MimeType != "image/png" {
+		t.Fatalf("refs[0] = %+v, want display metadata from flat-ref fallback", refs[0])
+	}
+	if refs[0].FileSize == nil || *refs[0].FileSize != fileSize || refs[0].DownloadURL == nil || *refs[0].DownloadURL != "/v1/assets/files/tasks/RW-001/assets/reference/%E8%A1%A5%E4%BC%A0%E5%8F%82%E8%80%83%E5%9B%BE.png" {
+		t.Fatalf("refs[0] display access = %+v, want a previewable reference", refs[0])
 	}
 }
 

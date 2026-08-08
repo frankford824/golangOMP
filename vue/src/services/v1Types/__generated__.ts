@@ -19757,6 +19757,16 @@ export interface components {
             i_id?: string;
             /** @description Compatibility alias for `i_id`. */
             product_i_id?: string;
+            /**
+             * Format: date-time
+             * @description Canonical task deadline. RFC3339 updates the deadline; explicit null or an empty string clears it.
+             */
+            deadline_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Compatibility alias for `deadline_at`.
+             */
+            due_at?: string | null;
             category?: string;
             category_id?: number | null;
             category_code?: string;

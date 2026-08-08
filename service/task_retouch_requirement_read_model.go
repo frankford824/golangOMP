@@ -263,10 +263,26 @@ func buildDetailReferenceFileRefsFromDetail(detail *domain.TaskDetail, flatRefs 
 		if flat == nil || flat.RefID == "" {
 			continue
 		}
-		refs = append(refs, domain.ReferenceFileRef{
-			AssetID: flat.RefID,
-			RefID:   flat.RefID,
-		})
+		ref := domain.ReferenceFileRef{
+			AssetID:    flat.RefID,
+			RefID:      flat.RefID,
+			Filename:   strings.TrimSpace(flat.FileName),
+			MimeType:   strings.TrimSpace(flat.MimeType),
+			StorageKey: strings.TrimSpace(flat.StorageKey),
+		}
+		if flat.FileSize != nil {
+			ref.FileSize = domain.CloneInt64Ptr(flat.FileSize)
+		}
+		if domain.AssetStorageRefStatus(strings.TrimSpace(flat.StorageStatus)) == domain.AssetStorageRefStatusRecorded && ref.StorageKey != "" {
+			downloadURL := domain.BuildRelativeEscapedURLPath("/v1/assets/files", ref.StorageKey)
+			ref.DownloadURL = &downloadURL
+			ref.URL = &downloadURL
+			ref.Source = domain.ReferenceFileRefSourceTaskCreateAssetCenter
+			ref.Status = domain.ReferenceFileRefStatusUploaded
+		} else {
+			ref.StorageKey = ""
+		}
+		refs = append(refs, ref)
 	}
 	return domain.NormalizeReferenceFileRefs(refs)
 }

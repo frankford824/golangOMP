@@ -22,10 +22,9 @@
         <label>
           <span>优先级</span>
           <select v-model="draft.priority">
-            <option value="low">低</option>
             <option value="normal">普通</option>
-            <option value="high">高</option>
-            <option value="critical">紧急</option>
+            <option value="high">加急</option>
+            <option value="drawing">出单画图</option>
           </select>
         </label>
         <label>

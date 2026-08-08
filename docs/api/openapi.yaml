@@ -3224,6 +3224,16 @@ components:
         product_i_id:
           type: string
           description: Compatibility alias for `i_id`.
+        deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Canonical task deadline. RFC3339 updates the deadline; explicit null or an empty string clears it.
+        due_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Compatibility alias for `deadline_at`.
         category: { type: string }
         category_id:
           type: integer
