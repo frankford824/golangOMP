@@ -51,7 +51,7 @@
       </div>
       <label v-if="intent === 'new_design' || intent === 'planning_sku'" class="field">
         <span class="field-name">ERP 同步</span>
-        <span class="switch-row"><input v-model="erpSync" type="checkbox" :disabled="intent === 'planning_sku' && !canPlanningERPSync" aria-label="创建成功后自动同步 ERP" /><small>{{ erpSyncHint }}</small></span>
+        <span class="switch-row"><input v-model="erpSync" type="checkbox" aria-label="创建成功后自动同步 ERP" /><small>{{ erpSyncHint }}</small></span>
       </label>
       <label class="field note-field">
         <span class="field-name">备注（选填）</span>
@@ -287,11 +287,7 @@ function defaultDueAt(): string {
 }
 
 const intent = ref<ComposeIntent>(initialIntent())
-const canPlanningERPSync = computed(() => can('planning_sku.erp_sync'))
-function permittedDefaultErpSyncMode(nextIntent: ComposeIntent): ComposeCommonInfo['erp_sync_mode'] {
-  return nextIntent === 'planning_sku' && !canPlanningERPSync.value ? 'none' : defaultErpSyncMode(nextIntent)
-}
-const common = reactive<ComposeCommonInfo>({ due_at: defaultDueAt(), priority: 'normal', note: '', customization_required: false, customization_source_type: undefined, erp_sync_mode: permittedDefaultErpSyncMode(intent.value) })
+const common = reactive<ComposeCommonInfo>({ due_at: defaultDueAt(), priority: 'normal', note: '', customization_required: false, customization_source_type: undefined, erp_sync_mode: defaultErpSyncMode(intent.value) })
 const rows = ref<ComposeRow[]>([createComposeRow()])
 const selectedRowId = ref(rows.value[0].id)
 const selectedRowIds = ref<string[]>([rows.value[0].id])
@@ -331,15 +327,9 @@ const editableTextColumns = computed(() => columns.value.filter((column) => colu
 const showSetHint = computed(() => intent.value === 'new_design' || intent.value === 'modify_existing')
 const maxRows = computed(() => intent.value === 'planning_sku' ? 200 : intent.value === 'modify_existing' ? 50 : 100)
 const rowCountHint = computed(() => intent.value === 'modify_existing' ? '每一行都会变成一张单独的任务单' : intent.value === 'new_design' && rows.value.length > 1 ? '这几行会合成一张批量任务单' : intent.value === 'retouch' ? '这些修图要求会放进同一张任务单' : intent.value === 'planning_sku' ? '提交后马上拿到全部编码' : '这一行会生成一个新 SKU 的设计任务')
-const erpSync = computed({
-  get: () => common.erp_sync_mode === 'async',
-  set: (value: boolean) => {
-    common.erp_sync_mode = value && (intent.value !== 'planning_sku' || canPlanningERPSync.value) ? 'async' : 'none'
-  },
-})
+const erpSync = computed({ get: () => common.erp_sync_mode === 'async', set: (value: boolean) => { common.erp_sync_mode = value ? 'async' : 'none' } })
 // 勾选状态必须由同一句话表达：此前标题固定写「创建后自动同步 ERP」，未勾选时与提示语互相打架。
 const erpSyncHint = computed(() => {
-  if (intent.value === 'planning_sku' && !canPlanningERPSync.value) return '当前账号可生成 SKU；ERP 同步由超级管理员执行'
   if (!erpSync.value) return '本次不同步：只创建任务与 SKU'
   return intent.value === 'planning_sku'
     ? '本次同步：款式编码同时用于生成 SKU 与 ERP 建档，商品名称取产品描述 / 规格'
@@ -446,7 +436,7 @@ function resetComposeState() {
   common.note = ''
   common.customization_required = false
   common.customization_source_type = undefined
-  common.erp_sync_mode = permittedDefaultErpSyncMode(intent.value)
+  common.erp_sync_mode = defaultErpSyncMode(intent.value)
   common.designer_id = undefined
   rows.value = [createComposeRow()]
   selectRow(rows.value[0].id)
@@ -813,8 +803,7 @@ async function submit(retryOnly: boolean) {
   try {
     if (intent.value === 'planning_sku') {
       try {
-        const erpSyncMode = canPlanningERPSync.value ? common.erp_sync_mode : 'none'
-        planningResult.value = await planningSkuApi.create(buildPlanningInputs(candidates, common.customization_required), erpSyncMode, clientCreateId.value)
+        planningResult.value = await planningSkuApi.create(buildPlanningInputs(candidates, common.customization_required), common.erp_sync_mode, clientCreateId.value)
         selectedPlanningIds.value = new Set(planningResult.value.items.map((item) => item.task_sku_item_id))
         candidates.forEach((row, index) => { row.status = 'created'; row.result_task_id = String(planningResult.value?.task_id || ''); row.result_sku_code = planningResult.value?.items[index]?.sku_code })
         result.value = true
@@ -1023,7 +1012,6 @@ async function restoreDraft(id: string) {
     const payload = draft.payload as Record<string, unknown>
     if (intentOptions.value.some((item) => item.value === payload.intent)) intent.value = payload.intent as ComposeIntent
     if (payload.common && typeof payload.common === 'object') Object.assign(common, payload.common)
-    if (intent.value === 'planning_sku' && !canPlanningERPSync.value) common.erp_sync_mode = 'none'
     if (Array.isArray(payload.rows)) {
       rows.value = payload.rows.map((rawRow) => {
         const row = createComposeRow(rawRow as Partial<ComposeRow>)
