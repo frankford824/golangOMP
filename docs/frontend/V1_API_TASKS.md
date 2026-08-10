@@ -3870,12 +3870,13 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `owner_department_id` | query | integer | 否 | - |
 | `owner_team_id` | query | integer | 否 | - |
 | `priority` | query | enum(normal/high/drawing) | 否 | - |
+| `filter` | query | enum(mine) | 否 | `mine` returns only non-terminal work currently requiring this actor: current-handler tasks, active design tasks assigned to the actor, and the actor's unassigned drafts. Historical participation remains searchable from the full task list. |
 | `overdue` | query | boolean | 否 | - |
 | `operational_bucket` | query | enum(active_tasks/design_pending/pending_audit/handover/customization_in_progress/overdue/due_today/today_created) | 否 | Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. |
 | `date_from` | query | string | 否 | - |
 | `date_to` | query | string | 否 | - |
 | `keyword` | query | string | 否 | - |
-| `sort` | query | enum(created_at/-created_at/updated_at/-updated_at/due_at/-due_at/task_no/-task_no) | 否 | - |
+| `sort` | query | enum(created_at/-created_at/updated_at/-updated_at/due_at/-due_at/task_no/-task_no) | 否 | Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 

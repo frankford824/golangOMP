@@ -349,14 +349,20 @@ func TestBuildTaskListQuerySpecMineActorOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
 	}
-	want := "(t.creator_id = ? OR t.designer_id = ? OR t.current_handler_id = ?)"
-	if !strings.Contains(spec.whereSQL, want) {
-		t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
+	for _, want := range []string{
+		"t.current_handler_id = ?",
+		"t.designer_id = ? AND t.task_status IN (?, ?, ?)",
+		"t.creator_id = ? AND t.task_status IN (?, ?)",
+		"t.task_status NOT IN (?, ?, ?)",
+	} {
+		if !strings.Contains(spec.whereSQL, want) {
+			t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
+		}
 	}
-	if len(spec.args) < 3 {
-		t.Fatalf("args len = %d, want at least 3 mine actor placeholders", len(spec.args))
+	if len(spec.args) != 11 {
+		t.Fatalf("args len = %d, want 11 responsibility/status placeholders", len(spec.args))
 	}
-	for i := len(spec.args) - 3; i < len(spec.args); i++ {
+	for _, i := range []int{0, 1, 5} {
 		if spec.args[i] != actorID {
 			t.Fatalf("mine actor arg[%d] = %v, want %d", i, spec.args[i], actorID)
 		}

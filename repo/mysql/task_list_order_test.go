@@ -11,15 +11,15 @@ func TestTaskListOrderByHonorsSortToken(t *testing.T) {
 		token string
 		want  string
 	}{
-		{"empty defaults to updated_at desc", "", "t.updated_at DESC, t.id DESC"},
-		{"updated_at ascending", "updated_at", "t.updated_at ASC, t.id DESC"},
-		{"updated_at descending", "-updated_at", "t.updated_at DESC, t.id DESC"},
+		{"empty defaults to business updated desc", "", "business_updated_at DESC, t.id DESC"},
+		{"updated_at ascending", "updated_at", "business_updated_at ASC, t.id DESC"},
+		{"updated_at descending", "-updated_at", "business_updated_at DESC, t.id DESC"},
 		{"created_at ascending", "created_at", "t.created_at ASC, t.id DESC"},
 		{"created_at descending", "-created_at", "t.created_at DESC, t.id DESC"},
 		{"due_at maps to deadline", "due_at", "t.deadline_at ASC, t.id DESC"},
 		{"due_at descending", "-due_at", "t.deadline_at DESC, t.id DESC"},
 		{"task_no ascending", "task_no", "t.task_no ASC, t.id DESC"},
-		{"unknown token is coerced to updated_at desc", "; DROP TABLE tasks", "t.updated_at DESC, t.id DESC"},
+		{"unknown token is coerced to business updated desc", "; DROP TABLE tasks", "business_updated_at DESC, t.id DESC"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

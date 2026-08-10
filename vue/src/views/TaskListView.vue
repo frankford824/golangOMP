@@ -60,6 +60,18 @@
           placeholder="全部状态"
           clearable
         />
+        <BaseSelect
+          v-model="sortKey"
+          class="task-sort-field"
+          :options="sortFieldOptions"
+          aria-label="任务排序字段"
+        />
+        <BaseSelect
+          v-model="sortOrder"
+          class="task-sort-order"
+          :options="sortOrderOptions"
+          aria-label="任务排序方向"
+        />
         <BaseButton size="sm" variant="primary" class="quick-apply" @click="applyQuickFilters">查询</BaseButton>
         <BaseButton
           size="sm"
@@ -646,6 +658,16 @@ const pageSizeOptions: BaseSelectOption[] = [
   { value: 50, label: '50' },
   { value: 100, label: '100' },
 ]
+const sortFieldOptions: BaseSelectOption[] = [
+  { value: 'updatedAt', label: '按业务更新时间' },
+  { value: 'createdAt', label: '按创建时间' },
+  { value: 'dueAt', label: '按截止时间' },
+  { value: 'taskNo', label: '按任务号' },
+]
+const sortOrderOptions: BaseSelectOption[] = [
+  { value: 'desc', label: '最新在前' },
+  { value: 'asc', label: '最早在前' },
+]
 
 function queryString(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
@@ -688,7 +710,8 @@ function saveState() {
 
 const searchKeyword = ref((route.query.q as string) || '')
 const activeTab = ref<TaskListTab>(parseTaskTab(route.query.tab))
-const sortKey = ref<'taskNo' | 'updatedAt' | 'dueAt'>('updatedAt')
+type TaskSortKey = 'taskNo' | 'updatedAt' | 'createdAt' | 'dueAt'
+const sortKey = ref<TaskSortKey>('updatedAt')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 const page = ref(1)
 const pageSize = ref(20)
@@ -1006,6 +1029,7 @@ if (typeof route.query.sort === 'string') {
   const map: Record<string, typeof sortKey.value> = {
     task_no: 'taskNo',
     updated_at: 'updatedAt',
+    created_at: 'createdAt',
     due_at: 'dueAt',
   }
   if (map[field]) {
@@ -1098,6 +1122,7 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
   const sortMap: Record<typeof sortKey.value, string> = {
     taskNo: 'task_no',
     updatedAt: 'updated_at',
+    createdAt: 'created_at',
     dueAt: 'due_at',
   }
   params.sort = `${sortOrder.value === 'desc' ? '-' : ''}${sortMap[sortKey.value]}`
@@ -1824,6 +1849,7 @@ watch(
     const sortMap: Record<typeof sortKey.value, string> = {
       taskNo: 'task_no',
       updatedAt: 'updated_at',
+      createdAt: 'created_at',
       dueAt: 'due_at',
     }
     q.sort = `${sortOrder.value === 'desc' ? '-' : ''}${sortMap[sortKey.value]}`
@@ -1876,6 +1902,7 @@ watch(
       const sortMap: Record<string, typeof sortKey.value> = {
         task_no: 'taskNo',
         updated_at: 'updatedAt',
+        created_at: 'createdAt',
         due_at: 'dueAt',
       }
       if (sortMap[field] && (sortKey.value !== sortMap[field] || sortOrder.value !== direction)) {
@@ -3083,6 +3110,14 @@ watch(totalPages, (value) => {
   flex: 0 0 10rem;
 }
 
+.task-sort-field {
+  flex: 0 0 10.5rem;
+}
+
+.task-sort-order {
+  flex: 0 0 7.5rem;
+}
+
 .active-filter-chips {
   display: flex;
   flex-wrap: wrap;
@@ -3131,6 +3166,11 @@ watch(totalPages, (value) => {
   }
 
   .quick-status {
+    flex: 1 1 9rem;
+  }
+
+  .task-sort-field,
+  .task-sort-order {
     flex: 1 1 9rem;
   }
 

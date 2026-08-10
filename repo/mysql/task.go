@@ -569,7 +569,13 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 		SELECT t.id, t.task_no, t.product_id, t.sku_code, t.product_name_snapshot,
 		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.owner_department_id, t.owner_team_id, t.workflow_revision, t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
-		       t.task_status, t.created_at, t.updated_at, t.deadline_at, COALESCE(t.business_lane, ''), t.customization_required,
+		       t.task_status, t.created_at,
+		       COALESCE((SELECT activity_event.created_at
+		                   FROM task_event_logs activity_event
+		                  WHERE activity_event.task_id = t.id
+		                  ORDER BY activity_event.sequence DESC
+		                  LIMIT 1), t.created_at) AS business_updated_at,
+		       t.deadline_at, COALESCE(t.business_lane, ''), t.customization_required,
 		       t.is_batch_task, t.batch_item_count, t.batch_mode, COALESCE(t.primary_sku_code, ''), COALESCE(td.sku_code_type, ''),
 		       td.category, td.category_code, td.category_name,
 		       td.source_product_id, td.source_product_name, td.source_search_entry_code, td.source_match_type, td.source_match_rule,
@@ -618,7 +624,7 @@ func taskListOrderBy(sortToken string) string {
 	token := strings.TrimSpace(sortToken)
 	desc := strings.HasPrefix(token, "-")
 	field := strings.TrimPrefix(token, "-")
-	column := "t.updated_at"
+	column := "business_updated_at"
 	switch field {
 	case "task_no":
 		column = "t.task_no"
@@ -627,9 +633,12 @@ func taskListOrderBy(sortToken string) string {
 	case "created_at":
 		column = "t.created_at"
 	case "updated_at", "":
-		column = "t.updated_at"
+		// Task list "updated_at" is the latest business event, not the physical
+		// tasks.updated_at column. Maintenance backfills may touch thousands of
+		// task rows in one second and must not scramble the user-facing order.
+		column = "business_updated_at"
 	default:
-		column = "t.updated_at"
+		column = "business_updated_at"
 		desc = true
 	}
 	direction := "ASC"
@@ -1720,8 +1729,18 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 
 	if filter.MineActorID != nil {
 		actorID := *filter.MineActorID
-		where = append(where, "(t.creator_id = ? OR t.designer_id = ? OR t.current_handler_id = ?)")
-		args = append(args, actorID, actorID, actorID)
+		where = append(where, `(
+			t.current_handler_id = ?
+			OR (t.current_handler_id IS NULL AND t.designer_id = ? AND t.task_status IN (?, ?, ?))
+			OR (t.current_handler_id IS NULL AND t.designer_id IS NULL AND t.creator_id = ? AND t.task_status IN (?, ?))
+		)`)
+		args = append(args,
+			actorID,
+			actorID, string(domain.TaskStatusAssigned), string(domain.TaskStatusInProgress), string(domain.TaskStatusBlocked),
+			actorID, string(domain.TaskStatusDraft), string(domain.TaskStatusPendingAssign),
+		)
+		where = append(where, "t.task_status NOT IN (?, ?, ?)")
+		args = append(args, string(domain.TaskStatusCompleted), string(domain.TaskStatusArchived), string(domain.TaskStatusCancelled))
 	} else if filter.CreatorID != nil {
 		where = append(where, "t.creator_id = ?")
 		args = append(args, *filter.CreatorID)

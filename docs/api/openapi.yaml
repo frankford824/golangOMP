@@ -2849,7 +2849,10 @@ components:
           description: Effective task actions for this list row. `task.claim` is emitted only for an unassigned design task that the current actor may claim; it is distinct from the management-only `task.assign` action.
           items: { type: string }
         created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
+        updated_at:
+          type: string
+          format: date-time
+          description: Latest business activity time for this list row, derived from the task event chain. Maintenance-only writes to the physical task row do not affect this value or updated-time sorting.
         deadline_at: { type: string, format: date-time, nullable: true }
         business_lane: { type: string, enum: [normal, customization] }
         customization_required: { type: boolean }
@@ -10139,6 +10142,10 @@ paths:
         - { in: query, name: owner_department_id, schema: { type: integer, format: int64 } }
         - { in: query, name: owner_team_id, schema: { type: integer, format: int64 } }
         - { in: query, name: priority, schema: { type: string, enum: [normal, high, drawing] } }
+        - in: query
+          name: filter
+          description: '`mine` returns only non-terminal work currently requiring this actor: current-handler tasks, active design tasks assigned to the actor, and the actor''s unassigned drafts. Historical participation remains searchable from the full task list.'
+          schema: { type: string, enum: [mine] }
         - { in: query, name: overdue, schema: { type: boolean } }
         - in: query
           name: operational_bucket
@@ -10149,7 +10156,10 @@ paths:
         - { in: query, name: date_from, schema: { type: string } }
         - { in: query, name: date_to, schema: { type: string } }
         - { in: query, name: keyword, schema: { type: string } }
-        - { in: query, name: sort, schema: { type: string, enum: [created_at, -created_at, updated_at, -updated_at, due_at, -due_at, task_no, -task_no], default: -updated_at } }
+        - in: query
+          name: sort
+          description: Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker.
+          schema: { type: string, enum: [created_at, -created_at, updated_at, -updated_at, due_at, -due_at, task_no, -task_no], default: -updated_at }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 200, default: 20 } }
       responses:
