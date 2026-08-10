@@ -164,7 +164,7 @@ describe('UnifiedTaskCreateView', () => {
 
     expect(mocks.create).toHaveBeenCalledWith([
       expect.objectContaining({ category_code: 'KT_STANDARD', sku_code_type: 'regular', description_spec: '亚克力立牌 20cm', quantity: 2, erp_product_i_id: 'KT_STANDARD', erp_product_name: '亚克力立牌 20cm' }),
-    ], 'async', expect.any(String))
+    ], 'none', expect.any(String))
     expect(wrapper.text()).toContain('任务 RW-088 已结单')
     expect(wrapper.text()).toContain('CGH000021')
     expect(wrapper.text()).toContain('以下编号已正式占用')
@@ -175,6 +175,7 @@ describe('UnifiedTaskCreateView', () => {
   })
 
   it('states ERP sync behavior explicitly without the removed planning cost panel', async () => {
+    mocks.permissions.add('planning_sku.erp_sync')
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
         stubs: {
@@ -197,6 +198,36 @@ describe('UnifiedTaskCreateView', () => {
     expect(wrapper.text()).toContain('本次同步：款式编码同时用于生成 SKU 与 ERP 建档，商品名称取产品描述 / 规格')
 
     expect(wrapper.find('.cost-preview-stub').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('lets an operations creator generate SKU without attempting privileged ERP sync', async () => {
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: { template: '<div class="grid-stub" />', methods: { readRowsFromWorkbook() {} } },
+          IIdSelector: { template: '<div class="iid-stub" />' },
+          RouterLink: true,
+        },
+      },
+    })
+
+    const sync = wrapper.get('input[aria-label="创建成功后自动同步 ERP"]')
+    expect((sync.element as HTMLInputElement).checked).toBe(false)
+    expect(sync.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('当前账号可生成 SKU；ERP 同步由超级管理员执行')
+
+    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('KT_STANDARD')
+    await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
+    await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('1')
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.create).toHaveBeenCalledWith([
+      expect.objectContaining({ category_code: 'KT_STANDARD', description_spec: '亚克力立牌 20cm', quantity: 1 }),
+    ], 'none', expect.any(String))
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('任务 RW-088 已结单')
     wrapper.unmount()
   })
 
