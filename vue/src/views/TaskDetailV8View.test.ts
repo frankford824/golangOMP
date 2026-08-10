@@ -7,7 +7,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(), cancel: vi.fn(),
-  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), resolveAssetDownload: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
+  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), resolveAssetDownload: vi.fn(), runRetouchBatchDownload: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
 vi.mock('@/services/api/assetsApi', async (loadOriginal) => ({
@@ -29,6 +29,10 @@ vi.mock('vue-router', () => ({
   onBeforeRouteUpdate: vi.fn(),
 }))
 vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: mocks.uploadReference }))
+vi.mock('@/domain/retouch-requirement-batch-download', async (loadOriginal) => ({
+  ...(await loadOriginal<typeof import('@/domain/retouch-requirement-batch-download')>()),
+  runRetouchBatchDownload: mocks.runRetouchBatchDownload,
+}))
 vi.mock('@/services/api/planningSkuApi', () => ({ planningSkuApi: { getTask: mocks.getPlanning, downloadTask: mocks.downloadPlanning } }))
 vi.mock('@/services/api/usersApi', () => ({ usersApi: { getDesigners: mocks.getDesigners } }))
 
@@ -96,6 +100,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.cancel.mockResolvedValue({})
     mocks.listAssets.mockResolvedValue({ data: { data: [] } })
     mocks.resolveAssetDownload.mockResolvedValue({ status: 'not_found', message: '资源不存在' })
+    mocks.runRetouchBatchDownload.mockResolvedValue({ ok: true, writtenCount: 2, failureCount: 0 })
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
     mocks.getPlanning.mockResolvedValue({ task_id: 41, task_no: 'RW-041', task_status: 'Completed', workflow_revision: 3, items: [] })
     mocks.downloadPlanning.mockResolvedValue(undefined)
@@ -188,6 +193,10 @@ describe('TaskDetailV8View business context', () => {
       description: '清理主图背景',
       remark: '保留产品阴影',
       reference_file_refs: [{ ref_id: 'requirement-ref', filename: '需求参考图.jpg', mime_type: 'image/jpeg', download_url: 'https://files/requirement-ref' }],
+      source_assets: [
+        { id: 201, current_version: { id: 301, file_name: '主图.png', download_url: 'https://files/source-main.png', mime_type: 'image/png' } },
+        { id: 202, current_version: { id: 302, file_name: '细节图.png', download_url: 'https://files/source-detail.png', mime_type: 'image/png' } },
+      ],
     }] } } })
     mocks.taskBundle.mockResolvedValue({
       task_id: 41,
@@ -223,6 +232,21 @@ describe('TaskDetailV8View business context', () => {
     expect(wrapper.text()).toContain('修图任务无需独立源文件')
     expect(wrapper.text()).not.toContain('提交修图成品')
     expect(wrapper.get('.resource-rail .rail-column.references').text()).toContain('1 个附件')
+    const batchButton = wrapper.findAll('button').find((item) => item.text() === '批量下载全部')
+    expect(batchButton).toBeDefined()
+    await batchButton?.trigger('click')
+    expect(mocks.runRetouchBatchDownload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entries: expect.arrayContaining([
+          expect.objectContaining({ assetId: 201, zipPath: '需求1/素材文件' }),
+          expect.objectContaining({ assetId: 202, zipPath: '需求1/素材文件' }),
+        ]),
+        assetIdCount: 2,
+      }),
+      expect.stringContaining('素材文件'),
+      expect.any(Function),
+    )
+    expect(wrapper.text()).toContain('已打包 2 个待修素材')
     expect(wrapper.find('.references-card').exists()).toBe(false)
     await wrapper.findAll('button').find((item) => item.text() === '参考资料总览')?.trigger('click')
     expect(dialog().getAttribute('aria-label')).toBe('运营参考图')
@@ -374,7 +398,7 @@ describe('TaskDetailV8View business context', () => {
     }))
   })
 
-  it('lets the creator update only business fields on their own batch task', async () => {
+  it('lets the creator update business fields and audited manual cost on their own active batch task', async () => {
     const permissions = usePermissionsStore()
     permissions.setCurrentUser({
       id: '240',
@@ -407,11 +431,11 @@ describe('TaskDetailV8View business context', () => {
     await editButton?.trigger('click')
 
     expect(dialog().querySelector('.task-business-editor')).not.toBeNull()
-    expect(dialog().textContent).toContain('自己创建的任务，可修改业务字段；成本只读')
+    expect(dialog().textContent).toContain('自己创建的未结单任务，可修改业务字段与成本；人工改价需填写原因')
     const costInput = [...dialog().querySelectorAll('label')]
       .find((label) => label.textContent?.includes('当前/人工成本'))
       ?.querySelector<HTMLInputElement>('input')
-    expect(costInput?.disabled).toBe(true)
+    expect(costInput?.disabled).toBe(false)
     const productInput = dialog().querySelector<HTMLInputElement>('input')
     expect(productInput?.disabled).toBe(false)
 
@@ -429,6 +453,24 @@ describe('TaskDetailV8View business context', () => {
       product_name: '更新后的整单名称',
       design_requirement: '更新整张任务单的设计要求',
       remark: '创建人编辑整张任务单',
+    }))
+
+    const reasonInput = [...dialog().querySelectorAll('label')]
+      .find((label) => label.textContent?.includes('成本调整原因'))
+      ?.querySelector<HTMLInputElement>('input')
+    if (!costInput || !reasonInput) throw new Error('expected editable SKU cost fields')
+    costInput.value = '20.5'
+    costInput.dispatchEvent(new Event('input', { bubbles: true }))
+    reasonInput.value = '核对供应商报价后修正'
+    reasonInput.dispatchEvent(new Event('input', { bubbles: true }))
+    ;([...dialog().querySelectorAll<HTMLButtonElement>('button')]
+      .find((item) => item.textContent?.trim() === '保存该 SKU'))?.click()
+    await flushPromises()
+
+    expect(mocks.patchSkuItemCostInfo).toHaveBeenCalledWith('41', 52, expect.objectContaining({
+      cost_price: 20.5,
+      manual_cost_override: true,
+      manual_cost_override_reason: '核对供应商报价后修正',
     }))
   })
 

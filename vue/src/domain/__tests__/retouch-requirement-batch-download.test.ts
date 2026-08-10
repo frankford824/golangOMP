@@ -78,6 +78,19 @@ describe('buildRetouchBatchDownloadPlan', () => {
     expect(plan.entries[0].preferredFilename).toBe('pack.psd')
   })
 
+  it('collects source materials from every requirement without adding reference images', () => {
+    const plan = buildRetouchBatchDownloadPlan([
+      ...requirements,
+      sampleRequirement({ id: 12, sourceAssets: [{
+        id: '202',
+        file_role: 'source',
+        current_version: { id: '302', file_name: 'second.png', download_url: 'https://cdn.example/second.png' },
+      } as never] }),
+    ], 'all_sources')
+    expect(plan.entries.map((entry) => entry.assetId)).toEqual([201, 202])
+    expect(plan.entries.every((entry) => entry.zipPath.endsWith('/素材文件'))).toBe(true)
+  })
+
   it('uses SKU and requirement description for retouch batch filenames when available', () => {
     const plan = buildRetouchBatchDownloadPlan(
       [
@@ -190,5 +203,16 @@ describe('resolveRetouchBatchZipPrefix', () => {
         '刘露充绒字母和聪明门画图',
       ),
     ).toBe('NSKT001024-刘露充绒字母和聪明门画图-需求1-素材文件')
+  })
+
+  it('labels an all-source-material package without mixing reference attachments', () => {
+    expect(
+      resolveRetouchBatchZipPrefix(
+        [sampleRequirement({ skuCode: 'NSKT001024' })],
+        'all_sources',
+        undefined,
+        '批量修图',
+      ),
+    ).toBe('NSKT001024-批量修图-素材文件')
   })
 })

@@ -53,8 +53,14 @@
       <section v-if="isRetouch && retouchMaterialRows.length" class="retouch-materials" aria-label="待修素材">
         <header>
           <div><p class="eyebrow">待修素材</p><h2>设计人员可直接查看和下载</h2></div>
-          <strong>{{ retouchMaterialCount }} 个文件</strong>
+          <div class="retouch-material-actions">
+            <strong>{{ retouchMaterialCount }} 个文件</strong>
+            <button type="button" :disabled="retouchBatchDownloading" @click="downloadAllRetouchMaterials">
+              <Download :size="15" aria-hidden="true" />{{ retouchBatchDownloading ? '正在打包…' : '批量下载全部' }}
+            </button>
+          </div>
         </header>
+        <p v-if="retouchBatchStatus" class="retouch-batch-status" role="status">{{ retouchBatchStatus }}</p>
         <div class="retouch-material-grid">
           <article v-for="row in retouchMaterialRows" :key="row.key">
             <img v-if="row.file.imagePreviewUrl" :src="row.file.imagePreviewUrl" :alt="row.file.fileName">
@@ -397,6 +403,11 @@ import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detai
 import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
 import { mapRetouchRequirementsFromApi } from '@/domain/mappers/retouch-requirements-from-api'
 import { retouchSourceAssetsToDisplayItems, type RetouchSourceFileDisplayItem } from '@/domain/retouch-requirement-assets'
+import {
+  buildRetouchBatchDownloadPlan,
+  resolveRetouchBatchZipPrefix,
+  runRetouchBatchDownload,
+} from '@/domain/retouch-requirement-batch-download'
 import { assetKindLabelCn } from '@/domain/mappers/read-model-labels-cn'
 import { assetsApi } from '@/services/api/assetsApi'
 import type { BackendAsset } from '@/services/apiTypes'
@@ -461,6 +472,8 @@ const terminateError = ref('')
 const referenceInput = ref<HTMLInputElement | null>(null)
 const referenceUploading = ref(false)
 const retouchDownloadingKey = ref('')
+const retouchBatchDownloading = ref(false)
+const retouchBatchStatus = ref('')
 const planningExporting = ref(false)
 const planningResult = ref<PlanningSKUCreateResult | null>(null)
 const assignError = ref('')
@@ -537,11 +550,11 @@ const isOwnCreatedTask = computed(() => {
 const canEditOwnSKUItems = computed(() => can('task.create') && isOwnCreatedTask.value)
 const canEditTaskBusinessInfo = computed(() => actionSet.value.has('task.business_info.edit') && !isTerminal.value)
 const canTerminateTask = computed(() => actionSet.value.has('task.terminate') && !isTerminal.value)
-const canEditSKUCosts = computed(() => can('catalog.manage') && !isTerminal.value)
+const canEditSKUCosts = computed(() => (can('catalog.manage') || canEditOwnSKUItems.value) && !isTerminal.value)
 const canEditSKUItems = computed(() => (canEditSKUCosts.value || canEditOwnSKUItems.value) && !isTerminal.value)
 const skuEditAccessLabel = computed(() => {
-  if (canEditSKUCosts.value) return '具备目录维护权限，可修改业务字段与成本'
-  if (canEditOwnSKUItems.value) return '自己创建的任务，可修改业务字段；成本只读'
+  if (can('catalog.manage') && !isTerminal.value) return '具备目录维护权限，可修改业务字段与成本'
+  if (canEditOwnSKUItems.value && !isTerminal.value) return '自己创建的未结单任务，可修改业务字段与成本；人工改价需填写原因'
   return '当前账号只读'
 })
 const canHandover = computed(() => actionSet.value.has('task.audit.handover'))
@@ -909,6 +922,36 @@ async function downloadRetouchMaterial(row: RetouchMaterialRow) {
     retouchDownloadingKey.value = ''
   }
 }
+
+async function downloadAllRetouchMaterials() {
+  if (!task.value || retouchBatchDownloading.value || !retouchMaterialRows.value.length) return
+  retouchBatchDownloading.value = true
+  retouchBatchStatus.value = '正在准备待修素材…'
+  error.value = ''
+  try {
+    const plan = buildRetouchBatchDownloadPlan(retouchRequirements.value, 'all_sources')
+    const zipPrefix = resolveRetouchBatchZipPrefix(
+      retouchRequirements.value,
+      'all_sources',
+      undefined,
+      task.value.product_name_snapshot || task.value.task_no,
+    )
+    const result = await runRetouchBatchDownload(plan, zipPrefix, (message) => {
+      retouchBatchStatus.value = message
+    })
+    if (!result.ok) {
+      error.value = result.message || '待修素材批量下载失败。'
+      retouchBatchStatus.value = ''
+      return
+    }
+    retouchBatchStatus.value = result.message || `已打包 ${result.writtenCount || 0} 个待修素材。`
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '待修素材批量下载失败。'
+    retouchBatchStatus.value = ''
+  } finally {
+    retouchBatchDownloading.value = false
+  }
+}
 // 资源组读取失败，或迁移前未完成任务只有空壳组时，退回任务资产列表。它直接查
 // design_assets，不伪造修订历史，同时确保历史源文件与成品仍可见、可下载。
 async function loadLegacyAssets() {
@@ -1060,7 +1103,7 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .primary-button,.secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{min-height:38px;padding:0 14px;border-radius:10px;font-weight:750;text-decoration:none;cursor:pointer}
 .primary-button{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));box-shadow:0 8px 18px rgb(var(--yb-brand)/.16)}
 .planning-results{display:grid;gap:14px;padding:16px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.05)}.planning-results>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.planning-results>header h2{margin:3px 0}.planning-results>header p:last-child{margin:4px 0 0;color:rgb(var(--yb-text-muted))}.planning-results>header>strong{padding:6px 10px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-deep));white-space:nowrap}.planning-result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.planning-result-grid>article{display:grid;grid-template-columns:112px minmax(0,1fr);gap:12px;padding:10px;border:1px solid rgb(var(--yb-border));border-radius:14px;background:rgb(var(--yb-surface-soft))}.planning-image{width:112px;height:112px;display:grid;place-items:center;overflow:hidden;border-radius:11px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:11px;text-align:center}.planning-image img{width:100%;height:100%;object-fit:cover}.planning-result-copy{min-width:0}.planning-result-copy>p{margin:2px 0;color:rgb(var(--yb-text-muted));font-size:10px}.planning-result-copy h3{margin:2px 0 7px}.planning-result-copy>strong{display:-webkit-box;overflow:hidden;font-size:12px;line-height:1.5;-webkit-box-orient:vertical;-webkit-line-clamp:2}.planning-result-copy dl{display:grid;gap:3px;margin:9px 0 0}.planning-result-copy dl div{display:grid;grid-template-columns:45px minmax(0,1fr);gap:4px}.planning-result-copy dt{color:rgb(var(--yb-text-muted));font-size:10px}.planning-result-copy dd{margin:0;overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
-.retouch-materials{display:grid;gap:14px;padding:18px 20px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));box-shadow:0 12px 28px rgb(var(--yb-shadow)/.04)}.retouch-materials>header{display:flex;align-items:end;justify-content:space-between;gap:16px}.retouch-materials h2{margin:3px 0 0;font-size:18px}.retouch-materials>header>strong{color:rgb(var(--yb-brand-strong))}.retouch-material-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.retouch-material-grid article{display:grid;grid-template-columns:54px minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-material-grid img,.retouch-file-mark{width:54px;height:54px;border-radius:10px;object-fit:cover}.retouch-file-mark{display:grid;place-items:center;background:rgb(var(--yb-surface-neutral-inverse-deep));color:rgb(var(--yb-text-inverse));font-size:11px;font-weight:850}.retouch-material-grid article>div{display:grid;gap:3px;min-width:0}.retouch-material-grid small,.retouch-material-grid p{margin:0;color:rgb(var(--yb-text-muted));font-size:11px}.retouch-material-grid strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.retouch-material-grid button{display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand-strong));font-weight:750;cursor:pointer}.retouch-material-grid button:disabled{opacity:.55;cursor:wait}.retouch-requirement-list{display:grid;gap:10px;margin:12px 0 0;padding:0;list-style:none}.retouch-requirement-list li{display:grid;grid-template-columns:30px 1fr;gap:10px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-requirement-list li>span{display:grid;width:26px;height:26px;place-items:center;border-radius:9px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:800}.retouch-requirement-list strong{display:block}.retouch-requirement-list p{margin:4px 0 0;color:rgb(var(--yb-text-muted))}
+.retouch-materials{display:grid;gap:14px;padding:18px 20px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));box-shadow:0 12px 28px rgb(var(--yb-shadow)/.04)}.retouch-materials>header{display:flex;align-items:end;justify-content:space-between;gap:16px}.retouch-materials h2{margin:3px 0 0;font-size:18px}.retouch-material-actions{display:flex;align-items:center;gap:10px}.retouch-material-actions>strong{color:rgb(var(--yb-brand-strong))}.retouch-material-actions>button{display:inline-flex;align-items:center;gap:6px;padding:9px 12px;border:0;border-radius:9px;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));font-weight:750;cursor:pointer}.retouch-material-actions>button:disabled{opacity:.55;cursor:wait}.retouch-batch-status{margin:0;color:rgb(var(--yb-text-muted));font-size:12px}.retouch-material-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.retouch-material-grid article{display:grid;grid-template-columns:54px minmax(0,1fr) auto;align-items:center;gap:11px;padding:11px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-material-grid img,.retouch-file-mark{width:54px;height:54px;border-radius:10px;object-fit:cover}.retouch-file-mark{display:grid;place-items:center;background:rgb(var(--yb-surface-neutral-inverse-deep));color:rgb(var(--yb-text-inverse));font-size:11px;font-weight:850}.retouch-material-grid article>div{display:grid;gap:3px;min-width:0}.retouch-material-grid small,.retouch-material-grid p{margin:0;color:rgb(var(--yb-text-muted));font-size:11px}.retouch-material-grid strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.retouch-material-grid button{display:inline-flex;align-items:center;gap:5px;padding:8px 10px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand-strong));font-weight:750;cursor:pointer}.retouch-material-grid button:disabled{opacity:.55;cursor:wait}.retouch-requirement-list{display:grid;gap:10px;margin:12px 0 0;padding:0;list-style:none}.retouch-requirement-list li{display:grid;grid-template-columns:30px 1fr;gap:10px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-requirement-list li>span{display:grid;width:26px;height:26px;place-items:center;border-radius:9px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:800}.retouch-requirement-list strong{display:block}.retouch-requirement-list p{margin:4px 0 0;color:rgb(var(--yb-text-muted))}
 .secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}
 .overview-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(250px,.8fr) minmax(285px,1fr);align-items:start;gap:12px}.brief-card{min-width:0;padding:16px;display:grid;align-content:start;gap:12px}.brief-card header{align-items:start}.brief-card header button{min-height:30px;padding:0 9px}
 .mission-copy{display:grid;grid-template-columns:1.15fr .85fr;gap:10px}.mission-copy>section,.mission-copy>aside{min-width:0;padding:12px;border-radius:12px;background:rgb(var(--yb-surface-soft))}.mission-copy>aside{border-left:3px solid rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft))}.section-label{display:block;margin-bottom:5px;color:rgb(var(--yb-text-muted));font-size:10px;font-weight:800;letter-spacing:.08em}

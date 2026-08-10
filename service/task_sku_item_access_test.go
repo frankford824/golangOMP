@@ -42,3 +42,30 @@ func TestAuthorizeTaskSKUItemBusinessInfoUpdateRejectsTerminalTask(t *testing.T)
 		t.Fatal("creator unexpectedly authorized completed task")
 	}
 }
+
+func TestAuthorizeTaskSKUItemCostInfoUpdateAllowsOwnCreator(t *testing.T) {
+	task := &domain.Task{ID: 75, CreatorID: 807, TaskStatus: domain.TaskStatusInProgress}
+	actor := taskActionTestActor(807, domain.PermissionTaskCreate, domain.AccessScopeGlobal)
+
+	if appErr := authorizeTaskSKUItemCostInfoUpdate(domain.WithRequestActor(context.Background(), actor), task); appErr != nil {
+		t.Fatalf("own creator cost correction unexpectedly denied: %+v", appErr)
+	}
+}
+
+func TestAuthorizeTaskSKUItemCostInfoUpdateRejectsDifferentCreator(t *testing.T) {
+	task := &domain.Task{ID: 76, CreatorID: 808, TaskStatus: domain.TaskStatusInProgress}
+	actor := taskActionTestActor(809, domain.PermissionTaskCreate, domain.AccessScopeGlobal)
+
+	if appErr := authorizeTaskSKUItemCostInfoUpdate(domain.WithRequestActor(context.Background(), actor), task); appErr == nil {
+		t.Fatal("different creator cost correction unexpectedly authorized")
+	}
+}
+
+func TestAuthorizeTaskSKUItemCostInfoUpdateRejectsTerminalTask(t *testing.T) {
+	task := &domain.Task{ID: 77, CreatorID: 810, TaskStatus: domain.TaskStatusCompleted}
+	actor := taskActionTestActor(810, domain.PermissionTaskCreate, domain.AccessScopeGlobal)
+
+	if appErr := authorizeTaskSKUItemCostInfoUpdate(domain.WithRequestActor(context.Background(), actor), task); appErr == nil {
+		t.Fatal("creator cost correction unexpectedly authorized for completed task")
+	}
+}

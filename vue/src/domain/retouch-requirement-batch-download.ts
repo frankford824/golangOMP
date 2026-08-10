@@ -23,6 +23,7 @@ export const RETOUCH_ZIP_SOURCE_DIR = '素材文件'
 
 export type RetouchBatchDownloadScope =
   | 'all_attachments'
+  | 'all_sources'
   | 'requirement_all'
   | 'requirement_references'
   | 'requirement_sources'
@@ -101,7 +102,7 @@ export function resolveRetouchBatchZipPrefix(
   taskBusinessName?: string,
 ): string {
   const selected =
-    scope === 'all_attachments'
+    scope === 'all_attachments' || scope === 'all_sources'
       ? requirements
       : requirementIndex != null && requirementIndex >= 0
         ? [requirements[requirementIndex]].filter(Boolean)
@@ -131,6 +132,7 @@ function resolveRetouchBatchZipSku(requirements: Array<RetouchRequirement | unde
 
 function retouchBatchScopeSuffix(scope: RetouchBatchDownloadScope, requirementIndex?: number): string {
   if (scope === 'all_attachments') return ''
+  if (scope === 'all_sources') return RETOUCH_ZIP_SOURCE_DIR
   const requirementLabel =
     requirementIndex != null && requirementIndex >= 0 ? formatRetouchRequirementFolderLabel(requirementIndex) : ''
   switch (scope) {
@@ -216,7 +218,7 @@ export function buildRetouchBatchDownloadPlan(
 ): RetouchBatchDownloadPlan {
   const entries: RetouchBatchDownloadPlanEntry[] = []
   const indices =
-    scope === 'all_attachments'
+    scope === 'all_attachments' || scope === 'all_sources'
       ? requirements.map((_, index) => index)
       : requirementIndex != null && requirementIndex >= 0
         ? [requirementIndex]
@@ -238,7 +240,7 @@ export function buildRetouchBatchDownloadPlan(
     const includeRefs =
       scope === 'all_attachments' || scope === 'requirement_all' || scope === 'requirement_references'
     const includeSources =
-      scope === 'all_attachments' || scope === 'requirement_all' || scope === 'requirement_sources'
+      scope === 'all_attachments' || scope === 'all_sources' || scope === 'requirement_all' || scope === 'requirement_sources'
 
     if (includeRefs) {
       entries.push(...buildReferenceEntries(item, index, refs, folder))

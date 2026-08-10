@@ -39,8 +39,8 @@
         <label>面积<input v-model.trim="drafts[itemKey(item)].area" :disabled="!canEdit || isSaving(item)" inputmode="decimal" /></label>
         <label>数量<input v-model.trim="drafts[itemKey(item)].quantity" :disabled="!canEdit || isSaving(item)" inputmode="numeric" /></label>
         <label class="wide">运营修改要求<textarea v-model.trim="drafts[itemKey(item)].designRequirement" :disabled="!canEdit || isSaving(item)" rows="2" /></label>
-        <label>当前/人工成本<input v-model.trim="drafts[itemKey(item)].costPrice" :disabled="!canEditCost || isSaving(item)" inputmode="decimal" :placeholder="canEditCost ? '留空则不改成本' : '成本仅目录管理员可改'" /></label>
-        <label>成本调整原因<input v-model.trim="drafts[itemKey(item)].costReason" :disabled="!canEditCost || isSaving(item)" :required="canEditCost && Boolean(drafts[itemKey(item)].costPrice)" placeholder="人工改成本时必填" /></label>
+        <label>当前/人工成本<input v-model.trim="drafts[itemKey(item)].costPrice" :disabled="!canEditCost || isSaving(item)" inputmode="decimal" :placeholder="canEditCost ? '修改后按人工成本保存' : '当前账号不可修改成本'" /></label>
+        <label>成本调整原因<input v-model.trim="drafts[itemKey(item)].costReason" :disabled="!canEditCost || isSaving(item)" :required="costChanged(item)" placeholder="人工改成本时必填" /></label>
         <div class="row-actions">
           <p v-if="messages[itemKey(item)]" :class="{ error: failures[itemKey(item)] }" role="status">{{ messages[itemKey(item)] }}</p>
           <button v-if="canEdit" type="submit" :disabled="isSaving(item)">{{ isSaving(item) ? '保存中…' : '保存该 SKU' }}</button>
@@ -182,6 +182,16 @@ function isSaving(item: SKUItem) {
   return Boolean(saving.value[itemKey(item)])
 }
 
+function costChanged(item: SKUItem) {
+  if (!props.canEditCost) return false
+  const draft = drafts.value[itemKey(item)]
+  if (!draft) return false
+  const next = optionalNumber(draft.costPrice)
+  const current = optionalNumber(displayText(item.cost_price))
+  if (next == null || current == null) return next !== current
+  return Math.abs(next - current) > 0.000001
+}
+
 watch(
   () => props.items,
   (items) => {
@@ -209,7 +219,8 @@ async function save(item: SKUItem) {
     messages.value[key] = '数量必须是整数。'
     return
   }
-  if (props.canEditCost && cost != null && !draft.costReason.trim()) {
+  const shouldUpdateCost = costChanged(item)
+  if (shouldUpdateCost && cost != null && !draft.costReason.trim()) {
     failures.value[key] = true
     messages.value[key] = '人工调整成本时必须填写原因。'
     return
@@ -231,7 +242,7 @@ async function save(item: SKUItem) {
       design_requirement: draft.designRequirement,
       remark: '任务详情逐 SKU 信息维护',
     })
-    if (cost != null) {
+    if (shouldUpdateCost && cost != null) {
       await tasksApi.patchSkuItemCostInfo(String(props.taskId), skuItemId, {
         cost_price: cost,
         manual_cost_override: true,

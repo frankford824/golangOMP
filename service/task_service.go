@@ -173,9 +173,9 @@ type UpdateTaskBusinessInfoParams struct {
 type TaskFilter struct {
 	domain.TaskQueryFilterDefinition
 	CreatorID *int64
-	// MineActorID scopes GET /v1/tasks?filter=mine to non-terminal tasks for which
-	// the actor is currently responsible. Historical participation alone is not a
-	// personal to-do: submitted design tasks move to audit and leave the designer's list.
+	// MineActorID scopes GET /v1/tasks?filter=mine to post-cutover non-terminal
+	// tasks created by the actor or currently requiring the actor as handler/designer.
+	// Historical designer participation alone is not a personal to-do.
 	MineActorID   *int64
 	DesignerID    *int64
 	DesignerEmpty *bool
@@ -2813,7 +2813,7 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 	if task == nil {
 		return nil, domain.ErrNotFound
 	}
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
+	if appErr := authorizeTaskSKUItemCostInfoUpdate(ctx, task); appErr != nil {
 		return nil, appErr
 	}
 	detail, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)

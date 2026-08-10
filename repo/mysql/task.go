@@ -1730,14 +1730,18 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 	if filter.MineActorID != nil {
 		actorID := *filter.MineActorID
 		where = append(where, `(
-			t.current_handler_id = ?
-			OR (t.current_handler_id IS NULL AND t.designer_id = ? AND t.task_status IN (?, ?, ?))
-			OR (t.current_handler_id IS NULL AND t.designer_id IS NULL AND t.creator_id = ? AND t.task_status IN (?, ?))
+			t.created_at >= ?
+			AND (
+				t.creator_id = ?
+				OR t.current_handler_id = ?
+				OR (t.current_handler_id IS NULL AND t.designer_id = ? AND t.task_status IN (?, ?, ?))
+			)
 		)`)
 		args = append(args,
+			time.Date(2026, time.June, 30, 0, 0, 0, 0, taskOperationalLocation()),
+			actorID,
 			actorID,
 			actorID, string(domain.TaskStatusAssigned), string(domain.TaskStatusInProgress), string(domain.TaskStatusBlocked),
-			actorID, string(domain.TaskStatusDraft), string(domain.TaskStatusPendingAssign),
 		)
 		where = append(where, "t.task_status NOT IN (?, ?, ?)")
 		args = append(args, string(domain.TaskStatusCompleted), string(domain.TaskStatusArchived), string(domain.TaskStatusCancelled))

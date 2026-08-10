@@ -10144,7 +10144,7 @@ paths:
         - { in: query, name: priority, schema: { type: string, enum: [normal, high, drawing] } }
         - in: query
           name: filter
-          description: '`mine` returns only non-terminal work currently requiring this actor: current-handler tasks, active design tasks assigned to the actor, and the actor''s unassigned drafts. Historical participation remains searchable from the full task list.'
+          description: '`mine` returns non-terminal work created by the actor or currently requiring the actor as handler/designer. The active queue starts at the 2026-06-30 business cutover so pre-cutover legacy backlog remains available through advanced filters without polluting personal work. Historical designer participation and terminal records remain searchable from the full or archived task lists.'
           schema: { type: string, enum: [mine] }
         - { in: query, name: overdue, schema: { type: boolean } }
         - in: query
@@ -10426,7 +10426,7 @@ paths:
   /v1/tasks/{id}/sku-items/{sku_item_id}:
     patch:
       summary: Patch one batch SKU item
-      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to a task created by the current actor. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation. Per-SKU cost remains governed by the separate `cost-info` endpoint and still requires `catalog.manage`.
+      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to a task created by the current actor. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation. Per-SKU cost remains governed by the separate `cost-info` endpoint.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.manage, task.create]
@@ -10481,10 +10481,10 @@ paths:
   /v1/tasks/{id}/sku-items/{sku_item_id}/cost-info:
     patch:
       summary: Patch per-SKU cost information for a batch task item
-      description: Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost.
+      description: Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to an active task created by the current actor. This does not grant cost-rule management.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [catalog.manage]
+      x-permissions: [catalog.manage, task.create]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:

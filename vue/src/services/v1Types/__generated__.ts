@@ -5677,7 +5677,7 @@ export interface paths {
         head?: never;
         /**
          * Patch one batch SKU item
-         * @description Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to a task created by the current actor. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation. Per-SKU cost remains governed by the separate `cost-info` endpoint and still requires `catalog.manage`.
+         * @description Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to a task created by the current actor. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation. Per-SKU cost remains governed by the separate `cost-info` endpoint.
          */
         patch: {
             parameters: {
@@ -5751,7 +5751,7 @@ export interface paths {
         head?: never;
         /**
          * Patch per-SKU cost information for a batch task item
-         * @description Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost.
+         * @description Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to an active task created by the current actor. This does not grant cost-rule management.
          */
         patch: {
             parameters: {
@@ -19442,7 +19442,10 @@ export interface components {
             allowed_actions: string[];
             /** Format: date-time */
             created_at?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Latest business activity time for this list row, derived from the task event chain. Maintenance-only writes to the physical task row do not affect this value or updated-time sorting.
+             */
             updated_at?: string;
             /** Format: date-time */
             deadline_at?: string | null;
@@ -23279,12 +23282,15 @@ export interface operations {
                 owner_department_id?: number;
                 owner_team_id?: number;
                 priority?: "normal" | "high" | "drawing";
+                /** @description `mine` returns non-terminal work created by the actor or currently requiring the actor as handler/designer. The active queue starts at the 2026-06-30 business cutover so pre-cutover legacy backlog remains available through advanced filters without polluting personal work. Historical designer participation and terminal records remain searchable from the full or archived task lists. */
+                filter?: "mine";
                 overdue?: boolean;
                 /** @description Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. */
                 operational_bucket?: "active_tasks" | "design_pending" | "pending_audit" | "handover" | "customization_in_progress" | "overdue" | "due_today" | "today_created";
                 date_from?: string;
                 date_to?: string;
                 keyword?: string;
+                /** @description Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker. */
                 sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at" | "due_at" | "-due_at" | "task_no" | "-task_no";
                 page?: number;
                 page_size?: number;

@@ -42,8 +42,9 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		if appErr != nil {
 			return service.TaskFilter{}, appErr
 		}
-		// "mine" is a current-work queue. Repository filtering excludes terminal
-		// records and historical participation that no longer requires this actor.
+		// "mine" is the actor's active queue: own-created tasks plus current
+		// handler/designer responsibility. Repository filtering excludes terminal
+		// records, pre-cutover legacy backlog, and stale designer participation.
 		filter.MineActorID = &actorID
 	}
 	if raw := c.Query("designer_id"); raw != "" {

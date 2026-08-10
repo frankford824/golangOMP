@@ -567,6 +567,47 @@ func TestCostRulePreviewTreatsTrailingMultiplierAsBoxFaces(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewKeepsExplicitBillableAreaWhenNotesContainFaceDimensions(t *testing.T) {
+	result := previewCostRules(domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD",
+		Area:         costRuleFloat64Ptr(0.54),
+		Process:      "开槽",
+		Notes:        "CPT-常规KT板/教师节抽奖箱（需开槽）/30*30cm",
+	}, []*domain.CostRule{
+		{
+			RuleID:        61,
+			RuleVersion:   1,
+			RuleName:      "常规KT板基础单价",
+			CategoryCode:  "KT_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     costRuleFloat64Ptr(11),
+			TaxMultiplier: costRuleFloat64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "test",
+		},
+		{
+			RuleID:          62,
+			RuleVersion:     1,
+			RuleName:        "常规KT板小面积附加",
+			CategoryCode:    "KT_STANDARD",
+			RuleType:        domain.CostRuleTypeAreaThresholdSurcharge,
+			AreaThreshold:   costRuleFloat64Ptr(0.15),
+			SurchargeAmount: costRuleFloat64Ptr(3),
+			Priority:        20,
+			IsActive:        true,
+			Source:          "test",
+		},
+	}).Response
+
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-6.534) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 6.534 from explicit billable area", result.EstimatedCost)
+	}
+	if len(result.AppliedRules) != 1 {
+		t.Fatalf("applied rules = %d, want base rule only", len(result.AppliedRules))
+	}
+}
+
 func TestCostRulePreviewExtractsLongestSideFromNotes(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

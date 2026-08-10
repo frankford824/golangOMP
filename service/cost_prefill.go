@@ -181,7 +181,14 @@ func withTextDerivedCostRuleDimensions(req domain.CostRulePreviewRequest) domain
 		req.Height = cloneFloat64Ptr(extracted.HeightM)
 	}
 	if extracted.AreaM2 != nil {
-		req.Area = cloneFloat64Ptr(extracted.AreaM2)
+		// For box/layout work, an explicitly supplied area is the billable total.
+		// Product text commonly contains only one-face dimensions (for example,
+		// 30x30cm), so those dimensions must not overwrite a positive total area.
+		// Flat products keep the existing text-first behavior that corrects stale
+		// numeric payloads from older task records.
+		if req.Area == nil || *req.Area <= 0 || !costPreviewUsesBillableAreaForThreshold(req) {
+			req.Area = cloneFloat64Ptr(extracted.AreaM2)
+		}
 	}
 	return req
 }

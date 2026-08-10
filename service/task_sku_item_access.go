@@ -8,8 +8,19 @@ import (
 
 // authorizeTaskSKUItemBusinessInfoUpdate keeps catalog maintenance as the
 // broad administrative capability while allowing a task creator to maintain
-// only the non-cost fields of their own batch SKU rows.
+// the business fields of their own active batch SKU rows.
 func authorizeTaskSKUItemBusinessInfoUpdate(ctx context.Context, task *domain.Task) *domain.AppError {
+	return authorizeTaskSKUItemUpdate(ctx, task, "task_creator_own_sku_business_info")
+}
+
+// authorizeTaskSKUItemCostInfoUpdate restores row-scoped manual cost
+// correction for the creator of an active task without granting global cost
+// rule maintenance. The cost update itself remains audited by the task service.
+func authorizeTaskSKUItemCostInfoUpdate(ctx context.Context, task *domain.Task) *domain.AppError {
+	return authorizeTaskSKUItemUpdate(ctx, task, "task_creator_own_sku_cost_info")
+}
+
+func authorizeTaskSKUItemUpdate(ctx context.Context, task *domain.Task, creatorMatchedRule string) *domain.AppError {
 	authorizer := newTaskActionAuthorizer()
 	decision := authorizer.EvaluateTaskActionPolicy(ctx, TaskActionUpdateBusinessInfo, task, "", "")
 	if decision.Allowed {
@@ -31,7 +42,7 @@ func authorizeTaskSKUItemBusinessInfoUpdate(ctx context.Context, task *domain.Ta
 		decision.Allowed = true
 		decision.DenyCode = ""
 		decision.DenyReason = ""
-		decision.MatchedRule = "task_creator_own_sku_business_info"
+		decision.MatchedRule = creatorMatchedRule
 		decision.ScopeSource = "explicit_access"
 		authorizer.logDecision(TaskActionUpdateBusinessInfo, decision)
 		return nil

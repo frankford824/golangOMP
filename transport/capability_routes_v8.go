@@ -171,7 +171,7 @@ func v8TaskRoutePermissions(method, path string) ([]domain.PermissionCode, bool)
 	if strings.Contains(path, "/reference-upload") || strings.Contains(path, "/prepare-product-codes") || strings.Contains(path, "/excel-assist/") || strings.Contains(path, "/batch-create/") {
 		return []domain.PermissionCode{domain.PermissionTaskCreate}, true
 	}
-	if strings.Contains(path, "/sku-items/") && !strings.Contains(path, "/cost-info") {
+	if strings.Contains(path, "/sku-items/") {
 		return []domain.PermissionCode{domain.PermissionCatalogManage, domain.PermissionTaskCreate}, true
 	}
 	if strings.Contains(path, "/product-info") || strings.Contains(path, "/cost-info") || strings.Contains(path, "/business-info") {
