@@ -165,6 +165,10 @@ export interface ResourceBundle {
 export interface FlatResourceItem {
   group_id: number
   task_id: number
+  revision_id: number
+  resource_item_id: number
+  task_asset_id?: number
+  sort_order: number
   task_no?: string
   task_type: string
   sku_code?: string
@@ -207,6 +211,18 @@ export interface ResourceGroupDownloadItem {
   mime_type?: string
   file_size?: number | null
   download_url: string
+}
+
+export interface ResourceDownloadInfo {
+  download_mode: string
+  download_url?: string | null
+  access_hint?: string | null
+  preview_available?: boolean
+  filename: string
+  file_size: number
+  mime_type?: string
+  expires_at?: string | null
+  items?: ResourceDownloadInfo[]
 }
 
 export interface ResourceGroupSubmission {
@@ -255,6 +271,12 @@ export const resourceGroupsApi = {
   },
   async batchDownload(groupIds: number[]): Promise<{ items: ResourceGroupDownloadItem[] }> {
     return unwrap(await http.post('/v1/resource-groups/batch-download', { group_ids: groupIds }))
+  },
+  async previewTaskAsset(taskAssetId: number, signal?: AbortSignal): Promise<ResourceDownloadInfo> {
+    return unwrap(await http.get(`/v1/task-assets/${taskAssetId}/preview`, { signal }))
+  },
+  async downloadTaskAsset(taskAssetId: number, signal?: AbortSignal): Promise<ResourceDownloadInfo> {
+    return unwrap(await http.get(`/v1/task-assets/${taskAssetId}/download`, { signal }))
   },
   async submitDesign(taskId: number, bundle: ResourceBundle, groups: ResourceGroupSubmission[]): Promise<ResourceBundle> {
     return unwrap(await http.post(`/v1/tasks/${taskId}/submit-design`, {

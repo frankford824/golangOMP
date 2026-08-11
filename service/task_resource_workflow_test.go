@@ -783,12 +783,14 @@ func TestListResourceGroupsUsesFileLevelPaginationForFlatMode(t *testing.T) {
 				t.Fatalf("flat SQL scope params = %+v", params.Access)
 			}
 			return []domain.FlatResourceItem{{
-				GroupID:      8,
-				TaskID:       18,
-				TaskAssetID:  81,
-				FileName:     "fifth.png",
-				StorageKey:   "tasks/18/fifth.png",
-				ResourceRole: domain.ResourceRoleFilterFinal,
+				GroupID:        8,
+				TaskID:         18,
+				RevisionID:     71,
+				ResourceItemID: 91,
+				TaskAssetID:    81,
+				FileName:       "fifth.png",
+				StorageKey:     "tasks/18/fifth.png",
+				ResourceRole:   domain.ResourceRoleFilterFinal,
 			}}, 5
 		},
 	}
@@ -807,6 +809,9 @@ func TestListResourceGroupsUsesFileLevelPaginationForFlatMode(t *testing.T) {
 	}
 	if result.FlatItems[0].DownloadURL != "" {
 		t.Fatalf("view-scoped flat list leaked download_url = %q", result.FlatItems[0].DownloadURL)
+	}
+	if result.FlatItems[0].RevisionID != 71 || result.FlatItems[0].ResourceItemID != 91 || result.FlatItems[0].TaskAssetID != 81 {
+		t.Fatalf("flat resource identity = %+v", result.FlatItems[0])
 	}
 }
 

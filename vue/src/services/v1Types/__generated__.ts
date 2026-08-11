@@ -22155,12 +22155,25 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        /** @description One matched resource row used by the five-dimensional asset-center filter. */
+        /** @description One matched current resource row used by the asset-center filters. revision_id and resource_item_id preserve the exact canonical resource-group identity across list, preview, and download flows. */
         FlatResourceItem: {
             /** Format: int64 */
             group_id: number;
             /** Format: int64 */
             task_id: number;
+            /** Format: int64 */
+            revision_id: number;
+            /**
+             * Format: int64
+             * @description Role-specific current revision member id. Reference uses the revision reference id, source uses the source task asset id, and final uses the revision item id.
+             */
+            resource_item_id: number;
+            /**
+             * Format: int64
+             * @description Immutable task asset id when the resource has been formalized. Legacy reference snapshots may omit it.
+             */
+            task_asset_id?: number;
+            sort_order: number;
             task_no?: string;
             /** @enum {string} */
             task_type: "original_product_development" | "new_product_development" | "sku_planning" | "retouch_task" | "customer_customization" | "regular_customization";

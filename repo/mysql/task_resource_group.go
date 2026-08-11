@@ -345,7 +345,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	}
 
 	flatCTE := `WITH flat_resources AS (
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
+		SELECT g.id AS group_id, g.task_id, g.finalized_revision_id AS revision_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
 		       'reference' AS resource_role,
 		       COALESCE(NULLIF(rr.file_name_snapshot, ''), asr.file_name, '') AS file_name,
 		       COALESCE(asr.mime_type, '') AS mime_type,
@@ -396,7 +396,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		    )
 		  )
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
+		SELECT g.id AS group_id, g.task_id, g.finalized_revision_id AS revision_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
 		       'source' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,
@@ -420,7 +420,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		  AND ta.storage_ref_id IS NOT NULL AND asr.ref_id IS NOT NULL
 		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
 		UNION ALL
-		SELECT g.id AS group_id, g.task_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
+		SELECT g.id AS group_id, g.task_id, g.finalized_revision_id AS revision_id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + ` AS sku_code,
 		       'final' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
 		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
 		       ta.id AS task_asset_id,
@@ -505,9 +505,10 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	}
 	queryArgs := append(append([]interface{}{}, filterArgs...), pageSize, (page-1)*pageSize)
 	rows, err := r.db.db.QueryContext(ctx, flatCTE+`
-		SELECT flat.group_id, flat.task_id, flat.task_no, flat.task_type, flat.sku_code, flat.resource_role,
+		SELECT flat.group_id, flat.task_id, flat.revision_id, flat.row_id, flat.task_asset_id, flat.item_sort,
+		       flat.task_no, flat.task_type, flat.sku_code, flat.resource_role,
 		       flat.file_name, flat.mime_type, flat.resource_owner_id, flat.resource_owner_name,
-		       flat.resource_created_at, flat.storage_key, flat.task_asset_id
+		       flat.resource_created_at, flat.storage_key
 		FROM flat_resources flat
 		WHERE `+flatClause+`
 		ORDER BY flat.group_updated_at DESC, flat.group_id DESC, flat.role_sort, flat.item_sort, flat.row_id
@@ -519,9 +520,10 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 	items := make([]domain.FlatResourceItem, 0, pageSize)
 	for rows.Next() {
 		var item domain.FlatResourceItem
-		if err := rows.Scan(&item.GroupID, &item.TaskID, &item.TaskNo, &item.TaskType, &item.SKUCode, &item.ResourceRole,
+		if err := rows.Scan(&item.GroupID, &item.TaskID, &item.RevisionID, &item.ResourceItemID, &item.TaskAssetID, &item.SortOrder,
+			&item.TaskNo, &item.TaskType, &item.SKUCode, &item.ResourceRole,
 			&item.FileName, &item.MimeType, &item.ResourceOwnerID, &item.ResourceOwnerName,
-			&item.ResourceCreatedAt, &item.StorageKey, &item.TaskAssetID); err != nil {
+			&item.ResourceCreatedAt, &item.StorageKey); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, item)

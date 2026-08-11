@@ -105,26 +105,28 @@ func TestListFlatResourceItemsFiltersCountsAndPagesFilesWithSameScope(t *testing
 		WillReturnRows(sqlmock.NewRows([]string{"violation_code", "entity_id"}))
 	mock.ExpectQuery("flat-resource-filter").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(5))
 	mock.ExpectQuery("flat-resource-filter").WillReturnRows(sqlmock.NewRows([]string{
-		"group_id", "task_id", "task_no", "task_type", "sku_code", "resource_role", "file_name", "mime_type",
-		"resource_owner_id", "resource_owner_name", "resource_created_at", "storage_key", "task_asset_id",
-	}).AddRow(8, 3, "RW-008", "new_product_development", "SKU-008", "source", "source.psd",
-		"image/vnd.adobe.photoshop", 42, "设计师", time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC), "tasks/3/source.psd", 88))
+		"group_id", "task_id", "revision_id", "resource_item_id", "task_asset_id", "sort_order",
+		"task_no", "task_type", "sku_code", "resource_role", "file_name", "mime_type",
+		"resource_owner_id", "resource_owner_name", "resource_created_at", "storage_key",
+	}).AddRow(8, 3, 70, 88, 88, 0, "RW-008", "new_product_development", "SKU-008", "source", "source.psd",
+		"image/vnd.adobe.photoshop", 42, "设计师", time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC), "tasks/3/source.psd"))
 	items, total, err := repository.ListFlatResourceItems(context.Background(), domain.ResourceGroupListParams{
-		ResourceRole:   domain.ResourceRoleFilterSource,
-		Query:          "source",
-		FormatCategory: domain.AssetFormatCategoryDesign,
-		FileFormat:     "psd",
-		ResourceOwnerID: int64Ptr(42),
+		ResourceRole:        domain.ResourceRoleFilterSource,
+		Query:               "source",
+		FormatCategory:      domain.AssetFormatCategoryDesign,
+		FileFormat:          "psd",
+		ResourceOwnerID:     int64Ptr(42),
 		ResourceCreatedFrom: timePtr(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)),
 		ResourceCreatedTo:   timePtr(time.Date(2026, 8, 5, 23, 59, 59, 0, time.UTC)),
-		TaskType:       domain.TaskTypeNewProductDevelopment,
-		Page:           3, PageSize: 2,
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		Page:                3, PageSize: 2,
 		Access: domain.ResourceGroupAccessFilter{DepartmentIDs: []int64{101}},
 	})
 	if err != nil {
 		t.Fatalf("ListFlatResourceItems() error = %v", err)
 	}
-	if total != 5 || len(items) != 1 || items[0].TaskAssetID != 88 || items[0].FileName != "source.psd" || items[0].StorageKey == "" {
+	if total != 5 || len(items) != 1 || items[0].RevisionID != 70 || items[0].ResourceItemID != 88 ||
+		items[0].TaskAssetID != 88 || items[0].FileName != "source.psd" || items[0].StorageKey == "" {
 		t.Fatalf("items/total = %+v/%d", items, total)
 	}
 	if matched != 3 {

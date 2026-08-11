@@ -4,7 +4,13 @@ import {
   type SystemAssetDownloadInfo,
   type SystemAssetRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import {
+  resourceGroupsApi,
+  type FlatResourceItem,
+  type ResourceGroup,
+} from '@/services/api/resourceGroupsApi'
 import { materialAssetKey } from '@aw/shared/materials/systemAssetPreview'
+import { canonicalResourceRoleLabel, resolveCanonicalDownload } from '@aw/shared/resource-groups/canonicalResource'
 import { downloadIsPreparing, waitForPreparedDownload } from './preparedDownload'
 import { useDownloadCenterStore } from './downloadCenter.store'
 import { transferDownload, type DownloadTransferMeta, type DownloadTransferProgress, type DownloadTransferResult } from './downloadTransfer'
@@ -56,7 +62,55 @@ export function useGlobalDownload() {
     })
   }
 
-  return { downloadCenter, queueDriveFile, queueMaterial }
+  function queueCanonicalResource(item: FlatResourceItem, getGroup = resourceGroupsApi.get) {
+    return downloadCenter.enqueue({
+      key: `canonical-resource:${item.group_id}:${item.revision_id}:${item.resource_role}:${item.resource_item_id}`,
+      displayName: item.file_name,
+      sourceLabel: canonicalResourceRoleLabel(item.resource_role),
+      resolve: async (signal) => {
+        const meta = await resolveCanonicalDownload(item, getGroup, signal)
+        const downloadUrl = String(meta.download_url || '').trim()
+        if (!downloadUrl) throw new Error('当前资源暂时无法下载')
+        return {
+          downloadUrl,
+          filename: meta.filename || item.file_name,
+          fileSize: Number(meta.file_size || 0),
+          mimeType: meta.mime_type || item.mime_type,
+        }
+      },
+    })
+  }
+
+  function queueCanonicalGroup(group: ResourceGroup) {
+    const revision = group.finalized_revision || group.working_revision
+    const title = group.product_name || group.sku_code || group.task_no || `资源组 ${group.id}`
+    return downloadCenter.enqueue({
+      key: `canonical-group:${group.id}:${revision?.id || 0}`,
+      displayName: title,
+      sourceLabel: '最终成品',
+      resolve: async () => {
+        const manifest = await resourceGroupsApi.batchDownload([group.id])
+        const items = manifest.items.map((item) => ({
+          downloadUrl: item.download_url,
+          filename: item.filename,
+          fileSize: Number(item.file_size || 0),
+          mimeType: item.mime_type,
+        }))
+        if (!items.length) throw new Error('该资源组没有可下载的最终成品')
+        const first = items[0]
+        return {
+          downloadUrl: first.downloadUrl,
+          filename: items.length > 1 ? `${withoutExtension(title)}_套装.zip` : first.filename,
+          fileSize: items.reduce((sum, item) => sum + item.fileSize, 0),
+          mimeType: items.length > 1 ? 'application/zip' : first.mimeType,
+          items,
+        }
+      },
+      transfer: transferResourceGroupBundle,
+    })
+  }
+
+  return { downloadCenter, queueDriveFile, queueMaterial, queueCanonicalResource, queueCanonicalGroup }
 }
 
 function transferMeta(meta: SystemAssetDownloadInfo, fallbackName: string) {

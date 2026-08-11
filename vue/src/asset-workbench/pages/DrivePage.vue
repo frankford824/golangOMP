@@ -44,9 +44,9 @@ import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
 import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
 import ResourceGroupMaterialCard from '@aw/shared/resource-groups/ResourceGroupMaterialCard.vue'
+import ResourceLibraryPanel from '@aw/shared/resource-groups/ResourceLibraryPanel.vue'
 import { matchesClientMaterialQuery } from '@aw/shared/materials/clientMaterialSearch'
 import {
-  filtersForLocatedMaterial,
   materialBrowseRootForSource,
   reconcileMaterialFilterState,
   type MaterialFilterDimension,
@@ -184,7 +184,6 @@ const materialPreviewLoadingIds = ref<Set<string>>(new Set())
 const activeMaterial = shallowRef<SystemAssetRow | null>(null)
 const publishingClientMaterial = ref(false)
 const batchUpdatingClientMaterials = ref(false)
-const suppressMaterialAutoload = ref(false)
 const selectedMaterialFolderPath = ref('')
 const expandedMaterialFolderPaths = ref<Set<string>>(new Set(['']))
 const clientMaterialFilter = ref<ClientMaterialFilter>('all')
@@ -974,30 +973,6 @@ function clientMaterialIdentityKeys(material: ClientMaterialRow): Set<string> {
   return keys
 }
 
-function overviewMaterialIdentityKeys(row: OverviewSearchRow): Set<string> {
-  const keys = new Set<string>()
-  const resourceID = row.locate?.resource_id || row.locate?.source_ref || stringFromMeta(row, 'resource_id') || stringFromMeta(row, 'source_ref') || row.primary_code
-  const sourceType = normalizeMaterialSourceType(row.locate?.source_type || stringFromMeta(row, 'source_type'), resourceID)
-  const assetID = overviewAssetID(row)
-  addIdentityKey(keys, resourceID)
-  addIdentityKey(keys, `${sourceType}:${resourceID}`)
-  if (row.locate?.material_id) addIdentityKey(keys, `client:${row.locate.material_id}`)
-  const materialID = numberFromUnknown(row.meta_json?.material_id)
-  if (materialID > 0) addIdentityKey(keys, `client:${materialID}`)
-  if (assetID > 0) {
-    addIdentityKey(keys, `${sourceType}:${assetID}`)
-    if (sourceType === 'system') {
-      addIdentityKey(keys, String(assetID))
-      addIdentityKey(keys, `system:${assetID}`)
-    } else {
-      addIdentityKey(keys, `ext-${assetID}`)
-      addIdentityKey(keys, `external:ext-${assetID}`)
-      addIdentityKey(keys, `external:${assetID}`)
-    }
-  }
-  return keys
-}
-
 function clientMaterialForAsset(asset: SystemAssetRow): ClientMaterialRow | null {
   const assetKeys = materialIdentityKeys(asset)
   return clientMaterials.value.find((material) => hasSharedIdentity(assetKeys, clientMaterialIdentityKeys(material))) || null
@@ -1038,10 +1013,6 @@ function hasSharedIdentity(left: Set<string>, right: Set<string>): boolean {
     if (right.has(key)) return true
   }
   return false
-}
-
-function materialMatchesOverviewRow(asset: SystemAssetRow, row: OverviewSearchRow): boolean {
-  return hasSharedIdentity(materialIdentityKeys(asset), overviewMaterialIdentityKeys(row))
 }
 
 function overviewAssetID(row: OverviewSearchRow): number {
@@ -1750,6 +1721,13 @@ async function runUnifiedSearch() {
     clearSearch()
     return
   }
+  if (searchScope.value === 'operational') {
+    activeMode.value = 'operational'
+    materialQuery.value = q
+    resetSearchState(true)
+    notice.value = `已在主工程资源库中检索：${q}`
+    return
+  }
   const requestID = ++searchRequestSeq
   searchAbortController?.abort()
   searchAbortController = new AbortController()
@@ -1761,9 +1739,12 @@ async function runUnifiedSearch() {
   try {
     const result = await assetWorkbenchApi.overviewSearch({ q, scope: searchScope.value, page: 1, page_size: 60 }, searchAbortController.signal)
     if (requestID !== searchRequestSeq) return
-    const items = Array.isArray(result.items) ? result.items : []
+    // Operational resources are deliberately excluded from the legacy overview
+    // index. Their search, preview, and download all live in ResourceLibraryPanel
+    // and use /v1/resource-groups plus immutable task-asset identities.
+    const items = (Array.isArray(result.items) ? result.items : []).filter((item) => !isOperationalSearchHit(item))
     searchResults.value = items
-    searchTotal.value = result.total
+    searchTotal.value = items.length
     void prefetchSearchResultPreviews(items)
   } catch (err) {
     if (requestID !== searchRequestSeq || isAbortError(err)) return
@@ -1852,29 +1833,10 @@ function scheduleUnifiedSearch() {
 
 async function locateSearchRow(row: OverviewSearchRow) {
   if (row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material') {
-    suppressMaterialAutoload.value = true
-    try {
-      activeMode.value = 'operational'
-      const target = materialFromOverview(row)
-      const nextFilters = filtersForLocatedMaterial(
-        materialAssetSource(target),
-        materialBusinessLaneOf(target),
-        materialFormatCategoryOf(target),
-      )
-      materialSourceFilter.value = nextFilters.source
-      materialBusinessLaneFilter.value = nextFilters.businessLane
-      materialFormatFilter.value = nextFilters.format
-      resetMaterialScopeSnapshot()
-      await loadMaterialFolder(materialDirectoryPath(target), { expandTree: true })
-      const found = materialItems.value.find((asset) => materialMatchesOverviewRow(asset, row))
-      const located = found || target
-      if (!found) upsertMaterialItem(located)
-      selectMaterial(located)
-      searchActive.value = false
-      notice.value = `已定位目录：${materialDirectoryPath(located) || '全部素材'} · ${materialFolderFileName(located)}`
-    } finally {
-      suppressMaterialAutoload.value = false
-    }
+    activeMode.value = 'operational'
+    materialQuery.value = row.secondary_code || row.primary_code || row.title || ''
+    searchActive.value = false
+    notice.value = materialQuery.value ? `已在主工程资源库中检索：${materialQuery.value}` : '已打开主工程资源库'
     return
   }
   const fileID = Number(row.locate?.file_id || 0)
@@ -2579,6 +2541,10 @@ function selectMaterial(asset: SystemAssetRow) {
   void ensureMaterialPreview(asset)
 }
 
+function isActiveMaterial(asset: SystemAssetRow) {
+  return activeMaterial.value ? materialAssetKey(activeMaterial.value) === materialAssetKey(asset) : false
+}
+
 function selectClientMaterial(material: ClientMaterialRow) {
   const materialKeys = clientMaterialIdentityKeys(material)
   const existing = materialItems.value.find((asset) => hasSharedIdentity(materialIdentityKeys(asset), materialKeys))
@@ -3030,14 +2996,8 @@ function syncEditForm(file: DriveFileRow | null) {
 }
 
 watch(selectedFile, syncEditForm)
-watch(activeMode, (mode, previousMode) => {
-  if (mode !== 'operational' || previousMode === 'operational' || suppressMaterialAutoload.value) return
-  resetMaterialScopeSnapshot()
-  if (materialQuery.value.trim()) {
-    void loadMaterials(materialQuery.value)
-    return
-  }
-  void loadMaterialFolder(materialDefaultFolderPathForSource())
+watch(activeMode, (mode) => {
+  if (mode === 'operational') activeMaterial.value = null
 })
 watch(
   () => [route.query.q, route.query.scope] as const,
@@ -3072,9 +3032,9 @@ onMounted(async () => {
   if (initialQuery) {
     searchQuery.value = initialQuery
     searchScope.value = normalizeScope(route.query.scope)
-    await runUnifiedSearch()
+    if (searchScope.value === 'operational') materialQuery.value = initialQuery
+    else await runUnifiedSearch()
   }
-  if (activeMode.value === 'operational') await loadMaterials(initialQuery)
   window.addEventListener('click', closeContextMenu)
 })
 
@@ -3433,6 +3393,9 @@ onBeforeUnmount(() => {
               </template>
             </template>
             <template v-else>
+              <button class="aw-drive__crumb" :class="{ 'is-active': true }" type="button" @click="openOperational">主工程资源库</button>
+            </template>
+            <template v-if="false">
               <template v-for="(crumb, index) in materialFolderBreadcrumbs" :key="crumb.path || '__material_root__'">
                 <ChevronRight v-if="index > 0" :size="14" aria-hidden="true" />
                 <button
@@ -3484,6 +3447,12 @@ onBeforeUnmount(() => {
               </button>
             </template>
             <template v-else>
+              <div class="aw-material-toolbar aw-material-toolbar--canonical">
+                <strong>当前资源组</strong>
+                <span>参考图、设计源文件、最终成品</span>
+              </div>
+            </template>
+            <template v-if="false">
               <form class="aw-material-toolbar" @submit.prevent="loadMaterials()">
                 <div class="aw-material-toolbar__query">
                   <span class="aw-material-toolbar__search-icon" aria-hidden="true">
@@ -3740,6 +3709,9 @@ onBeforeUnmount(() => {
           </template>
 
           <template v-else>
+            <ResourceLibraryPanel :initial-query="materialQuery" />
+          </template>
+          <template v-if="false">
             <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
             <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
             <p v-else-if="visibleMaterialFolders.length === 0 && visibleMaterialFiles.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
@@ -3856,7 +3828,7 @@ onBeforeUnmount(() => {
                     :key="materialAssetKey(asset)"
                     class="aw-material-row"
                     :class="{
-                      'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset),
+                      'is-active': isActiveMaterial(asset),
                       'is-selected': selectedMaterialIds.has(materialAssetKey(asset)),
                     }"
                     @contextmenu.prevent.stop
