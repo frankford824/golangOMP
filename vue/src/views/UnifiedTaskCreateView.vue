@@ -808,6 +808,11 @@ async function submit(retryOnly: boolean) {
     if (intent.value === 'planning_sku') {
       try {
         planningResult.value = await planningSkuApi.create(buildPlanningInputs(candidates, common.customization_required), common.erp_sync_mode, clientCreateId.value)
+        if (planningResult.value.items.length !== candidates.length) {
+          submitError.value = `系统返回 ${planningResult.value.items.length} 个 SKU，但本次提交了 ${candidates.length} 行。为避免漏单，已停止更新页面状态，请勿重复提交并联系管理员。`
+          planningResult.value = null
+          return
+        }
         selectedPlanningIds.value = new Set(planningResult.value.items.map((item) => item.task_sku_item_id))
         candidates.forEach((row, index) => { row.status = 'created'; row.result_task_id = String(planningResult.value?.task_id || ''); row.result_sku_code = planningResult.value?.items[index]?.sku_code })
         result.value = true

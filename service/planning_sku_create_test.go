@@ -11,6 +11,15 @@ import (
 	"workflow/repo"
 )
 
+type planningCreateReplayRepoStub struct {
+	PlanningSKURepository
+	replay *domain.PlanningSKUCreateResult
+}
+
+func (s *planningCreateReplayRepoStub) FindCreateResult(context.Context, int64, string) (*domain.PlanningSKUCreateResult, error) {
+	return s.replay, nil
+}
+
 func TestNewPlanningTaskDetailUsesValidRiskFlagsJSON(t *testing.T) {
 	detail := newPlanningTaskDetail([]domain.PlanningSKUItemInput{{Quantity: 2}, {Quantity: 3}})
 
@@ -69,6 +78,50 @@ func TestPlanningSKUCodeRuleMatchesLatestLegacyPurchaseFormat(t *testing.T) {
 		if codes[index] != want[index] {
 			t.Fatalf("codes[%d] = %q, want %q", index, codes[index], want[index])
 		}
+	}
+}
+
+func TestPlanningSKUItemsUseStableUniqueDedupeKeys(t *testing.T) {
+	seen := map[string]struct{}{}
+	for index, clientItemID := range []string{"row-a", "row-b", "row-c", "row-d"} {
+		item := newPlanningTaskSKUItem(domain.PlanningSKUItemInput{
+			ClientItemID:    clientItemID,
+			ERPProductIID:   "HZS",
+			DescriptionSpec: fmt.Sprintf("产品-%d", index+1),
+		}, fmt.Sprintf("CGH%06d", index+22), index+1)
+		if item.DedupeKey == "" {
+			t.Fatalf("item %d has an empty dedupe key", index)
+		}
+		if _, duplicate := seen[item.DedupeKey]; duplicate {
+			t.Fatalf("item %d repeats dedupe key %q", index, item.DedupeKey)
+		}
+		seen[item.DedupeKey] = struct{}{}
+	}
+}
+
+func TestPlanningSKUCreateRejectsIdempotentReplayWithDifferentItemCount(t *testing.T) {
+	svc := &planningSKUService{repo: &planningCreateReplayRepoStub{replay: &domain.PlanningSKUCreateResult{
+		TaskID: 4118,
+		Items:  []domain.PlanningSKUResultItem{{TaskSKUItemID: 4661}},
+	}}}
+	actor := domain.RequestActor{ID: 292, Permissions: []domain.PermissionCode{domain.PermissionPlanningSKUCreate}}
+	request := domain.CreatePlanningSKUTaskRequest{
+		ClientCreateID: "draft-101",
+		ERPSyncMode:    domain.PlanningSKUERPSyncNone,
+		Items: []domain.PlanningSKUItemInput{
+			{ClientItemID: "row-a", CategoryCode: "HZS", DescriptionSpec: "产品 A", Quantity: 1},
+			{ClientItemID: "row-b", CategoryCode: "HZS", DescriptionSpec: "产品 B", Quantity: 1},
+			{ClientItemID: "row-c", CategoryCode: "HZS", DescriptionSpec: "产品 C", Quantity: 1},
+			{ClientItemID: "row-d", CategoryCode: "HZS", DescriptionSpec: "产品 D", Quantity: 1},
+		},
+	}
+
+	result, appErr := svc.Create(context.Background(), actor, request)
+	if result != nil {
+		t.Fatalf("result = %+v, want nil", result)
+	}
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("appErr = %+v, want conflict", appErr)
 	}
 }
 

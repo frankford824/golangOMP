@@ -138,6 +138,13 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 	if replay, err := s.repo.FindCreateResult(ctx, actor.ID, request.ClientCreateID); err != nil {
 		return nil, infraError("check planning SKU idempotency", err)
 	} else if replay != nil {
+		if len(replay.Items) != len(request.Items) {
+			return nil, domain.NewAppError(domain.ErrCodeConflict, "planning SKU idempotency payload does not match the existing result", map[string]interface{}{
+				"requested_item_count": len(request.Items),
+				"existing_item_count":  len(replay.Items),
+				"task_id":              replay.TaskID,
+			})
+		}
 		return replay, nil
 	}
 
@@ -182,12 +189,11 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 			quantity := input.Quantity
 			skuCodeType := normalizePlanningSKUCodeType(input.SKUCodeType)
 			categoryIdentity := planningSKUCategoryIdentity(input)
-			items = append(items, &domain.TaskSKUItem{
-				SequenceNo: i + 1, SKUCode: skuCode, SKUStatus: domain.TaskSKUStatusGenerated,
-				SKUOrigin: "native", ProductIID: strings.TrimSpace(input.ERPProductIID),
-				ProductNameSnapshot: planningProductName(input), Quantity: &quantity,
-				CategoryCode: strings.ToUpper(categoryIdentity), SKUCodeType: skuCodeType,
-			})
+			item := newPlanningTaskSKUItem(input, skuCode, i+1)
+			item.Quantity = &quantity
+			item.CategoryCode = strings.ToUpper(categoryIdentity)
+			item.SKUCodeType = skuCodeType
+			items = append(items, item)
 		}
 		batchMode := domain.TaskBatchModeSingle
 		if len(items) > 1 {
@@ -261,6 +267,18 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 	}
 	result.WorkflowRevision = completedRevision
 	return result, nil
+}
+
+func newPlanningTaskSKUItem(input domain.PlanningSKUItemInput, skuCode string, sequenceNo int) *domain.TaskSKUItem {
+	return &domain.TaskSKUItem{
+		SequenceNo:          sequenceNo,
+		SKUCode:             skuCode,
+		SKUStatus:           domain.TaskSKUStatusGenerated,
+		SKUOrigin:           "native",
+		ProductIID:          strings.TrimSpace(input.ERPProductIID),
+		ProductNameSnapshot: planningProductName(input),
+		DedupeKey:           "planning_sku:" + strings.TrimSpace(input.ClientItemID),
+	}
 }
 
 func (s *planningSKUService) GetResult(ctx context.Context, actor domain.RequestActor, taskID int64) (*domain.PlanningSKUCreateResult, *domain.AppError) {

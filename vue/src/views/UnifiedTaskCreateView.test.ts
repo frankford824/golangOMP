@@ -177,6 +177,28 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
+  it('does not mark planning rows complete when the server returns fewer SKUs than submitted', async () => {
+    mocks.create.mockResolvedValue({ task_id: 4118, task_no: 'RWA20260811000001', items: [] })
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: { template: '<div class="grid-stub" />', methods: { flushRowsFromWorkbook: mocks.gridFlush } },
+          IIdSelector: { template: '<div class="iid-stub" />' },
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+    await wrapper.get('[data-row-index="0"] input[type="text"]').setValue('KT_STANDARD')
+    await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
+    await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('2')
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('系统返回 0 个 SKU，但本次提交了 1 行')
+    expect(wrapper.text()).not.toContain('任务 RWA20260811000001 已结单')
+    wrapper.unmount()
+  })
+
   it('states ERP sync behavior explicitly without the removed planning cost panel', async () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
