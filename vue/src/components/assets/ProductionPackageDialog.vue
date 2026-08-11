@@ -41,22 +41,22 @@
               </label>
             </div>
             <div class="action-row">
-              <button type="button" class="secondary-button" :disabled="busy" @click="buildManualPackage">
-                {{ busy ? '服务端打包中…' : '生成生产 ZIP' }}
+              <button type="button" class="primary-button" :disabled="busy" @click="buildManualPackage">
+                {{ busy ? '服务端打包中…' : '生成并下载生产 ZIP' }}
               </button>
               <button
-                v-if="excelManifest"
                 type="button"
-                class="primary-button"
+                class="secondary-button"
                 :disabled="!downloadUrl"
                 @click="downloadExcelPackage"
               >
-                下载生产 ZIP
+                {{ downloadUrl ? '再次下载生产 ZIP' : '生成后可再次下载' }}
               </button>
               <button v-if="excelManifest" type="button" class="quiet-button" @click="exportExcelReport">
                 导出匹配结果 Excel
               </button>
             </div>
+            <p class="download-hint">生成完成后会自动下载；如果浏览器拦截或需要重复下载，可点击“再次下载生产 ZIP”。</p>
             <div v-if="excelManifest" class="summary-grid">
               <span
                 ><small>匹配行</small><strong>{{ excelManifest.success_count }}</strong></span
@@ -157,6 +157,8 @@ async function buildManualPackage() {
     error.value = '请至少输入一个 SKU 编码，或上传 Excel。'
     return
   }
+  excelManifest.value = null
+  downloadUrl.value = ''
   busy.value = true
   error.value = ''
   excelFileName.value = ''
@@ -168,6 +170,7 @@ async function buildManualPackage() {
 		const job = unwrap(response)
 		if (!job?.job_id) throw new Error('后端未返回打包任务。')
 		await pollPackageJob(job.job_id, jobController.signal)
+		downloadExcelPackage()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '生产清单查询失败。'
   } finally {
@@ -181,6 +184,7 @@ async function handleExcelFile(event: Event) {
   if (!file) return
   excelFileName.value = file.name
   excelManifest.value = null
+  downloadUrl.value = ''
   busy.value = true
   error.value = ''
   termsText.value = ''
@@ -192,6 +196,7 @@ async function handleExcelFile(event: Event) {
 		const job = unwrap(response)
 		if (!job?.job_id) throw new Error('后端未返回打包任务。')
 		await pollPackageJob(job.job_id, jobController.signal)
+		downloadExcelPackage()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Excel 生产打包解析失败。'
   } finally {
@@ -383,6 +388,11 @@ function exportExcelReport() {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem;
+}
+.download-hint {
+  margin: -0.15rem 0 0;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.78rem;
 }
 .primary-button,
 .secondary-button,

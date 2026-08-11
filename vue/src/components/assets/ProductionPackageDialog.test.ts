@@ -27,6 +27,7 @@ describe('ProductionPackageDialog unified production package', () => {
   })
 
   it('preserves duplicate SKU rows and sends the selected TIF-only production filter', async () => {
+		const downloadClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
 		mocks.createExcelPackageJob.mockResolvedValueOnce({ data: { data: { job_id: 'pkg-1' } } })
 		mocks.getExcelPackageJob.mockResolvedValueOnce({
 			data: {
@@ -71,7 +72,8 @@ describe('ProductionPackageDialog unified production package', () => {
     textarea.value = 'HSC34548\nHSC34548'
     textarea.dispatchEvent(new Event('input'))
     await wrapper.vm.$nextTick()
-		const search = document.body.querySelector<HTMLButtonElement>('.package-dialog .secondary-button')
+		const search = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.package-dialog button'))
+			.find((button) => button.textContent?.includes('生成并下载生产 ZIP'))
     if (!search) throw new Error('missing search button')
     search.click()
     await flushPromises()
@@ -97,7 +99,42 @@ describe('ProductionPackageDialog unified production package', () => {
 		expect(mocks.getExcelPackageJob).toHaveBeenCalledWith('pkg-1', expect.any(AbortSignal))
     expect(document.body.textContent).toContain('匹配行')
     expect(document.body.textContent).toContain('生产文件')
+		expect(document.body.textContent).toContain('再次下载生产 ZIP')
+		expect(downloadClick).toHaveBeenCalledOnce()
     expect(document.body.textContent).not.toContain('Excel 仓库外发')
+		downloadClick.mockRestore()
     wrapper.unmount()
   })
+
+	it('shows a visible download control before generation and enables it when the package is ready', async () => {
+		mocks.createExcelPackageJob.mockResolvedValueOnce({ data: { data: { job_id: 'pkg-visible' } } })
+		mocks.getExcelPackageJob.mockResolvedValueOnce({
+			data: { data: {
+				job_id: 'pkg-visible', status: 'succeeded', total_count: 1, processed_count: 1, failed_count: 0,
+				download_url: 'https://oss.test/visible.zip', filename: 'visible.zip',
+				manifest: { items: [], failures: [], success_count: 1, failure_count: 0, total_files: 1, total_size: 1 },
+			} },
+		})
+		const downloadClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+		const wrapper = mount(ProductionPackageDialog, { props: { open: true }, attachTo: document.body })
+		const download = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.package-dialog button'))
+			.find((button) => button.textContent?.includes('生成后可再次下载'))
+		expect(download).toBeDefined()
+		expect(download?.disabled).toBe(true)
+
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('.package-dialog textarea')
+		const generate = document.body.querySelector<HTMLButtonElement>('.package-dialog .primary-button')
+		if (!textarea || !generate) throw new Error('missing production package controls')
+		textarea.value = 'CGP000349'
+		textarea.dispatchEvent(new Event('input'))
+		await wrapper.vm.$nextTick()
+		generate.click()
+		await flushPromises()
+
+		expect(download?.disabled).toBe(false)
+		expect(download?.textContent).toContain('再次下载生产 ZIP')
+		expect(downloadClick).toHaveBeenCalledOnce()
+		downloadClick.mockRestore()
+		wrapper.unmount()
+	})
 })
