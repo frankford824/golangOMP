@@ -14,6 +14,8 @@ import CanonicalResourceThumb from './CanonicalResourceThumb.vue'
 import {
   canonicalGroupCover,
   canonicalGroupFinals,
+  canonicalPreviewErrorMessage,
+  canonicalPreviewUnavailableMessage,
   canonicalResourceRoleLabel,
   canonicalResourceRoleOptions,
   currentCanonicalRevision,
@@ -117,9 +119,9 @@ async function openItemPreview(item: FlatResourceItem) {
     const meta = await resolveCanonicalPreview(item, getGroup)
     previewUrl.value = String(meta.download_url || '')
     previewMimeType.value = meta.mime_type || item.mime_type || ''
-    if (!previewUrl.value) previewError.value = '当前资源暂不支持在线预览'
+    if (!previewUrl.value) previewError.value = canonicalPreviewUnavailableMessage(item.resource_role)
   } catch (cause) {
-    previewError.value = cause instanceof Error ? cause.message : '预览加载失败'
+    previewError.value = canonicalPreviewErrorMessage(cause, item.resource_role)
   } finally {
     previewLoading.value = false
   }
@@ -141,9 +143,9 @@ async function openGroupPreview(group: ResourceGroup) {
     if (cover.taskAssetId) meta = await resourceGroupsApi.previewTaskAsset(cover.taskAssetId)
     previewUrl.value = String(meta?.download_url || cover.previewUrl || cover.downloadUrl || '')
     previewMimeType.value = meta?.mime_type || cover.mimeType || ''
-    if (!previewUrl.value) previewError.value = '当前资源暂不支持在线预览'
+    if (!previewUrl.value) previewError.value = canonicalPreviewUnavailableMessage('final')
   } catch (cause) {
-    previewError.value = cause instanceof Error ? cause.message : '预览加载失败'
+    previewError.value = canonicalPreviewErrorMessage(cause, 'final')
   } finally {
     previewLoading.value = false
   }

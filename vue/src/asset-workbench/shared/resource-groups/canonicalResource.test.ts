@@ -7,6 +7,7 @@ import {
 } from '@/services/api/resourceGroupsApi'
 import {
   canonicalFileFromGroup,
+  canonicalPreviewErrorMessage,
   resolveCanonicalDownload,
   resolveCanonicalPreview,
 } from './canonicalResource'
@@ -81,5 +82,33 @@ describe('canonical resource resolver', () => {
 
   it('fails closed when the listed revision is no longer current', () => {
     expect(() => canonicalFileFromGroup(group, { ...item('final', 701, 1002), revision_id: 69 })).toThrow('资源版本已更新')
+  })
+
+  it('explains an unavailable source preview without misreporting a data conflict', () => {
+    const cause = Object.assign(new Error('与已有数据冲突，请更换后重试'), {
+      status: 409,
+      responseData: {
+        error: {
+          code: 'INVALID_STATE_TRANSITION',
+          message: 'task asset preview is not available',
+        },
+      },
+    })
+
+    expect(canonicalPreviewErrorMessage(cause, 'source')).toBe('该设计源文件暂不支持在线预览，请下载后查看。')
+  })
+
+  it('keeps unrelated 409 errors on their original message path', () => {
+    const cause = Object.assign(new Error('与已有数据冲突，请更换后重试'), {
+      status: 409,
+      responseData: {
+        error: {
+          code: 'INVALID_STATE_TRANSITION',
+          message: 'resource group read model is inconsistent',
+        },
+      },
+    })
+
+    expect(canonicalPreviewErrorMessage(cause, 'source')).toBe('与已有数据冲突，请更换后重试')
   })
 })

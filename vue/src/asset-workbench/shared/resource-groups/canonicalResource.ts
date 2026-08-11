@@ -7,6 +7,7 @@ import {
   type ResourceReference,
   type ResourceRevision,
 } from '@/services/api/resourceGroupsApi'
+import { parseApiErrorPayload } from '@/utils/api-message-zh'
 
 export type CanonicalResourceRole = '' | 'reference' | 'source' | 'final'
 
@@ -28,6 +29,28 @@ export const canonicalResourceRoleOptions: Array<{ value: CanonicalResourceRole;
 
 export function canonicalResourceRoleLabel(role: FlatResourceItem['resource_role']): string {
   return ({ reference: '参考图', source: '设计源文件', final: '最终成品' } as const)[role]
+}
+
+export function canonicalPreviewUnavailableMessage(role?: FlatResourceItem['resource_role']): string {
+  return role === 'source'
+    ? '该设计源文件暂不支持在线预览，请下载后查看。'
+    : '当前资源暂不支持在线预览，请下载后查看。'
+}
+
+export function canonicalPreviewErrorMessage(
+  cause: unknown,
+  role?: FlatResourceItem['resource_role'],
+): string {
+  const parsed = parseApiErrorPayload(cause)
+  const backendMessage = (parsed.message || '').trim().toLowerCase().replace(/\.$/, '')
+  if (
+    parsed.status === 409 &&
+    parsed.code === 'INVALID_STATE_TRANSITION' &&
+    (backendMessage === 'task asset preview is not available' || backendMessage === 'asset preview is not available')
+  ) {
+    return canonicalPreviewUnavailableMessage(role)
+  }
+  return cause instanceof Error ? cause.message : '预览加载失败'
 }
 
 export function currentCanonicalRevision(group: ResourceGroup): ResourceRevision | null {
@@ -71,7 +94,7 @@ export async function resolveCanonicalPreview(
   const group = await getGroup(item.group_id)
   const file = canonicalFileFromGroup(group, item)
   const previewUrl = file.previewUrl || file.downloadUrl
-  if (!previewUrl) throw new Error('当前资源暂不支持在线预览')
+  if (!previewUrl) throw new Error(canonicalPreviewUnavailableMessage(item.resource_role))
   return asDownloadInfo(file, previewUrl, true)
 }
 
