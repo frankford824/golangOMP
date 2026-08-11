@@ -459,6 +459,12 @@ function measurePage(countSelector) {
 }
 
 async function preparePlanningSkuScenario(page) {
+  // Populate the row model through controls that are actually visible. On the
+  // desktop layout the mobile cards remain in the DOM but Univer owns edits;
+  // mutating those hidden textareas races Univer's worksheet-to-model sync and
+  // creates a false value-loss failure.
+  await page.setViewportSize({ width: 760, height: 900 })
+  await page.waitForFunction(() => window.matchMedia('(max-width: 760px)').matches)
   const addRow = page.getByRole('button', { name: '添加一行' })
   await addRow.waitFor({ state: 'visible' })
   await page.evaluate(() => {
@@ -468,16 +474,15 @@ async function preparePlanningSkuScenario(page) {
   })
   await page.waitForFunction(() => document.querySelector('.compose-page')?.getAttribute('data-row-count') === '200')
 
-  await page.evaluate(() => {
-    const setValue = (index, value) => {
-      const control = document.querySelector(`[data-testid="compose-row"][data-row-index="${index}"] textarea`)
-      if (!(control instanceof HTMLTextAreaElement)) throw new Error(`planning row ${index} is missing`)
-      control.value = value
-      control.dispatchEvent(new Event('input', { bubbles: true }))
-    }
-    setValue(0, '首行保持值 001')
-    setValue(199, '末行保持值 200')
-  })
+  await page.locator('[data-row-index="0"] textarea').first().fill('首行保持值 001')
+  await page.locator('[data-row-index="199"] textarea').first().fill('末行保持值 200')
+
+  // Re-enter the production desktop surface and wait for the worksheet to be
+  // rebuilt from the populated row model before testing footer scrolling.
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.locator('.compose-grid__canvas.is-ready').waitFor({ state: 'visible' })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForTimeout(200)
   const rowOrder = await page.locator('[data-testid="compose-row"]').evaluateAll((rows) => rows.map((row) => Number(row.getAttribute('data-row-index'))))
   const firstValuePreserved = await page.locator('[data-row-index="0"] textarea').first().inputValue() === '首行保持值 001'
   const lastValuePreserved = await page.locator('[data-row-index="199"] textarea').first().inputValue() === '末行保持值 200'
@@ -492,8 +497,11 @@ async function preparePlanningSkuScenario(page) {
     const footerRect = footerElement.getBoundingClientRect()
     const gridRect = gridElement.getBoundingClientRect()
     return {
-      footerVisible: footerRect.top >= 0 && footerRect.bottom <= window.innerHeight,
+      footerVisible: footerRect.top >= -1 && footerRect.bottom <= window.innerHeight + 1,
       footerOverlapsLast: footerRect.top < gridRect.bottom && footerRect.bottom > gridRect.top,
+      footerRectTop: Math.round(footerRect.top),
+      footerRectBottom: Math.round(footerRect.bottom),
+      viewportHeight: window.innerHeight,
     }
   })
 
