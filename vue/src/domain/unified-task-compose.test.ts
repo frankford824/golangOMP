@@ -52,6 +52,13 @@ describe('unified task compose domain', () => {
     })
   })
 
+  it('shows explicit business units for task dimensions', () => {
+    const labels = composeColumns('new_design').map((column) => column.label)
+    expect(labels).toContain('宽（cm）')
+    expect(labels).toContain('高（cm）')
+    expect(labels).toContain('面积（㎡）')
+  })
+
   it('maps one new-design row and keeps the operations set hint non-authoritative', () => {
     const row = createComposeRow({
       id: 'row-1',

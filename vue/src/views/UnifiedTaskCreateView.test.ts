@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   permissions: new Set(['task.create', 'planning_sku.create', 'planning_sku.erp_sync']),
   uploadReferenceFileRef: vi.fn(), uploadPlanningImage: vi.fn(),
   uploadRetouchRequirementPendingAssets: vi.fn(), downloadPlanning: vi.fn(),
+  gridFlush: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -144,7 +145,7 @@ describe('UnifiedTaskCreateView', () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
         stubs: {
-          UnifiedTaskGrid: { template: '<div class="grid-stub" />', methods: { readRowsFromWorkbook() {} } },
+          UnifiedTaskGrid: { template: '<div class="grid-stub" />', methods: { flushRowsFromWorkbook: mocks.gridFlush } },
           IIdSelector: { template: '<div class="iid-stub" />' },
           RouterLink: { template: '<a><slot /></a>' },
         },
@@ -166,6 +167,7 @@ describe('UnifiedTaskCreateView', () => {
     expect(mocks.create).toHaveBeenCalledWith([
       expect.objectContaining({ category_code: 'KT_STANDARD', sku_code_type: 'regular', description_spec: '亚克力立牌 20cm', quantity: 2, erp_product_i_id: 'KT_STANDARD', erp_product_name: '亚克力立牌 20cm' }),
     ], 'async', expect.any(String))
+    expect(mocks.gridFlush).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('任务 RW-088 已结单')
     expect(wrapper.text()).toContain('CGH000021')
     expect(wrapper.text()).toContain('以下编号已正式占用')

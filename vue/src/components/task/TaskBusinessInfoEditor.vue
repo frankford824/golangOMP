@@ -64,15 +64,15 @@
           <input v-model.trim="draft.process" maxlength="255" />
         </label>
         <label>
-          <span>宽</span>
+          <span>宽（cm）</span>
           <input v-model="draft.width" type="number" min="0" step="any" inputmode="decimal" />
         </label>
         <label>
-          <span>高</span>
+          <span>高（cm）</span>
           <input v-model="draft.height" type="number" min="0" step="any" inputmode="decimal" />
         </label>
         <label>
-          <span>面积</span>
+          <span>面积（㎡）</span>
           <input v-model="draft.area" type="number" min="0" step="any" inputmode="decimal" />
         </label>
       </div>

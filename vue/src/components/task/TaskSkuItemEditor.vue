@@ -34,9 +34,9 @@
         <label>ERP 商品编码<input v-model.trim="drafts[itemKey(item)].productIID" :disabled="!canEdit || isSaving(item)" /></label>
         <label>规格<input v-model.trim="drafts[itemKey(item)].specText" :disabled="!canEdit || isSaving(item)" placeholder="例如：500ml" /></label>
         <label>尺寸<input v-model.trim="drafts[itemKey(item)].sizeText" :disabled="!canEdit || isSaving(item)" placeholder="例如：20×30cm" /></label>
-        <label>宽<input v-model.trim="drafts[itemKey(item)].width" :disabled="!canEdit || isSaving(item)" inputmode="decimal" /></label>
-        <label>高<input v-model.trim="drafts[itemKey(item)].height" :disabled="!canEdit || isSaving(item)" inputmode="decimal" /></label>
-        <label>面积<input v-model.trim="drafts[itemKey(item)].area" :disabled="!canEdit || isSaving(item)" inputmode="decimal" /></label>
+        <label>宽（cm）<input v-model.trim="drafts[itemKey(item)].width" :disabled="!canEdit || isSaving(item)" inputmode="decimal" /></label>
+        <label>高（cm）<input v-model.trim="drafts[itemKey(item)].height" :disabled="!canEdit || isSaving(item)" inputmode="decimal" /></label>
+        <label>面积（㎡）<input v-model.trim="drafts[itemKey(item)].area" :disabled="!canEdit || isSaving(item)" inputmode="decimal" /></label>
         <label>数量<input v-model.trim="drafts[itemKey(item)].quantity" :disabled="!canEdit || isSaving(item)" inputmode="numeric" /></label>
         <label class="wide">运营修改要求<textarea v-model.trim="drafts[itemKey(item)].designRequirement" :disabled="!canEdit || isSaving(item)" rows="2" /></label>
         <label>当前/人工成本<input v-model.trim="drafts[itemKey(item)].costPrice" :disabled="!canEditCost || isSaving(item)" inputmode="decimal" :placeholder="canEditCost ? '修改后按人工成本保存' : '当前账号不可修改成本'" /></label>

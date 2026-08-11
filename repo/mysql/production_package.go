@@ -9,11 +9,11 @@ import (
 )
 
 const productionPackageResolvedSKU = `UPPER(COALESCE(
-	NULLIF(tsi.sku_code, ''),
-	NULLIF(rr.sku_code, ''),
-	NULLIF(ta.scope_sku_code, ''),
-	NULLIF(t.primary_sku_code, ''),
-	NULLIF(t.sku_code, ''),
+	NULLIF(CONVERT(tsi.sku_code USING utf8mb4) COLLATE utf8mb4_unicode_ci, ''),
+	NULLIF(CONVERT(rr.sku_code USING utf8mb4) COLLATE utf8mb4_unicode_ci, ''),
+	NULLIF(CONVERT(ta.scope_sku_code USING utf8mb4) COLLATE utf8mb4_unicode_ci, ''),
+	NULLIF(CONVERT(t.primary_sku_code USING utf8mb4) COLLATE utf8mb4_unicode_ci, ''),
+	NULLIF(CONVERT(t.sku_code USING utf8mb4) COLLATE utf8mb4_unicode_ci, ''),
 	''
 ))`
 

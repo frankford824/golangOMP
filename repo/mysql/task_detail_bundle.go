@@ -65,11 +65,23 @@ func (r *taskRepo) GetTaskDetailReadBundle(ctx context.Context, taskID int64, ev
 		SELECT rfr.id, rfr.task_id, rfr.sku_item_id,
 		       rfr.retouch_requirement_id, rfr.ref_id,
 		       rfr.owner_module_key, rfr.context, rfr.attached_at,
-		       COALESCE(asr.ref_key, ''), COALESCE(asr.file_name, ''),
-		       COALESCE(asr.mime_type, ''), asr.file_size,
-		       COALESCE(asr.status, '')
+		       COALESCE(NULLIF(asr.ref_key, ''), NULLIF(bound_asset.storage_key, ''), bound_storage.ref_key, ''),
+		       COALESCE(NULLIF(asr.file_name, ''), NULLIF(bound_asset.original_filename, ''), NULLIF(bound_asset.file_name, ''), bound_storage.file_name, ''),
+		       COALESCE(NULLIF(asr.mime_type, ''), NULLIF(bound_asset.mime_type, ''), bound_storage.mime_type, ''),
+		       COALESCE(asr.file_size, bound_asset.file_size, bound_storage.file_size),
+		       COALESCE(NULLIF(asr.status, ''), NULLIF(bound_storage.status, ''),
+		                CASE WHEN bound_asset.upload_status = 'uploaded' THEN 'recorded' ELSE '' END, '')
 		FROM reference_file_refs rfr
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rfr.ref_id
+		LEFT JOIN task_reference_asset_bindings ref_binding
+		  ON ref_binding.task_id = rfr.task_id
+		 AND CONVERT(ref_binding.ref_id USING utf8mb4) COLLATE utf8mb4_unicode_ci =
+		     CONVERT(rfr.ref_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+		LEFT JOIN task_assets bound_asset
+		  ON bound_asset.id = ref_binding.task_asset_id
+		 AND bound_asset.deleted_at IS NULL
+		 AND bound_asset.cleaned_at IS NULL
+		LEFT JOIN asset_storage_refs bound_storage ON bound_storage.ref_id = bound_asset.storage_ref_id
 		WHERE rfr.task_id = %[1]d
 		ORDER BY rfr.owner_module_key, rfr.attached_at ASC, rfr.id ASC;
 

@@ -780,7 +780,7 @@ function locateViolation(issue: ComposeViolation) {
 }
 
 async function submit(retryOnly: boolean) {
-  gridRef.value?.readRowsFromWorkbook?.()
+  await gridRef.value?.flushRowsFromWorkbook?.()
   await Promise.resolve()
   submitError.value = ''
   const candidates = retryOnly ? rows.value.filter((row) => row.status === 'failed') : rows.value

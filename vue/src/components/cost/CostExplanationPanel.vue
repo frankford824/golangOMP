@@ -20,9 +20,9 @@
       <form class="preview-form" @submit.prevent="preview">
         <label>ERP 商品编码<input v-model.trim="draft.productIID" placeholder="用于精确匹配规则绑定" /></label>
         <label>规则分组 / 类目编码<input v-model.trim="draft.categoryCode" placeholder="未绑定 i_id 时用于兜底匹配" /></label>
-        <label>宽<input v-model.trim="draft.width" inputmode="decimal" /></label>
-        <label>高<input v-model.trim="draft.height" inputmode="decimal" /></label>
-        <label>面积<input v-model.trim="draft.area" inputmode="decimal" /></label>
+        <label>宽（m）<input v-model.trim="draft.width" inputmode="decimal" /></label>
+        <label>高（m）<input v-model.trim="draft.height" inputmode="decimal" /></label>
+        <label>面积（㎡）<input v-model.trim="draft.area" inputmode="decimal" /></label>
         <label>数量<input v-model.trim="draft.quantity" inputmode="numeric" /></label>
         <label>工艺<input v-model.trim="draft.process" /></label>
         <label class="wide">补充说明<input v-model.trim="draft.notes" placeholder="例如材质、特殊工艺或尺寸来源" /></label>

@@ -248,7 +248,7 @@ async function boot() {
       resizeTimer = setTimeout(applyColumnWidths, 160)
     })
     resizeObserver.observe(canvasRef.value)
-    eventDisposables.push(facade.addEvent(facade.Event.SheetEditEnded, () => scheduleRead()))
+    eventDisposables.push(facade.addEvent(facade.Event.SheetEditEnded, () => readRowsFromWorkbook()))
     if (facade.Event.SheetValueChanged) {
       eventDisposables.push(facade.addEvent(facade.Event.SheetValueChanged, () => scheduleRead()))
     }
@@ -298,7 +298,7 @@ async function boot() {
 function scheduleRead() {
   if (applyingVisuals) return
   if (syncTimer) clearTimeout(syncTimer)
-  syncTimer = setTimeout(readRowsFromWorkbook, 80)
+  syncTimer = setTimeout(readRowsFromWorkbook, 16)
 }
 
 function applyColumnWidths() {
@@ -410,6 +410,21 @@ function readRowsFromWorkbook() {
   emit('update:rows', next)
 }
 
+/**
+ * Univer 的单元格编辑器会在失焦后才把最后一段输入（尤其是粘贴内容）
+ * 写回 worksheet。提交前显式结束编辑并等待两个渲染节拍，避免界面可见但
+ * 行模型仍是旧值，进而出现必填项误报。
+ */
+async function flushRowsFromWorkbook() {
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active !== document.body) active.blur()
+  await nextTick()
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  readRowsFromWorkbook()
+  await nextTick()
+}
+
 function dispose(increment = true) {
   if (increment) bootSequence += 1
   if (syncTimer) clearTimeout(syncTimer)
@@ -431,7 +446,7 @@ function dispose(increment = true) {
   highlightedCells = new Set()
 }
 
-defineExpose({ readRowsFromWorkbook, boot, focusCell })
+defineExpose({ readRowsFromWorkbook, flushRowsFromWorkbook, boot, focusCell })
 </script>
 
 <template>
