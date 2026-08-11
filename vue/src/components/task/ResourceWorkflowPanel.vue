@@ -113,7 +113,7 @@
                   <CheckCircle2 :size="18" class="file-ready" aria-label="已就绪" />
                 </div>
                 <label v-if="canUploadSource(entry.row)" class="drop-zone source-drop">
-                  <UploadCloud :size="20" aria-hidden="true" /><span>{{ entry.row.sourceMemberNames.length ? `继续添加源文件（已选 ${entry.row.sourceMemberNames.length} 份）` : entry.row.source && !replaceSourceGroups.has(entry.row.group.id) ? '替换源文件' : '选择一份或多份 PSD、AI、PSB、ZIP 等源文件' }}</span>
+                  <UploadCloud :size="20" aria-hidden="true" /><span>{{ entry.row.sourceMemberNames.length ? `继续添加源文件（已选 ${entry.row.sourceMemberNames.length} 份）` : entry.row.source && !replaceSourceGroups.has(entry.row.group.id) ? '替换源文件' : '选择一份或多份 PSD、AI、PSB、TIF、ZIP 等源文件' }}</span>
                   <input type="file" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadSource($event, entry.row)" />
                 </label>
               </section>

@@ -1,7 +1,7 @@
 /** 设计稿交付上传：文案集中管理（组件内禁止散落硬编码） */
-export const DESIGN_UPLOAD_MAX_FILE_SIZE_MB = 1024
+export const DESIGN_UPLOAD_MAX_FILE_SIZE_MB = 10 * 1024
 export const DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES = DESIGN_UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024
-export const DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL = '1GB'
+export const DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL = '10GB'
 
 export function designUploadTooLargeMessage(fileName?: string): string {
   const base = `文件大小不能超过 ${DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL}`

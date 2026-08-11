@@ -110,6 +110,7 @@ vi.mock('@/utils/upload-errors', () => ({
 import {
   normalizeUploadSessionNumericID,
   normalizeRetouchRequirementId,
+  formatCreateUploadSessionFailure,
   prepareTaskAssetUploadSession,
   completePreparedTaskAssetUploadSession,
   cancelPreparedTaskAssetUploadSession,
@@ -457,6 +458,33 @@ describe('completePreparedTaskAssetUploadSession — remote transport', () => {
     await expect(
       completePreparedTaskAssetUploadSession(prepared, fakeFile()),
     ).rejects.toThrow('上传入口未准备好')
+  })
+})
+
+describe('formatCreateUploadSessionFailure', () => {
+  it('shows the selected file size and backend upload limit', () => {
+    const err = {
+      response: {
+        data: {
+          error: {
+            code: 'INVALID_REQUEST',
+            details: { max_bytes: 10 * 1024 ** 3, max_label: '10GB' },
+          },
+        },
+      },
+    }
+
+    expect(formatCreateUploadSessionFailure(err, {
+      name: 'large-design.tif',
+      size: 11 * 1024 ** 3,
+    })).toBe('创建上传入口失败：large-design.tif（11.0GB）超过单文件上限 10GB')
+  })
+
+  it('keeps the shared generic message for unrelated create-session errors', () => {
+    expect(formatCreateUploadSessionFailure(new Error('offline'), {
+      name: 'design.tif',
+      size: 1024,
+    })).toBe('upload failed at create_session')
   })
 })
 

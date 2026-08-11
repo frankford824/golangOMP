@@ -19397,7 +19397,7 @@ export interface components {
             file_name?: string;
             /**
              * Format: int64
-             * @description Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length.
+             * @description Required exact file size in bytes. Task asset upload sessions reject values above 10 GiB and completion verifies the OSS object length.
              */
             expected_size?: number;
             /**

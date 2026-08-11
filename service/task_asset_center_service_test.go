@@ -1768,6 +1768,31 @@ func TestTaskAssetCenterServiceCreateUploadSessionRejectsExpectedSizeAboveLimit(
 	}
 }
 
+func TestTaskAssetCenterServiceCreateUploadSessionAcceptsExpectedSizeAboveLegacyOneGiBLimit(t *testing.T) {
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2033, TaskStatus: domain.TaskStatusPendingAudit})
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+
+	largeTIF := int64(2 * 1024 * 1024 * 1024)
+	result, appErr := svc.CreateUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
+		TaskID:       2033,
+		CreatedBy:    540,
+		AssetType:    domain.TaskAssetTypeSource,
+		Filename:     "large-design-source.tif",
+		ExpectedSize: &largeTIF,
+		MimeType:     "image/tiff",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession() appErr = %+v, want nil", appErr)
+	}
+	if result == nil || result.Session == nil {
+		t.Fatalf("CreateUploadSession() result = %+v", result)
+	}
+	if result.Session.UploadMode != domain.DesignAssetUploadModeMultipart {
+		t.Fatalf("CreateUploadSession() upload mode = %q, want multipart", result.Session.UploadMode)
+	}
+}
+
 func TestTaskAssetCenterServiceUploadContentTypeContractDefaultsAndRejectsMismatch(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2032, TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()

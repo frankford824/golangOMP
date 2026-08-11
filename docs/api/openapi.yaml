@@ -2516,13 +2516,13 @@ components:
           type: integer
           format: int64
           minimum: 1
-          maximum: 1073741824
-          description: Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length.
+          maximum: 10737418240
+          description: Required exact file size in bytes. Task asset upload sessions reject values above 10 GiB and completion verifies the OSS object length.
         file_size:
           type: integer
           format: int64
           minimum: 1
-          maximum: 1073741824
+          maximum: 10737418240
           description: Compatibility alias of `expected_size`; when used it must be the exact positive file size.
         mime_type:
           type: string

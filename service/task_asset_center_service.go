@@ -130,8 +130,8 @@ const (
 	assetVersionRaceRetryDenyCode    = "asset_version_race_retry"
 	assetVersionReplacementRetention = 15 * 24 * time.Hour
 	taskAssetStagingRetention        = 7 * 24 * time.Hour
-	taskAssetUploadMaxFileSizeBytes  = int64(1024 * 1024 * 1024)
-	taskAssetUploadMaxFileSizeLabel  = "1GB"
+	taskAssetUploadMaxFileSizeBytes  = int64(10 * 1024 * 1024 * 1024)
+	taskAssetUploadMaxFileSizeLabel  = "10GB"
 	taskAssetSinglePartThreshold     = int64(10 * 1024 * 1024)
 )
 

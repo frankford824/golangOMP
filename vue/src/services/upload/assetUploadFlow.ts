@@ -72,11 +72,7 @@ function uploadErrorResponseData(err: unknown): unknown {
   return value.response?.data ?? value.responseData
 }
 
-function readUploadDenyDetail(err: unknown, key: string): string | undefined {
-  if (key === 'deny_code') {
-    const denyCode = parseApiErrorPayload(err).denyCode
-    if (denyCode) return denyCode
-  }
+function readUploadDetail(err: unknown, key: string): unknown {
   const raw = uploadErrorResponseData(err)
   if (!raw || typeof raw !== 'object') return undefined
   const root = raw as Record<string, unknown>
@@ -89,8 +85,39 @@ function readUploadDenyDetail(err: unknown, key: string): string | undefined {
   const details = apiError?.details && typeof apiError.details === 'object'
     ? apiError.details as Record<string, unknown>
     : undefined
-  const value = details?.[key]
+  return details?.[key]
+}
+
+function readUploadDenyDetail(err: unknown, key: string): string | undefined {
+  if (key === 'deny_code') {
+    const denyCode = parseApiErrorPayload(err).denyCode
+    if (denyCode) return denyCode
+  }
+  const value = readUploadDetail(err, key)
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '未知大小'
+  const gib = bytes / (1024 ** 3)
+  if (gib >= 1) return `${gib.toFixed(gib >= 10 ? 1 : 2)}GB`
+  const mib = bytes / (1024 ** 2)
+  return `${mib.toFixed(mib >= 10 ? 1 : 2)}MB`
+}
+
+export function formatCreateUploadSessionFailure(err: unknown, file: Pick<File, 'name' | 'size'>): string {
+  const maxLabel = readUploadDenyDetail(err, 'max_label')
+  const maxBytesRaw = readUploadDetail(err, 'max_bytes')
+  const maxBytes = typeof maxBytesRaw === 'number'
+    ? maxBytesRaw
+    : typeof maxBytesRaw === 'string'
+      ? Number(maxBytesRaw)
+      : NaN
+  const resolvedMaxLabel = maxLabel || (Number.isFinite(maxBytes) && maxBytes > 0 ? formatFileSize(maxBytes) : '')
+  if (resolvedMaxLabel) {
+    return `创建上传入口失败：${file.name}（${formatFileSize(file.size)}）超过单文件上限 ${resolvedMaxLabel}`
+  }
+  return formatUploadFailureMessage('create_session', err)
 }
 
 /**
@@ -239,7 +266,7 @@ export async function prepareTaskAssetUploadSession(
       sessionRes = await taskAssetsApi.createTaskCreateUploadSession(payload, options?.signal)
     }
   } catch (err) {
-    throw new Error(formatUploadFailureMessage('create_session', err))
+    throw new Error(formatCreateUploadSessionFailure(err, file))
   }
 
   const parsedDirect = parseOssDirectPlan(sessionRes.data)
