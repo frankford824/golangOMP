@@ -183,7 +183,7 @@ func (s *ActionService) markCustomizationReadyForSubmit(ctx context.Context, tx 
 	if err != nil {
 		return err
 	}
-	if job == nil || job.Status != domain.CustomizationJobStatusInProgress {
+	if job == nil || (job.Status != domain.CustomizationJobStatusInProgress && job.Status != domain.CustomizationJobStatusLegacyPendingProduction) {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "定制任务尚未处于可完成的设计状态", map[string]interface{}{"job_status": customizationJobStatus(job)})
 	}
 	if err := s.modules.UpdateState(ctx, tx, req.TaskID, domain.ModuleKeyCustomization, next, false, nil); err != nil {

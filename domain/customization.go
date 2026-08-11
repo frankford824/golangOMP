@@ -24,6 +24,10 @@ const (
 	CustomizationJobStatusInProgress     CustomizationJobStatus = "in_progress"
 	CustomizationJobStatusReadyForSubmit CustomizationJobStatus = "ready_for_submit"
 	CustomizationJobStatusCompleted      CustomizationJobStatus = "completed"
+	// CustomizationJobStatusLegacyPendingProduction is read-only compatibility
+	// for jobs created before the V8 customization workflow normalized the
+	// internal state machine. New writes must never create this status.
+	CustomizationJobStatusLegacyPendingProduction CustomizationJobStatus = "pending_customization_production"
 )
 
 func (s CustomizationJobStatus) Valid() bool {

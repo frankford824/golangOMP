@@ -121,6 +121,44 @@ func TestCustomizationSubmitMarksReadyWithoutAdvancingTask(t *testing.T) {
 	}
 }
 
+func TestCustomizationSubmitRepairsLegacyPendingProductionState(t *testing.T) {
+	actorID := int64(228)
+	tasks := &actionV8TaskRepo{task: &domain.Task{
+		ID: 3038, TaskStatus: domain.TaskStatusInProgress, CustomizationRequired: true,
+		DesignerID: &actorID, CurrentHandlerID: &actorID,
+	}}
+	modules := &actionV8ModuleRepo{module: &domain.TaskModule{
+		ID: 12402, TaskID: 3038, ModuleKey: domain.ModuleKeyCustomization,
+		State: domain.ModuleStateInProgress, ClaimedBy: &actorID,
+	}}
+	jobs := &actionV8CustomizationRepo{job: &domain.CustomizationJob{
+		ID: 347, TaskID: 3038, Status: domain.CustomizationJobStatusLegacyPendingProduction,
+	}}
+	events := &actionV8EventRepo{}
+	runner := &actionV8TxRunner{}
+	svc := NewActionService(tasks, modules, events, nil, runner, nil, WithCustomizationJobRepo(jobs))
+
+	decision := svc.Apply(context.Background(), ActionRequest{
+		Actor: actionV8Actor(actorID, domain.PermissionTaskDesignSubmit), TaskID: 3038,
+		ModuleKey: domain.ModuleKeyCustomization, Action: domain.ModuleActionSubmit,
+	})
+	if !decision.OK {
+		t.Fatalf("Apply() denied: %+v", decision)
+	}
+	if !runner.committed || runner.rolledBack {
+		t.Fatalf("transaction committed/rolledBack = %v/%v", runner.committed, runner.rolledBack)
+	}
+	if len(modules.updates) != 1 || modules.updates[0] != domain.ModuleStateSubmitted {
+		t.Fatalf("module updates = %+v", modules.updates)
+	}
+	if jobs.updates != 1 || jobs.job.Status != domain.CustomizationJobStatusReadyForSubmit || jobs.job.LastOperatorID == nil || *jobs.job.LastOperatorID != actorID {
+		t.Fatalf("customization job = %+v; updates=%d", jobs.job, jobs.updates)
+	}
+	if len(events.events) != 1 || events.events[0].EventType != domain.ModuleEventSubmitted {
+		t.Fatalf("events = %+v", events.events)
+	}
+}
+
 func TestCustomizationSubmitRequiresExplicitScopedCapability(t *testing.T) {
 	tasks := &actionV8TaskRepo{task: &domain.Task{ID: 41, TaskStatus: domain.TaskStatusInProgress, CustomizationRequired: true, CreatorID: 19}}
 	modules := &actionV8ModuleRepo{module: &domain.TaskModule{ID: 51, TaskID: 41, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStateInProgress}}

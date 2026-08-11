@@ -15,7 +15,7 @@ func TestCustomizationJobStatusValidOnlyAcceptsCurrentInternalStates(t *testing.
 
 	for _, historical := range []CustomizationJobStatus{
 		"pending_customization_review",
-		"pending_customization_production",
+		CustomizationJobStatusLegacyPendingProduction,
 		"pending_effect_review",
 		"pending_effect_revision",
 		"pending_production_transfer",
