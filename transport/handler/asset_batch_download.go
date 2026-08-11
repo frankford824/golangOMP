@@ -116,3 +116,90 @@ func (h *TaskAssetCenterHandler) PreviewExcelPackageFile(c *gin.Context) {
 	}
 	respondOK(c, manifest)
 }
+
+func (h *TaskAssetCenterHandler) CreateExcelPackageJob(c *gin.Context) {
+	if h.globalSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+		return
+	}
+	actorID, appErr := actorIDOrRequestValue(c, nil, "requested_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	var req assetExcelPackagePreviewReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	rows := make([]assetcenter.ExcelPackageRow, 0, len(req.Rows))
+	for _, row := range req.Rows {
+		rows = append(rows, assetcenter.ExcelPackageRow{RowNumber: row.RowNumber, OrderNo: row.OrderNo,
+			SKUCode: row.SKUCode, SKUName: row.SKUName, Quantity: row.Quantity, Address: row.Address, Keyword: row.Keyword})
+	}
+	job, appErr := h.globalSvc.CreateProductionPackageJob(c.Request.Context(), actorID,
+		assetcenter.ProductionPackageJobRequest{Rows: rows, FormatFilter: req.FormatFilter})
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	respondOK(c, job)
+}
+
+func (h *TaskAssetCenterHandler) CreateExcelPackageFileJob(c *gin.Context) {
+	if h.globalSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+		return
+	}
+	actorID, appErr := actorIDOrRequestValue(c, nil, "requested_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil || fileHeader.Size > assetcenter.MaxExcelPackageUploadBytes {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel 文件为空或超过大小限制", nil))
+		return
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, assetcenter.MaxExcelPackageUploadBytes+1))
+	if err != nil || int64(len(data)) > assetcenter.MaxExcelPackageUploadBytes {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel 文件读取失败或超过大小限制", nil))
+		return
+	}
+	rows, appErr := assetcenter.ParseExcelPackageRows(data, fileHeader.Filename)
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	job, appErr := h.globalSvc.CreateProductionPackageJob(c.Request.Context(), actorID,
+		assetcenter.ProductionPackageJobRequest{Rows: rows, FormatFilter: c.PostForm("format_filter")})
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	respondOK(c, job)
+}
+
+func (h *TaskAssetCenterHandler) GetExcelPackageJob(c *gin.Context) {
+	if h.globalSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+		return
+	}
+	actorID, appErr := actorIDOrRequestValue(c, nil, "requested_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	job, appErr := h.globalSvc.GetProductionPackageJob(c.Request.Context(), actorID, c.Param("job_id"))
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	respondOK(c, job)
+}

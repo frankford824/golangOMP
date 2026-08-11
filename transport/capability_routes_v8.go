@@ -204,7 +204,8 @@ func v8TaskRoutePermissions(method, path string) ([]domain.PermissionCode, bool)
 }
 
 func v8AssetRoutePermissions(method, path string) []domain.PermissionCode {
-	if method == http.MethodPost && (path == "/v1/assets/batch-download" || path == "/v1/assets/excel-package/preview" || path == "/v1/assets/excel-package/preview-file") {
+	if (method == http.MethodPost && (path == "/v1/assets/batch-download" || path == "/v1/assets/excel-package/preview" || path == "/v1/assets/excel-package/preview-file" || path == "/v1/assets/excel-package/jobs" || path == "/v1/assets/excel-package/jobs/file")) ||
+		(method == http.MethodGet && strings.HasPrefix(path, "/v1/assets/excel-package/jobs/")) {
 		// Production packaging is available to every authenticated asset-center
 		// viewer. Keep the wider asset.download capability on single-file,
 		// task-attachment and asset-workbench download surfaces.

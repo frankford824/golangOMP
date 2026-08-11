@@ -42,13 +42,13 @@
             </div>
             <div class="action-row">
               <button type="button" class="secondary-button" :disabled="busy" @click="buildManualPackage">
-                {{ busy ? '查询中…' : '查询并生成生产清单' }}
+                {{ busy ? '服务端打包中…' : '生成生产 ZIP' }}
               </button>
               <button
                 v-if="excelManifest"
                 type="button"
                 class="primary-button"
-                :disabled="busy || !excelManifest.items.length"
+                :disabled="!downloadUrl"
                 @click="downloadExcelPackage"
               >
                 下载生产 ZIP
@@ -92,15 +92,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import {
   assetsApi,
   type AssetExcelPackageFormat,
+  type AssetExcelPackageJob,
   type AssetExcelPackageManifest,
   type AssetExcelPackageRow,
 } from '@/services/api/assetsApi'
-import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
-import { buildExcelPackageZipEntries } from '@/utils/excelPackageZip'
 
 defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -111,14 +110,21 @@ const excelManifest = ref<AssetExcelPackageManifest | null>(null)
 const busy = ref(false)
 const status = ref('')
 const error = ref('')
-const excelZipEntries = computed(() =>
-  excelManifest.value ? buildExcelPackageZipEntries(excelManifest.value.items) : [],
+const downloadUrl = ref('')
+const downloadFilename = ref('生产打包.zip')
+let jobController: AbortController | null = null
+const excelSetCount = computed(
+  () => new Set((excelManifest.value?.items || []).map((item) => item.package_folder).filter(Boolean)).size,
 )
-const excelSetCount = computed(() => new Set(excelZipEntries.value.map((item) => item.zipPath).filter(Boolean)).size)
 
 function close() {
-  if (!busy.value) emit('close')
+  jobController?.abort()
+  jobController = null
+  busy.value = false
+  emit('close')
 }
+
+onBeforeUnmount(() => jobController?.abort())
 
 function unwrap<T>(response: { data?: { data?: T } | T }): T | undefined {
   const body = response.data
@@ -127,6 +133,7 @@ function unwrap<T>(response: { data?: { data?: T } | T }): T | undefined {
 
 function clearManifest() {
   excelManifest.value = null
+	downloadUrl.value = ''
   status.value = ''
   error.value = ''
 }
@@ -155,10 +162,12 @@ async function buildManualPackage() {
   excelFileName.value = ''
   status.value = `正在按 ${rows.length} 行生成生产清单…`
   try {
-    const response = await assetsApi.excelPackagePreview(rows, packageFormat.value)
-    excelManifest.value = unwrap(response) || null
-    if (!excelManifest.value) throw new Error('后端未返回生产清单。')
-    status.value = `已匹配 ${excelManifest.value.success_count} 行、${excelManifest.value.total_files} 个生产文件。`
+		jobController?.abort()
+		jobController = new AbortController()
+    const response = await assetsApi.createExcelPackageJob(rows, packageFormat.value, jobController.signal)
+		const job = unwrap(response)
+		if (!job?.job_id) throw new Error('后端未返回打包任务。')
+		await pollPackageJob(job.job_id, jobController.signal)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '生产清单查询失败。'
   } finally {
@@ -177,10 +186,12 @@ async function handleExcelFile(event: Event) {
   termsText.value = ''
   status.value = '正在解析 Excel 并生成统一生产清单…'
   try {
-    const response = await assetsApi.excelPackagePreviewFile(file, packageFormat.value)
-    excelManifest.value = unwrap(response) || null
-    if (!excelManifest.value) throw new Error('后端未返回打包清单。')
-    status.value = `已匹配 ${excelManifest.value.total_files} 个生产文件。`
+		jobController?.abort()
+		jobController = new AbortController()
+    const response = await assetsApi.createExcelPackageFileJob(file, packageFormat.value, jobController.signal)
+		const job = unwrap(response)
+		if (!job?.job_id) throw new Error('后端未返回打包任务。')
+		await pollPackageJob(job.job_id, jobController.signal)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Excel 生产打包解析失败。'
   } finally {
@@ -190,29 +201,35 @@ async function handleExcelFile(event: Event) {
 }
 
 async function downloadExcelPackage() {
-  const manifest = excelManifest.value
-  if (!manifest) return
-  busy.value = true
-  error.value = ''
-  try {
-    const items = excelZipEntries.value
-    const result = await downloadBatchAsZip({
-      zipFilename: buildTimestampedZipFilename('生产打包-仓库外发'),
-      items,
-      serverFailures: (manifest.failures || []).map(
-        (item) => `${item.sku_code || item.sku_name || item.row_number}: ${item.message || item.reason}`,
-      ),
-      onStatus: (message) => {
-        status.value = message
-      },
-    })
-    status.value = `已生成生产包：${result.writtenCount} 个文件，${excelSetCount.value} 个套装目录。`
-    if (result.failureCount) error.value = `${result.failureCount} 项异常，明细已写入 ZIP。`
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '生成生产 ZIP 失败。'
-  } finally {
-    busy.value = false
-  }
+	if (!downloadUrl.value) return
+	const link = document.createElement('a')
+	link.href = downloadUrl.value
+	link.download = downloadFilename.value
+	link.rel = 'noopener'
+	link.click()
+}
+
+async function pollPackageJob(jobId: string, signal: AbortSignal) {
+	for (;;) {
+		if (signal.aborted) throw new DOMException('已取消', 'AbortError')
+		const response = await assetsApi.getExcelPackageJob(jobId, signal)
+		const job = unwrap<AssetExcelPackageJob>(response)
+		if (!job) throw new Error('无法读取打包任务状态。')
+		status.value = job.status === 'queued' ? '打包任务已排队…' : `服务端打包中：${job.processed_count}/${job.total_count}`
+		if (job.status === 'failed' || job.status === 'expired') throw new Error(job.error_message || '生产打包任务失败。')
+		if (job.status === 'succeeded') {
+			excelManifest.value = job.manifest || null
+			downloadUrl.value = job.download_url || ''
+			downloadFilename.value = job.filename || '生产打包.zip'
+			if (!downloadUrl.value || !excelManifest.value) throw new Error('打包完成，但下载信息不完整。')
+			status.value = `打包完成：${excelManifest.value.total_files} 个文件，可直接下载。`
+			return
+		}
+		await new Promise<void>((resolve, reject) => {
+			const timer = window.setTimeout(resolve, 2000)
+			signal.addEventListener('abort', () => { window.clearTimeout(timer); reject(new DOMException('已取消', 'AbortError')) }, { once: true })
+		})
+	}
 }
 
 async function exportRows(filename: string, rows: Array<Record<string, string | number>>) {

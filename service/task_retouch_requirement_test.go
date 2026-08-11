@@ -148,7 +148,7 @@ func TestTaskServiceCreateRetouchTaskPersistsAndReturnsRequirements(t *testing.T
 		DesignRequirement:   "legacy text still allowed",
 		RetouchRequirements: []domain.CreateRetouchRequirementItem{
 			{Description: "需求一", SKUCode: "SKU-A", SortOrder: 1},
-			{Description: "需求二", Remark: "备注", SortOrder: 2},
+			{Description: "需求二", SKUCode: "SKU-B", Remark: "备注", SortOrder: 2},
 		},
 	})
 	if appErr != nil {

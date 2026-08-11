@@ -3,7 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  excelPackagePreview: vi.fn(),
+	createExcelPackageJob: vi.fn(),
+	getExcelPackageJob: vi.fn(),
 }))
 
 vi.mock('@/services/api/assetsApi', async (loadOriginal) => {
@@ -12,7 +13,8 @@ vi.mock('@/services/api/assetsApi', async (loadOriginal) => {
     ...original,
     assetsApi: {
       ...original.assetsApi,
-      excelPackagePreview: mocks.excelPackagePreview,
+		createExcelPackageJob: mocks.createExcelPackageJob,
+		getExcelPackageJob: mocks.getExcelPackageJob,
     },
   }
 })
@@ -25,10 +27,19 @@ describe('ProductionPackageDialog unified production package', () => {
   })
 
   it('preserves duplicate SKU rows and sends the selected TIF-only production filter', async () => {
-    mocks.excelPackagePreview.mockResolvedValueOnce({
-      data: {
-        data: {
-          items: [
+		mocks.createExcelPackageJob.mockResolvedValueOnce({ data: { data: { job_id: 'pkg-1' } } })
+		mocks.getExcelPackageJob.mockResolvedValueOnce({
+			data: {
+				data: {
+					job_id: 'pkg-1',
+					status: 'succeeded',
+					total_count: 2,
+					processed_count: 2,
+					failed_count: 0,
+					download_url: 'https://oss.test/package.zip',
+					filename: 'package.zip',
+					manifest: {
+					items: [
             {
               row_number: 1,
               order_no: 'HSC34548',
@@ -44,9 +55,10 @@ describe('ProductionPackageDialog unified production package', () => {
           ],
           success_count: 2,
           failure_count: 0,
-          total_files: 2,
-          total_size: 2048,
-        },
+					total_files: 2,
+					total_size: 2048,
+					},
+				},
       },
     })
 
@@ -59,14 +71,12 @@ describe('ProductionPackageDialog unified production package', () => {
     textarea.value = 'HSC34548\nHSC34548'
     textarea.dispatchEvent(new Event('input'))
     await wrapper.vm.$nextTick()
-    const search = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
-      button.textContent?.includes('查询并生成生产清单'),
-    )
+		const search = document.body.querySelector<HTMLButtonElement>('.package-dialog .secondary-button')
     if (!search) throw new Error('missing search button')
     search.click()
     await flushPromises()
 
-    expect(mocks.excelPackagePreview).toHaveBeenCalledWith(
+		expect(mocks.createExcelPackageJob).toHaveBeenCalledWith(
       [
         {
           row_number: 1,
@@ -80,9 +90,11 @@ describe('ProductionPackageDialog unified production package', () => {
           sku_code: 'HSC34548',
           quantity: 1,
         },
-      ],
-      'tif',
-    )
+			],
+			'tif',
+			expect.any(AbortSignal),
+		)
+		expect(mocks.getExcelPackageJob).toHaveBeenCalledWith('pkg-1', expect.any(AbortSignal))
     expect(document.body.textContent).toContain('匹配行')
     expect(document.body.textContent).toContain('生产文件')
     expect(document.body.textContent).not.toContain('Excel 仓库外发')

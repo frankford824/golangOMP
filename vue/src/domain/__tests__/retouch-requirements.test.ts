@@ -11,6 +11,7 @@ describe('retouch-requirements payload', () => {
   it('buildRetouchRequirementsPayload omits pending local files', () => {
     const drafts: RetouchRequirementDraft[] = [
       {
+			skuCode: 'SKU-A',
         description: '需求 A',
         sortOrder: 1,
         pendingReferenceFiles: [new File(['a'], 'ref-a.png', { type: 'image/png' })],
@@ -20,6 +21,7 @@ describe('retouch-requirements payload', () => {
     const payload = buildRetouchRequirementsPayload(drafts)
     expect(payload).toEqual([
       {
+			sku_code: 'SKU-A',
         description: '需求 A',
         sort_order: 1,
       },
@@ -31,11 +33,12 @@ describe('retouch-requirements payload', () => {
   it('normalizeRetouchRequirementDrafts strips pending files', () => {
     const normalized = normalizeRetouchRequirementDrafts([
       {
+			skuCode: 'SKU-X',
         description: 'x',
         pendingReferenceFiles: [new File(['x'], 'r.png')],
       },
     ])
-    expect(normalized[0]).toEqual({ description: 'x', sortOrder: 1 })
+		expect(normalized[0]).toEqual({ description: 'x', skuCode: 'SKU-X', sortOrder: 1 })
     expect(normalized[0].pendingReferenceFiles).toBeUndefined()
   })
 
@@ -43,7 +46,7 @@ describe('retouch-requirements payload', () => {
     const ref = new File(['a'], 'ref.png')
     const src = new File(['b'], 'src.psd')
     const normalized = normalizeRetouchRequirementDraftsWithPending([
-      { description: 'x', pendingReferenceFiles: [ref], pendingSourceFiles: [src] },
+		{ description: 'x', skuCode: 'SKU-X', pendingReferenceFiles: [ref], pendingSourceFiles: [src] },
     ])
     expect(normalized[0].pendingReferenceFiles).toEqual([ref])
     expect(normalized[0].pendingSourceFiles).toEqual([src])

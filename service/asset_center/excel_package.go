@@ -77,6 +77,7 @@ type ExcelPackageFailure struct {
 
 type scoredExcelAsset struct {
 	system        *repo.TaskAssetSearchRow
+	finalized     *repo.ProductionPackageAsset
 	external      *AssetDetail
 	score         int
 	ready         bool
@@ -91,12 +92,16 @@ type preparedExcelPackageMatch struct {
 }
 
 func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPackageRow, requestedFormats ...string) (*ExcelPackageManifest, *domain.AppError) {
+	return s.buildExcelPackageManifest(ctx, rows, MaxExcelPackageRows, MaxExcelPackageTotalFiles, MaxExcelPackageTotalBytes, requestedFormats...)
+}
+
+func (s *Service) buildExcelPackageManifest(ctx context.Context, rows []ExcelPackageRow, maxRows, maxFiles int, maxBytes int64, requestedFormats ...string) (*ExcelPackageManifest, *domain.AppError) {
 	if len(rows) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rows must not be empty", nil)
 	}
-	if len(rows) > MaxExcelPackageRows {
+	if len(rows) > maxRows {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rows exceed excel package limit", map[string]interface{}{
-			"limit": MaxExcelPackageRows,
+			"limit": maxRows,
 		})
 	}
 	if s.presigner == nil || !s.presigner.Enabled() {
@@ -108,6 +113,14 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 		Failures: make([]ExcelPackageFailure, 0),
 	}
 	formatFilter := normalizeExcelPackageFormat(firstNonEmptyExcelPackage(requestedFormats...))
+	finalizedMatches, appErr := s.matchFinalizedPackageRows(ctx, rows, formatFilter)
+	if appErr != nil {
+		return nil, appErr
+	}
+	externalMatches, appErr := s.matchExternalPackageRows(ctx, rows, formatFilter, finalizedMatches)
+	if appErr != nil {
+		return nil, appErr
+	}
 	var totalBytes int64
 	var totalFiles int
 	successRows := 0
@@ -131,10 +144,17 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 		cacheKey := excelPackageMatchCacheKey(row) + "\x00" + formatFilter
 		matches, ok := matchCache[cacheKey]
 		if !ok {
-			var appErr *domain.AppError
-			matches, appErr = s.matchExcelPackageAssets(ctx, row, formatFilter)
-			if appErr != nil {
-				return nil, appErr
+			if s.productionRepo != nil {
+				matches = finalizedMatches[cacheKey]
+				if len(matches) == 0 {
+					matches = externalMatches[cacheKey]
+				}
+			} else {
+				var matchErr *domain.AppError
+				matches, matchErr = s.matchExcelPackageAssets(ctx, row, formatFilter)
+				if matchErr != nil {
+					return nil, matchErr
+				}
 			}
 			matchCache[cacheKey] = matches
 		}
@@ -166,28 +186,28 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 			manifest.Failures = append(manifest.Failures, row.failure(prepared.failureReason, prepared.failureMessage))
 			continue
 		}
-		if row.Quantity > MaxExcelPackageTotalFiles || len(prepared.items) > MaxExcelPackageTotalFiles/row.Quantity {
-			manifest.Failures = append(manifest.Failures, row.failure("total_file_limit_exceeded", fmt.Sprintf("总文件数超过 %d 个", MaxExcelPackageTotalFiles)))
+		if row.Quantity > maxFiles || len(prepared.items) > maxFiles/row.Quantity {
+			manifest.Failures = append(manifest.Failures, row.failure("total_file_limit_exceeded", fmt.Sprintf("总文件数超过 %d 个", maxFiles)))
 			continue
 		}
 		rowFileCount := len(prepared.items) * row.Quantity
-		if totalFiles+rowFileCount > MaxExcelPackageTotalFiles {
-			manifest.Failures = append(manifest.Failures, row.failure("total_file_limit_exceeded", fmt.Sprintf("总文件数超过 %d 个", MaxExcelPackageTotalFiles)))
+		if totalFiles+rowFileCount > maxFiles {
+			manifest.Failures = append(manifest.Failures, row.failure("total_file_limit_exceeded", fmt.Sprintf("总文件数超过 %d 个", maxFiles)))
 			continue
 		}
 		items := make([]ExcelPackageItem, 0, len(prepared.items))
 		rowBytes := int64(0)
 		for _, preparedItem := range prepared.items {
 			item := applyExcelPackageRow(preparedItem, row)
-			if item.FileSize > 0 && item.FileSize > MaxExcelPackageTotalBytes/int64(row.Quantity) {
-				rowBytes = MaxExcelPackageTotalBytes + 1
+			if item.FileSize > 0 && item.FileSize > maxBytes/int64(row.Quantity) {
+				rowBytes = maxBytes + 1
 				break
 			}
 			rowBytes += item.FileSize * int64(row.Quantity)
 			items = append(items, item)
 		}
-		if rowBytes > MaxExcelPackageTotalBytes-totalBytes {
-			manifest.Failures = append(manifest.Failures, row.failure("total_size_limit_exceeded", fmt.Sprintf("总大小超过 %d MB", MaxExcelPackageTotalBytes/1024/1024)))
+		if rowBytes > maxBytes-totalBytes {
+			manifest.Failures = append(manifest.Failures, row.failure("total_size_limit_exceeded", fmt.Sprintf("总大小超过 %d MB", maxBytes/1024/1024)))
 			continue
 		}
 		totalBytes += rowBytes
@@ -625,6 +645,8 @@ func (s *Service) buildExcelPackageItem(ctx context.Context, match scoredExcelAs
 	var failure *ExcelPackageFailure
 	if match.external != nil {
 		item, failure = s.buildExternalExcelPackageItem(ctx, match.external, req)
+	} else if match.finalized != nil {
+		item, failure = s.buildFinalizedExcelPackageItem(match.finalized, req)
 	} else {
 		item, failure = s.buildSystemExcelPackageItem(match.system, req)
 	}
@@ -632,6 +654,36 @@ func (s *Service) buildExcelPackageItem(ctx context.Context, match scoredExcelAs
 		item.PackageFolder = match.packageFolder
 	}
 	return item, failure
+}
+
+func (s *Service) buildFinalizedExcelPackageItem(asset *repo.ProductionPackageAsset, req ExcelPackageRow) (ExcelPackageItem, *ExcelPackageFailure) {
+	if asset == nil {
+		f := req.failure("asset_not_found", "未找到 finalized 生产成品")
+		return ExcelPackageItem{}, &f
+	}
+	skuCode := strings.ToUpper(strings.TrimSpace(firstNonEmptyExcelPackage(req.SKUCode, asset.SKUCode)))
+	skuName := strings.TrimSpace(firstNonEmptyExcelPackage(asset.SKUName, req.SKUName))
+	if skuCode == "" || skuName == "" {
+		f := req.failure("business_naming_unavailable", "finalized 成品缺少商品编码或商品名称")
+		return ExcelPackageItem{}, &f
+	}
+	filename := strings.TrimSpace(firstNonEmptyExcelPackage(asset.OriginalFilename, asset.FileName, asset.ItemName))
+	signed := s.presigner.PresignDownloadURL(asset.StorageKey)
+	if filenamePresigner, ok := s.presigner.(DownloadFilenamePresigner); ok {
+		signed = filenamePresigner.PresignDownloadURLWithFilename(asset.StorageKey, filename)
+	}
+	if signed == nil || strings.TrimSpace(signed.DownloadURL) == "" {
+		f := req.failure("download_url_unavailable", "finalized 成品下载地址生成失败")
+		return ExcelPackageItem{}, &f
+	}
+	expiresAt := signed.ExpiresAt
+	return ExcelPackageItem{
+		RowNumber: req.RowNumber, OrderNo: req.OrderNo, SKUCode: skuCode, SKUName: skuName,
+		Quantity: req.Quantity, AssetID: asset.TaskAssetID, ResourceID: strconv.FormatInt(asset.TaskAssetID, 10),
+		SourceType: string(domain.AssetResourceSourceSystem), TaskID: asset.TaskID, TaskNo: asset.TaskNo,
+		Filename: sanitizeBatchFilename(filename), FileSize: asset.FileSize, MimeType: asset.MimeType,
+		DownloadURL: strings.TrimSpace(signed.DownloadURL), Address: req.Address, ExpiresAt: &expiresAt,
+	}, nil
 }
 
 func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req ExcelPackageRow) (ExcelPackageItem, *ExcelPackageFailure) {
@@ -861,6 +913,12 @@ func chooseExcelPackageRendition(candidates []scoredExcelAsset, formatFilter str
 }
 
 func excelPackageCandidateExtension(candidate scoredExcelAsset) string {
+	if candidate.finalized != nil {
+		return normalizeExcelPackageExtension(
+			firstNonEmptyExcelPackage(candidate.finalized.OriginalFilename, candidate.finalized.FileName, candidate.finalized.ItemName),
+			candidate.finalized.MimeType,
+		)
+	}
 	if candidate.system != nil && candidate.system.Asset != nil {
 		return normalizeExcelPackageExtension(
 			firstNonEmptyExcelPackage(candidate.system.Asset.FileName, stringPtrValue(candidate.system.Asset.OriginalName)),

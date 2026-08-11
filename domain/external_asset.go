@@ -111,8 +111,11 @@ type ExternalAssetSearchQuery struct {
 	CreatedTo              *time.Time
 	FormatCategory         AssetFormatCategoryFilter
 	OperationalVisibleOnly bool
-	Page                   int
-	Size                   int
+	// IncludeOSSArchive allows packaging-only recovery of records whose source
+	// path is missing but whose original object is already durable in OSS.
+	IncludeOSSArchive bool
+	Page              int
+	Size              int
 }
 
 func (q ExternalAssetSearchQuery) Normalized() ExternalAssetSearchQuery {

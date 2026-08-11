@@ -4495,6 +4495,186 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/assets/excel-package/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a durable server-side production ZIP job from normalized rows
+         * @description Resolves the latest finalized system asset group first, then falls back to OSS-ready migrated external originals. The worker writes order folders, address.txt files and a failure manifest, uploads the completed ZIP to OSS, and can resume after process restart through a persisted lease.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetExcelPackagePreviewRequest"];
+                };
+            };
+            responses: {
+                /** @description Persisted package job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["AssetExcelPackageJob"];
+                        };
+                    };
+                };
+                /** @description Invalid rows */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Asset view denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/excel-package/jobs/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Parse XLS or XLSX and create a durable server-side production ZIP job */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        /**
+                         * Format: binary
+                         * @description XLS or XLSX file up to 10 MiB.
+                         */
+                        file: string;
+                        /**
+                         * @default image
+                         * @enum {string}
+                         */
+                        format_filter?: "tif" | "jpg" | "png" | "jpg_png" | "image";
+                    };
+                };
+            };
+            responses: {
+                /** @description Persisted package job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["AssetExcelPackageJob"];
+                        };
+                    };
+                };
+                /** @description Invalid file or template */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Asset view denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/excel-package/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the current user's production package job */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    job_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current job state and completed ZIP URL when succeeded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["AssetExcelPackageJob"];
+                        };
+                    };
+                };
+                /** @description Asset view denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Job not found or not owned by current user */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/assets/batch-download": {
         parameters: {
             query?: never;
@@ -18641,6 +18821,14 @@ export interface components {
             /** @description Requirement-scoped source/material files (`asset_type=source`) for this line. Always present on read models and may be empty. */
             source_assets?: components["schemas"]["DesignAsset"][];
         };
+        CreateTaskRetouchRequirement: {
+            /** @description Required traceability key used by finalized production packaging. */
+            sku_code: string;
+            description: string;
+            spec?: string;
+            remark?: string;
+            sort_order?: number;
+        };
         /** @description V1.1-A1 fast-path task aggregate detail. Batch tasks include `sku_items`; design uploads include `asset_versions` with `scope_sku_code` for per-SKU grouping. */
         TaskAggregateDetailV2: {
             task?: components["schemas"]["Task"];
@@ -19614,6 +19802,7 @@ export interface components {
              */
             priority: "normal" | "high" | "drawing";
             reference_file_refs?: components["schemas"]["ReferenceFileRef"][];
+            retouch_requirements?: components["schemas"]["CreateTaskRetouchRequirement"][];
             remark?: string;
             /**
              * @default single
@@ -20165,6 +20354,30 @@ export interface components {
             total_files: number;
             /** Format: int64 */
             total_size: number;
+            /** Format: date-time */
+            expires_at?: string | null;
+        };
+        AssetExcelPackageJob: {
+            job_id: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed" | "expired";
+            total_count: number;
+            processed_count: number;
+            failed_count: number;
+            error_message?: string;
+            /**
+             * Format: uri
+             * @description Present only for a succeeded job. This short-lived OSS URL is regenerated on every status read.
+             */
+            download_url?: string;
+            filename?: string;
+            manifest?: components["schemas"]["AssetExcelPackageManifest"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at?: string | null;
+            /** Format: date-time */
+            finished_at?: string | null;
             /** Format: date-time */
             expires_at?: string | null;
         };

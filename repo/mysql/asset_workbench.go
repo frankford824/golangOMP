@@ -1779,8 +1779,9 @@ func (r *assetWorkbenchRepo) ClaimQueuedBatchJobs(ctx context.Context, tx repo.T
 	rows, err := Unwrap(tx).QueryContext(ctx, `
 		SELECT id
 		  FROM asset_workbench_batch_jobs
-		 WHERE status = 'queued'
-		    OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= UTC_TIMESTAMP())
+		 WHERE job_type <> 'excel_production_package'
+		   AND (status = 'queued'
+		    OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= UTC_TIMESTAMP()))
 		 ORDER BY created_at ASC, id ASC
 		 LIMIT ?
 		 FOR UPDATE`, limit)

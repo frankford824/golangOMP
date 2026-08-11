@@ -187,6 +187,7 @@ describe('unified task compose domain', () => {
     })
     const forty = createComposeRow({
       id: 'retouch-40',
+		erp_sku: 'SKU-40',
       design_requirement: '批量修图',
       source_assets: Array.from({ length: 40 }, (_, index) => source(index)),
     })
@@ -194,6 +195,7 @@ describe('unified task compose domain', () => {
 
     const fiftyOne = createComposeRow({
       id: 'retouch-51',
+		erp_sku: 'SKU-51',
       design_requirement: '批量修图',
       source_assets: Array.from({ length: 51 }, (_, index) => source(index)),
     })
@@ -202,6 +204,7 @@ describe('unified task compose domain', () => {
 
     const oversized = createComposeRow({
       id: 'retouch-large',
+		erp_sku: 'SKU-LARGE',
       design_requirement: '批量修图',
       source_assets: [source(1, 300 * 1024 * 1024 + 1)],
     })

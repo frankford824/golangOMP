@@ -421,7 +421,7 @@ describe('UnifiedTaskCreateView', () => {
     mocks.route.query = { intent: 'retouch' }
     const created = {
       id: 'task-retouch',
-      retouchRequirements: [{ id: 41, taskId: 1, description: '清理背景', sortOrder: 1 }],
+      retouchRequirements: [{ id: 41, taskId: 1, skuCode: 'SKU-RETRY', description: '清理背景', sortOrder: 1 }],
     }
     mocks.addTask.mockResolvedValue(created)
     mocks.getTaskById.mockReturnValue(created)
@@ -435,12 +435,18 @@ describe('UnifiedTaskCreateView', () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
         stubs: {
-          UnifiedTaskGrid: { template: '<div />', methods: { readRowsFromWorkbook() {} } },
+          UnifiedTaskGrid: {
+            props: ['rows'],
+            emits: ['update:rows'],
+            template: '<button class="set-retouch-sku" @click="$emit(\'update:rows\', rows.map((row) => ({ ...row, erp_sku: \'SKU-RETRY\' })))">set sku</button>',
+            methods: { readRowsFromWorkbook() {} },
+          },
           IIdSelector: true,
           RouterLink: { template: '<a><slot /></a>' },
         },
       },
     })
+    await wrapper.get('.set-retouch-sku').trigger('click')
     await wrapper.get('[data-row-index="0"] textarea').setValue('清理背景')
     await wrapper.get('[data-row-index="0"] .asset-button').trigger('click')
     const input = wrapper.get('input[aria-label="上传待修素材文件"]')
@@ -524,6 +530,7 @@ describe('UnifiedTaskCreateView', () => {
         intent: 'retouch',
         rows: [{
           id: 'retouch-row',
+          erp_sku: 'SKU-DRAFT',
           design_requirement: '清理背景',
           reference_assets: [],
           source_assets: [{ id: 'source-1', name: 'original.psd', status: 'local' }],

@@ -135,6 +135,7 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'set_mode_hint', label: '建议套装', width: 102, kind: 'boolean', help: '仅供设计师参考，最终由设计阶段判定' },
   ],
   retouch: [
+    { key: 'erp_sku', label: 'SKU 编码', width: 150, required: true },
     { key: 'design_requirement', label: '修图要求', width: 360, required: true },
     { key: 'reference_assets', label: '参考图', width: 140, kind: 'asset' },
     { key: 'source_assets', label: '待修素材', width: 140, kind: 'asset' },
@@ -218,6 +219,7 @@ export function validateCompose(
       if (isErpProductNameTooLong(row.product_name)) add('product_name', erpProductNameError(row.product_name))
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写设计需求')
     } else if (intent === 'retouch') {
+      if (!row.erp_sku?.trim()) add('erp_sku', '请填写 SKU 编码')
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写修图要求')
     } else {
       if (!row.product_i_id?.trim()) add('product_i_id', '请选择款式编码')
@@ -349,6 +351,7 @@ export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'plannin
         productName: rows.length === 1 ? '修图任务' : `批量修图（${rows.length} 项）`,
         designRequirement: rows.map((row) => row.design_requirement?.trim()).filter(Boolean).join('；'),
         retouchRequirements: rows.map((row, index) => ({
+          skuCode: row.erp_sku?.trim() ?? '',
           description: row.design_requirement?.trim() ?? '',
           remark: row.special_note?.trim() ?? '',
           sortOrder: index + 1,

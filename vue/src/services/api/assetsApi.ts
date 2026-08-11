@@ -336,6 +336,28 @@ export interface AssetExcelPackagePreviewResponse {
   data?: AssetExcelPackageManifest
 }
 
+export type AssetExcelPackageJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'expired'
+
+export interface AssetExcelPackageJob {
+  job_id: string
+  status: AssetExcelPackageJobStatus
+  total_count: number
+  processed_count: number
+  failed_count: number
+  error_message?: string
+  download_url?: string
+  filename?: string
+  manifest?: AssetExcelPackageManifest
+  created_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  expires_at?: string | null
+}
+
+export interface AssetExcelPackageJobResponse {
+  data?: AssetExcelPackageJob
+}
+
 export type AssetExcelPackageFormat = 'tif' | 'jpg' | 'png' | 'jpg_png' | 'image'
 
 export const assetsApi = {
@@ -433,6 +455,30 @@ export const assetsApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+
+  createExcelPackageJob: (
+    rows: AssetExcelPackageRow[],
+    formatFilter: AssetExcelPackageFormat = 'image',
+    signal?: AbortSignal,
+  ) =>
+    http.post<AssetExcelPackageJobResponse>(
+      '/v1/assets/excel-package/jobs',
+      { rows, format_filter: formatFilter },
+      { signal },
+    ),
+
+  createExcelPackageFileJob: (file: File, formatFilter: AssetExcelPackageFormat = 'image', signal?: AbortSignal) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('format_filter', formatFilter)
+    return http.post<AssetExcelPackageJobResponse>('/v1/assets/excel-package/jobs/file', form, {
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  getExcelPackageJob: (jobId: string, signal?: AbortSignal) =>
+    http.get<AssetExcelPackageJobResponse>(`/v1/assets/excel-package/jobs/${encodeURIComponent(jobId)}`, { signal }),
 
   /** GET /v1/assets/{id} */
   getAsset: (assetId: string, signal?: AbortSignal) => http.get<BackendAsset>(`/v1/assets/${assetId}`, { signal }),

@@ -215,17 +215,22 @@ func (s *Service) batchSearchRows(ctx context.Context, term, formatFilter string
 }
 
 func (s *Service) batchSearchExternalRows(ctx context.Context, term, formatFilter string) ([]*AssetDetail, error) {
+	return s.batchSearchExternalRowsWithArchive(ctx, term, formatFilter, false)
+}
+
+func (s *Service) batchSearchExternalRowsWithArchive(ctx context.Context, term, formatFilter string, includeOSSArchive bool) ([]*AssetDetail, error) {
 	if s == nil || s.externalSvc == nil || !s.externalSvc.Enabled() {
 		return []*AssetDetail{}, nil
 	}
 	var allRows []*AssetDetail
 	for page := 1; ; page++ {
 		rows, total, appErr := s.searchExternalRows(ctx, domain.AssetSearchQuery{
-			Keyword:        term,
-			Source:         domain.AssetResourceSourceExternal,
-			Page:           page,
-			Size:           batchSearchPageSize,
-			FormatCategory: batchSearchFormatCategory(formatFilter),
+			Keyword:                   term,
+			Source:                    domain.AssetResourceSourceExternal,
+			Page:                      page,
+			Size:                      batchSearchPageSize,
+			FormatCategory:            batchSearchFormatCategory(formatFilter),
+			IncludeExternalOSSArchive: includeOSSArchive,
 		})
 		if appErr != nil {
 			return nil, fmt.Errorf("%s: %s", appErr.Code, appErr.Message)

@@ -23,10 +23,11 @@ export function normalizeRetouchRequirementDrafts(
     const item = items[i]
     if (!item) continue
     const description = String(item.description ?? '').trim()
-    if (!description) continue
+		const skuCode = String(item.skuCode ?? '').trim()
+		if (!description || !skuCode) continue
     out.push({
       description,
-      skuCode: String(item.skuCode ?? '').trim() || undefined,
+			skuCode,
       spec: String(item.spec ?? '').trim() || undefined,
       remark: String(item.remark ?? '').trim() || undefined,
       sortOrder: item.sortOrder && item.sortOrder > 0 ? item.sortOrder : i + 1,
@@ -45,10 +46,11 @@ export function normalizeRetouchRequirementDraftsWithPending(
     const item = items[i]
     if (!item) continue
     const description = String(item.description ?? '').trim()
-    if (!description) continue
+		const skuCode = String(item.skuCode ?? '').trim()
+		if (!description || !skuCode) continue
     out.push({
       description,
-      skuCode: String(item.skuCode ?? '').trim() || undefined,
+			skuCode,
       spec: String(item.spec ?? '').trim() || undefined,
       remark: String(item.remark ?? '').trim() || undefined,
       sortOrder: item.sortOrder && item.sortOrder > 0 ? item.sortOrder : i + 1,

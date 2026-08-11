@@ -21,6 +21,17 @@ func validateRetouchRequirements(p CreateTaskParams) *domain.AppError {
 		)
 	}
 	for i, item := range p.RetouchRequirements {
+		if strings.TrimSpace(item.SKUCode) == "" {
+			return taskCreateValidationError(
+				"retouch_requirements sku_code is required",
+				p,
+				taskCreateViolation(
+					fmt.Sprintf("retouch_requirements[%d].sku_code", i),
+					"missing_retouch_requirement_sku_code",
+					"retouch_requirements[].sku_code is required so finalized assets remain packageable",
+				),
+			)
+		}
 		if strings.TrimSpace(item.Description) == "" {
 			return taskCreateValidationError(
 				"retouch_requirements description is required",

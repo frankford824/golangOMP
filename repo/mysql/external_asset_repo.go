@@ -293,8 +293,12 @@ func buildExternalAssetLikeWhere(query domain.ExternalAssetSearchQuery) (string,
 }
 
 func buildExternalAssetWhereWithMode(query domain.ExternalAssetSearchQuery, preferFullText bool) (string, []interface{}, string) {
+	statusClause := `status <> 'missing'`
+	if query.IncludeOSSArchive {
+		statusClause = `(status <> 'missing' OR (status = 'missing' AND oss_sync_status = 'ready' AND COALESCE(oss_original_key, '') <> ''))`
+	}
 	clauses := []string{
-		`status <> 'missing'`,
+		statusClause,
 		`is_dir = 0`,
 		`origin_path NOT LIKE '%/@eaDir/%'`,
 		`origin_path NOT LIKE '%/#recycle/%'`,

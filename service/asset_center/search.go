@@ -22,14 +22,17 @@ const materialSystemRoot = "/系统资源"
 const assetSearchTotalCacheTTL = 30 * time.Second
 
 type Service struct {
-	searchRepo    repo.TaskAssetSearchRepo
-	presigner     DownloadPresigner
-	urlBuilder    BrowserURLBuilder
-	streamOpener  baseservice.StorageStreamOpener
-	externalSvc   *externalassets.Service
-	cache         AssetCenterCache
-	flightMu      sync.Mutex
-	searchFlights map[string]*assetSearchFlight
+	searchRepo     repo.TaskAssetSearchRepo
+	productionRepo repo.ProductionPackageRepo
+	packageJobRepo repo.ProductionPackageJobRepo
+	packageStore   ProductionPackageObjectStore
+	presigner      DownloadPresigner
+	urlBuilder     BrowserURLBuilder
+	streamOpener   baseservice.StorageStreamOpener
+	externalSvc    *externalassets.Service
+	cache          AssetCenterCache
+	flightMu       sync.Mutex
+	searchFlights  map[string]*assetSearchFlight
 }
 
 type assetSearchFlight struct {
@@ -70,6 +73,19 @@ func NewService(searchRepo repo.TaskAssetSearchRepo, presigner DownloadPresigner
 func WithAssetCenterRedis(cache AssetCenterCache) Option {
 	return func(s *Service) {
 		s.cache = cache
+	}
+}
+
+func WithProductionPackageRepo(repository repo.ProductionPackageRepo) Option {
+	return func(s *Service) {
+		s.productionRepo = repository
+	}
+}
+
+func WithProductionPackageJobs(repository repo.ProductionPackageJobRepo, store ProductionPackageObjectStore) Option {
+	return func(s *Service) {
+		s.packageJobRepo = repository
+		s.packageStore = store
 	}
 }
 
@@ -418,6 +434,7 @@ func (s *Service) searchExternalRows(ctx context.Context, query domain.AssetSear
 		CreatedTo:              query.CreatedTo,
 		FormatCategory:         query.FormatCategory,
 		OperationalVisibleOnly: query.OperationalVisibleOnly,
+		IncludeOSSArchive:      query.IncludeExternalOSSArchive,
 		Page:                   query.Page,
 		Size:                   query.Size,
 	})

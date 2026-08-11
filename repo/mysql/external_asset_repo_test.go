@@ -54,6 +54,19 @@ func TestPendingExternalAssetQueriesScopeMountsAndBackOffFailures(t *testing.T) 
 	}
 }
 
+func TestBuildExternalAssetWhereIncludesOnlyOSSReadyMissingArchiveWhenRequested(t *testing.T) {
+	where, _, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{IncludeOSSArchive: true})
+	for _, fragment := range []string{"status = 'missing'", "oss_sync_status = 'ready'", "oss_original_key"} {
+		if !strings.Contains(where, fragment) {
+			t.Fatalf("archive packaging where clause missing %q: %s", fragment, where)
+		}
+	}
+	ordinary, _, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{})
+	if !strings.Contains(ordinary, "status <> 'missing'") || strings.Contains(ordinary, "status = 'missing'") {
+		t.Fatalf("ordinary external search changed missing-file visibility: %s", ordinary)
+	}
+}
+
 func TestClaimPendingOSSUsesLockedLeaseSelection(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expected, actual string) error {
 		normalized := strings.Join(strings.Fields(actual), " ")

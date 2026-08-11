@@ -1416,7 +1416,11 @@ func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDown
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
-	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
+	if row == nil || !s.isOriginVisible(row.MountPath, row.OriginPath) {
+		return nil, domain.ErrNotFound
+	}
+	if row.Status == domain.ExternalAssetStatusMissing &&
+		(row.OSSSyncStatus != domain.ExternalAssetOSSStatusReady || strings.TrimSpace(row.OSSOriginalKey) == "") {
 		return nil, domain.ErrNotFound
 	}
 	if row.IsDir {

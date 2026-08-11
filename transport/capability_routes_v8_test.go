@@ -35,6 +35,9 @@ func TestV8BusinessRoutePermissionsCoverActiveTaskAssetAndERPSurfaces(t *testing
 		{http.MethodPost, "/v1/assets/batch-download", domain.PermissionAssetView},
 		{http.MethodPost, "/v1/assets/excel-package/preview", domain.PermissionAssetView},
 		{http.MethodPost, "/v1/assets/excel-package/preview-file", domain.PermissionAssetView},
+		{http.MethodPost, "/v1/assets/excel-package/jobs", domain.PermissionAssetView},
+		{http.MethodPost, "/v1/assets/excel-package/jobs/file", domain.PermissionAssetView},
+		{http.MethodGet, "/v1/assets/excel-package/jobs/pkg-1", domain.PermissionAssetView},
 		{http.MethodGet, "/v1/task-board/overview", domain.PermissionTaskView},
 		{http.MethodGet, "/v1/erp/products", domain.PermissionCatalogView},
 		{http.MethodPost, "/v1/erp/products/upsert", domain.PermissionERPManage},
@@ -65,12 +68,16 @@ func TestV8BusinessRoutePermissionsCoverActiveTaskAssetAndERPSurfaces(t *testing
 
 func TestProductionPackageRoutesAreAvailableToAssetViewers(t *testing.T) {
 	tests := []struct {
+		method       string
 		path         string
 		registration string
 	}{
-		{path: "/v1/assets/batch-download", registration: `assetGroup.POST("/batch-download"`},
-		{path: "/v1/assets/excel-package/preview", registration: `assetGroup.POST("/excel-package/preview"`},
-		{path: "/v1/assets/excel-package/preview-file", registration: `assetGroup.POST("/excel-package/preview-file"`},
+		{method: http.MethodPost, path: "/v1/assets/batch-download", registration: `assetGroup.POST("/batch-download"`},
+		{method: http.MethodPost, path: "/v1/assets/excel-package/preview", registration: `assetGroup.POST("/excel-package/preview"`},
+		{method: http.MethodPost, path: "/v1/assets/excel-package/preview-file", registration: `assetGroup.POST("/excel-package/preview-file"`},
+		{method: http.MethodPost, path: "/v1/assets/excel-package/jobs", registration: `assetGroup.POST("/excel-package/jobs"`},
+		{method: http.MethodPost, path: "/v1/assets/excel-package/jobs/file", registration: `assetGroup.POST("/excel-package/jobs/file"`},
+		{method: http.MethodGet, path: "/v1/assets/excel-package/jobs/:job_id", registration: `assetGroup.GET("/excel-package/jobs/:job_id"`},
 	}
 
 	raw, err := os.ReadFile("http.go")
@@ -79,7 +86,7 @@ func TestProductionPackageRoutesAreAvailableToAssetViewers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			permissions, governed := v8BusinessRoutePermissions(http.MethodPost, tt.path)
+			permissions, governed := v8BusinessRoutePermissions(tt.method, tt.path)
 			if !governed {
 				t.Fatal("production package route is not governed")
 			}

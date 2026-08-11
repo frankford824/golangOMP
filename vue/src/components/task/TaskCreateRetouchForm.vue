@@ -39,6 +39,10 @@
 
         <div class="requirement-card-body">
           <div class="requirement-col requirement-col--main">
+            <label class="requirement-sku-input">
+              <span>SKU 编码（必填）</span>
+              <input v-model.trim="item.skuCode" type="text" autocomplete="off" placeholder="例如 HSC34548" />
+            </label>
             <div class="requirement-desc-input">
               <BaseTextarea
                 v-model="item.description"

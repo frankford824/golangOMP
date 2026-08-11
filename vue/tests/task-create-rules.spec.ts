@@ -131,6 +131,7 @@ function retouchForm(overrides: Partial<TaskCreateFormModel> = {}): TaskCreateFo
     retouchRequirements: [
       {
         ...createEmptyRetouchRequirementDraft(1),
+        skuCode: 'SKU-RETOUCH',
         description: '精修背景',
       },
     ],
@@ -164,6 +165,7 @@ describe('buildRetouchRequirementsPayload', () => {
     const file = new File(['x'], 'ref.png', { type: 'image/png' })
     const payload = buildRetouchRequirementsPayload([
       {
+        skuCode: 'SKU-1',
         description: '需求一',
         sortOrder: 1,
         pendingReferenceFiles: [file],
@@ -172,6 +174,7 @@ describe('buildRetouchRequirementsPayload', () => {
     ])
     expect(payload).toHaveLength(1)
     expect(payload[0]).toEqual({
+      sku_code: 'SKU-1',
       description: '需求一',
       sort_order: 1,
     })
@@ -179,13 +182,11 @@ describe('buildRetouchRequirementsPayload', () => {
     expect(payload[0]).not.toHaveProperty('pendingSourceFiles')
   })
 
-  it('omits sku_code and spec when not provided on draft', () => {
+  it('rejects drafts without the required sku_code', () => {
     const payload = buildRetouchRequirementsPayload([
       { description: '仅描述', sortOrder: 1, remark: '备注说明' },
     ])
-    expect(payload[0]).toEqual({ description: '仅描述', remark: '备注说明', sort_order: 1 })
-    expect(payload[0]).not.toHaveProperty('sku_code')
-    expect(payload[0]).not.toHaveProperty('spec')
+    expect(payload).toEqual([])
   })
 })
 

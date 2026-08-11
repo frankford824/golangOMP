@@ -15,6 +15,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql" // registers mysql driver
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
@@ -125,6 +126,8 @@ func main() {
 	taskRetouchRequirementRepo := mysqlrepo.NewTaskRetouchRequirementRepo(mdb)
 	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
+	productionPackageRepo := mysqlrepo.NewProductionPackageRepo(mdb)
+	productionPackageJobRepo := mysqlrepo.NewProductionPackageJobRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
 	externalAssetRepo := mysqlrepo.NewExternalAssetRepoWithAIRetrieval(mdb, cfg.VectorSearch.EmbeddingVersion)
 	taskAutoArchiveRepo := mysqlrepo.NewTaskAutoArchiveRepo(mdb)
@@ -375,7 +378,10 @@ func main() {
 		service.WithTaskAssetCenterRetouchRequirementRepo(taskRetouchRequirementRepo),
 		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
 		service.WithTaskAssetCenterAuditRepo(auditV7Repo))
-	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient, assetcenter.WithAssetCenterRedis(rdb))
+	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient,
+		assetcenter.WithAssetCenterRedis(rdb),
+		assetcenter.WithProductionPackageRepo(productionPackageRepo),
+		assetcenter.WithProductionPackageJobs(productionPackageJobRepo, ossDirectSvc))
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
 	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)
@@ -598,6 +604,7 @@ func main() {
 	}
 	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
 	startAssetObjectDeletionWorker(workerCtx, assetObjectDeletionWorker, logger.Named("asset_object_deletion_worker"))
+	startProductionPackageWorker(workerCtx, globalAssetCenterSvc, logger.Named("production_package_worker"))
 	if wecomSender.Start(workerCtx) {
 		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
 	}
@@ -682,6 +689,37 @@ func main() {
 		logger.Error("HTTP shutdown error", zap.Error(err))
 	}
 	logger.Info("server stopped gracefully")
+}
+
+func startProductionPackageWorker(ctx context.Context, svc *assetcenter.Service, logger *zap.Logger) {
+	if svc == nil {
+		return
+	}
+	go func() {
+		const interval = 3 * time.Second
+		workerID := "production-package-" + uuid.NewString()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		run := func() {
+			runCtx, cancel := context.WithTimeout(ctx, 6*time.Hour)
+			defer cancel()
+			processed, err := svc.ProcessProductionPackageJobs(runCtx, workerID, 1)
+			if err != nil {
+				logger.Warn("production package worker failed", zap.Error(err))
+			} else if processed > 0 {
+				logger.Info("production package worker completed", zap.Int("jobs", processed))
+			}
+		}
+		run()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
+			}
+		}
+	}()
 }
 
 func buildLogger(level string) *zap.Logger {

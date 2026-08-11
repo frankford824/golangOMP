@@ -67,6 +67,9 @@ type AssetSearchQuery struct {
 	BusinessLane           TaskBusinessLane
 	AssetType              TaskAssetType
 	OperationalVisibleOnly bool
+	// IncludeExternalOSSArchive is internal-only and is used by production
+	// packaging to recover migrated external files that remain available in OSS.
+	IncludeExternalOSSArchive bool
 	// AccessScopeKey is an internal cache partition derived from the resolved
 	// actor and access-policy revision. It is never accepted from public input.
 	AccessScopeKey string

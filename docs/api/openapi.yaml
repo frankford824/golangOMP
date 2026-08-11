@@ -1590,6 +1590,15 @@ components:
           items:
             $ref: '#/components/schemas/DesignAsset'
       required: [id, task_id, description, sort_order, created_at, updated_at]
+    CreateTaskRetouchRequirement:
+      type: object
+      required: [sku_code, description]
+      properties:
+        sku_code: { type: string, minLength: 1, description: Required traceability key used by finalized production packaging. }
+        description: { type: string, minLength: 1 }
+        spec: { type: string }
+        remark: { type: string }
+        sort_order: { type: integer, minimum: 1 }
     TaskAggregateDetailV2:
       type: object
       description: V1.1-A1 fast-path task aggregate detail. Batch tasks include `sku_items`; design uploads include `asset_versions` with `scope_sku_code` for per-SKU grouping.
@@ -3057,6 +3066,9 @@ components:
         reference_file_refs:
           type: array
           items: { $ref: '#/components/schemas/ReferenceFileRef' }
+        retouch_requirements:
+          type: array
+          items: { $ref: '#/components/schemas/CreateTaskRetouchRequirement' }
         remark: { type: string }
         batch_sku_mode: { type: string, enum: [single, multiple], default: single }
         batch_items:
@@ -3819,6 +3831,23 @@ components:
         failure_count: { type: integer }
         total_files: { type: integer }
         total_size: { type: integer, format: int64 }
+        expires_at: { type: string, format: date-time, nullable: true }
+    AssetExcelPackageJob:
+      type: object
+      required: [job_id, status, total_count, processed_count, failed_count, created_at]
+      properties:
+        job_id: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, expired] }
+        total_count: { type: integer }
+        processed_count: { type: integer }
+        failed_count: { type: integer }
+        error_message: { type: string }
+        download_url: { type: string, format: uri, description: Present only for a succeeded job. This short-lived OSS URL is regenerated on every status read. }
+        filename: { type: string }
+        manifest: { $ref: '#/components/schemas/AssetExcelPackageManifest' }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
         expires_at: { type: string, format: date-time, nullable: true }
     TaskReferenceBatchDownloadRequest:
       type: object
@@ -9580,6 +9609,75 @@ paths:
                   data: { $ref: '#/components/schemas/AssetExcelPackageManifest' }
         '400': { description: Invalid file or template }
         '403': { description: Asset view denied }
+  /v1/assets/excel-package/jobs:
+    post:
+      summary: Create a durable server-side production ZIP job from normalized rows
+      description: Resolves the latest finalized system asset group first, then falls back to OSS-ready migrated external originals. The worker writes order folders, address.txt files and a failure manifest, uploads the completed ZIP to OSS, and can resume after process restart through a persisted lease.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetExcelPackagePreviewRequest' }
+      responses:
+        '200':
+          description: Persisted package job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AssetExcelPackageJob' }
+        '400': { description: Invalid rows }
+        '403': { description: Asset view denied }
+  /v1/assets/excel-package/jobs/file:
+    post:
+      summary: Parse XLS or XLSX and create a durable server-side production ZIP job
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: XLS or XLSX file up to 10 MiB. }
+                format_filter: { type: string, enum: [tif, jpg, png, jpg_png, image], default: image }
+      responses:
+        '200':
+          description: Persisted package job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AssetExcelPackageJob' }
+        '400': { description: Invalid file or template }
+        '403': { description: Asset view denied }
+  /v1/assets/excel-package/jobs/{job_id}:
+    get:
+      summary: Read the current user's production package job
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      parameters:
+        - { name: job_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Current job state and completed ZIP URL when succeeded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AssetExcelPackageJob' }
+        '403': { description: Asset view denied }
+        '404': { description: Job not found or not owned by current user }
   /v1/assets/batch-download:
     post:
       summary: Batch download asset direct URL manifest

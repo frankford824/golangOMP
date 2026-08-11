@@ -22,12 +22,14 @@ describe('uploadRetouchRequirementPendingAssets', () => {
     const srcFile = new File(['s'], 'src-1.psd', { type: 'application/octet-stream' })
     const drafts: RetouchRequirementDraft[] = [
       {
+        skuCode: 'SKU-1',
         description: '第一条',
         sortOrder: 2,
         pendingReferenceFiles: [refFile],
         pendingSourceFiles: [srcFile],
       },
       {
+        skuCode: 'SKU-2',
         description: '第二条',
         sortOrder: 1,
       },
@@ -63,7 +65,7 @@ describe('uploadRetouchRequirementPendingAssets', () => {
   it('records failure when requirement id is missing', async () => {
     const refFile = new File(['r'], 'ref.png')
     const drafts: RetouchRequirementDraft[] = [
-      { description: 'only', sortOrder: 1, pendingReferenceFiles: [refFile] },
+      { skuCode: 'SKU-ONLY', description: 'only', sortOrder: 1, pendingReferenceFiles: [refFile] },
     ]
     const created: RetouchRequirement[] = [{ id: 0, taskId: 1, description: 'only', sortOrder: 1 }]
 
@@ -76,7 +78,7 @@ describe('uploadRetouchRequirementPendingAssets', () => {
   it('uploads a large source-file batch with bounded concurrency', async () => {
     const sourceFiles = Array.from({ length: 8 }, (_, index) => new File(['s'], `src-${index + 1}.psd`))
     const drafts: RetouchRequirementDraft[] = [
-      { description: 'batch', sortOrder: 1, pendingSourceFiles: sourceFiles },
+      { skuCode: 'SKU-BATCH', description: 'batch', sortOrder: 1, pendingSourceFiles: sourceFiles },
     ]
     const created: RetouchRequirement[] = [{ id: 10, taskId: 1, description: 'batch', sortOrder: 1 }]
     let active = 0

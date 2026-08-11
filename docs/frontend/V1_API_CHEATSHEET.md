@@ -1,10 +1,10 @@
-# V1 API 速查表(248 path · 一行一条)
+# V1 API 速查表(251 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 248 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 251 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -209,6 +209,9 @@
 | POST | `/v1/assets/search/batch` | Batch search production assets | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/excel-package/preview` | Build a production package manifest from normalized Excel rows | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/excel-package/preview-file` | Parse XLS or XLSX and build a production package manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/excel-package/jobs` | Create a durable server-side production ZIP job from normalized rows | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/excel-package/jobs/file` | Parse XLS or XLSX and create a durable server-side production ZIP job | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/excel-package/jobs/{job_id}` | Read the current user's production package job | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/batch-download` | Batch download asset direct URL manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/download` | Get asset download info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
