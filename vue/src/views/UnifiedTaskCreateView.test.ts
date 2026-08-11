@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(), replace: vi.fn(),
   create: vi.fn(), addTask: vi.fn(), getTaskById: vi.fn(), parseBatch: vi.fn(), getProducts: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
   permissions: new Set(['task.create', 'planning_sku.create', 'planning_sku.erp_sync']),
-  uploadReferenceFileRef: vi.fn(),
+  uploadReferenceFileRef: vi.fn(), uploadPlanningImage: vi.fn(),
   uploadRetouchRequirementPendingAssets: vi.fn(), downloadPlanning: vi.fn(),
 }))
 
@@ -23,7 +23,7 @@ vi.mock('@/stores/tasks', () => ({ useTasksStore: () => ({ addTask: mocks.addTas
 vi.mock('@/services/api/planningSkuApi', () => ({
   planningSkuApi: {
     create: mocks.create,
-    parseExcel: vi.fn(), uploadImage: vi.fn(), retryFailedERP: vi.fn(), exportSelection: vi.fn(),
+    parseExcel: vi.fn(), uploadImage: mocks.uploadPlanningImage, retryFailedERP: vi.fn(), exportSelection: vi.fn(),
     downloadTask: mocks.downloadPlanning,
   },
 }))
@@ -56,6 +56,7 @@ describe('UnifiedTaskCreateView', () => {
     mocks.getIids.mockResolvedValue({ data: { data: [{ i_id: 'KT_STANDARD' }] } })
     mocks.getProducts.mockResolvedValue({ data: { data: { items: [] } } })
     mocks.uploadReferenceFileRef.mockResolvedValue({ asset_id: 'reference-default' })
+    mocks.uploadPlanningImage.mockResolvedValue('planning-image-ref')
     mocks.addTask.mockResolvedValue({ id: 'task-default', retouchRequirements: [] })
     mocks.getTaskById.mockReturnValue({ id: 'task-default', retouchRequirements: [] })
     mocks.uploadRetouchRequirementPendingAssets.mockResolvedValue({ failures: [], referenceUploaded: 0, sourceUploaded: 0 })
@@ -385,6 +386,35 @@ describe('UnifiedTaskCreateView', () => {
     expect(wrapper.findAll('.row-drawer .asset-list article')).toHaveLength(40)
     expect(wrapper.text()).toContain('最多 50 个文件')
     expect(wrapper.text()).not.toContain('每项待修素材最多 50 个文件。')
+    wrapper.unmount()
+  })
+
+  it('keeps a successfully uploaded planning image embedded without rebuilding the workbook', async () => {
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: {
+            props: ['rows', 'revision'],
+            emits: ['files'],
+            data: () => ({ image: new File(['image'], 'product.png', { type: 'image/png' }) }),
+            template: `<div>
+              <button class="paste-product-image" @click="$emit('files', { rowId: rows[0].id, field: 'reference_assets', files: [image] })">paste image</button>
+              <span class="grid-revision">{{ revision || 0 }}</span>
+              <span class="grid-assets">{{ rows[0].reference_assets.length }}</span>
+            </div>`,
+          },
+          IIdSelector: true,
+          RouterLink: true,
+        },
+      },
+    })
+
+    await wrapper.get('.paste-product-image').trigger('click')
+    await flushPromises()
+
+    expect(mocks.uploadPlanningImage).toHaveBeenCalledOnce()
+    expect(wrapper.get('.grid-assets').text()).toBe('1')
+    expect(wrapper.get('.grid-revision').text()).toBe('0')
     wrapper.unmount()
   })
 

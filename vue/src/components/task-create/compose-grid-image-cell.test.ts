@@ -16,6 +16,7 @@ describe('compose grid image cell bridge', () => {
   it('uses the active Univer cell for clipboard images and inserts an immediate preview', async () => {
     const element = document.createElement('div')
     const insert = vi.fn().mockResolvedValue(true)
+    const setRowHeight = vi.fn()
     const onFiles = vi.fn()
     const calls: string[] = []
     const columns: ComposeColumn[] = [{ key: 'reference_assets', label: '参考图', width: 120, kind: 'asset' }]
@@ -23,7 +24,7 @@ describe('compose grid image cell bridge', () => {
       element,
       columns,
       rows: () => [createComposeRow({ id: 'row-1' })],
-      worksheet: () => ({ getRange: () => ({ insertCellImageAsync: insert }) }),
+      worksheet: () => ({ getRange: () => ({ insertCellImageAsync: insert }), setRowHeight }),
       hooks: {
         onCellDragOver: () => ({ dispose: vi.fn() }),
         onCellDrop: () => ({ dispose: vi.fn() }),
@@ -32,6 +33,8 @@ describe('compose grid image cell bridge', () => {
       onFiles: (...args) => { calls.push('files'); onFiles(...args) },
     })
     binding.setActive({ row: 1, col: 0 })
+    const downstreamPaste = vi.fn()
+    element.addEventListener('paste', downstreamPaste)
     const file = new File(['image'], 'reference.png', { type: 'image/png' })
     const event = new Event('paste', { bubbles: true, cancelable: true })
     Object.defineProperty(event, 'clipboardData', { value: { files: [file] } })
@@ -40,8 +43,39 @@ describe('compose grid image cell bridge', () => {
     await Promise.resolve()
 
     expect(insert).toHaveBeenCalledWith(file)
+    expect(setRowHeight).toHaveBeenCalledWith(1, 72)
     expect(onFiles).toHaveBeenCalledWith('row-1', 'reference_assets', [file])
     expect(calls).toEqual(['flush', 'files'])
+    expect(event.defaultPrevented).toBe(true)
+    expect(downstreamPaste).not.toHaveBeenCalled()
+    binding.dispose()
+  })
+
+  it('does not intercept image paste outside an asset column', async () => {
+    const element = document.createElement('div')
+    const onFiles = vi.fn()
+    const downstreamPaste = vi.fn()
+    const binding = bindComposeGridImageCells({
+      element,
+      columns: [{ key: 'description_spec', label: '产品描述', width: 180, kind: 'text' }],
+      rows: () => [createComposeRow({ id: 'row-1' })],
+      worksheet: () => null,
+      hooks: {
+        onCellDragOver: () => ({ dispose: vi.fn() }),
+        onCellDrop: () => ({ dispose: vi.fn() }),
+      },
+      onFiles,
+    })
+    binding.setActive({ row: 1, col: 0 })
+    element.addEventListener('paste', downstreamPaste)
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'clipboardData', { value: { files: [new File(['image'], 'reference.png', { type: 'image/png' })] } })
+    element.dispatchEvent(event)
+    await Promise.resolve()
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(downstreamPaste).toHaveBeenCalledOnce()
+    expect(onFiles).not.toHaveBeenCalled()
     binding.dispose()
   })
 

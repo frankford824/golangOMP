@@ -552,6 +552,7 @@ async function addFiles(payload: { rowId: string; field: 'reference_assets' | 's
     gridRevision.value += 1
     return
   }
+  let uploadFailed = false
   for (const draft of drafts) {
     try {
       if (!draft.file) continue
@@ -560,13 +561,16 @@ async function addFiles(payload: { rowId: string; field: 'reference_assets' | 's
         : await uploadReferenceFileRef(draft.file)
       patchAssetDraft(payload.rowId, payload.field, draft.id, { upload_ref: uploadRef, status: 'uploaded' })
     } catch (error) {
+      uploadFailed = true
       patchAssetDraft(payload.rowId, payload.field, draft.id, {
         status: 'failed',
         error: error instanceof Error ? error.message : '上传失败',
       })
     }
   }
-  gridRevision.value += 1
+  // Successful planning images are already real Univer cell images. Rebuilding
+  // the workbook here would replace the thumbnail with plain status text.
+  if (intent.value !== 'planning_sku' || uploadFailed) gridRevision.value += 1
 }
 
 function patchAssetDraft(

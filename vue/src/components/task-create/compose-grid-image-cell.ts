@@ -16,6 +16,7 @@ interface UniverRangeLike {
 
 interface UniverWorksheetLike {
   getRange(row: number, column: number, numRows?: number, numColumns?: number): UniverRangeLike
+  setRowHeight?(rowPosition: number, height: number): unknown
 }
 
 interface SheetHookLike {
@@ -41,12 +42,20 @@ export function isComposeImageColumn(column: ComposeColumn | undefined): boolean
 export function composeImageColumnAccepts(column: ComposeColumn | undefined, file: File): boolean {
   if (!isComposeImageColumn(column)) return false
   if (column?.key === 'source_assets') return true
-  return file.type.startsWith('image/')
+  return isComposeImageFile(file)
+}
+
+const COMPOSE_IMAGE_FILE_NAME = /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i
+const COMPOSE_IMAGE_ROW_HEIGHT = 72
+
+export function isComposeImageFile(file: File): boolean {
+  return file.type.startsWith('image/') || COMPOSE_IMAGE_FILE_NAME.test(file.name)
 }
 
 /**
- * Bridges native File drag/paste data with Univer's cell hit-testing. Univer owns
- * the visible preview; the business row model owns upload state and references.
+ * Bridges native File drag/paste data with Univer's cell hit-testing. This owns
+ * the image event so Univer cannot also create a duplicate floating drawing.
+ * The business row model remains authoritative for upload state and references.
  */
 export function bindComposeGridImageCells(options: ComposeImageCellOptions): ComposeImageCellBinding {
   let hover: ComposeGridCellPosition | null = null
@@ -74,7 +83,8 @@ export function bindComposeGridImageCells(options: ComposeImageCellOptions): Com
     // can otherwise restore the older row model and erase the fresh text.
     options.onBeforeFiles?.()
     const worksheet = options.worksheet()
-    if (worksheet && accepted[0].type.startsWith('image/')) {
+    if (worksheet && isComposeImageFile(accepted[0])) {
+      worksheet.setRowHeight?.(target.row, COMPOSE_IMAGE_ROW_HEIGHT)
       await worksheet.getRange(target.row, target.col, 1, 1).insertCellImageAsync(accepted[0]).catch(() => false)
     }
     options.onFiles(row.id, column.key, accepted)
@@ -90,13 +100,19 @@ export function bindComposeGridImageCells(options: ComposeImageCellOptions): Com
   const onDrop = (event: DragEvent) => {
     const files = Array.from(event.dataTransfer?.files ?? [])
     if (!files.length) return
+    const target = resolveTarget()
+    if (!target || !files.some((file) => composeImageColumnAccepts(options.columns[target.col], file))) return
     event.preventDefault()
+    event.stopImmediatePropagation()
     void handleFiles(files)
   }
   const onPaste = (event: ClipboardEvent) => {
     const files = Array.from(event.clipboardData?.files ?? [])
     if (!files.length) return
+    const target = resolveTarget()
+    if (!target || !files.some((file) => composeImageColumnAccepts(options.columns[target.col], file))) return
     event.preventDefault()
+    event.stopImmediatePropagation()
     void handleFiles(files)
   }
   const setActive = (position: ComposeGridCellPosition) => {
@@ -105,16 +121,16 @@ export function bindComposeGridImageCells(options: ComposeImageCellOptions): Com
   }
 
   options.element.addEventListener('dragover', onDragOver)
-  options.element.addEventListener('drop', onDrop)
-  options.element.addEventListener('paste', onPaste)
+  options.element.addEventListener('drop', onDrop, true)
+  options.element.addEventListener('paste', onPaste, true)
 
   return {
     dispose() {
       dragDisposable.dispose()
       dropDisposable.dispose()
       options.element.removeEventListener('dragover', onDragOver)
-      options.element.removeEventListener('drop', onDrop)
-      options.element.removeEventListener('paste', onPaste)
+      options.element.removeEventListener('drop', onDrop, true)
+      options.element.removeEventListener('paste', onPaste, true)
     },
     setActive,
   }

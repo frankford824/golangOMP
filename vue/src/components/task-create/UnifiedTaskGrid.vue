@@ -38,6 +38,7 @@ interface UniverRangeLike {
 interface UniverWorksheetLike {
   getRange(row: number, column: number, numRows?: number, numColumns?: number): UniverRangeLike
   setColumnWidth(columnPosition: number, width: number): unknown
+  setRowHeight(rowPosition: number, height: number): unknown
   getMaxRows?(): number
 }
 let univerInstance: Univer | null = null
