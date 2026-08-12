@@ -112,16 +112,18 @@ func (s *Service) GetProductionPackageJob(ctx context.Context, actorID int64, jo
 		ErrorMessage: job.ErrorMessage, CreatedAt: job.CreatedAt,
 		StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
 	}
-	if job.Status == domain.ProductionPackageJobSucceeded {
+	if len(job.ResultPayload) > 0 && string(job.ResultPayload) != "{}" {
 		var result ProductionPackageJobResult
 		if err := json.Unmarshal(job.ResultPayload, &result); err != nil {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, "invalid production package result", nil)
 		}
 		view.Filename = result.Filename
 		view.Manifest = result.Manifest
-		if signed := s.packageStore.PresignDownloadURLWithFilename(result.ObjectKey, result.Filename); signed != nil {
-			view.DownloadURL = signed.DownloadURL
-			view.ExpiresAt = &signed.ExpiresAt
+		if job.Status == domain.ProductionPackageJobSucceeded && strings.TrimSpace(result.ObjectKey) != "" {
+			if signed := s.packageStore.PresignDownloadURLWithFilename(result.ObjectKey, result.Filename); signed != nil {
+				view.DownloadURL = signed.DownloadURL
+				view.ExpiresAt = &signed.ExpiresAt
+			}
 		}
 	}
 	return view, nil
@@ -172,7 +174,15 @@ func (s *Service) processProductionPackageJob(ctx context.Context, workerID stri
 		return fmt.Errorf("build package manifest: %s", appErr.Message)
 	}
 	if len(manifest.Items) == 0 {
-		return fmt.Errorf("no packageable files; failures=%d", manifest.FailureCount)
+		result, err := json.Marshal(ProductionPackageJobResult{Manifest: manifest})
+		if err != nil {
+			return err
+		}
+		cancelHeartbeat()
+		return s.packageJobRepo.FailWithResult(
+			ctx, job.JobID, workerID, productionPackageNoFilesMessage(manifest), result,
+			manifest.FailureCount, time.Now().UTC(),
+		)
 	}
 	processed.Store(int64(len(request.Rows)))
 	failed.Store(int64(manifest.FailureCount))
@@ -202,6 +212,17 @@ func (s *Service) processProductionPackageJob(ctx context.Context, workerID stri
 	}
 	cancelHeartbeat()
 	return s.packageJobRepo.Complete(ctx, job.JobID, workerID, result, manifest.FailureCount, time.Now().UTC())
+}
+
+func productionPackageNoFilesMessage(manifest *ExcelPackageManifest) string {
+	failures := 0
+	if manifest != nil {
+		failures = manifest.FailureCount
+	}
+	if failures <= 0 {
+		return "未找到可打包的最终成品，请查看异常明细。"
+	}
+	return fmt.Sprintf("未找到可打包的最终成品：%d 行均未匹配所选格式，请查看逐行异常明细。", failures)
 }
 
 func uploadProductionPackageFile(ctx context.Context, store ProductionPackageObjectStore, objectKey, filePath string) error {

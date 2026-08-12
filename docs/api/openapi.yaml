@@ -3844,7 +3844,9 @@ components:
         error_message: { type: string }
         download_url: { type: string, format: uri, description: Present only for a succeeded job. This short-lived OSS URL is regenerated on every status read. }
         filename: { type: string }
-        manifest: { $ref: '#/components/schemas/AssetExcelPackageManifest' }
+        manifest:
+          allOf: [{ $ref: '#/components/schemas/AssetExcelPackageManifest' }]
+          description: Present for succeeded jobs and for row-level matching failures, so clients can display per-SKU reasons even when no ZIP is produced.
         created_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time, nullable: true }
         finished_at: { type: string, format: date-time, nullable: true }

@@ -76,7 +76,7 @@ const error = ref('')
 const groupId = computed(() => Number(route.params.id))
 const activeRevision = computed(() => group.value?.finalized_revision || group.value?.working_revision)
 const modeLabel = computed(() => activeRevision.value?.mode === 'set' ? '套装资源' : '单图资源')
-const finalCount = computed(() => activeRevision.value?.items?.length || 0)
+const finalCount = computed(() => group.value?.finalized_revision?.items?.length || 0)
 const profile = computed(() => group.value?.sku_profile || null)
 const displaySKU = computed(() => group.value?.sku_code || profile.value?.sku_code || 'SKU 待关联')
 const comboCodes = computed(() => (profile.value?.combo_sku_codes || []).join('、'))
@@ -141,7 +141,11 @@ function formatCheckedAt(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }
 async function downloadAll() {
-  if (!group.value) return
+	if (!group.value) return
+	if (!group.value.finalized_revision?.items?.length) {
+		error.value = '当前资源还没有审核定稿，暂时没有最终成品可下载。'
+		return
+	}
   downloading.value = true
   error.value = ''
   try {

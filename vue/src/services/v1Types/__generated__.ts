@@ -20371,6 +20371,7 @@ export interface components {
              */
             download_url?: string;
             filename?: string;
+            /** @description Present for succeeded jobs and for row-level matching failures, so clients can display per-SKU reasons even when no ZIP is produced. */
             manifest?: components["schemas"]["AssetExcelPackageManifest"];
             /** Format: date-time */
             created_at: string;

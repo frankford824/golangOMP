@@ -221,7 +221,10 @@ async function pollPackageJob(jobId: string, signal: AbortSignal) {
 		const job = unwrap<AssetExcelPackageJob>(response)
 		if (!job) throw new Error('无法读取打包任务状态。')
 		status.value = job.status === 'queued' ? '打包任务已排队…' : `服务端打包中：${job.processed_count}/${job.total_count}`
-		if (job.status === 'failed' || job.status === 'expired') throw new Error(job.error_message || '生产打包任务失败。')
+		if (job.status === 'failed' || job.status === 'expired') {
+			excelManifest.value = job.manifest || null
+			throw new Error(job.error_message || '生产打包任务失败，请查看异常明细。')
+		}
 		if (job.status === 'succeeded') {
 			excelManifest.value = job.manifest || null
 			downloadUrl.value = job.download_url || ''

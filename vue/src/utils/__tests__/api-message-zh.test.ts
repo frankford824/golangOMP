@@ -118,6 +118,16 @@ describe('resolveApiUserMessage', () => {
     expect(message).toBe('与已有数据冲突，请更换后重试')
   })
 
+	it('explains that a working resource is not a downloadable final output', () => {
+		const message = resolveApiUserMessage({
+			status: 409,
+			responseData: { error: { code: 'INVALID_STATE_TRANSITION', message: 'resource group has no finalized revision' } },
+		})
+
+		expect(message).toBe('当前资源还没有审核定稿，暂时没有最终成品可下载')
+		expect(message).not.toContain('冲突')
+	})
+
   it('maps deny_code from error.details before generic permission copy', () => {
     const message = resolveApiUserMessage({
       status: 403,

@@ -137,4 +137,29 @@ describe('ProductionPackageDialog unified production package', () => {
 		downloadClick.mockRestore()
 		wrapper.unmount()
 	})
+
+	it('shows per-SKU reasons when no selected-format file can be packaged', async () => {
+		mocks.createExcelPackageJob.mockResolvedValueOnce({ data: { data: { job_id: 'pkg-failed' } } })
+		mocks.getExcelPackageJob.mockResolvedValueOnce({ data: { data: {
+			job_id: 'pkg-failed', status: 'failed', total_count: 1, processed_count: 1, failed_count: 1,
+			error_message: '未找到可打包的最终成品：1 行均未匹配所选格式，请查看逐行异常明细。',
+			manifest: {
+				items: [], success_count: 0, failure_count: 1, total_files: 0, total_size: 0,
+				failures: [{ row_number: 1, sku_code: 'CGK001698', reason: 'asset_not_found', message: '未找到匹配的最终成品 TIF 文件' }],
+			},
+		} } })
+		const wrapper = mount(ProductionPackageDialog, { props: { open: true }, attachTo: document.body })
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('.package-dialog textarea')
+		const generate = document.body.querySelector<HTMLButtonElement>('.package-dialog .primary-button')
+		if (!textarea || !generate) throw new Error('missing production package controls')
+		textarea.value = 'CGK001698'
+		textarea.dispatchEvent(new Event('input'))
+		await wrapper.vm.$nextTick()
+		generate.click()
+		await flushPromises()
+
+		expect(document.body.textContent).toContain('CGK001698：未找到匹配的最终成品 TIF 文件')
+		expect(document.body.textContent).toContain('1 行均未匹配所选格式')
+		wrapper.unmount()
+	})
 })

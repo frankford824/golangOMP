@@ -126,6 +126,19 @@ func (r *productionPackageJobRepo) Fail(ctx context.Context, jobID, workerID, me
 	return requireProductionPackageJobUpdate(res)
 }
 
+func (r *productionPackageJobRepo) FailWithResult(ctx context.Context, jobID, workerID, message string, result []byte, failedCount int, finishedAt time.Time) error {
+	res, err := r.db.db.ExecContext(ctx, `UPDATE asset_workbench_batch_jobs
+		SET status='failed', error_message=?, result_payload_json=?, processed_count=total_count,
+		failed_count=?, lease_owner='', lease_expires_at=NULL, finished_at=?
+		WHERE job_type=? AND job_id=? AND status='running' AND lease_owner=?`,
+		truncateProductionPackageError(message), result, failedCount, finishedAt.UTC(),
+		domain.ProductionPackageJobType, jobID, workerID)
+	if err != nil {
+		return err
+	}
+	return requireProductionPackageJobUpdate(res)
+}
+
 type productionPackageJobScanner interface{ Scan(...interface{}) error }
 
 func scanProductionPackageJob(row productionPackageJobScanner) (*domain.ProductionPackageJob, error) {

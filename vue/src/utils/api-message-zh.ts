@@ -157,6 +157,10 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   /** GET /v1/assets/{id}/preview 等：409 + INVALID_STATE_TRANSITION 常见英文文案 */
   'asset preview is not available': '资产预览不可用',
   'asset preview is not available.': '资产预览不可用',
+	'resource group has no finalized revision': '当前资源还没有审核定稿，暂时没有最终成品可下载',
+	'final resource file is unavailable': '最终成品文件当前不可用，请刷新后重试',
+	'final resource file download is unavailable': '最终成品下载地址生成失败，请刷新后重试',
+	'resource group has no sku cost profile': '当前资源尚未关联 SKU 成本档案，无法进行成本核对',
   'price effective range overlaps an existing rule.': '这条单价的生效时间与已有单价重叠，请调整生效日期或使用「替代」发布新版本',
   'deduction effective range overlaps an existing rule.': '这条质检扣款的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本',
   'welfare effective range overlaps an existing rule.': '该福利规则的生效时间与已有规则重叠，请调整生效日期或使用「替代」发布新版本',

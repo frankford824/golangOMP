@@ -52,4 +52,18 @@ describe('ResourceGroupDetailView', () => {
       ],
     }))
   })
+
+	it('does not offer a working revision as downloadable final output', async () => {
+		mocks.get.mockResolvedValueOnce({
+			id: 8, task_id: 9, task_no: 'RW-009', scope_kind: 'sku', sku_code: 'SKU-009', lock_version: 1,
+			migration_incomplete: false,
+			working_revision: { id: 69, group_id: 8, revision_no: 1, status: 'submitted', mode: 'single', source_stage: 'design', references: [], items: [{ id: 1, revision_id: 69, task_asset_id: 101, sort_order: 0 }] },
+		})
+		const wrapper = mount(ResourceGroupDetailView)
+		await flushPromises()
+		const button = wrapper.findAll('.hero-actions button').find((item) => item.text() === '暂无成品可下载')
+		expect(button?.attributes('disabled')).toBeDefined()
+		await button?.trigger('click')
+		expect(mocks.batchDownload).not.toHaveBeenCalled()
+	})
 })

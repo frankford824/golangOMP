@@ -75,6 +75,13 @@ func TestFinalizedPackageFilenameContainsSKUBoundaries(t *testing.T) {
 	}
 }
 
+func TestProductionPackageNoFilesMessageExplainsRowFailures(t *testing.T) {
+	message := productionPackageNoFilesMessage(&ExcelPackageManifest{FailureCount: 3})
+	if message != "未找到可打包的最终成品：3 行均未匹配所选格式，请查看逐行异常明细。" {
+		t.Fatalf("message = %q", message)
+	}
+}
+
 func TestUploadProductionPackageFileUsesMultipartAndCompletesETags(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
