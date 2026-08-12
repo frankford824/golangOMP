@@ -6766,6 +6766,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/integration/asset-sync/finalized/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the complete current finalized production manifest
+         * @description Returns a deterministic snapshot of current finalized resource-group revisions using the same eligibility and image filtering as production Excel packaging. It never exposes draft-only or superseded revisions. `manifest_id` and the response `ETag` hash canonical snapshot content and exclude `generated_at`; clients should send `If-None-Match` on later polls. Objects that are missing in OSS remain in the manifest as current database facts and are reported by the download-ticket endpoint.
+         */
+        get: operations["getFinalizedAssetSyncManifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-sync/finalized/download-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stat finalized OSS objects and issue short-lived download tickets
+         * @description Revalidates that every requested task asset still belongs to a current eligible finalized revision, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
+         */
+        post: operations["createFinalizedAssetDownloadTickets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/integration/external-assets/events": {
         parameters: {
             query?: never;
@@ -20963,6 +21003,89 @@ export interface components {
         ExternalAssetFilesystemEventResponse: {
             data: components["schemas"]["ExternalAssetFilesystemEventResult"];
         };
+        FinalizedSyncManifestItem: {
+            /** Format: int64 */
+            revision_item_id: number;
+            sort_order: number;
+            item_name: string;
+            /** Format: int64 */
+            task_asset_id: number;
+            file_name: string;
+            original_filename: string;
+            /** @enum {string} */
+            format: "jpg" | "png" | "tif";
+            mime_type: string;
+            /** Format: int64 */
+            file_size: number;
+            storage_key: string;
+            whole_hash: string | null;
+            /** Format: date-time */
+            asset_updated_at: string;
+        };
+        FinalizedSyncManifestGroup: {
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int64 */
+            revision_id: number;
+            /** @enum {string} */
+            revision_mode: "single" | "set";
+            /** Format: date-time */
+            finalized_at: string;
+            /** Format: int64 */
+            task_id: number;
+            task_no: string;
+            /** @enum {string} */
+            scope_kind: "task" | "sku" | "retouch_requirement";
+            sku_code: string;
+            product_name: string;
+            items: components["schemas"]["FinalizedSyncManifestItem"][];
+        };
+        FinalizedSyncManifest: {
+            /** @enum {integer} */
+            schema_version: 1;
+            manifest_id: string;
+            /** Format: date-time */
+            generated_at: string;
+            group_count: number;
+            item_count: number;
+            object_count: number;
+            /** Format: int64 */
+            total_object_bytes: number;
+            groups: components["schemas"]["FinalizedSyncManifestGroup"][];
+        };
+        FinalizedSyncManifestResponse: {
+            data: components["schemas"]["FinalizedSyncManifest"];
+        };
+        FinalizedDownloadTicketRequest: {
+            task_asset_ids: number[];
+        };
+        FinalizedDownloadTicketResult: {
+            /** Format: int64 */
+            task_asset_id: number;
+            /** @enum {string} */
+            status: "ready" | "missing" | "size_mismatch" | "not_current" | "error";
+            storage_key?: string;
+            file_name?: string;
+            /** Format: int64 */
+            expected_size?: number;
+            /** Format: int64 */
+            actual_size?: number;
+            etag?: string;
+            crc64_ecma?: string;
+            whole_hash?: string | null;
+            /** Format: uri */
+            download_url?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            retryable: boolean;
+            error_message?: string;
+        };
+        FinalizedDownloadTicketData: {
+            results: components["schemas"]["FinalizedDownloadTicketResult"][];
+        };
+        FinalizedDownloadTicketResponse: {
+            data: components["schemas"]["FinalizedDownloadTicketData"];
+        };
         CodeRule: {
             id?: number;
             /** @enum {string} */
@@ -23538,6 +23661,96 @@ export interface operations {
                 };
             };
             403: components["responses"]["V8Forbidden"];
+        };
+    };
+    getFinalizedAssetSyncManifest: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete current finalized manifest */
+            200: {
+                headers: {
+                    /** @description Weak ETag containing the manifest content SHA-256; generated_at is intentionally excluded. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalizedSyncManifestResponse"];
+                };
+            };
+            /** @description Manifest content has not changed */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid dedicated machine token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Manifest query or construction failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createFinalizedAssetDownloadTickets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalizedDownloadTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-asset OSS availability and download tickets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalizedDownloadTicketResponse"];
+                };
+            };
+            /** @description Invalid JSON or task_asset_ids count/value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid dedicated machine token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Current-finalized database query failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     getAIChatConfig: {

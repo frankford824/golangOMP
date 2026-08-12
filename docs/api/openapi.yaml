@@ -44,6 +44,11 @@ components:
       in: header
       name: X-External-Asset-Event-Token
       description: Dedicated pre-shared machine credential for the NAS filesystem event watcher. It does not grant access to session or legacy agent APIs.
+    AssetSyncToken:
+      type: apiKey
+      in: header
+      name: X-Asset-Sync-Token
+      description: Dedicated fail-closed machine credential for finalized manifest and download-ticket reads. Authorization Bearer is also accepted by runtime.
   responses:
     V8BadRequest:
       description: Invalid request or business validation failure.
@@ -4600,6 +4605,95 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/ExternalAssetFilesystemEventResult'
+    FinalizedSyncManifestItem:
+      type: object
+      required: [revision_item_id, sort_order, item_name, task_asset_id, file_name, original_filename, format, mime_type, file_size, storage_key, whole_hash, asset_updated_at]
+      properties:
+        revision_item_id: { type: integer, format: int64 }
+        sort_order: { type: integer }
+        item_name: { type: string }
+        task_asset_id: { type: integer, format: int64 }
+        file_name: { type: string }
+        original_filename: { type: string }
+        format: { type: string, enum: [jpg, png, tif] }
+        mime_type: { type: string }
+        file_size: { type: integer, format: int64, minimum: 0 }
+        storage_key: { type: string, minLength: 1 }
+        whole_hash: { type: string, nullable: true }
+        asset_updated_at: { type: string, format: date-time }
+    FinalizedSyncManifestGroup:
+      type: object
+      required: [group_id, revision_id, revision_mode, finalized_at, task_id, task_no, scope_kind, sku_code, product_name, items]
+      properties:
+        group_id: { type: integer, format: int64 }
+        revision_id: { type: integer, format: int64 }
+        revision_mode: { type: string, enum: [single, set] }
+        finalized_at: { type: string, format: date-time }
+        task_id: { type: integer, format: int64 }
+        task_no: { type: string }
+        scope_kind: { type: string, enum: [task, sku, retouch_requirement] }
+        sku_code: { type: string }
+        product_name: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FinalizedSyncManifestItem' }
+    FinalizedSyncManifest:
+      type: object
+      required: [schema_version, manifest_id, generated_at, group_count, item_count, object_count, total_object_bytes, groups]
+      properties:
+        schema_version: { type: integer, enum: [1] }
+        manifest_id: { type: string, pattern: '^[0-9a-f]{64}$' }
+        generated_at: { type: string, format: date-time }
+        group_count: { type: integer, minimum: 0 }
+        item_count: { type: integer, minimum: 0 }
+        object_count: { type: integer, minimum: 0 }
+        total_object_bytes: { type: integer, format: int64, minimum: 0 }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/FinalizedSyncManifestGroup' }
+    FinalizedSyncManifestResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/FinalizedSyncManifest' }
+    FinalizedDownloadTicketRequest:
+      type: object
+      required: [task_asset_ids]
+      properties:
+        task_asset_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { type: integer, format: int64, minimum: 1 }
+    FinalizedDownloadTicketResult:
+      type: object
+      required: [task_asset_id, status, retryable]
+      properties:
+        task_asset_id: { type: integer, format: int64 }
+        status: { type: string, enum: [ready, missing, size_mismatch, not_current, error] }
+        storage_key: { type: string }
+        file_name: { type: string }
+        expected_size: { type: integer, format: int64, minimum: 0 }
+        actual_size: { type: integer, format: int64, minimum: 0 }
+        etag: { type: string }
+        crc64_ecma: { type: string }
+        whole_hash: { type: string, nullable: true }
+        download_url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
+        retryable: { type: boolean }
+        error_message: { type: string }
+    FinalizedDownloadTicketData:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/FinalizedDownloadTicketResult' }
+    FinalizedDownloadTicketResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/FinalizedDownloadTicketData' }
     CodeRule:
       type: object
       properties:
@@ -11078,6 +11172,70 @@ paths:
           description: Unauthenticated
         '403':
           description: Caller lacks `task.view` or is outside the effective task scope
+  /v1/integration/asset-sync/finalized/manifest:
+    get:
+      operationId: getFinalizedAssetSyncManifest
+      summary: Get the complete current finalized production manifest
+      description: |
+        Returns a deterministic snapshot of current finalized resource-group revisions using the same eligibility and image filtering as production Excel packaging. It never exposes draft-only or superseded revisions. `manifest_id` and the response `ETag` hash canonical snapshot content and exclude `generated_at`; clients should send `If-None-Match` on later polls. Objects that are missing in OSS remain in the manifest as current database facts and are reported by the download-ticket endpoint.
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth:
+        mode: dedicated_pre_shared_token
+        header: X-Asset-Sync-Token
+      security:
+        - AssetSyncToken: []
+      parameters:
+        - in: header
+          name: If-None-Match
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Complete current finalized manifest
+          headers:
+            ETag:
+              schema: { type: string }
+              description: Weak ETag containing the manifest content SHA-256; generated_at is intentionally excluded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinalizedSyncManifestResponse' }
+        '304':
+          description: Manifest content has not changed
+        '401':
+          description: Missing or invalid dedicated machine token
+        '500':
+          description: Manifest query or construction failed
+  /v1/integration/asset-sync/finalized/download-tickets:
+    post:
+      operationId: createFinalizedAssetDownloadTickets
+      summary: Stat finalized OSS objects and issue short-lived download tickets
+      description: |
+        Revalidates that every requested task asset still belongs to a current eligible finalized revision, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth:
+        mode: dedicated_pre_shared_token
+        header: X-Asset-Sync-Token
+      security:
+        - AssetSyncToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinalizedDownloadTicketRequest' }
+      responses:
+        '200':
+          description: Per-asset OSS availability and download tickets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinalizedDownloadTicketResponse' }
+        '400':
+          description: Invalid JSON or task_asset_ids count/value
+        '401':
+          description: Missing or invalid dedicated machine token
+        '500':
+          description: Current-finalized database query failed
   /v1/integration/external-assets/events:
     post:
       summary: Ingest NAS filesystem events

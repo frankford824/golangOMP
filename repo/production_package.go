@@ -34,9 +34,24 @@ type ProductionPackageAsset struct {
 	MimeType            string
 	FileSize            int64
 	StorageKey          string
+	WholeHash           string
 	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type ProductionPackageRepo interface {
 	ListFinalizedAssets(ctx context.Context, query ProductionPackageQuery) ([]ProductionPackageAsset, error)
+}
+
+// FinalizedAssetSyncRepo exposes the same current-finalized authority used by
+// production packaging without adding machine-sync concerns to the ordinary
+// SKU/name lookup contract.
+type FinalizedAssetSyncRepo interface {
+	ListAllFinalizedAssets(ctx context.Context) ([]ProductionPackageAsset, error)
+	ListFinalizedAssetsByIDs(ctx context.Context, taskAssetIDs []int64) ([]ProductionPackageAsset, error)
+}
+
+type ProductionPackageStore interface {
+	ProductionPackageRepo
+	FinalizedAssetSyncRepo
 }

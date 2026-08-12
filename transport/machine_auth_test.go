@@ -41,3 +41,35 @@ func TestExternalAssetEventTokenAuthIsDedicated(t *testing.T) {
 		})
 	}
 }
+
+func TestAssetSyncTokenAuthIsDedicatedAndFailClosed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previous := assetSyncToken
+	t.Cleanup(func() { assetSyncToken = previous })
+
+	request := func(headerName, token string) int {
+		router := gin.New()
+		router.Use(withAssetSyncTokenAuth())
+		router.GET("/manifest", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		req := httptest.NewRequest(http.MethodGet, "/manifest", nil)
+		req.Header.Set(headerName, token)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		return resp.Code
+	}
+
+	assetSyncToken = ""
+	if got := request(assetSyncTokenHeader, "secret"); got != http.StatusUnauthorized {
+		t.Fatalf("unset token status = %d", got)
+	}
+	assetSyncToken = "sync-secret"
+	if got := request(assetSyncTokenHeader, "sync-secret"); got != http.StatusNoContent {
+		t.Fatalf("dedicated header status = %d", got)
+	}
+	if got := request(authorizationHeader, "Bearer sync-secret"); got != http.StatusNoContent {
+		t.Fatalf("bearer status = %d", got)
+	}
+	if got := request(externalAssetEventTokenHeader, "sync-secret"); got != http.StatusUnauthorized {
+		t.Fatalf("external event header status = %d", got)
+	}
+}

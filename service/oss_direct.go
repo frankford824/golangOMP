@@ -115,6 +115,7 @@ type OSSObjectInfo struct {
 	ContentLength int64
 	ContentType   string
 	ETag          string
+	CRC64ECMA     string
 }
 
 type OSSCompletePart struct {
@@ -461,6 +462,7 @@ func (s *OSSDirectService) StatObject(ctx context.Context, objectKey string) (*O
 			ContentLength: resp.ContentLength,
 			ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
 			ETag:          strings.Trim(strings.TrimSpace(resp.Header.Get("ETag")), `"`),
+			CRC64ECMA:     strings.TrimSpace(resp.Header.Get("X-Oss-Hash-Crc64ecma")),
 		}, true, nil
 	case http.StatusNotFound:
 		return nil, false, nil

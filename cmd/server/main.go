@@ -381,7 +381,8 @@ func main() {
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient,
 		assetcenter.WithAssetCenterRedis(rdb),
 		assetcenter.WithProductionPackageRepo(productionPackageRepo),
-		assetcenter.WithProductionPackageJobs(productionPackageJobRepo, ossDirectSvc))
+		assetcenter.WithProductionPackageJobs(productionPackageJobRepo, ossDirectSvc),
+		assetcenter.WithFinalizedAssetSync(productionPackageRepo, ossDirectSvc))
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
 	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)
@@ -544,6 +545,7 @@ func main() {
 	taskSingleExcelH := handler.NewTaskSingleExcelHandler(taskSingleTemplateSvc, taskSingleParseSvc)
 	assetWorkbenchH := handler.NewAssetWorkbenchHandler(assetWorkbenchSvc, cfg.AssetWorkbench.CookieDomain)
 	integrationCenterH := handler.NewIntegrationCenterHandler(externalAssetSvc)
+	integrationCenterH.SetFinalizedAssetSyncService(globalAssetCenterSvc)
 	codeRuleH := handler.NewCodeRuleHandler(codeRuleSvc)
 	auditV7H := handler.NewAuditV7Handler(auditV7Svc, taskEventSvc)
 	serverLogSvc := service.NewServerLogService(serverLogRepo)

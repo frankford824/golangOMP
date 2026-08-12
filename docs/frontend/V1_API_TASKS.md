@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `172` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `174` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/access/permissions
 
@@ -5313,6 +5313,132 @@ curl -X POST https://api.example.com/v1/tasks/<id>/reference-assets/batch-downlo
 ```bash
 curl -X GET https://api.example.com/v1/task-board/overview \
   -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/integration/asset-sync/finalized/manifest
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns a deterministic snapshot of current finalized resource-group revisions using the same eligibility and image filtering as production Excel packaging. It never exposes draft-only or superseded revisions. `manifest_id` and the response `ETag` hash canonical snapshot content and exclude `generated_at`; clients should send `If-None-Match` on later polls. Objects that are missing in OSS remain in the manifest as current database facts and are reported by the download-ticket endpoint.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `If-None-Match` | header | string | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "schema_version": 1,
+    "manifest_id": "string",
+    "generated_at": "2026-04-25T10:30:41Z",
+    "group_count": 123,
+    "item_count": 123,
+    "object_count": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | FinalizedSyncManifest | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid dedicated machine token |
+| 500 | 见 `error.code` | 见 `deny_code` | Manifest query or construction failed |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/integration/asset-sync/finalized/manifest \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/asset-sync/finalized/download-tickets
+
+### 简介
+支持方法: POST。
+
+- `POST`: Revalidates that every requested task asset still belongs to a current eligible finalized revision, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `task_asset_ids` | array<integer> | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "results": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | FinalizedDownloadTicketData | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid JSON or task_asset_ids count/value |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid dedicated machine token |
+| 500 | 见 `error.code` | 见 `deny_code` | Current-finalized database query failed |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/asset-sync/finalized/download-tickets \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
 ```
 
 ### 前端最佳实践

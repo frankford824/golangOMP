@@ -25,7 +25,7 @@ const productionPackageResolvedName = `COALESCE(
 
 type productionPackageRepo struct{ db *DB }
 
-func NewProductionPackageRepo(db *DB) repo.ProductionPackageRepo {
+func NewProductionPackageRepo(db *DB) repo.ProductionPackageStore {
 	return &productionPackageRepo{db: db}
 }
 
@@ -58,6 +58,25 @@ func (r *productionPackageRepo) ListFinalizedAssets(ctx context.Context, query r
 		matchClauses = append(matchClauses, "("+strings.Join(parts, " OR ")+")")
 	}
 
+	return r.listFinalizedAssets(ctx, "("+strings.Join(matchClauses, " OR ")+")", args...)
+}
+
+func (r *productionPackageRepo) ListAllFinalizedAssets(ctx context.Context) ([]repo.ProductionPackageAsset, error) {
+	return r.listFinalizedAssets(ctx, "1 = 1")
+}
+
+func (r *productionPackageRepo) ListFinalizedAssetsByIDs(ctx context.Context, taskAssetIDs []int64) ([]repo.ProductionPackageAsset, error) {
+	if len(taskAssetIDs) == 0 {
+		return []repo.ProductionPackageAsset{}, nil
+	}
+	args := make([]interface{}, 0, len(taskAssetIDs))
+	for _, id := range taskAssetIDs {
+		args = append(args, id)
+	}
+	return r.listFinalizedAssets(ctx, "ta.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")+")", args...)
+}
+
+func (r *productionPackageRepo) listFinalizedAssets(ctx context.Context, matchClause string, args ...interface{}) ([]repo.ProductionPackageAsset, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT g.id,
 		       r.id,
@@ -77,7 +96,9 @@ func (r *productionPackageRepo) ListFinalizedAssets(ctx context.Context, query r
 		       COALESCE(ta.mime_type, ''),
 		       COALESCE(ta.file_size, 0),
 		       ta.storage_key,
-		       ta.created_at
+		       COALESCE(ta.whole_hash, ''),
+		       ta.created_at,
+		       ta.updated_at
 		  FROM task_asset_groups g
 		  JOIN task_asset_group_revisions r
 		    ON r.id = g.finalized_revision_id
@@ -89,7 +110,7 @@ func (r *productionPackageRepo) ListFinalizedAssets(ctx context.Context, query r
 		  LEFT JOIN task_retouch_requirements rr
 		    ON rr.id = g.retouch_requirement_id
 		   AND rr.deleted_at IS NULL
-		 WHERE (`+strings.Join(matchClauses, " OR ")+`)
+		 WHERE `+matchClause+`
 		   AND g.migration_incomplete = 0
 		   AND ta.deleted_at IS NULL
 		   AND ta.cleaned_at IS NULL
@@ -125,7 +146,9 @@ func (r *productionPackageRepo) ListFinalizedAssets(ctx context.Context, query r
 			&item.MimeType,
 			&item.FileSize,
 			&item.StorageKey,
+			&item.WholeHash,
 			&item.CreatedAt,
+			&item.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan finalized production package asset: %w", err)
 		}

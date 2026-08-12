@@ -14,12 +14,14 @@ import (
 
 const agentTokenHeader = "X-Agent-Token"
 const externalAssetEventTokenHeader = "X-External-Asset-Event-Token"
+const assetSyncTokenHeader = "X-Asset-Sync-Token"
 
 // agentAPIToken is the pre-shared secret for the NAS agent machine endpoints
 // (/v1/agent/*). When unset the endpoints reject every request, so deployments
 // must configure AGENT_API_TOKEN before agents can sync.
 var agentAPIToken = strings.TrimSpace(os.Getenv("AGENT_API_TOKEN"))
 var externalAssetEventToken = strings.TrimSpace(os.Getenv("EXTERNAL_ASSETS_EVENT_TOKEN"))
+var assetSyncToken = strings.TrimSpace(os.Getenv("ASSET_SYNC_API_TOKEN"))
 
 // withAgentTokenAuth protects machine-to-machine NAS agent endpoints with a
 // pre-shared token carried in X-Agent-Token (or Authorization: Bearer).
@@ -48,6 +50,23 @@ func withExternalAssetEventTokenAuth() gin.HandlerFunc {
 		}
 		if externalAssetEventToken == "" || provided == "" ||
 			subtle.ConstantTimeCompare([]byte(provided), []byte(externalAssetEventToken)) != 1 {
+			abortUnauthorized(c)
+			return
+		}
+		c.Next()
+	}
+}
+
+// withAssetSyncTokenAuth is a fail-closed credential dedicated to the
+// finalized manifest and download-ticket read APIs.
+func withAssetSyncTokenAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		provided := strings.TrimSpace(c.GetHeader(assetSyncTokenHeader))
+		if provided == "" {
+			provided = parseBearerToken(c.GetHeader(authorizationHeader))
+		}
+		if assetSyncToken == "" || provided == "" ||
+			subtle.ConstantTimeCompare([]byte(provided), []byte(assetSyncToken)) != 1 {
 			abortUnauthorized(c)
 			return
 		}

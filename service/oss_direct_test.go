@@ -505,6 +505,41 @@ func TestOSSDirectServiceOpenObjectSuccess(t *testing.T) {
 	}
 }
 
+func TestOSSDirectServiceStatObjectReturnsETagAndCRC64(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Fatalf("method = %s, want HEAD", r.Method)
+		}
+		w.Header().Set("Content-Length", "42")
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("ETag", `"etag-value"`)
+		w.Header().Set("X-Oss-Hash-Crc64ecma", "123456789")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	svc := NewOSSDirectService(OSSDirectConfig{
+		Enabled: true, Endpoint: strings.TrimPrefix(server.URL, "https://"),
+		PublicEndpoint: strings.TrimPrefix(server.URL, "https://"), Bucket: "test-bucket",
+		AccessKeyID: "LTAI5tTestKeyID", AccessKeySecret: "TestSecretKeyXYZ",
+	})
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpClient := server.Client()
+	httpClient.Transport = &rewriteHostTransport{base: baseURL, inner: httpClient.Transport}
+	svc.httpClient = httpClient
+
+	info, exists, err := svc.StatObject(context.Background(), "tasks/final.jpg")
+	if err != nil || !exists {
+		t.Fatalf("StatObject exists=%v err=%v", exists, err)
+	}
+	if info.ContentLength != 42 || info.ETag != "etag-value" || info.CRC64ECMA != "123456789" {
+		t.Fatalf("StatObject info = %+v", info)
+	}
+}
+
 func TestOSSDirectServiceOpenObjectNon2xxReturnsError(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

@@ -22,17 +22,19 @@ const materialSystemRoot = "/系统资源"
 const assetSearchTotalCacheTTL = 30 * time.Second
 
 type Service struct {
-	searchRepo     repo.TaskAssetSearchRepo
-	productionRepo repo.ProductionPackageRepo
-	packageJobRepo repo.ProductionPackageJobRepo
-	packageStore   ProductionPackageObjectStore
-	presigner      DownloadPresigner
-	urlBuilder     BrowserURLBuilder
-	streamOpener   baseservice.StorageStreamOpener
-	externalSvc    *externalassets.Service
-	cache          AssetCenterCache
-	flightMu       sync.Mutex
-	searchFlights  map[string]*assetSearchFlight
+	searchRepo         repo.TaskAssetSearchRepo
+	productionRepo     repo.ProductionPackageRepo
+	finalizedSyncRepo  repo.FinalizedAssetSyncRepo
+	finalizedSyncStore FinalizedAssetSyncObjectStore
+	packageJobRepo     repo.ProductionPackageJobRepo
+	packageStore       ProductionPackageObjectStore
+	presigner          DownloadPresigner
+	urlBuilder         BrowserURLBuilder
+	streamOpener       baseservice.StorageStreamOpener
+	externalSvc        *externalassets.Service
+	cache              AssetCenterCache
+	flightMu           sync.Mutex
+	searchFlights      map[string]*assetSearchFlight
 }
 
 type assetSearchFlight struct {
@@ -86,6 +88,13 @@ func WithProductionPackageJobs(repository repo.ProductionPackageJobRepo, store P
 	return func(s *Service) {
 		s.packageJobRepo = repository
 		s.packageStore = store
+	}
+}
+
+func WithFinalizedAssetSync(repository repo.FinalizedAssetSyncRepo, store FinalizedAssetSyncObjectStore) Option {
+	return func(s *Service) {
+		s.finalizedSyncRepo = repository
+		s.finalizedSyncStore = store
 	}
 }
 

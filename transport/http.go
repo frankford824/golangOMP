@@ -343,6 +343,11 @@ func NewRouter(
 
 	integrationGroup := v1.Group("/integration")
 	{
+		assetSyncGroup := integrationGroup.Group("/asset-sync")
+		assetSyncGroup.Use(withAssetSyncTokenAuth())
+		assetSyncGroup.GET("/finalized/manifest", integrationCenterH.FinalizedSyncManifest)
+		assetSyncGroup.POST("/finalized/download-tickets", integrationCenterH.FinalizedDownloadTickets)
+
 		externalAssetIntegrationGroup := integrationGroup.Group("/external-assets")
 		externalAssetIntegrationGroup.Use(withExternalAssetEventTokenAuth())
 		externalAssetIntegrationGroup.POST("/events", integrationCenterH.IngestExternalAssetEvents)

@@ -64,6 +64,7 @@ Core variables include:
 - `AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS` (keep `false` outside isolated local bootstrap/test runs)
 - `FRONTEND_ACCESS_SETTINGS_FILE`
 - `AGENT_API_TOKEN` (required by `/v1/agent/*` machine clients via `X-Agent-Token` or `Authorization: Bearer`)
+- `ASSET_SYNC_API_TOKEN` (required by the read-only finalized manifest/download-ticket machine APIs via `X-Asset-Sync-Token` or `Authorization: Bearer`; unset fails closed)
 - `WS_ALLOWED_ORIGINS` (only needed for cross-origin WebSocket clients; same host is allowed by default)
 - `ERP_BRIDGE_BASE_URL`
 - `UPLOAD_SERVICE_*`

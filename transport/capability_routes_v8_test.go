@@ -291,7 +291,14 @@ func TestV8TaskAssetUploadSessionAliasesShareCanonicalCapabilityContract(t *test
 }
 
 func TestV8BusinessRoutePermissionsKeepNonBusinessAndMachineRoutesOutsideCatalog(t *testing.T) {
-	for _, path := range []string{"/health", "/v1/auth/login", "/v1/agent/heartbeat", "/v1/integration/external-assets/events"} {
+	for _, path := range []string{
+		"/health",
+		"/v1/auth/login",
+		"/v1/agent/heartbeat",
+		"/v1/integration/external-assets/events",
+		"/v1/integration/asset-sync/finalized/manifest",
+		"/v1/integration/asset-sync/finalized/download-tickets",
+	} {
 		if permissions, governed := v8BusinessRoutePermissions(http.MethodGet, path); governed {
 			t.Fatalf("%s unexpectedly governed with %v", path, permissions)
 		}
