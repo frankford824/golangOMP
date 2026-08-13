@@ -36,7 +36,6 @@ type ProductionPackageAsset struct {
 	StorageKey          string
 	WholeHash           string
 	CreatedAt           time.Time
-	UpdatedAt           time.Time
 }
 
 type ProductionPackageRepo interface {

@@ -47,7 +47,7 @@ func TestFinalizedSyncManifestReturnsETagEnvelopeAnd304(t *testing.T) {
 		RevisionFinalizedAt: time.Unix(1000, 0).UTC(), RevisionItemID: 3,
 		TaskAssetID: 4, TaskID: 5, TaskNo: "RW-1", ScopeKind: domain.TaskAssetGroupScopeTask,
 		FileName: "final.jpg", MimeType: "image/jpeg", FileSize: 10, StorageKey: "tasks/final.jpg",
-		UpdatedAt: time.Unix(900, 0).UTC(),
+		CreatedAt: time.Unix(900, 0).UTC(),
 	}
 	svc := assetcenter.NewService(nil, nil, nil, assetcenter.WithFinalizedAssetSync(integrationFinalizedSyncRepoStub{rows: []repo.ProductionPackageAsset{row}}, nil))
 	handler := NewIntegrationCenterHandler(nil)

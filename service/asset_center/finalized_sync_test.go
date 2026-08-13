@@ -61,7 +61,7 @@ func finalizedSyncRow(groupID, revisionItemID, assetID int64, sortOrder int, fil
 		SortOrder: sortOrder, ItemName: filename, TaskAssetID: assetID, TaskID: groupID * 1000,
 		TaskNo: "RW-TEST", SKUCode: "SKU-1", SKUName: "Product", ScopeKind: domain.TaskAssetGroupScopeSKU,
 		FileName: filename, MimeType: "image/jpeg", FileSize: size, StorageKey: "tasks/" + filename,
-		UpdatedAt: time.Unix(1500+assetID, 0).UTC(),
+		CreatedAt: time.Unix(1500+assetID, 0).UTC(),
 	}
 }
 

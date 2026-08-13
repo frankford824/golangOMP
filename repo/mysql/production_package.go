@@ -97,8 +97,7 @@ func (r *productionPackageRepo) listFinalizedAssets(ctx context.Context, matchCl
 		       COALESCE(ta.file_size, 0),
 		       ta.storage_key,
 		       COALESCE(ta.whole_hash, ''),
-		       ta.created_at,
-		       ta.updated_at
+		       ta.created_at
 		  FROM task_asset_groups g
 		  JOIN task_asset_group_revisions r
 		    ON r.id = g.finalized_revision_id
@@ -148,7 +147,6 @@ func (r *productionPackageRepo) listFinalizedAssets(ctx context.Context, matchCl
 			&item.StorageKey,
 			&item.WholeHash,
 			&item.CreatedAt,
-			&item.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan finalized production package asset: %w", err)
 		}

@@ -189,7 +189,7 @@ func finalizedSyncItem(row repo.ProductionPackageAsset, format string) Finalized
 		RevisionItemID: row.RevisionItemID, SortOrder: row.SortOrder, ItemName: row.ItemName,
 		TaskAssetID: row.TaskAssetID, FileName: row.FileName, OriginalFilename: row.OriginalFilename,
 		Format: format, MimeType: row.MimeType, FileSize: row.FileSize, StorageKey: row.StorageKey,
-		WholeHash: wholeHash, AssetUpdatedAt: row.UpdatedAt.UTC(),
+		WholeHash: wholeHash, AssetUpdatedAt: row.CreatedAt.UTC(),
 	}
 }
 
