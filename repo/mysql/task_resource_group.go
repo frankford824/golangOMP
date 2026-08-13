@@ -1537,8 +1537,22 @@ func (r *TaskResourceGroupRepo) FinalizeGroup(ctx context.Context, tx repo.Tx, g
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return repo.ErrConflict
 	}
-	if err := revokeSupersededResourceGroupObjects(ctx, sqlTx, groupID, now); err != nil {
-		return err
+	// A first approval that keeps the designer's source has no superseded file
+	// bytes to revoke: design submissions cannot contain final-output items and
+	// there is no earlier finalized revision. Avoid the expensive historical
+	// reachability scan in that common path. Besides being redundant, running
+	// that scan once per SKU made large audit batches grow linearly until the
+	// browser's 30-second request deadline cancelled the transaction.
+	//
+	// Reopened tasks and auditor source replacements still take the full scan so
+	// obsolete source/final objects keep the existing revocation semantics.
+	needsSupersededObjectScan := previousRevisionID.Valid ||
+		previousSourceID.Valid != nextSourceID.Valid ||
+		(previousSourceID.Valid && previousSourceID.Int64 != nextSourceID.Int64)
+	if needsSupersededObjectScan {
+		if err := revokeSupersededResourceGroupObjects(ctx, sqlTx, groupID, now); err != nil {
+			return err
+		}
 	}
 	if err := reindexTaskAssetGroupSearchDocument(ctx, sqlTx, groupID); err != nil {
 		return err
