@@ -417,14 +417,41 @@ func (r *taskAssetLifecycleRepo) ClaimObjectDeletions(ctx context.Context, tx re
 		limit = 50
 	}
 	sqlTx := Unwrap(tx)
+	// A migration alias can legitimately share both storage_ref_id and
+	// storage_key with a finalized delivery row. Resolve that ownership before
+	// leasing the deletion so the worker never infers physical ownership from a
+	// task_asset_id alone. Any remaining non-deleted pointer wins over cleanup;
+	// orphaned retained objects can be collected only after all pointers detach.
 	rows, err := sqlTx.QueryContext(ctx, `
-		SELECT id, task_asset_id, storage_ref_id, storage_adapter, storage_is_placeholder, storage_key, attempt
-		  FROM asset_object_deletion_outbox
+		SELECT deletion.id,
+		       deletion.task_asset_id,
+		       deletion.storage_ref_id,
+		       deletion.storage_adapter,
+		       deletion.storage_is_placeholder,
+		       deletion.storage_key,
+		       deletion.attempt,
+		       EXISTS (
+		           SELECT 1
+		             FROM task_assets other
+		            WHERE (deletion.task_asset_id IS NULL OR other.id <> deletion.task_asset_id)
+		              AND other.object_deleted_at IS NULL
+		              AND (
+		                   (
+		                       COALESCE(TRIM(deletion.storage_key), '') <> ''
+		                       AND TRIM(other.storage_key) = TRIM(deletion.storage_key)
+		                   )
+		                   OR (
+		                       COALESCE(TRIM(deletion.storage_ref_id), '') <> ''
+		                       AND other.storage_ref_id = deletion.storage_ref_id
+		                   )
+		              )
+		       ) AS retain_physical_object
+		  FROM asset_object_deletion_outbox deletion
 		 WHERE (
-		       (status IN ('pending', 'retry') AND (next_retry_at IS NULL OR next_retry_at <= ?))
-		       OR (status = 'processing' AND lease_until IS NOT NULL AND lease_until <= ?)
+		       (deletion.status IN ('pending', 'retry') AND (deletion.next_retry_at IS NULL OR deletion.next_retry_at <= ?))
+		       OR (deletion.status = 'processing' AND deletion.lease_until IS NOT NULL AND deletion.lease_until <= ?)
 		 )
-		 ORDER BY id
+		 ORDER BY deletion.id
 		 LIMIT ?
 		 FOR UPDATE SKIP LOCKED`, now, now, limit)
 	if err != nil {
@@ -435,7 +462,16 @@ func (r *taskAssetLifecycleRepo) ClaimObjectDeletions(ctx context.Context, tx re
 		var item repo.AssetObjectDeletionOutboxItem
 		var taskAssetID sql.NullInt64
 		var storageRefID, storageAdapter sql.NullString
-		if err := rows.Scan(&item.ID, &taskAssetID, &storageRefID, &storageAdapter, &item.StorageIsPlaceholder, &item.StorageKey, &item.Attempt); err != nil {
+		if err := rows.Scan(
+			&item.ID,
+			&taskAssetID,
+			&storageRefID,
+			&storageAdapter,
+			&item.StorageIsPlaceholder,
+			&item.StorageKey,
+			&item.Attempt,
+			&item.RetainPhysicalObject,
+		); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("scan object deletion outbox: %w", err)
 		}

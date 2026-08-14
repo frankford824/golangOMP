@@ -33,6 +33,10 @@ type AssetObjectDeletionOutboxItem struct {
 	StorageRefID         *string
 	StorageAdapter       domain.AssetStorageAdapter
 	StorageIsPlaceholder bool
+	// RetainPhysicalObject is true when another task asset still points at the
+	// same storage key or storage ref. The worker must then detach only this
+	// outbox owner and leave the shared bytes intact.
+	RetainPhysicalObject bool
 	StorageKey           string
 	Attempt              int
 }

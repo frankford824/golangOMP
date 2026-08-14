@@ -251,11 +251,11 @@ func TestObjectDeletionOutboxClaimReclaimsExpiredLeaseAndIncrementsAttempt(t *te
 	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	leaseUntil := now.Add(2 * time.Minute)
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT id, task_asset_id, storage_ref_id, storage_adapter, storage_is_placeholder, storage_key, attempt[\s\S]+FOR UPDATE SKIP LOCKED`).
+	mock.ExpectQuery(`SELECT deletion.id,[\s\S]+retain_physical_object[\s\S]+FOR UPDATE SKIP LOCKED`).
 		WithArgs(now, now, 50).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_asset_id", "storage_ref_id", "storage_adapter", "storage_is_placeholder", "storage_key", "attempt"}).
-			AddRow(int64(1), int64(101), "ref-101", "oss_upload_service", false, "tasks/1/source.psd", 0).
-			AddRow(int64(2), int64(102), nil, "placeholder_storage", true, "tasks/1/preview.webp", 2))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_asset_id", "storage_ref_id", "storage_adapter", "storage_is_placeholder", "storage_key", "attempt", "retain_physical_object"}).
+			AddRow(int64(1), int64(101), "ref-101", "oss_upload_service", false, "tasks/1/source.psd", 0, true).
+			AddRow(int64(2), int64(102), nil, "placeholder_storage", true, "tasks/1/preview.webp", 2, false))
 	mock.ExpectExec(`UPDATE asset_object_deletion_outbox[\s\S]+attempt = attempt \+ 1`).
 		WithArgs("lease-1", leaseUntil, int64(1), int64(2)).
 		WillReturnResult(sqlmock.NewResult(0, 2))
@@ -272,7 +272,7 @@ func TestObjectDeletionOutboxClaimReclaimsExpiredLeaseAndIncrementsAttempt(t *te
 	if err != nil {
 		t.Fatalf("ClaimObjectDeletions() error = %v", err)
 	}
-	if len(items) != 2 || items[0].Attempt != 1 || items[1].Attempt != 3 || items[0].StorageAdapter != "oss_upload_service" || items[0].StorageRefID == nil || *items[0].StorageRefID != "ref-101" || !items[1].StorageIsPlaceholder {
+	if len(items) != 2 || items[0].Attempt != 1 || items[1].Attempt != 3 || items[0].StorageAdapter != "oss_upload_service" || items[0].StorageRefID == nil || *items[0].StorageRefID != "ref-101" || !items[0].RetainPhysicalObject || items[1].RetainPhysicalObject || !items[1].StorageIsPlaceholder {
 		t.Fatalf("items = %+v", items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

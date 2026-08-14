@@ -23,6 +23,7 @@ type ObjectDeletionWorkerConfig struct {
 type ObjectDeletionWorkerResult struct {
 	Claimed   int
 	Succeeded int
+	Retained  int
 	Retried   int
 	Alerted   int
 }
@@ -102,6 +103,10 @@ func (w *ObjectDeletionWorker) RunOnce(ctx context.Context, limit int) (*ObjectD
 	}
 	result.Claimed = len(items)
 	for _, item := range items {
+		if item.RetainPhysicalObject {
+			result.Retained++
+			w.logf("object deletion retained shared object id=%d task_asset_id=%v storage_key=%s", item.ID, item.TaskAssetID, item.StorageKey)
+		}
 		deleteErr, forceAlert := w.deleteObject(ctx, item)
 		if deleteErr == nil || objectDeletionNotFound(w.deleter, deleteErr) {
 			if err := w.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
@@ -131,6 +136,9 @@ func (w *ObjectDeletionWorker) RunOnce(ctx context.Context, limit int) (*ObjectD
 }
 
 func (w *ObjectDeletionWorker) deleteObject(ctx context.Context, item repo.AssetObjectDeletionOutboxItem) (error, bool) {
+	if item.RetainPhysicalObject {
+		return nil, false
+	}
 	switch item.StorageAdapter {
 	case domain.AssetStorageAdapterOSSUploadService:
 		if item.StorageIsPlaceholder {

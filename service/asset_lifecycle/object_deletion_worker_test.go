@@ -75,6 +75,38 @@ func TestObjectDeletionWorkerDispatchesOnlyOSSAdapterAndFailsUnknownClosed(t *te
 	}
 }
 
+func TestObjectDeletionWorkerRetainsSharedPhysicalObjectAndCompletesAlias(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	aliasID := int64(37385)
+	repository := &objectDeletionOutboxRepoStub{items: []repo.AssetObjectDeletionOutboxItem{
+		{
+			ID:                   2518,
+			TaskAssetID:          &aliasID,
+			StorageAdapter:       domain.AssetStorageAdapterOSSUploadService,
+			StorageKey:           "tasks/RW-1/assets/AST-1/v1/delivery/final.png",
+			RetainPhysicalObject: true,
+		},
+	}}
+	deleter := &objectDeletionDeleterStub{errorsByKey: map[string]error{}}
+	worker := NewObjectDeletionWorker(repository, fakeTxRunner{}, deleter, ObjectDeletionWorkerConfig{}, nil).
+		WithNow(func() time.Time { return now }).
+		WithLeaseTokenGenerator(func() string { return "lease-shared" })
+
+	result, appErr := worker.RunOnce(context.Background(), 10)
+	if appErr != nil {
+		t.Fatalf("RunOnce() appErr = %+v", appErr)
+	}
+	if result.Claimed != 1 || result.Succeeded != 1 || result.Retained != 1 || result.Retried != 0 || result.Alerted != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(deleter.calls) != 0 {
+		t.Fatalf("shared object reached physical deleter: %v", deleter.calls)
+	}
+	if len(repository.succeeded) != 1 || repository.succeeded[0].ID != 2518 {
+		t.Fatalf("succeeded = %+v", repository.succeeded)
+	}
+}
+
 type objectDeletionRetryCall struct {
 	item      repo.AssetObjectDeletionOutboxItem
 	lastError string
