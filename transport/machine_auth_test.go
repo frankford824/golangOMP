@@ -1,12 +1,21 @@
 package transport
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"workflow/domain"
 )
+
+type rejectingMachineBearerActorResolver struct{}
+
+func (rejectingMachineBearerActorResolver) ResolveRequestActor(context.Context, string) (*domain.RequestActor, *domain.AppError) {
+	return nil, domain.NewAppError(domain.ErrCodeUnauthorized, "session token rejected", nil)
+}
 
 func TestExternalAssetEventTokenAuthIsDedicated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -71,5 +80,32 @@ func TestAssetSyncTokenAuthIsDedicatedAndFailClosed(t *testing.T) {
 	}
 	if got := request(externalAssetEventTokenHeader, "sync-secret"); got != http.StatusUnauthorized {
 		t.Fatalf("external event header status = %d", got)
+	}
+}
+
+func TestAssetSyncBearerBypassesSessionResolutionAndReachesMachineAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previous := assetSyncToken
+	assetSyncToken = "sync-secret"
+	t.Cleanup(func() { assetSyncToken = previous })
+
+	router := gin.New()
+	router.Use(injectRequestActor(rejectingMachineBearerActorResolver{}))
+	group := router.Group("/v1/integration/asset-sync")
+	group.Use(withAssetSyncTokenAuth())
+	group.GET("/finalized/manifest", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	request := func(token string) int {
+		req := httptest.NewRequest(http.MethodGet, "/v1/integration/asset-sync/finalized/manifest", nil)
+		req.Header.Set(authorizationHeader, "Bearer "+token)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		return resp.Code
+	}
+	if got := request("sync-secret"); got != http.StatusNoContent {
+		t.Fatalf("machine bearer status = %d", got)
+	}
+	if got := request("wrong"); got != http.StatusUnauthorized {
+		t.Fatalf("wrong machine bearer status = %d", got)
 	}
 }
