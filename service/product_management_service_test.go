@@ -61,10 +61,11 @@ func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T
 		SigningSecret: "proxy-secret",
 		TokenTTL:      time.Hour,
 	})
+	expectedImageURL := signer.BuildImageURL(asset)
 	bridge := &productManagementERPBridgeCapture{
 		readbackProduct: &domain.ERPProduct{
 			SKUCode:  "CGK000181",
-			ImageURL: "https://images-erp.sursung.com/prod/erp/ItemSku/CGK000181.jpg",
+			ImageURL: *expectedImageURL,
 		},
 	}
 	svc := &productManagementService{
@@ -744,6 +745,81 @@ func TestProductManagementVerifyERPImageReadbackRejectsNonPublicImage(t *testing
 	}
 }
 
+func TestProductManagementVerifyERPImageReadbackRejectsDifferentAssetVersion(t *testing.T) {
+	previousSleeper := productManagementERPImageReadbackSleep
+	productManagementERPImageReadbackSleep = func(time.Duration) {}
+	defer func() { productManagementERPImageReadbackSleep = previousSleeper }()
+
+	svc := &productManagementService{
+		erpBridge: &productManagementERPBridgeCapture{
+			readbackProduct: &domain.ERPProduct{
+				SKUCode:  "CGD000061",
+				ImageURL: "https://yongbo.cloud/v1/public/erp-product-images/32799?exp=2&sig=old",
+			},
+		},
+	}
+	appErr := svc.verifyERPImageReadback(
+		context.Background(),
+		&domain.ProductManagementRecord{SKUCode: "CGD000061"},
+		"https://yongbo.cloud/v1/public/erp-product-images/33204?exp=1&sig=new",
+	)
+	if appErr == nil {
+		t.Fatal("verifyERPImageReadback() appErr = nil, want mismatched image failure")
+	}
+	if !strings.Contains(appErr.Message, "与本次同步图片不一致") {
+		t.Fatalf("verifyERPImageReadback() message = %q", appErr.Message)
+	}
+}
+
+func TestProductManagementBestAssetsBySourceRequiresExactSKU(t *testing.T) {
+	assetID := int64(10)
+	exactSKU := "CGD000061"
+	wrongSKU := "CGK001293"
+	mimeType := "image/webp"
+	assets := []*domain.TaskAsset{
+		{ID: 1, AssetID: &assetID, TaskID: 99, AssetType: domain.TaskAssetTypePreview, MimeType: &mimeType},
+		{ID: 2, AssetID: &assetID, TaskID: 99, ScopeSKUCode: &wrongSKU, AssetType: domain.TaskAssetTypePreview, MimeType: &mimeType},
+		{ID: 3, AssetID: &assetID, TaskID: 99, ScopeSKUCode: &exactSKU, AssetType: domain.TaskAssetTypePreview, MimeType: &mimeType},
+	}
+
+	got := bestAssetsBySource(assets, exactSKU, domain.ProductManagementImageSourceDerivedPreview)
+	if len(got) != 1 || got[0].ID != 3 {
+		t.Fatalf("bestAssetsBySource() = %#v, want only exact SKU asset 3", got)
+	}
+}
+
+func TestProductManagementFinalizedImageCandidateUsesDerivedPreviewOfFinal(t *testing.T) {
+	finalAssetID := int64(51)
+	previewAssetID := int64(52)
+	finalVersionID := int64(410)
+	previewVersionID := int64(411)
+	sku := "CGD000061"
+	tiff := "image/tiff"
+	webp := "image/webp"
+	finalStorage := "tasks/99/final.tif"
+	previewStorage := "tasks/99/preview.webp"
+	assets := []*domain.TaskAsset{
+		{ID: finalVersionID, TaskID: 99, AssetID: &finalAssetID, ScopeSKUCode: &sku, AssetType: domain.TaskAssetTypeDelivery, FileName: "final.tif", MimeType: &tiff, StorageKey: &finalStorage},
+		{ID: previewVersionID, TaskID: 99, AssetID: &previewAssetID, ScopeSKUCode: &sku, AssetType: domain.TaskAssetTypePreview, FileName: "preview.webp", MimeType: &webp, StorageKey: &previewStorage, SourceAssetVersionID: &finalVersionID},
+	}
+	svc := &productManagementService{
+		taskAssets: &productManagementTaskAssetRepoFake{items: assets},
+		finalizedResources: productManagementFinalizedResourceRepoStub{items: []domain.FlatResourceItem{
+			{TaskID: 99, TaskAssetID: finalVersionID, SKUCode: sku, ResourceRole: domain.ResourceRoleFilterFinal},
+		}},
+	}
+
+	got, err := svc.finalizedImageCandidatesForRecord(context.Background(), &domain.ProductManagementRecord{
+		TaskID: 99, TaskNo: "RW-99", SKUCode: sku,
+	}, nil)
+	if err != nil {
+		t.Fatalf("finalizedImageCandidatesForRecord() error = %v", err)
+	}
+	if len(got) != 1 || got[0].AssetVersionID != previewVersionID || got[0].Source != domain.ProductManagementImageSourceDerivedPreview {
+		t.Fatalf("finalized candidates = %#v, want derived preview version %d", got, previewVersionID)
+	}
+}
+
 func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T) {
 	assetID := int64(7302)
 	versionID := int64(4396)
@@ -754,11 +830,12 @@ func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T
 		SigningSecret: "proxy-secret",
 		TokenTTL:      time.Hour,
 	})
+	expectedImageURL := signer.BuildImageURL(asset)
 	bridge := &productManagementERPBridgeCapture{
 		readbackProduct: &domain.ERPProduct{
 			SKUCode:  "NSAC000001",
 			IID:      "定制亚克力",
-			ImageURL: "https://images-erp.sursung.com/prod/erp/ItemSku/NSAC000001.jpg",
+			ImageURL: *expectedImageURL,
 		},
 	}
 	svc := &productManagementService{
@@ -813,6 +890,10 @@ func TestProductManagementERPImageReadbackPendingClassification(t *testing.T) {
 	if !isProductManagementERPImageSyncRetryable(transient) {
 		t.Fatal("upstream business rejection should be retried")
 	}
+	mismatch := domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片回读校验未通过：ERP 返回的图片与本次同步图片不一致", nil)
+	if !isProductManagementERPImageSyncRetryable(mismatch) {
+		t.Fatal("stale ERP image readback should be retried")
+	}
 }
 
 func TestProductManagementDecoratedImageSyncStatusRequiresVerifiedTimestamp(t *testing.T) {
@@ -835,4 +916,58 @@ func TestProductManagementDecoratedImageSyncStatusRequiresVerifiedTimestamp(t *t
 	if got != domain.ProductManagementERPSyncStatusSynced {
 		t.Fatalf("decorated verified status = %q, want %q", got, domain.ProductManagementERPSyncStatusSynced)
 	}
+}
+
+type productManagementFinalizedResourceRepoStub struct {
+	items []domain.FlatResourceItem
+	err   error
+}
+
+func (s productManagementFinalizedResourceRepoStub) ListFlatResourceItems(context.Context, domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error) {
+	return s.items, int64(len(s.items)), s.err
+}
+
+type productManagementTaskAssetRepoFake struct {
+	items []*domain.TaskAsset
+}
+
+func (f *productManagementTaskAssetRepoFake) Create(context.Context, repo.Tx, *domain.TaskAsset) (int64, error) {
+	return 0, nil
+}
+
+func (f *productManagementTaskAssetRepoFake) GetByID(_ context.Context, id int64) (*domain.TaskAsset, error) {
+	for _, item := range f.items {
+		if item != nil && item.ID == id {
+			return item, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *productManagementTaskAssetRepoFake) ListByTaskID(_ context.Context, taskID int64) ([]*domain.TaskAsset, error) {
+	items := make([]*domain.TaskAsset, 0, len(f.items))
+	for _, item := range f.items {
+		if item != nil && item.TaskID == taskID {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+func (f *productManagementTaskAssetRepoFake) ListByAssetID(_ context.Context, assetID int64) ([]*domain.TaskAsset, error) {
+	items := make([]*domain.TaskAsset, 0, len(f.items))
+	for _, item := range f.items {
+		if item != nil && item.AssetID != nil && *item.AssetID == assetID {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+func (f *productManagementTaskAssetRepoFake) NextVersionNo(context.Context, repo.Tx, int64) (int, error) {
+	return 1, nil
+}
+
+func (f *productManagementTaskAssetRepoFake) NextAssetVersionNo(context.Context, repo.Tx, int64) (int, error) {
+	return 1, nil
 }

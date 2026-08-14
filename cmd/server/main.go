@@ -325,6 +325,7 @@ func main() {
 		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
 		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
 		service.WithProductManagementERPImageProxy(erpImageProxySigner),
+		service.WithProductManagementFinalizedResources(taskResourceGroupRepo),
 		service.WithProductManagementTaskEventRepo(taskEventRepo),
 		service.WithProductManagementSKUComboRepo(skuComboRepo),
 		service.WithProductManagementCostRecalculationRunRepo(costRecalculationRunRepo),
