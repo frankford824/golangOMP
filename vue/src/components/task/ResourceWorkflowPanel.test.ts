@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   submitDesign: vi.fn(),
   triggerModuleAction: vi.fn(),
   upload: vi.fn(),
+  deleteAsset: vi.fn(),
 }))
 
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
@@ -27,6 +28,17 @@ vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
 vi.mock('@/services/upload/assetUploadFlow', () => ({
   uploadTaskFileViaAssetSession: mocks.upload,
 }))
+
+vi.mock('@/services/api/assetsApi', async (loadOriginal) => {
+  const original = await loadOriginal<typeof import('@/services/api/assetsApi')>()
+  return {
+    ...original,
+    assetsApi: {
+      ...original.assetsApi,
+      deleteAsset: mocks.deleteAsset,
+    },
+  }
+})
 
 vi.mock('@/services/api/tasksApi', () => ({
   tasksApi: {
@@ -123,6 +135,8 @@ describe('ResourceWorkflowPanel action contract', () => {
     mocks.triggerModuleAction.mockResolvedValue({ data: { data: { task_id: 41 } } })
     mocks.upload.mockReset()
     mocks.upload.mockResolvedValue({ version: { id: 201 } })
+    mocks.deleteAsset.mockReset()
+    mocks.deleteAsset.mockResolvedValue(undefined)
   })
 
   it.each([
@@ -432,6 +446,34 @@ describe('ResourceWorkflowPanel action contract', () => {
     expect(mocks.submitDesign).toHaveBeenCalledWith(41, expect.anything(), [expect.objectContaining({
       source_task_asset_id: 302,
     })])
+    wrapper.unmount()
+  })
+
+  it('removes an unsubmitted source upload and restores the upload control', async () => {
+    const emptySourceBundle = bundle()
+    if (emptySourceBundle.groups[0].working_revision) {
+      emptySourceBundle.groups[0].working_revision.source_file = undefined
+    }
+    mocks.upload.mockResolvedValueOnce({ asset: { id: '8801' }, version: { id: 301 } })
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: { taskId: 41, taskType: 'design', bundle: emptySourceBundle, allowedActions: ['task.design.submit'] },
+    })
+    const sourceInput = wrapper.get('.source-drop input[type="file"]')
+    Object.defineProperty(sourceInput.element, 'files', {
+      configurable: true,
+      value: [new File(['wrong'], '上传错了.psd', { type: 'application/octet-stream' })],
+    })
+    await sourceInput.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('上传错了.psd')
+    await wrapper.get('[aria-label="移除未提交的设计源文件"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.deleteAsset).toHaveBeenCalledWith('8801', { reason: '未提交前移除上传错误的设计源文件' })
+    expect(wrapper.text()).not.toContain('上传错了.psd')
+    expect(wrapper.text()).toContain('已移除未提交源文件，可以重新上传。')
+    expect(wrapper.text()).toContain('选择一份或多份 PSD、AI、PSB、TIF、ZIP 等源文件')
     wrapper.unmount()
   })
 

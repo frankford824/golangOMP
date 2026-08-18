@@ -9929,8 +9929,10 @@ paths:
       summary: Delete asset
       description: >-
         Discards one staged, unbound resource and its backend-derived preview/design-thumb resources; reason is
-        required. Authorization is the explicit `asset.manage` capability intersected with the task's stable
-        organization-ID scope. The same transaction locks the complete resource set, rejects any resource referenced
+        required. Authorization permits either explicit `asset.manage`, or the original uploader holding
+        `task.create`, `task.upload_source`, or `task.audit` within the task's stable organization-ID scope. Uploader
+        access is still limited to staged, unbound resources. The same transaction locks the complete resource set,
+        rejects any resource referenced
         by a working/finalized/historical resource-group revision or client publication, immediately revokes access,
         soft-deletes metadata, and writes durable adapter-aware object-deletion outbox rows. Physical deletion is
         asynchronous: only `oss_upload_service` rows reach OSS; placeholder/mock/export-placeholder rows complete
@@ -9940,7 +9942,7 @@ paths:
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-A
-      x-permissions: [asset.manage]
+      x-permissions: [asset.manage, task.create, task.upload_source, task.audit]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -9958,7 +9960,7 @@ paths:
       responses:
         '204': { description: Resource access revoked, metadata soft-deleted, and object deletion queued }
         '403':
-          description: Missing `asset.manage` capability or outside the task's stable organization-ID scope
+          description: Not an in-scope asset manager or the in-scope original uploader of the staged resource
           content:
             application/json:
               schema:

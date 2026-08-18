@@ -4838,7 +4838,7 @@ export interface paths {
         post?: never;
         /**
          * Delete asset
-         * @description Discards one staged, unbound resource and its backend-derived preview/design-thumb resources; reason is required. Authorization is the explicit `asset.manage` capability intersected with the task's stable organization-ID scope. The same transaction locks the complete resource set, rejects any resource referenced by a working/finalized/historical resource-group revision or client publication, immediately revokes access, soft-deletes metadata, and writes durable adapter-aware object-deletion outbox rows. Physical deletion is asynchronous: only `oss_upload_service` rows reach OSS; placeholder/mock/export-placeholder rows complete without a physical call; unknown adapters fail closed, alert, and retry indefinitely. Object-not-found is success. Completed and Archived tasks require reopen; reopening never permits deletion of files retained by an earlier finalized revision.
+         * @description Discards one staged, unbound resource and its backend-derived preview/design-thumb resources; reason is required. Authorization permits either explicit `asset.manage`, or the original uploader holding `task.create`, `task.upload_source`, or `task.audit` within the task's stable organization-ID scope. Uploader access is still limited to staged, unbound resources. The same transaction locks the complete resource set, rejects any resource referenced by a working/finalized/historical resource-group revision or client publication, immediately revokes access, soft-deletes metadata, and writes durable adapter-aware object-deletion outbox rows. Physical deletion is asynchronous: only `oss_upload_service` rows reach OSS; placeholder/mock/export-placeholder rows complete without a physical call; unknown adapters fail closed, alert, and retry indefinitely. Object-not-found is success. Completed and Archived tasks require reopen; reopening never permits deletion of files retained by an earlier finalized revision.
          */
         delete: {
             parameters: {
@@ -4862,7 +4862,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Missing `asset.manage` capability or outside the task's stable organization-ID scope */
+                /** @description Not an in-scope asset manager or the in-scope original uploader of the staged resource */
                 403: {
                     headers: {
                         [name: string]: unknown;

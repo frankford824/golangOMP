@@ -8,6 +8,7 @@
 import axios from 'axios'
 import http from '@/services/http'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
+import { isMockEnabled } from '@/mocks'
 
 export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'design_thumb' | 'erp_product_image'
 
@@ -516,6 +517,10 @@ export const assetsApi = {
   },
 
   uploadToRemoteUrl: (uploadUrl: string, file: File, options?: AssetUploadOptions) => {
+    if (isMockEnabled() && /^https:\/\/mock-upload\.local\//.test(uploadUrl)) {
+      options?.onProgress?.({ loaded: file.size, total: file.size, percent: 100 })
+      return Promise.resolve({ status: 200, data: null, headers: {} })
+    }
     const method = (options?.method ?? 'PUT').toUpperCase()
     const headers: Record<string, string> = {
       'Content-Type': file.type || 'application/octet-stream',

@@ -4,14 +4,14 @@ import { addMillisecondsToNowISO, nowISO } from '@/utils/date'
 
 type MockAssetRecord = (typeof mockAssets)[number]
 
-interface MockReplacementSession {
-  assetID: string
+interface MockUploadSession {
+  assetID?: string
   fileName: string
   fileRole: MockAssetRecord['file_role']
   taskID: string
 }
 
-const mockReplacementSessions = new Map<string, MockReplacementSession>()
+const mockUploadSessions = new Map<string, MockUploadSession>()
 
 const LARGE_SURFACE_AUDIT_TOTAL = Number(import.meta.env.VITE_LARGE_SURFACE_TOTAL ?? 5000)
 const LARGE_SURFACE_AUDIT_PAGE_SIZE = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
@@ -206,14 +206,12 @@ export const assetsHandler: MockHandler = (request) => {
     const sessionId = `us_${Date.now()}`
     const requestedAssetID = String(request.body?.asset_id ?? '')
     const target = mockAssets.find((item) => mockNumericAssetID(item) === requestedAssetID)
-    if (target) {
-      mockReplacementSessions.set(sessionId, {
-        assetID: target.id,
-        fileName: String(request.body?.file_name ?? target.file_name),
-        fileRole: (request.body?.asset_kind as MockAssetRecord['file_role']) ?? target.file_role,
-        taskID: String(request.body?.task_id ?? target.task_id),
-      })
-    }
+    mockUploadSessions.set(sessionId, {
+      assetID: target?.id,
+      fileName: String(request.body?.file_name ?? target?.file_name ?? 'uploaded-file.psd'),
+      fileRole: (request.body?.asset_kind as MockAssetRecord['file_role']) ?? target?.file_role ?? 'delivery',
+      taskID: String(request.body?.task_id ?? target?.task_id ?? 'task_1001'),
+    })
     return {
       status: 201,
       data: {
@@ -260,30 +258,30 @@ export const assetsHandler: MockHandler = (request) => {
   const taskComplete = request.path.match(/^\/v1\/tasks\/([^/]+)\/asset-center\/upload-sessions\/([^/]+)\/complete$/)
   if (request.method === 'POST' && (globalComplete || taskComplete)) {
     const sessionId = globalComplete?.[1] ?? taskComplete?.[2] ?? `us_${Date.now()}`
-    const replacement = mockReplacementSessions.get(sessionId)
+    const upload = mockUploadSessions.get(sessionId)
     let completedAsset: MockAssetRecord | undefined
-    if (replacement) {
-      const target = mockAssets.find((item) => item.id === replacement.assetID)
+    if (upload?.assetID) {
+      const target = mockAssets.find((item) => item.id === upload.assetID)
       if (target) {
-        target.file_name = replacement.fileName
-        target.file_role = replacement.fileRole
+        target.file_name = upload.fileName
+        target.file_role = upload.fileRole
         target.created_at = nowISO()
         completedAsset = target
       } else {
         completedAsset = mockAssets[0]
       }
-      mockReplacementSessions.delete(sessionId)
     } else {
-      const taskId = String(request.body?.task_id ?? 'task_1001')
+      const assetID = String(Date.now())
       completedAsset = {
-        id: `asset_${Date.now()}`,
-        task_id: taskId,
-        file_name: String(request.body?.file_name ?? 'uploaded-file.psd'),
-        file_role: (request.body?.file_role as 'source' | 'delivery' | 'reference') ?? 'delivery',
+        id: assetID,
+        task_id: upload?.taskID ?? 'task_1001',
+        file_name: upload?.fileName ?? 'uploaded-file.psd',
+        file_role: upload?.fileRole ?? 'delivery',
         created_at: nowISO(),
       }
       mockAssets.unshift(completedAsset)
     }
+    mockUploadSessions.delete(sessionId)
     if (!completedAsset) {
       return { status: 404, data: { message: 'asset not found' } }
     }
@@ -293,6 +291,7 @@ export const assetsHandler: MockHandler = (request) => {
         data: {
           session: { session_id: sessionId, session_status: 'completed', upload_status: 'uploaded' },
           asset: buildMockAssetDetail(completedAsset),
+          version: { id: Number(mockNumericAssetID(completedAsset)) * 10 + 1, file_name: completedAsset.file_name },
         },
       },
     }

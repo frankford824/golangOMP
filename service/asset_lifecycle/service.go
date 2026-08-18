@@ -48,9 +48,14 @@ func deleteAccessDenied(taskID int64) *domain.AppError {
 		domain.ErrCodePermissionDenied,
 		"asset deletion is outside the actor's explicit capability or task scope",
 		map[string]interface{}{
-			"deny_code":            "asset_manage_scope_denied",
-			"task_id":              taskID,
-			"required_permissions": []domain.PermissionCode{domain.PermissionAssetManage},
+			"deny_code": "asset_manage_scope_denied",
+			"task_id":   taskID,
+			"required_permissions": []domain.PermissionCode{
+				domain.PermissionAssetManage,
+				domain.PermissionTaskCreate,
+				domain.PermissionTaskDesignSubmit,
+				domain.PermissionTaskAuditDecision,
+			},
 		},
 	)
 }

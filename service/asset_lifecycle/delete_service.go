@@ -20,7 +20,12 @@ func (s *Service) Delete(ctx context.Context, actor domain.RequestActor, assetID
 		if row == nil || row.Asset == nil || row.Task == nil {
 			return domain.ErrNotFound
 		}
-		if actor.EffectiveAccess == nil || !domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, row.Task.AccessSubject()) {
+		subject := row.Task.AccessSubject()
+		canManage := domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, subject)
+		canDiscardOwnStagedUpload := actor.ID > 0 && actor.ID == row.Asset.UploadedBy && (domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject) ||
+			domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskDesignSubmit, subject) ||
+			domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, subject))
+		if !canManage && !canDiscardOwnStagedUpload {
 			return deleteAccessDenied(row.Task.ID)
 		}
 		if row.Task.TaskStatus == domain.TaskStatusCompleted || row.Task.TaskStatus == domain.TaskStatusArchived {

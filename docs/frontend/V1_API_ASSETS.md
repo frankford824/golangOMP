@@ -464,7 +464,7 @@ curl -X POST https://api.example.com/v1/assets/batch-download \
 支持方法: GET, DELETE。
 
 - `GET`: Returns one asset resource by id including full version list. Source V1_ASSET_OWNERSHIP §5.2.
-- `DELETE`: Discards one staged, unbound resource and its backend-derived preview/design-thumb resources; reason is required. Authorization is the explicit `asset.manage` capability intersected with the task's stable organization-ID scope. The same transaction locks the complete resource set, rejects any resource referenced by a working/finalized/historical resource-group revision or client publication, immediately revokes access, soft-deletes metadata, and writes durable adapter-aware object-deletion outbox rows. Physical deletion is asynchronous: only `oss_upload_service` rows reach OSS; placeholder/mock/export-placeholder rows complete without a physical call; unknown adapters fail closed, alert, and retry indefinitely. Object-not-found is success. Completed and Archived tasks require reopen; reopening never permits deletion of files retained by an earlier finalized revision.
+- `DELETE`: Discards one staged, unbound resource and its backend-derived preview/design-thumb resources; reason is required. Authorization permits either explicit `asset.manage`, or the original uploader holding `task.create`, `task.upload_source`, or `task.audit` within the task's stable organization-ID scope. Uploader access is still limited to staged, unbound resources. The same transaction locks the complete resource set, rejects any resource referenced by a working/finalized/historical resource-group revision or client publication, immediately revokes access, soft-deletes metadata, and writes durable adapter-aware object-deletion outbox rows. Physical deletion is asynchronous: only `oss_upload_service` rows reach OSS; placeholder/mock/export-placeholder rows complete without a physical call; unknown adapters fail closed, alert, and retry indefinitely. Object-not-found is success. Completed and Archived tasks require reopen; reopening never permits deletion of files retained by an earlier finalized revision.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -535,7 +535,7 @@ Content-Type: `application/json`
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | Missing `asset.manage` capability or outside the task's stable organization-ID scope |
+| 403 | 见 `error.code` | 见 `deny_code` | Not an in-scope asset manager or the in-scope original uploader of the staged resource |
 | 404 | 见 `error.code` | 见 `deny_code` | Asset not found |
 | 409 | 见 `error.code` | 见 `deny_code` | Task requires reopen, or the resource is bound, finalized, historical, or publication-pinned |
 

@@ -114,6 +114,54 @@ func TestDeleteRequiresAssetManageInStableTaskScope(t *testing.T) {
 	}
 }
 
+func TestDeleteAllowsOriginalUploaderToDiscardOwnStagedAssetInTaskScope(t *testing.T) {
+	assetID := int64(8805)
+	moduleID := int64(6605)
+	departmentID := int64(61)
+	uploaderID := int64(305)
+	row := &repo.TaskAssetSearchRow{
+		Asset: &domain.TaskAsset{
+			ID: 9905, TaskID: 7705, AssetID: &assetID, AssetType: domain.TaskAssetTypeSource,
+			SourceTaskModuleID: &moduleID, UploadedBy: uploaderID,
+		},
+		Task: &domain.Task{ID: 7705, CreatorID: 404, OwnerDepartmentID: &departmentID, TaskStatus: domain.TaskStatusInProgress},
+	}
+	lifecycle := &deleteLifecycleRepoStub{current: row}
+	svc := NewService(&deleteSearchRepoStub{}, lifecycle, fakeTxRunner{}, nil)
+	actor := taskPermissionActor(uploaderID, domain.PermissionTaskDesignSubmit, domain.AccessScopeOwnDepartment, &departmentID)
+
+	if appErr := svc.Delete(context.Background(), actor, assetID, "上传文件错误"); appErr != nil {
+		t.Fatalf("Delete() appErr = %+v", appErr)
+	}
+	if !lifecycle.enqueued || !lifecycle.softDeleted {
+		t.Fatalf("staged upload not deleted: enqueued=%v soft_deleted=%v", lifecycle.enqueued, lifecycle.softDeleted)
+	}
+}
+
+func TestDeleteRejectsTaskScopedActorWhoDidNotUploadAsset(t *testing.T) {
+	assetID := int64(8806)
+	moduleID := int64(6606)
+	departmentID := int64(62)
+	row := &repo.TaskAssetSearchRow{
+		Asset: &domain.TaskAsset{
+			ID: 9906, TaskID: 7706, AssetID: &assetID, AssetType: domain.TaskAssetTypeSource,
+			SourceTaskModuleID: &moduleID, UploadedBy: 306,
+		},
+		Task: &domain.Task{ID: 7706, CreatorID: 404, OwnerDepartmentID: &departmentID, TaskStatus: domain.TaskStatusInProgress},
+	}
+	lifecycle := &deleteLifecycleRepoStub{current: row}
+	svc := NewService(&deleteSearchRepoStub{}, lifecycle, fakeTxRunner{}, nil)
+	actor := taskPermissionActor(307, domain.PermissionTaskDesignSubmit, domain.AccessScopeOwnDepartment, &departmentID)
+
+	appErr := svc.Delete(context.Background(), actor, assetID, "上传文件错误")
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Delete() appErr = %+v, want permission denied", appErr)
+	}
+	if lifecycle.enqueued || lifecycle.softDeleted {
+		t.Fatalf("another user's staged resource mutated: enqueued=%v soft_deleted=%v", lifecycle.enqueued, lifecycle.softDeleted)
+	}
+}
+
 func TestDeleteRejectsBoundOrHistoricallyReferencedResourceAfterReopen(t *testing.T) {
 	assetID := int64(8804)
 	moduleID := int64(6604)
@@ -277,13 +325,17 @@ func (d *recordingObjectDeleter) DeleteObject(_ context.Context, key string) err
 }
 
 func assetManageActor(id int64, scope domain.AccessScopeMode, departmentID *int64) domain.RequestActor {
-	assignment := domain.AccessAssignment{ID: 1, UserID: id, RoleID: 901, RoleCode: "asset_manager", ScopeMode: scope, SourceType: "direct"}
+	return taskPermissionActor(id, domain.PermissionAssetManage, scope, departmentID)
+}
+
+func taskPermissionActor(id int64, permission domain.PermissionCode, scope domain.AccessScopeMode, departmentID *int64) domain.RequestActor {
+	assignment := domain.AccessAssignment{ID: 1, UserID: id, RoleID: 901, RoleCode: "test_role", ScopeMode: scope, SourceType: "direct"}
 	effective := &domain.EffectiveAccess{
 		UserID:      id,
-		Permissions: []domain.PermissionCode{domain.PermissionAssetManage},
+		Permissions: []domain.PermissionCode{permission},
 		Assignments: []domain.AccessAssignment{assignment},
 		Sources: []domain.EffectiveAccessNote{{
-			Permission: domain.PermissionAssetManage,
+			Permission: permission,
 			RoleID:     assignment.RoleID,
 			RoleCode:   assignment.RoleCode,
 			SourceType: assignment.SourceType,
