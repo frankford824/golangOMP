@@ -5,6 +5,12 @@ interface BatchMutationFailure {
   reason: string
 }
 
+const supplementRecordFailure = 'supplement upload files must be managed through their supplement record'
+
+export function hasSupplementRecordFailure(failures: BatchMutationFailure[] | undefined) {
+  return Boolean(failures?.some((failure) => failure.reason.trim().toLowerCase().replace(/[.。]+$/, '') === supplementRecordFailure))
+}
+
 export function batchMutationFailureMessage(action: '移动' | '删除', failures: BatchMutationFailure[] | undefined) {
   if (!failures?.length) return ''
   const firstReason = mapRawBackendMessageToZh(failures[0]?.reason || '')

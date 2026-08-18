@@ -10,10 +10,11 @@ import {
 } from '@/services/api/resourceGroupsApi'
 import { useGlobalDownload } from '@aw/shared/download/useGlobalDownload'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
+import type { ClientMaterialRow, SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
 import CanonicalResourceThumb from './CanonicalResourceThumb.vue'
+import ResourceGroupMaterialCard from './ResourceGroupMaterialCard.vue'
 import {
   canonicalGroupCover,
-  canonicalGroupFinals,
   canonicalPreviewErrorMessage,
   canonicalPreviewUnavailableMessage,
   canonicalResourceRoleLabel,
@@ -23,10 +24,19 @@ import {
   type CanonicalResourceRole,
 } from './canonicalResource'
 
-const props = defineProps<{ initialQuery?: string }>()
+const props = defineProps<{
+  initialQuery?: string
+  canPublish?: boolean
+  clientMaterials?: ClientMaterialRow[]
+  publishing?: boolean
+}>()
+const emit = defineEmits<{
+  publish: [payload: { asset: SystemAssetRow; selection: { finalizedRevisionId: number; coverRevisionItemId: number } }]
+}>()
 const { queueCanonicalGroup, queueCanonicalResource } = useGlobalDownload()
 const query = ref(props.initialQuery || '')
 const role = ref<CanonicalResourceRole>('')
+const businessLane = ref<'' | 'normal' | 'customization'>('')
 const loading = ref(false)
 const error = ref('')
 const groups = ref<ResourceGroup[]>([])
@@ -62,6 +72,7 @@ async function load() {
     const result = await resourceGroupsApi.list({
       q: query.value.trim() || undefined,
       resource_role: role.value || undefined,
+      business_lane: businessLane.value || undefined,
       page: page.value,
       page_size: pageSize,
     })
@@ -88,6 +99,11 @@ function search() {
 }
 
 function changeRole() {
+  page.value = 1
+  void load()
+}
+
+function changeBusinessLane() {
   page.value = 1
   void load()
 }
@@ -172,6 +188,38 @@ function groupTitle(group: ResourceGroup) {
   return group.product_name || group.sku_code || group.task_no || `资源组 ${group.id}`
 }
 
+function groupAsMaterialAsset(group: ResourceGroup): SystemAssetRow {
+  const revision = currentCanonicalRevision(group)
+  const cover = canonicalGroupCover(group)
+  return {
+    id: group.id,
+    source_type: 'task_resource_group',
+    source_label: '任务资源组',
+    resource_id: `group:${group.id}`,
+    resource_group_id: group.id,
+    finalized_revision_id: group.finalized_revision_id || undefined,
+    cover_revision_item_id: revision?.items[0]?.id,
+    resource_mode: revision?.mode,
+    resource_item_count: revision?.items.length || 0,
+    scope_sku_code: group.sku_code,
+    sku_code: group.sku_code,
+    product_name: groupTitle(group),
+    task_no: group.task_no,
+    business_lane: group.business_lane,
+    file_name: cover?.filename,
+    mime_type: cover?.mimeType,
+    preview_available: Boolean(cover),
+  }
+}
+
+function publicationForGroup(group: ResourceGroup) {
+  return props.clientMaterials?.find((material) => material.resource_group_id === group.id) || null
+}
+
+function publishGroup(group: ResourceGroup, selection: { finalizedRevisionId: number; coverRevisionItemId: number }) {
+  emit('publish', { asset: groupAsMaterialAsset(group), selection })
+}
+
 function groupRows(group: ResourceGroup): Array<[string, string]> {
   const revision = currentCanonicalRevision(group)
   return [
@@ -223,6 +271,14 @@ onMounted(load)
         <input v-model="query" type="search" aria-label="搜索主工程资源" placeholder="搜索 SKU、任务号或文件名" />
       </label>
       <label>
+        <span>业务分类</span>
+        <select v-model="businessLane" aria-label="业务分类" @change="changeBusinessLane">
+          <option value="">全部分类</option>
+          <option value="normal">常规</option>
+          <option value="customization">定制</option>
+        </select>
+      </label>
+      <label>
         <span>资源类型</span>
         <select v-model="role" aria-label="资源类型" @change="changeRole">
           <option v-for="option in canonicalResourceRoleOptions" :key="option.value || 'all'" :value="option.value">{{ option.label }}</option>
@@ -254,25 +310,18 @@ onMounted(load)
     </div>
 
     <div v-else-if="groups.length" class="aw-resource-library__grid">
-      <article v-for="group in groups" :key="group.id" class="aw-resource-library-card aw-resource-library-card--group">
-        <button class="aw-resource-library-card__preview" type="button" @click="openGroupPreview(group)">
-          <CanonicalResourceThumb :file="canonicalGroupCover(group)" :alt="groupTitle(group)" />
-          <span class="aw-resource-library-card__role">{{ currentCanonicalRevision(group)?.mode === 'set' ? '套装' : '单图' }}</span>
-        </button>
-        <div class="aw-resource-library-card__body">
-          <strong :title="groupTitle(group)">{{ groupTitle(group) }}</strong>
-          <span>{{ group.sku_code || '任务级资源' }} · {{ group.task_no || group.task_id }}</span>
-          <small class="aw-resource-library-card__structure">
-            <b>参考图 {{ currentCanonicalRevision(group)?.references.length || 0 }}</b>
-            <b>源文件 {{ currentCanonicalRevision(group)?.source_file ? 1 : 0 }}</b>
-            <b>成品 {{ canonicalGroupFinals(group).length }}</b>
-          </small>
-        </div>
-        <div class="aw-resource-library-card__actions">
-          <button type="button" @click="openGroupPreview(group)"><Eye :size="14" aria-hidden="true" />预览</button>
-          <button type="button" :disabled="!group.finalized_revision_id" @click="downloadGroup(group)"><Download :size="14" aria-hidden="true" />整组下载</button>
-        </div>
-      </article>
+      <ResourceGroupMaterialCard
+        v-for="group in groups"
+        :key="group.id"
+        :asset="groupAsMaterialAsset(group)"
+        :published="publicationForGroup(group)"
+        :cover-file="canonicalGroupCover(group)"
+        :can-publish="canPublish && Boolean(group.finalized_revision_id)"
+        :publishing="publishing"
+        @preview="openGroupPreview(group)"
+        @download="downloadGroup(group)"
+        @publish="publishGroup(group, $event)"
+      />
     </div>
 
     <nav v-if="totalPages > 1" class="aw-drive-pager" aria-label="资源分页">

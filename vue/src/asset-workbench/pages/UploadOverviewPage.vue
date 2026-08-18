@@ -16,7 +16,7 @@ import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
 import { useGlobalDownload } from '@aw/shared/download/useGlobalDownload'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
-import { batchMutationFailureMessage } from '@aw/shared/drive/batchMutationFeedback'
+import { batchMutationFailureMessage, hasSupplementRecordFailure } from '@aw/shared/drive/batchMutationFeedback'
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
@@ -33,6 +33,7 @@ const route = useRoute()
 const { queueDriveFile } = useGlobalDownload()
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
+const supplementRecordPath = computed(() => capabilities.value.has('asset.workbench.settlement') ? '/supplements' : '/my-settlement')
 
 const pageSize = 50
 const exportLimit = 5000
@@ -46,6 +47,7 @@ const loading = ref(false)
 const actionLoading = ref(false)
 const exporting = ref(false)
 const error = ref('')
+const supplementDeleteGuidance = ref(false)
 const notice = ref('')
 const page = ref(1)
 const total = ref(0)
@@ -694,6 +696,7 @@ async function deleteSelectedFiles() {
   if (!ids.length || !reason || !canManageDrive.value) return
   actionLoading.value = true
   error.value = ''
+  supplementDeleteGuidance.value = false
   notice.value = ''
   try {
     const result = await assetWorkbenchApi.batchDeleteFiles(ids, reason)
@@ -703,8 +706,10 @@ async function deleteSelectedFiles() {
     selectedIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
     await loadFiles()
     error.value = failureMessage
+    supplementDeleteGuidance.value = hasSupplementRecordFailure(result.failures)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除失败'
+    supplementDeleteGuidance.value = false
   } finally {
     actionLoading.value = false
   }
@@ -834,7 +839,13 @@ onBeforeUnmount(() => {
     </section>
 
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <p v-if="error" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
+    <div v-if="supplementDeleteGuidance" class="aw-inline-alert aw-inline-alert--error">
+      <span>{{ error }}</span>
+      <RouterLink class="aw-grid-button" :to="supplementRecordPath">
+        {{ supplementRecordPath === '/supplements' ? '进入补录查询' : '进入我的补录' }}
+      </RouterLink>
+    </div>
+    <p v-else-if="error" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
 
     <section v-if="selectedIds.size" class="aw-upload-ledger__batch" aria-label="批量操作">
       <strong>已选择 {{ selectedIds.size }} 个文件</strong>

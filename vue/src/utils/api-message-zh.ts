@@ -173,6 +173,7 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   'supplement permission can only be opened for the current natural month.': '补录权限只能开放到当前自然月，请读取当前月份后重试。',
   'settlement supplements must be recorded in the current natural month.': '补录工资只能计入当前自然月，请刷新后重新提交。',
   'supplement upload is not open for this payee and business month.': '当前人员尚未开放本月补录，请先在补录管理中开放权限。',
+  'supplement upload files must be managed through their supplement record.': '补录文件不能在上传台账中单独删除，请进入对应补录记录执行删除，系统会同步移除文件和未结算金额。',
   'supplement_date must use yyyy-mm-dd.': '补录日期格式异常，请重新选择日期。',
   'payee payout profile is incomplete; confirm is blocked.': '无法确认批次：批次内有人员尚未补全姓名、身份证或支付宝信息。请先在人员资料中补齐后重试。',
   'settlement batch is not confirmable.': '当前批次状态不能确认，请刷新后查看最新状态。',

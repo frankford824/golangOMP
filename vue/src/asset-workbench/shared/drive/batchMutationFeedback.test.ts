@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { batchMutationFailureMessage } from './batchMutationFeedback'
+import { batchMutationFailureMessage, hasSupplementRecordFailure } from './batchMutationFeedback'
 
 describe('batchMutationFailureMessage', () => {
   it('turns priced-work selection failures into actionable Chinese copy', () => {
@@ -18,5 +18,16 @@ describe('batchMutationFailureMessage', () => {
         { file_id: 1, reason: 'Submission item cannot be changed after settlement batch attachment.' },
       ]),
     ).toBe('删除未完成：当前作品已进入待确认的结算批次，暂时不能移动或删除。请先取消该批次后再操作。')
+  })
+
+  it('identifies supplement files that must be deleted from their supplement record', () => {
+    const failures = [
+      { file_id: 1, reason: 'Supplement upload files must be managed through their supplement record.' },
+      { file_id: 2, reason: 'Supplement upload files must be managed through their supplement record.' },
+    ]
+    expect(hasSupplementRecordFailure(failures)).toBe(true)
+    expect(batchMutationFailureMessage('删除', failures)).toBe(
+      '删除未完成：补录文件不能在上传台账中单独删除，请进入对应补录记录执行删除，系统会同步移除文件和未结算金额，另有 1 个文件同样未处理',
+    )
   })
 })

@@ -6993,6 +6993,22 @@ body.aw-submission-dialog-locked {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.aw-material-toolbar__view-switch {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.aw-material-toolbar--canonical {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.aw-material-toolbar--canonical > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
 .aw-material-toolbar__query {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto auto;
@@ -9794,7 +9810,7 @@ body.aw-submission-dialog-locked {
 
 .aw-resource-library__filters {
   display: grid;
-  grid-template-columns: minmax(calc(var(--aw-space-12) * 5), 1fr) calc(var(--aw-space-12) * 4) auto;
+  grid-template-columns: minmax(calc(var(--aw-space-12) * 5), 1fr) calc(var(--aw-space-12) * 3) calc(var(--aw-space-12) * 3.5) auto;
   align-items: end;
   gap: var(--aw-space-3);
 }

@@ -1482,6 +1482,8 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 | `task_no` | query | string | 否 | - |
 | `creator_id` | query | integer | 否 | - |
 | `resource_role` | query | enum(reference/source/final) | 否 | - |
+| `format_category` | query | enum(image/design/pdf/video/archive) | 否 | Optional coarse resource format category. |
+| `business_lane` | query | enum(normal/customization) | 否 | Optional task business category. `customization` means 定制; `normal` means 常规. |
 | `q` | query | string | 否 | Searches task number |
 | `file_format` | query | string | 否 | Exact lowercase file extension without a dot |
 | `created_from` | query | string | 否 | Resource creation-time lower bound as RFC3339 or YYYY-MM-DD. |

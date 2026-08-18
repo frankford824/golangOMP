@@ -2,7 +2,8 @@
   <section class="aw-resource-card" :class="{ 'is-published': published?.enabled }">
     <button class="aw-resource-card__main" type="button" @click="emit('select')" @dblclick="emit('preview')">
       <span class="aw-resource-card__cover">
-        <img v-if="previewUrl" :src="previewUrl" :alt="title" loading="lazy" @error="emit('preview-failed', previewUrl)" />
+        <CanonicalResourceThumb v-if="coverFile" :file="coverFile" :alt="title" />
+        <img v-else-if="previewUrl" :src="previewUrl" :alt="title" loading="lazy" @error="emit('preview-failed', previewUrl)" />
         <span v-else aria-hidden="true">{{ asset.resource_mode === 'set' ? 'SET' : 'IMG' }}</span>
       </span>
       <span class="aw-resource-card__body">
@@ -10,6 +11,7 @@
         <small>{{ asset.task_no || '任务资源' }} · {{ sku }}</small>
         <span class="aw-resource-card__facts">
           <em>{{ modeLabel }}</em>
+          <em>{{ businessLaneLabel }}</em>
           <em>{{ itemCount }} 张最终成品</em>
           <em v-if="published?.finalized_revision_id">客户端固定版本 {{ published.finalized_revision_id }}</em>
         </span>
@@ -55,12 +57,15 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { assetWorkbenchApi, type ClientMaterialRow, type SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
+import CanonicalResourceThumb from './CanonicalResourceThumb.vue'
+import type { CanonicalResourceFile } from './canonicalResource'
 import type { WorkbenchResourceRevision } from './types'
 
 const props = defineProps<{
   asset: SystemAssetRow
   published?: ClientMaterialRow | null
   previewUrl?: string
+  coverFile?: CanonicalResourceFile | null
   canPublish?: boolean
   publishing?: boolean
 }>()
@@ -86,6 +91,7 @@ const title = computed(() => props.asset.product_name || props.asset.task_no || 
 const sku = computed(() => props.asset.scope_sku_code || props.asset.sku_code || props.asset.primary_sku_code || '任务级资源')
 const itemCount = computed(() => Number(props.asset.resource_item_count || revision.value?.items.length || 1))
 const modeLabel = computed(() => (props.asset.resource_mode || revision.value?.mode) === 'set' ? '套装' : '单图')
+const businessLaneLabel = computed(() => props.asset.business_lane === 'customization' ? '定制' : props.asset.business_lane === 'normal' ? '常规' : '未分类')
 const orderedItems = computed(() => [...(revision.value?.items || [])].sort((left, right) => left.sort_order - right.sort_order))
 const pinOutdated = computed(() => Boolean(
   props.published?.finalized_revision_id

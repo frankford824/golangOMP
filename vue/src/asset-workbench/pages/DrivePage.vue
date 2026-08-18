@@ -38,7 +38,7 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
-import { batchMutationFailureMessage } from '@aw/shared/drive/batchMutationFeedback'
+import { batchMutationFailureMessage, hasSupplementRecordFailure } from '@aw/shared/drive/batchMutationFeedback'
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
@@ -72,6 +72,7 @@ import {
 } from '@aw/shared/materials/systemAssetPreview'
 
 type DriveMode = 'uploads' | 'directories' | 'operational'
+type OperationalViewMode = 'resources' | 'paths'
 type SearchScope = 'all' | 'operational' | 'files' | 'orders'
 type ClientMaterialFilter = 'all' | 'enabled' | 'disabled'
 type ContextMenuState =
@@ -112,6 +113,7 @@ const QUARK_VISIBLE_ROOTS = new Set(['电视投屏', '海报', 'kt板', '闲置k
 const QUARK_VISIBLE_ACTUAL_BASE = '/quark/我的备份/来自：ASUS Administrator 电脑备份'
 
 const activeMode = ref<DriveMode>('directories')
+const operationalViewMode = ref<OperationalViewMode>('resources')
 const driveSpreadsheetOpen = ref(false)
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
@@ -119,6 +121,7 @@ const canMaintainItems = computed(() => canManageDrive.value || capabilities.val
 const canListUploadDirectories = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canUseOperational = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.material.download'))
 const canDeleteDriveFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
+const supplementRecordPath = computed(() => capabilities.value.has('asset.workbench.settlement') ? '/supplements' : '/my-settlement')
 
 interface SelectedDir {
   key: string
@@ -204,8 +207,8 @@ const materialFormatOptions: Array<{ value: MaterialFormatCategory; label: strin
 ]
 const materialBusinessLaneOptions: Array<{ value: MaterialBusinessLane; label: string }> = [
   { value: 'all', label: '全部分类' },
-  { value: 'customization', label: '定制' },
   { value: 'normal', label: '常规' },
+  { value: 'customization', label: '定制' },
 ]
 
 const previewOpen = ref(false)
@@ -234,6 +237,7 @@ const archiveLoading = ref(false)
 const archiveError = ref('')
 const notice = ref('')
 const actionError = ref('')
+const supplementDeleteGuidance = ref(false)
 
 let directoryAbortController: AbortController | null = null
 let filesAbortController: AbortController | null = null
@@ -1658,6 +1662,20 @@ function goDrivesHome() {
 function openOperational() {
   activeMode.value = 'operational'
   selectedFile.value = null
+  if (canManageDrive.value) void refreshClientMaterials({ silent: true })
+  if (operationalViewMode.value === 'paths' && !materialItems.value.length) {
+    void loadMaterialFolder(materialDefaultFolderPathForSource())
+  }
+}
+
+function switchOperationalView(mode: OperationalViewMode) {
+  if (operationalViewMode.value === mode) return
+  operationalViewMode.value = mode
+  activeMaterial.value = null
+  if (mode === 'resources') return
+  resetMaterialScopeSnapshot()
+  if (materialQuery.value.trim()) void loadMaterials(materialQuery.value)
+  else void loadMaterialFolder(materialDefaultFolderPathForSource())
 }
 
 function openMaterialFolder(path: string) {
@@ -1723,6 +1741,7 @@ async function runUnifiedSearch() {
   }
   if (searchScope.value === 'operational') {
     activeMode.value = 'operational'
+    operationalViewMode.value = 'resources'
     materialQuery.value = q
     resetSearchState(true)
     notice.value = `已在主工程资源库中检索：${q}`
@@ -1834,6 +1853,7 @@ function scheduleUnifiedSearch() {
 async function locateSearchRow(row: OverviewSearchRow) {
   if (row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material') {
     activeMode.value = 'operational'
+    operationalViewMode.value = 'resources'
     materialQuery.value = row.secondary_code || row.primary_code || row.title || ''
     searchActive.value = false
     notice.value = materialQuery.value ? `已在主工程资源库中检索：${materialQuery.value}` : '已打开主工程资源库'
@@ -2148,16 +2168,19 @@ async function deleteSelectedFiles() {
   if (!ids.length || !deleteReason.value.trim()) return
   fileMutationLoading.value = true
   actionError.value = ''
+  supplementDeleteGuidance.value = false
   try {
     const result = await assetWorkbenchApi.batchDeleteFiles(ids, deleteReason.value.trim())
     const deletedCount = result.deleted?.length ?? 0
     notice.value = deletedCount ? `已删除 ${deletedCount} 个文件` : ''
     actionError.value = batchMutationFailureMessage('删除', result.failures)
+    supplementDeleteGuidance.value = hasSupplementRecordFailure(result.failures)
     selectedFileIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
     if (!result.failures?.length) deleteReason.value = ''
     await refreshCurrentDrive()
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '删除文件失败'
+    supplementDeleteGuidance.value = false
   } finally {
     fileMutationLoading.value = false
   }
@@ -2550,6 +2573,7 @@ function selectClientMaterial(material: ClientMaterialRow) {
   const existing = materialItems.value.find((asset) => hasSharedIdentity(materialIdentityKeys(asset), materialKeys))
   searchActive.value = false
   activeMode.value = 'operational'
+  operationalViewMode.value = 'paths'
   clientMaterialManagerOpen.value = false
   selectMaterial(existing ? materialWithClientPublication(existing, material) : materialFromClient(material))
 }
@@ -3018,6 +3042,7 @@ onMounted(async () => {
   await Promise.all([loadDifficultyClasses(), loadDirectories()])
   if (hasQueryValue(route.query.scope) && normalizeScope(route.query.scope) === 'operational') {
     activeMode.value = 'operational'
+    if (canManageDrive.value) void refreshClientMaterials({ silent: true })
   }
   const locateId = Number(route.query.file_id || route.query.locate)
   if (locateId > 0) {
@@ -3100,7 +3125,13 @@ onBeforeUnmount(() => {
     </header>
 
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <p v-if="actionError" class="aw-inline-alert aw-inline-alert--error">{{ actionError }}</p>
+    <div v-if="supplementDeleteGuidance" class="aw-inline-alert aw-inline-alert--error">
+      <span>{{ actionError }}</span>
+      <RouterLink class="aw-grid-button" :to="supplementRecordPath">
+        {{ supplementRecordPath === '/supplements' ? '进入补录查询' : '进入我的补录' }}
+      </RouterLink>
+    </div>
+    <p v-else-if="actionError" class="aw-inline-alert aw-inline-alert--error">{{ actionError }}</p>
 
     <div
       v-if="batchJobPanelOpen"
@@ -3392,10 +3423,10 @@ onBeforeUnmount(() => {
                 </template>
               </template>
             </template>
-            <template v-else>
+            <template v-else-if="operationalViewMode === 'resources'">
               <button class="aw-drive__crumb" :class="{ 'is-active': true }" type="button" @click="openOperational">主工程资源库</button>
             </template>
-            <template v-if="false">
+            <template v-else>
               <template v-for="(crumb, index) in materialFolderBreadcrumbs" :key="crumb.path || '__material_root__'">
                 <ChevronRight v-if="index > 0" :size="14" aria-hidden="true" />
                 <button
@@ -3446,14 +3477,24 @@ onBeforeUnmount(() => {
                 上传到此处
               </button>
             </template>
-            <template v-else>
+            <template v-else-if="operationalViewMode === 'resources'">
               <div class="aw-material-toolbar aw-material-toolbar--canonical">
-                <strong>当前资源组</strong>
-                <span>参考图、设计源文件、最终成品</span>
+                <div>
+                  <strong>当前资源组</strong>
+                  <span>参考图、设计源文件、最终成品</span>
+                </div>
+                <div class="aw-segmented-control aw-material-toolbar__view-switch" aria-label="运营素材浏览方式">
+                  <button :class="{ 'is-active': operationalViewMode === 'resources' }" type="button">资源组</button>
+                  <button type="button" @click="switchOperationalView('paths')">路径浏览</button>
+                </div>
               </div>
             </template>
-            <template v-if="false">
+            <template v-else>
               <form class="aw-material-toolbar" @submit.prevent="loadMaterials()">
+                <div class="aw-segmented-control aw-material-toolbar__view-switch" aria-label="运营素材浏览方式">
+                  <button type="button" @click="switchOperationalView('resources')">资源组</button>
+                  <button :class="{ 'is-active': operationalViewMode === 'paths' }" type="button">路径浏览</button>
+                </div>
                 <div class="aw-material-toolbar__query">
                   <span class="aw-material-toolbar__search-icon" aria-hidden="true">
                     <IconfontActionIcon name="search" :size="18" />
@@ -3708,10 +3749,16 @@ onBeforeUnmount(() => {
             </template>
           </template>
 
-          <template v-else>
-            <ResourceLibraryPanel :initial-query="materialQuery" />
+          <template v-else-if="operationalViewMode === 'resources'">
+            <ResourceLibraryPanel
+              :initial-query="materialQuery"
+              :can-publish="canManageDrive"
+              :client-materials="clientMaterials"
+              :publishing="publishingClientMaterial"
+              @publish="publishResourceGroupMaterial($event.asset, $event.selection)"
+            />
           </template>
-          <template v-if="false">
+          <template v-else>
             <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
             <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
             <p v-else-if="visibleMaterialFolders.length === 0 && visibleMaterialFiles.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>

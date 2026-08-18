@@ -6855,6 +6855,8 @@ paths:
         - { name: task_no, in: query, schema: { type: string } }
         - { name: creator_id, in: query, schema: { type: integer, format: int64 } }
         - { name: resource_role, in: query, schema: { type: string, enum: [reference, source, final] } }
+        - { name: format_category, in: query, description: Optional coarse resource format category., schema: { type: string, enum: [image, design, pdf, video, archive] } }
+        - { name: business_lane, in: query, description: Optional task business category. `customization` means 定制; `normal` means 常规., schema: { type: string, enum: [normal, customization] } }
         - { name: q, in: query, description: Searches task number, SKU, indexed resource text, and finalized filenames., schema: { type: string } }
         - { name: file_format, in: query, description: Exact lowercase file extension without a dot, for example jpg, psd, or tif., schema: { type: string, pattern: '^[a-z0-9]{1,16}$' } }
         - { name: created_from, in: query, description: Resource creation-time lower bound as RFC3339 or YYYY-MM-DD., schema: { type: string } }

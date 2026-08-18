@@ -249,6 +249,8 @@ export const resourceGroupsApi = {
     task_no?: string
     creator_id?: number | string
     resource_role?: 'reference' | 'source' | 'final' | ''
+    format_category?: 'image' | 'design' | 'pdf' | 'video' | 'archive'
+    business_lane?: 'normal' | 'customization'
     q?: string
     file_format?: string
     created_from?: string

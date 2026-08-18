@@ -23053,6 +23053,10 @@ export interface operations {
                 task_no?: string;
                 creator_id?: number;
                 resource_role?: "reference" | "source" | "final";
+                /** @description Optional coarse resource format category. */
+                format_category?: "image" | "design" | "pdf" | "video" | "archive";
+                /** @description Optional task business category. `customization` means 定制; `normal` means 常规. */
+                business_lane?: "normal" | "customization";
                 /** @description Searches task number */
                 q?: string;
                 /** @description Exact lowercase file extension without a dot */
