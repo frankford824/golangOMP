@@ -84,13 +84,18 @@ func (r *externalAssetRepo) listExternalAssetSyncRows(ctx context.Context, prefi
 		}
 	}
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, provider, kind, mount_path, origin_path_hash, origin_path, parent_path,
-		       file_name, mime_type, file_size, status, oss_sync_status,
-		       COALESCE(oss_original_key, ''), fp.source_modified_at, external_asset_records.updated_at
+		SELECT external_asset_records.id, external_asset_records.provider, external_asset_records.kind,
+		       external_asset_records.mount_path, external_asset_records.origin_path_hash,
+		       external_asset_records.origin_path, external_asset_records.parent_path,
+		       external_asset_records.file_name, external_asset_records.mime_type,
+		       external_asset_records.file_size, external_asset_records.status,
+		       external_asset_records.oss_sync_status,
+		       COALESCE(external_asset_records.oss_original_key, ''),
+		       fp.source_modified_at, external_asset_records.updated_at
 		  FROM external_asset_records
 		  LEFT JOIN external_asset_source_fingerprints fp USING (origin_path_hash)
 		 WHERE `+strings.Join(where, " AND ")+`
-		 ORDER BY origin_path, id`, args...)
+		 ORDER BY external_asset_records.origin_path, external_asset_records.id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list external asset sync rows: %w", err)
 	}
