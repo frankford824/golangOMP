@@ -419,7 +419,7 @@ func Load() (*Config, error) {
 			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
 			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
 			OSSRequiredPrefixes: getEnv("EXTERNAL_ASSETS_OSS_REQUIRED_PREFIXES", "/p3/仓库素材区/徐凯"),
-			SyncExportRoots:     getEnv("EXTERNAL_ASSETS_SYNC_EXPORT_ROOTS", "/p3/仓库素材区/徐凯/1"),
+			SyncExportRoots:     getEnv("EXTERNAL_ASSETS_SYNC_EXPORT_ROOTS", "/p3/仓库素材区/徐凯"),
 			EventRoots:          getEnv("EXTERNAL_ASSETS_EVENT_ROOTS", getEnv("EXTERNAL_ASSETS_OSS_REQUIRED_PREFIXES", "/p3/仓库素材区/徐凯")),
 			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),
 			PrepareInterval:     mustParseDuration(getEnv("EXTERNAL_ASSETS_PREPARE_INTERVAL", "30s")),
