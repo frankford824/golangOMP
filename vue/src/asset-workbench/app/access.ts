@@ -11,6 +11,7 @@ export interface AssetWorkbenchRouteAccess {
 
 const SETTINGS_CHILD_PATHS = [
   '/settings/pricing',
+  '/settings/upload-directories',
   '/settings/people',
   '/settings/members',
   '/settings/events',
@@ -145,6 +146,12 @@ export const assetWorkbenchRouteAccess = {
     subtitle: '单价、质检扣款、补贴、活动价',
     aliases: ['计价设置', '单价设置', '质检扣款'],
     requiresAnyCapability: ['asset.workbench.cost_center.manage'],
+  },
+  '/settings/upload-directories': {
+    label: '上传目录',
+    subtitle: '新增、编辑、停用上传中心目录',
+    aliases: ['上传目录', '文件夹管理', '上传文件夹', '目录设置'],
+    requiresAnyCapability: ['asset.workbench.manage'],
   },
   '/settings/people': {
     label: '人员定级',

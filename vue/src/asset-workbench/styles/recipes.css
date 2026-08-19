@@ -3208,6 +3208,100 @@ body.aw-submission-dialog-locked {
   margin-top: 3px;
 }
 
+.aw-upload-directory-editor {
+  display: grid;
+  gap: var(--aw-space-4);
+}
+
+.aw-upload-directory-editor .aw-form-grid {
+  margin: 0;
+}
+
+.aw-upload-directory-editor__enabled {
+  align-self: end;
+  min-height: 42px;
+}
+
+.aw-upload-directory-settings__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--aw-space-4);
+  margin-top: var(--aw-space-4);
+}
+
+.aw-upload-directory-card {
+  display: grid;
+  gap: var(--aw-space-4);
+  min-width: 0;
+  padding: var(--aw-space-4);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+}
+
+.aw-upload-directory-card.is-disabled {
+  background: color-mix(in srgb, var(--aw-paper) 72%, var(--aw-surface));
+  color: var(--aw-ink-muted);
+}
+
+.aw-upload-directory-card__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-3);
+}
+
+.aw-upload-directory-card__head > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.aw-upload-directory-card__head strong,
+.aw-upload-directory-card__head small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-upload-directory-card__head small {
+  color: var(--aw-ink-muted);
+  font-family: var(--aw-font-mono);
+}
+
+.aw-upload-directory-card__icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--aw-radius-sm);
+  background: color-mix(in srgb, var(--aw-accent) 11%, var(--aw-surface));
+  color: var(--aw-accent);
+}
+
+.aw-upload-directory-card__meta {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin: 0;
+}
+
+.aw-upload-directory-card__meta > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: var(--aw-space-3);
+}
+
+.aw-upload-directory-card__meta dt {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-upload-directory-card__meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .aw-grade-console {
   display: grid;
   gap: var(--aw-space-4);

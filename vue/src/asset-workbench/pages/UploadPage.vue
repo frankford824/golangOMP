@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { RouterLink } from 'vue-router'
 import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, Table2, XCircle } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
@@ -99,6 +100,7 @@ const failedItems = computed(() => queue.value.filter((item) => item.status === 
 const uploadPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(queue.value))
 const uploadedPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(uploadedItems.value))
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
+const canManageUploadDirectories = computed(() => bootstrap.value?.capabilities?.includes('asset.workbench.manage') === true)
 const requiresUploadDirectory = computed(() => uploadDirectories.value.length > 0)
 const selectedUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === selectedUploadDirectoryId.value))
 const canUseUploadDirectory = computed(() => !requiresUploadDirectory.value || selectedUploadDirectoryId.value > 0)
@@ -672,6 +674,10 @@ async function loadContext() {
 onMounted(() => {
   void loadContext()
 })
+
+onActivated(() => {
+  void loadContext()
+})
 </script>
 
 <template>
@@ -722,8 +728,11 @@ onMounted(() => {
           <p class="aw-eyebrow">上传目录</p>
           <h3>选择这次文件进入的位置</h3>
         </div>
-        <span v-if="selectedUploadDirectory" class="aw-chip aw-chip--info">{{ selectedUploadDirectory.name }} · {{ uploadDirectoryDifficulty(selectedUploadDirectory) }}</span>
-        <span v-else class="aw-chip aw-chip--neutral">默认目录</span>
+        <div class="aw-inline-actions">
+          <span v-if="selectedUploadDirectory" class="aw-chip aw-chip--info">{{ selectedUploadDirectory.name }} · {{ uploadDirectoryDifficulty(selectedUploadDirectory) }}</span>
+          <span v-else class="aw-chip aw-chip--neutral">默认目录</span>
+          <RouterLink v-if="canManageUploadDirectories" class="aw-secondary-button" to="/settings/upload-directories">管理上传目录</RouterLink>
+        </div>
       </div>
       <AsyncBoundary
         :loading="contextLoading"

@@ -69,7 +69,7 @@ onMounted(() => {
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
         <h2>工作台设置</h2>
-        <p class="aw-copy">计价、分配与人事配置集中在这里，日常作业请返回左侧主菜单。</p>
+        <p class="aw-copy">上传目录、计价、分配与人事配置集中在这里，日常作业请返回左侧主菜单。</p>
       </div>
       <div class="aw-page-bar__actions">
         <RouterLink class="aw-secondary-button" to="/">返回工作台</RouterLink>

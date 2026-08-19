@@ -78,6 +78,15 @@ describe('asset workbench access rules', () => {
     expect(accessibleSettingsPaths(pricingOnly)).toEqual(['/settings/pricing', '/settings/events'])
   })
 
+  it('exposes upload directory management to asset managers', () => {
+    const manager = bootstrap({ is_admin: true, capabilities: ['asset.workbench.manage'] })
+
+    expect(canAccessPath(manager, '/settings/upload-directories')).toBe(true)
+    expect(firstAccessibleSettingsPath(manager)).toBe('/settings/upload-directories')
+    expect(accessibleSettingsPaths(manager)).toEqual(['/settings/upload-directories', '/settings/events'])
+    expect(routeAccessForPath('/settings/upload-directories')?.aliases).toContain('文件夹管理')
+  })
+
   it('does not resolve a default settings route before bootstrap is known', () => {
     expect(accessibleSettingsPaths(null)).toEqual([])
     expect(firstAccessibleSettingsPath(null)).toBeNull()

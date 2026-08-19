@@ -4,6 +4,7 @@ import {
   Calculator,
   ClipboardCheck,
   FileUp,
+  FolderCog,
   HardDrive,
   LayoutDashboard,
   ReceiptText,
@@ -55,6 +56,7 @@ const DAILY_NAV_DEFS: Array<{ path: string; icon: Component; requires?: readonly
 
 const SETTINGS_NAV_DEFS: Array<{ path: AssetWorkbenchSettingsPath; icon: Component }> = [
   { path: '/settings/pricing', icon: Calculator },
+  { path: '/settings/upload-directories', icon: FolderCog },
   { path: '/settings/people', icon: UsersRound },
   { path: '/settings/members', icon: UserRound },
   { path: '/settings/events', icon: ScrollText },

@@ -147,6 +147,12 @@ const routes: RouteRecordRaw[] = [
         meta: accessMeta('/settings/pricing'),
       },
       {
+        path: 'upload-directories',
+        name: 'asset-settings-upload-directories',
+        component: () => import('./pages/UploadDirectoriesSettingsPage.vue'),
+        meta: accessMeta('/settings/upload-directories'),
+      },
+      {
         path: 'people',
         name: 'asset-settings-people',
         component: () => import('./pages/PeoplePage.vue'),
