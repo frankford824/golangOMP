@@ -129,10 +129,17 @@ func buildExternalCurrentManifest(rows []repo.ExternalAssetSyncRow, prefixes []r
 		}
 		return items[i].ExternalAssetID < items[j].ExternalAssetID
 	})
+	semanticItems := append([]ExternalCurrentManifestItem(nil), items...)
+	for index := range semanticItems {
+		// Database bookkeeping (preview/direct-link preparation) may update the
+		// record timestamp without changing source bytes. Keep it observable in
+		// the response but out of the semantic ETag.
+		semanticItems[index].RecordUpdatedAt = time.Time{}
+	}
 	digestInput := struct {
 		SchemaVersion int                           `json:"schema_version"`
 		Items         []ExternalCurrentManifestItem `json:"items"`
-	}{SchemaVersion: ExternalCurrentSyncSchemaVersion, Items: items}
+	}{SchemaVersion: ExternalCurrentSyncSchemaVersion, Items: semanticItems}
 	raw, err := json.Marshal(digestInput)
 	if err != nil {
 		return nil, err

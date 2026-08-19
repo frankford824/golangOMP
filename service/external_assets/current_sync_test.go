@@ -28,6 +28,14 @@ func TestBuildExternalCurrentManifestIsDeterministicAndCarriesTombstones(t *test
 	if first.ManifestID != second.ManifestID {
 		t.Fatalf("manifest IDs differ: %s != %s", first.ManifestID, second.ManifestID)
 	}
+	rows[1].UpdatedAt = modified.Add(time.Hour)
+	bookkeepingOnly, err := buildExternalCurrentManifest(rows, prefixes, time.Unix(3, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ManifestID != bookkeepingOnly.ManifestID {
+		t.Fatal("record bookkeeping timestamp changed semantic manifest ID")
+	}
 	if first.ItemCount != 2 || first.ActiveCount != 1 || first.DeletedCount != 1 || first.TotalObjectBytes != 10 {
 		t.Fatalf("manifest counts = %+v", first)
 	}
