@@ -89,6 +89,15 @@ describe('ResourceGroupsView', () => {
     })
   })
 
+  it('hides the production packaging entry from the asset-center header', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-page-header="asset-center"]').text()).not.toContain('生产打包')
+    expect(wrapper.findComponent({ name: 'ProductionPackageDialog' }).exists()).toBe(false)
+    expect(wrapper.get('.page-actions').text()).toContain('刷新')
+  })
+
   it('keeps all filters while paging and opens the numeric resource-group route', async () => {
     const wrapper = mountView()
     await flushPromises()

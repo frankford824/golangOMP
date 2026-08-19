@@ -6,7 +6,6 @@
         <p class="yb-page-subtitle">SKU 生成后立即可检索；图片、来源任务、规格、组合关系与系统计算成本在同一张卡片持续补齐。</p>
       </div>
       <div class="page-actions">
-        <button class="primary-button" @click="packageOpen = true">生产打包</button>
         <button class="quiet-button" :disabled="loading" @click="load">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
@@ -153,7 +152,6 @@
         </aside>
       </div>
     </Teleport>
-    <ProductionPackageDialog :open="packageOpen" @close="packageOpen = false" />
   </main>
 </template>
 
@@ -161,7 +159,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
-import ProductionPackageDialog from '@/components/assets/ProductionPackageDialog.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import type { BackendAsset } from '@/services/apiTypes'
 import { assetsApi, type AssetBatchSearchManifest } from '@/services/api/assetsApi'
@@ -173,7 +170,6 @@ const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const filterDrawerOpen = ref(false)
-const packageOpen = ref(false)
 const brokenImages = ref(new Set<number>())
 const brokenFlat = ref(new Set<number>())
 const liveCosts = ref(new Map<number, ProductCostReconciliation>())
