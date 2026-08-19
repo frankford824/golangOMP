@@ -43,6 +43,60 @@ func TestGetUploadSessionForUpdateUsesRowLock(t *testing.T) {
 	}
 }
 
+func TestReverseConfirmedSettlementBatchPreservesSnapshotsAndReleasesSources(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 8, 19, 2, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM asset_workbench_settlement_adjustments
+			WHERE batch_id = ?
+		)`)).WithArgs(int64(8801)).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE asset_workbench_settlement_batches
+		SET status = ?, cancelled_by = ?, cancelled_at = ?, cancel_reason = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = ?`)).
+		WithArgs(domain.AssetWorkbenchBatchStatusCancelled, int64(1), now, "误确认", int64(8801), domain.AssetWorkbenchBatchStatusConfirmed).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE asset_workbench_submission_items
+		SET settlement_status = ?, current_settlement_batch_id = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE current_settlement_batch_id = ? AND settlement_status = ?`)).
+		WithArgs(domain.AssetWorkbenchSettlementStatusUnsettled, int64(8801), domain.AssetWorkbenchSettlementStatusSettled).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE asset_workbench_settlement_supplements
+		SET status = ?, linked_batch_id = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE linked_batch_id = ? AND status = ?`)).
+		WithArgs(domain.AssetWorkbenchSupplementStatusApproved, int64(8801), domain.AssetWorkbenchSupplementStatusSettled).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	workbenchRepo := NewAssetWorkbenchRepo(mysqlDB)
+	if err := mysqlDB.RunInTx(context.Background(), func(tx repo.Tx) error {
+		hasAdjustments, err := workbenchRepo.HasSettlementBatchAdjustments(context.Background(), tx, 8801)
+		if err != nil {
+			return err
+		}
+		if hasAdjustments {
+			t.Fatal("HasSettlementBatchAdjustments() = true, want false")
+		}
+		return workbenchRepo.ReverseConfirmedSettlementBatch(context.Background(), tx, 8801, 1, "误确认", now)
+	}); err != nil {
+		t.Fatalf("ReverseConfirmedSettlementBatch() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestLockPriceMatrixDimensionLocksParentDimensionBeforeExistingRules(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

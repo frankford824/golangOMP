@@ -13,6 +13,7 @@ import {
   type SupplementPermissionRow,
   type UploadDirectoryRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
@@ -67,6 +68,10 @@ type PermissionGridRow = SupplementPermissionRow & { status_label: string; reaso
 type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string; supplement_date_label: string; action: string }
 type SettlementSectionKey = 'preview' | 'batches' | 'supplements' | 'adjustments'
 
+const session = useAssetWorkbenchSessionStore()
+const canReverseConfirmedBatch = computed(() => Boolean(
+  session.bootstrap?.access?.asset_roles?.includes('SuperAdmin') || session.bootstrap?.user?.roles?.includes('SuperAdmin'),
+))
 const month = ref(defaultBusinessMonth())
 const preview = ref<SettlementPreview | null>(null)
 const batches = ref<SettlementBatchRow[]>([])
@@ -80,12 +85,17 @@ const entryEligiblePayeeUserId = ref(0)
 const supplementMonth = ref(currentBusinessMonth())
 const selectedBatch = ref<SettlementBatchDetail | null>(null)
 const pendingCancelBatch = ref<SettlementBatchRow | null>(null)
+const pendingReverseBatch = ref<SettlementBatchRow | null>(null)
 const pendingDeleteSupplement = ref<SettlementSupplementRow | null>(null)
 const cancelReason = ref('')
+const reverseReason = ref('')
+const reverseExpectedBatchNo = ref('')
+const reverseConfirmedUnpaid = ref(false)
 const supplementDeleteReason = ref('')
 const exporting = ref(false)
 const generatingBatch = ref(false)
 const confirmingBatchId = ref<number | null>(null)
+const reversingBatchId = ref<number | null>(null)
 const eligibleMonthsLoading = ref(false)
 const entryEligibleMonthsLoading = ref(false)
 const activeSettlementSection = ref<SettlementSectionKey>('preview')
@@ -374,7 +384,7 @@ function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
 function toBatchGridRow(row: SettlementBatchRow): BatchGridRow {
   return {
     ...row,
-    status_label: batchStatusMeta(row.status).label,
+    status_label: row.status === 'cancelled' && row.confirmed_at ? '已撤销确认' : batchStatusMeta(row.status).label,
   }
 }
 
@@ -575,6 +585,56 @@ async function cancelBatch() {
     await loadSettlement({ keepNotice: true })
   } catch (err) {
     error.value = settlementActionError(err, '取消批次失败')
+  }
+}
+
+function startReverseBatchConfirmation(batch: SettlementBatchRow) {
+  pendingReverseBatch.value = batch
+  pendingCancelBatch.value = null
+  reverseReason.value = ''
+  reverseExpectedBatchNo.value = ''
+  reverseConfirmedUnpaid.value = false
+}
+
+function closeReverseBatchConfirmation() {
+  pendingReverseBatch.value = null
+  reverseReason.value = ''
+  reverseExpectedBatchNo.value = ''
+  reverseConfirmedUnpaid.value = false
+}
+
+async function reverseBatchConfirmation() {
+  const batch = pendingReverseBatch.value
+  if (!batch || reversingBatchId.value) return
+  const reason = reverseReason.value.trim()
+  if (!reason) {
+    error.value = '请填写撤销确认原因'
+    return
+  }
+  if (reverseExpectedBatchNo.value.trim() !== batch.batch_no) {
+    error.value = `请输入完整批次号 ${batch.batch_no} 以确认操作`
+    return
+  }
+  if (!reverseConfirmedUnpaid.value) {
+    error.value = '请确认该批次尚未实际发放；已发放批次只能使用工资调整'
+    return
+  }
+  error.value = ''
+  notice.value = ''
+  reversingBatchId.value = batch.id
+  try {
+    await assetWorkbenchApi.reverseSettlementBatchConfirmation(batch.id, {
+      reason,
+      expected_batch_no: reverseExpectedBatchNo.value.trim(),
+      confirm_unpaid: true,
+    })
+    notice.value = `已撤销确认：${batch.batch_no}；原结算快照已保留，作品已恢复为未结算状态`
+    closeReverseBatchConfirmation()
+    await loadSettlement({ keepNotice: true })
+  } catch (err) {
+    error.value = settlementActionError(err, '撤销确认失败')
+  } finally {
+    reversingBatchId.value = null
   }
 }
 
@@ -1175,7 +1235,7 @@ onMounted(() => {
 
           <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
           <p class="aw-inline-alert aw-inline-alert--info">
-            确认批次前，请确保批次内所有人员都已补全姓名、身份证和支付宝信息。待确认批次会锁定对应作品，取消批次后才能移动或删除。
+            确认批次前，请确保批次内所有人员都已补全姓名、身份证和支付宝信息。待确认批次可取消后释放作品；已确认批次仅超级管理员可在确认尚未实际发放、且没有工资调整记录时撤销确认。
           </p>
 
           <div class="aw-data-surface">
@@ -1207,6 +1267,14 @@ onMounted(() => {
                   <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="startCancelBatch(gridRowAsBatch(row))">
                     取消
                   </button>
+                  <button
+                    v-if="canReverseConfirmedBatch && gridRowAsBatch(row).status === 'confirmed'"
+                    class="aw-secondary-button--danger"
+                    type="button"
+                    @click="startReverseBatchConfirmation(gridRowAsBatch(row))"
+                  >
+                    撤销确认
+                  </button>
                 </div>
                 <span
                   v-else-if="column.key === 'status_label'"
@@ -1237,6 +1305,41 @@ onMounted(() => {
                 <button class="aw-secondary-button" type="button" @click="pendingCancelBatch = null">返回</button>
               </div>
             </div>
+            <div v-if="pendingReverseBatch" class="aw-panel aw-settlement-reversal" role="dialog" aria-label="撤销已确认批次">
+              <div class="aw-panel__head">
+                <div>
+                  <h3>撤销已确认批次</h3>
+                  <p class="aw-copy">{{ pendingReverseBatch.batch_no }}</p>
+                </div>
+                <span class="aw-chip aw-chip--danger">高风险操作</span>
+              </div>
+              <p class="aw-inline-alert aw-inline-alert--error">
+                撤销后作品和补录将恢复为未结算/待结算状态，但原结算明细、付款快照和审计事件会保留。若工资已经实际发放，请勿撤销，必须使用工资调整。
+              </p>
+              <label class="aw-field">
+                <span>撤销原因</span>
+                <input v-model="reverseReason" aria-label="撤销确认原因" required />
+              </label>
+              <label class="aw-field">
+                <span>输入完整批次号确认</span>
+                <input v-model="reverseExpectedBatchNo" :placeholder="pendingReverseBatch.batch_no" aria-label="确认撤销批次号" autocomplete="off" required />
+              </label>
+              <label class="aw-check-row">
+                <input v-model="reverseConfirmedUnpaid" type="checkbox" />
+                <span>我确认该批次尚未实际发放，且理解原结算快照会永久保留</span>
+              </label>
+              <div class="aw-inline-actions">
+                <button
+                  class="aw-secondary-button aw-secondary-button--danger"
+                  type="button"
+                  :disabled="reversingBatchId === pendingReverseBatch.id"
+                  @click="reverseBatchConfirmation"
+                >
+                  {{ reversingBatchId === pendingReverseBatch.id ? '撤销中…' : '确认撤销' }}
+                </button>
+                <button class="aw-secondary-button" type="button" :disabled="reversingBatchId === pendingReverseBatch.id" @click="closeReverseBatchConfirmation">返回</button>
+              </div>
+            </div>
             <div v-if="!batches.length" class="aw-empty-state">
               <h3>还没有结算批次</h3>
               <p>先在“预览工资”确认金额，再生成批次。</p>
@@ -1262,6 +1365,14 @@ onMounted(() => {
                   {{ confirmingBatchId === selectedBatch.batch.id ? '确认中…' : '确认批次' }}
                 </button>
                 <button v-if="selectedBatch.batch.status === 'generated'" class="aw-secondary-button" type="button" @click="startCancelBatch(selectedBatch.batch)">取消批次</button>
+                <button
+                  v-if="canReverseConfirmedBatch && selectedBatch.batch.status === 'confirmed'"
+                  class="aw-secondary-button aw-secondary-button--danger"
+                  type="button"
+                  @click="startReverseBatchConfirmation(selectedBatch.batch)"
+                >
+                  撤销确认
+                </button>
                 <button v-if="selectedBatch.batch.status === 'confirmed'" class="aw-secondary-button" type="button" @click="activeSettlementSection = 'adjustments'">去记录工资调整</button>
               </div>
             </div>

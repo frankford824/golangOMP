@@ -17,7 +17,7 @@ describe('batchMutationFailureMessage', () => {
       batchMutationFailureMessage('删除', [
         { file_id: 1, reason: 'Submission item cannot be changed after settlement batch attachment.' },
       ]),
-    ).toBe('删除未完成：当前作品已进入待确认的结算批次，暂时不能移动或删除。请先取消该批次后再操作。')
+    ).toBe('删除未完成：当前作品已关联结算批次，不能移动或删除。待确认批次请先取消；已确认批次需由超级管理员执行受控撤销确认。')
   })
 
   it('identifies supplement files that must be deleted from their supplement record', () => {

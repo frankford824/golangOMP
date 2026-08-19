@@ -14869,6 +14869,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/asset-workbench/settlement/batches/{batch_id}/reverse-confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reverse one confirmed but unpaid settlement batch
+         * @description Super-admin-only compensating transition for an incorrectly confirmed batch. The caller must attest that payroll has not been paid, provide the exact batch number and a reason, and the batch must have no settlement adjustments. The batch becomes `cancelled`; linked submission items return to `unsettled`, linked supplements return to `approved`, and their batch links are cleared. Original settlement items, payout snapshots, confirmation metadata, totals, and audit evidence are retained permanently.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    batch_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Human-reviewed reason stored in the immutable audit event and batch cancellation metadata. */
+                        reason: string;
+                        /** @description Exact visible batch number typed by the operator to prevent reversing the wrong batch. */
+                        expected_batch_no: string;
+                        /**
+                         * @description Required operator attestation that payroll for this batch has not been paid. Paid batches must use adjustments instead.
+                         * @enum {boolean}
+                         */
+                        confirm_unpaid: true;
+                    };
+                };
+            };
+            responses: {
+                /** @description Confirmation reversed; financial snapshots retained and source rows released */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                batch_id: number;
+                                /** @enum {string} */
+                                status: "cancelled";
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Super administrator role required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Settlement batch not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Batch is not confirmed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/asset-workbench/settlement/supplement-permissions": {
         parameters: {
             query?: never;

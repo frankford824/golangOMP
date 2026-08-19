@@ -182,6 +182,7 @@ export function eventTypeMeta(value?: string | null): StatusMeta {
     'error_import.created': { label: '导入出错数', tone: 'warn' },
     'settlement.generated': { label: '生成结算', tone: 'money' },
     'settlement.confirmed': { label: '确认结算', tone: 'success' },
+    'settlement.confirmation_reversed': { label: '撤销结算确认', tone: 'danger' },
     'settlement.cancelled': { label: '取消结算', tone: 'danger' },
     'settlement.adjusted': { label: '工资调整', tone: 'money' },
     'supplement.created': { label: '创建补录', tone: 'info' },

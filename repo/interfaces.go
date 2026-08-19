@@ -594,6 +594,8 @@ type AssetWorkbenchRepo interface {
 	ConfirmSettlementBatch(ctx context.Context, tx Tx, batchID int64, actorID int64, at time.Time) error
 	FreezeSettlementPayouts(ctx context.Context, tx Tx, batchID int64, at time.Time, snapshots map[int64]json.RawMessage) error
 	CancelGeneratedSettlementBatch(ctx context.Context, tx Tx, batchID int64, actorID int64, reason string, at time.Time) error
+	HasSettlementBatchAdjustments(ctx context.Context, tx Tx, batchID int64) (bool, error)
+	ReverseConfirmedSettlementBatch(ctx context.Context, tx Tx, batchID int64, actorID int64, reason string, at time.Time) error
 	LockSettlementBatch(ctx context.Context, tx Tx, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error)
 	GetSettlementBatch(ctx context.Context, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error)
 	ListSettlementBatches(ctx context.Context, filter AssetWorkbenchSettlementBatchFilter) ([]*domain.AssetWorkbenchSettlementBatch, int64, error)

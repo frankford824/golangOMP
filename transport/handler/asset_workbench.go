@@ -1624,6 +1624,37 @@ func (h *AssetWorkbenchHandler) CancelSettlementBatch(c *gin.Context) {
 	respondOK(c, gin.H{"status": "ok"})
 }
 
+func (h *AssetWorkbenchHandler) ReverseSettlementBatchConfirmation(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	batchID, err := strconv.ParseInt(c.Param("batch_id"), 10, 64)
+	if err != nil || batchID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid batch_id", nil))
+		return
+	}
+	var req struct {
+		Reason          string `json:"reason"`
+		ExpectedBatchNo string `json:"expected_batch_no"`
+		ConfirmUnpaid   bool   `json:"confirm_unpaid"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	if appErr := h.svc.ReverseSettlementBatchConfirmation(c.Request.Context(), actor, assetworkbench.ReverseSettlementBatchConfirmationParams{
+		BatchID:         batchID,
+		Reason:          req.Reason,
+		ExpectedBatchNo: req.ExpectedBatchNo,
+		ConfirmedUnpaid: req.ConfirmUnpaid,
+	}); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, gin.H{"batch_id": batchID, "status": domain.AssetWorkbenchBatchStatusCancelled})
+}
+
 func (h *AssetWorkbenchHandler) CreateSettlementAdjustment(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

@@ -318,6 +318,10 @@ var knownGapReasons = map[string]string{
 	knownGapKey("PUT", "/v1/users/:id/roles"):                                                "tool-deref-limit-inline-route",
 }
 
+func init() {
+	knownGapReasons[knownGapKey("POST", "/v1/asset-workbench/settlement/batches/:batch_id/reverse-confirmation")] = "asset-workbench-mounted-route-contract-pending"
+}
+
 func main() {
 	var transport, handlers, domain, openapi, output, markdown string
 	var failOnDrift bool

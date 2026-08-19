@@ -388,6 +388,9 @@ export interface SettlementBatchRow {
   supplement_amount: number
   adjustment_amount: number
   net_amount: number
+  confirmed_at?: string
+  cancelled_at?: string
+  cancel_reason?: string
 }
 
 export interface SettlementItemRow {
@@ -1599,6 +1602,11 @@ export const assetWorkbenchApi = {
 
   async cancelSettlementBatch(batchId: number, reason: string, signal?: AbortSignal): Promise<unknown> {
     const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/settlement/batches/${batchId}/cancel`, { reason }, { signal })
+    return unwrap(res.data)
+  },
+
+  async reverseSettlementBatchConfirmation(batchId: number, payload: { reason: string; expected_batch_no: string; confirm_unpaid: boolean }, signal?: AbortSignal): Promise<unknown> {
+    const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/settlement/batches/${batchId}/reverse-confirmation`, payload, { signal })
     return unwrap(res.data)
   },
 

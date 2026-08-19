@@ -3184,6 +3184,30 @@ body.aw-submission-dialog-locked {
   margin: var(--aw-space-1) 0 0;
 }
 
+.aw-settlement-reversal {
+  display: grid;
+  gap: var(--aw-space-4);
+  border-color: color-mix(in srgb, var(--aw-danger) 38%, var(--aw-hairline));
+}
+
+.aw-settlement-reversal .aw-panel__head {
+  margin-bottom: 0;
+}
+
+.aw-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aw-space-2);
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.5;
+}
+
+.aw-check-row input {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
 .aw-grade-console {
   display: grid;
   gap: var(--aw-space-4);

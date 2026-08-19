@@ -3334,6 +3334,51 @@ func (r *assetWorkbenchRepo) CancelGeneratedSettlementBatch(ctx context.Context,
 	return nil
 }
 
+func (r *assetWorkbenchRepo) HasSettlementBatchAdjustments(ctx context.Context, tx repo.Tx, batchID int64) (bool, error) {
+	var exists bool
+	if err := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM asset_workbench_settlement_adjustments
+			WHERE batch_id = ?
+		)`, batchID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check asset workbench settlement adjustments: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *assetWorkbenchRepo) ReverseConfirmedSettlementBatch(ctx context.Context, tx repo.Tx, batchID int64, actorID int64, reason string, at time.Time) error {
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_settlement_batches
+		SET status = ?, cancelled_by = ?, cancelled_at = ?, cancel_reason = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = ?`,
+		domain.AssetWorkbenchBatchStatusCancelled, actorID, at, reason, batchID, domain.AssetWorkbenchBatchStatusConfirmed)
+	if err != nil {
+		return fmt.Errorf("reverse confirmed asset workbench settlement batch: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected != 1 {
+		return domain.NewAppError(domain.ErrCodeConflict, "Settlement batch is not confirmation-reversible.", nil)
+	}
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_submission_items
+		SET settlement_status = ?, current_settlement_batch_id = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE current_settlement_batch_id = ? AND settlement_status = ?`,
+		domain.AssetWorkbenchSettlementStatusUnsettled, batchID, domain.AssetWorkbenchSettlementStatusSettled); err != nil {
+		return fmt.Errorf("release confirmed asset workbench settlement items: %w", err)
+	}
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_settlement_supplements
+		SET status = ?, linked_batch_id = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE linked_batch_id = ? AND status = ?`,
+		domain.AssetWorkbenchSupplementStatusApproved, batchID, domain.AssetWorkbenchSupplementStatusSettled); err != nil {
+		return fmt.Errorf("release confirmed asset workbench settlement supplements: %w", err)
+	}
+	// Keep settlement items and payout snapshots attached to the cancelled batch.
+	// They are immutable evidence that the batch was once confirmed and later reversed.
+	return nil
+}
+
 func (r *assetWorkbenchRepo) LockSettlementBatch(ctx context.Context, tx repo.Tx, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error) {
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSettlementBatchSelect()+` WHERE id = ? FOR UPDATE`, batchID)
 	return scanAssetWorkbenchSettlementBatch(row)

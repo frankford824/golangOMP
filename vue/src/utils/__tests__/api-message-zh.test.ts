@@ -170,7 +170,7 @@ describe('resolveApiUserMessage', () => {
 
   it('maps asset-workbench settlement and priced-work mutation messages', () => {
     expect(mapRawBackendMessageToZh('Submission item cannot be changed after settlement batch attachment.')).toBe(
-      '当前作品已进入待确认的结算批次，暂时不能移动或删除。请先取消该批次后再操作。',
+      '当前作品已关联结算批次，不能移动或删除。待确认批次请先取消；已确认批次需由超级管理员执行受控撤销确认。',
     )
     expect(mapRawBackendMessageToZh('All files in one priced work must be selected together.')).toBe(
       '该作品由文件夹内的多个文件组成，请勾选整个文件夹作品后再移动或删除。',

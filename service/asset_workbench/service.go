@@ -1033,6 +1033,13 @@ type CreateSettlementAdjustmentParams struct {
 	Payload        json.RawMessage `json:"payload_json"`
 }
 
+type ReverseSettlementBatchConfirmationParams struct {
+	BatchID         int64
+	Reason          string
+	ExpectedBatchNo string
+	ConfirmedUnpaid bool
+}
+
 type SettlementBatchDetail struct {
 	Batch       *domain.AssetWorkbenchSettlementBatch  `json:"batch"`
 	Items       []*domain.AssetWorkbenchSettlementItem `json:"items"`
@@ -5063,6 +5070,75 @@ func (s *Service) CancelSettlementBatch(ctx context.Context, actor domain.Reques
 			return appErr
 		}
 		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to cancel settlement batch.", err.Error())
+	}
+	return nil
+}
+
+func (s *Service) ReverseSettlementBatchConfirmation(ctx context.Context, actor domain.RequestActor, params ReverseSettlementBatchConfirmationParams) *domain.AppError {
+	if err := s.requireRepo(); err != nil {
+		return err
+	}
+	if !actorHasAny(actor, domain.RoleSuperAdmin) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Only super administrators can reverse confirmed settlement batches.", nil)
+	}
+	if params.BatchID <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "batch_id is required.", nil)
+	}
+	reason := strings.TrimSpace(params.Reason)
+	if reason == "" {
+		return domain.NewAppError(domain.ErrCodeReasonRequired, "A reversal reason is required.", nil)
+	}
+	expectedBatchNo := strings.TrimSpace(params.ExpectedBatchNo)
+	if expectedBatchNo == "" {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_batch_no is required.", nil)
+	}
+	if !params.ConfirmedUnpaid {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "confirm_unpaid must be true before reversing a confirmed settlement batch.", nil)
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		batch, err := s.repo.LockSettlementBatch(ctx, tx, params.BatchID)
+		if err != nil {
+			return err
+		}
+		if batch.Status != domain.AssetWorkbenchBatchStatusConfirmed {
+			return domain.NewAppError(domain.ErrCodeConflict, "Settlement batch is not confirmation-reversible.", map[string]interface{}{
+				"batch_id": params.BatchID,
+				"status":   batch.Status,
+			})
+		}
+		if expectedBatchNo != batch.BatchNo {
+			return domain.NewAppError(domain.ErrCodeConflict, "expected_batch_no does not match the confirmed settlement batch.", map[string]interface{}{
+				"batch_id": params.BatchID,
+			})
+		}
+		hasAdjustments, err := s.repo.HasSettlementBatchAdjustments(ctx, tx, batch.ID)
+		if err != nil {
+			return err
+		}
+		if hasAdjustments {
+			return domain.NewAppError(domain.ErrCodeConflict, "Settlement batch has adjustments and cannot be confirmation-reversed.", map[string]interface{}{
+				"batch_id": batch.ID,
+			})
+		}
+		if err := s.repo.ReverseConfirmedSettlementBatch(ctx, tx, batch.ID, actor.ID, reason, s.nowFn().UTC()); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSettlementConfirmationReversed, domain.AssetWorkbenchEntitySettlement, &batch.ID, batch, map[string]interface{}{
+			"batch_id":                   batch.ID,
+			"batch_no":                   batch.BatchNo,
+			"status":                     domain.AssetWorkbenchBatchStatusCancelled,
+			"confirmation_reversed":      true,
+			"operator_confirmed_unpaid":  true,
+			"settlement_items_preserved": true,
+		}, reason)
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return appErr
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.NewAppError(domain.ErrCodeNotFound, "Settlement batch not found.", nil)
+		}
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to reverse confirmed settlement batch.", err.Error())
 	}
 	return nil
 }

@@ -449,6 +449,11 @@ type settlementBatchRepo struct {
 	attachedSupplementIDs []int64
 	cancelledBatchID      int64
 	cancelReason          string
+	lockedBatchStatus     string
+	lockedBatchNo         string
+	hasAdjustments        bool
+	reversedBatchID       int64
+	reverseReason         string
 	confirmedBatchID      int64
 	frozenBatchID         int64
 	events                []*domain.AssetWorkbenchEvent
@@ -500,7 +505,15 @@ func (r *settlementBatchRepo) ConfirmSettlementBatch(_ context.Context, _ repo.T
 }
 
 func (r *settlementBatchRepo) LockSettlementBatch(_ context.Context, _ repo.Tx, batchID int64) (*domain.AssetWorkbenchSettlementBatch, error) {
-	return &domain.AssetWorkbenchSettlementBatch{ID: batchID, Status: domain.AssetWorkbenchBatchStatusGenerated}, nil
+	status := r.lockedBatchStatus
+	if status == "" {
+		status = domain.AssetWorkbenchBatchStatusGenerated
+	}
+	batchNo := r.lockedBatchNo
+	if batchNo == "" {
+		batchNo = "AWB-TEST"
+	}
+	return &domain.AssetWorkbenchSettlementBatch{ID: batchID, BatchNo: batchNo, Status: status}, nil
 }
 
 func (r *settlementBatchRepo) ListSettlementItemsByBatch(_ context.Context, batchID int64) ([]*domain.AssetWorkbenchSettlementItem, error) {
@@ -541,6 +554,16 @@ func (r *settlementBatchRepo) GetProfileByUserID(_ context.Context, userID int64
 func (r *settlementBatchRepo) CancelGeneratedSettlementBatch(_ context.Context, _ repo.Tx, batchID int64, _ int64, reason string, _ time.Time) error {
 	r.cancelledBatchID = batchID
 	r.cancelReason = reason
+	return nil
+}
+
+func (r *settlementBatchRepo) HasSettlementBatchAdjustments(_ context.Context, _ repo.Tx, _ int64) (bool, error) {
+	return r.hasAdjustments, nil
+}
+
+func (r *settlementBatchRepo) ReverseConfirmedSettlementBatch(_ context.Context, _ repo.Tx, batchID int64, _ int64, reason string, _ time.Time) error {
+	r.reversedBatchID = batchID
+	r.reverseReason = reason
 	return nil
 }
 
@@ -3451,6 +3474,56 @@ func TestConfirmAndCancelSettlementBatchWriteEvents(t *testing.T) {
 		workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSettlementConfirmed ||
 		workbenchRepo.events[1].EventType != domain.AssetWorkbenchEventSettlementCancelled {
 		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestReverseSettlementBatchConfirmationRequiresGuardedSuperAdminAction(t *testing.T) {
+	workbenchRepo := &settlementBatchRepo{lockedBatchStatus: domain.AssetWorkbenchBatchStatusConfirmed, lockedBatchNo: "AWB2026071309523139"}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	params := ReverseSettlementBatchConfirmationParams{
+		BatchID:         8801,
+		Reason:          "  误确认，工资尚未发放  ",
+		ExpectedBatchNo: "AWB2026071309523139",
+		ConfirmedUnpaid: true,
+	}
+
+	if appErr := svc.ReverseSettlementBatchConfirmation(context.Background(), domain.RequestActor{ID: 9, Roles: []domain.Role{domain.RoleAssetSettlement}}, params); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("settlement role reversal appErr = %+v", appErr)
+	}
+	if appErr := svc.ReverseSettlementBatchConfirmation(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleSuperAdmin}}, ReverseSettlementBatchConfirmationParams{
+		BatchID: 8801, Reason: params.Reason, ExpectedBatchNo: params.ExpectedBatchNo,
+	}); appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("unconfirmed payout reversal appErr = %+v", appErr)
+	}
+	if appErr := svc.ReverseSettlementBatchConfirmation(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleSuperAdmin}}, params); appErr != nil {
+		t.Fatalf("ReverseSettlementBatchConfirmation() error = %+v", appErr)
+	}
+	if workbenchRepo.reversedBatchID != 8801 || workbenchRepo.reverseReason != "误确认，工资尚未发放" {
+		t.Fatalf("reversed batch = %d reason = %q", workbenchRepo.reversedBatchID, workbenchRepo.reverseReason)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSettlementConfirmationReversed {
+		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestReverseSettlementBatchConfirmationRejectsMismatchAndAdjustments(t *testing.T) {
+	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleSuperAdmin}}
+	params := ReverseSettlementBatchConfirmationParams{
+		BatchID: 8801, Reason: "误确认", ExpectedBatchNo: "WRONG", ConfirmedUnpaid: true,
+	}
+	workbenchRepo := &settlementBatchRepo{lockedBatchStatus: domain.AssetWorkbenchBatchStatusConfirmed, lockedBatchNo: "AWB-TEST"}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	if appErr := svc.ReverseSettlementBatchConfirmation(context.Background(), actor, params); appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("mismatched batch number appErr = %+v", appErr)
+	}
+
+	params.ExpectedBatchNo = "AWB-TEST"
+	workbenchRepo.hasAdjustments = true
+	if appErr := svc.ReverseSettlementBatchConfirmation(context.Background(), actor, params); appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("adjusted batch reversal appErr = %+v", appErr)
+	}
+	if workbenchRepo.reversedBatchID != 0 {
+		t.Fatalf("reversed batch = %d, want 0", workbenchRepo.reversedBatchID)
 	}
 }
 

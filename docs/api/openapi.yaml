@@ -15955,6 +15955,59 @@ paths:
                       size: { type: integer }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/settlement/batches/{batch_id}/reverse-confirmation:
+    post:
+      summary: Reverse one confirmed but unpaid settlement batch
+      description: Super-admin-only compensating transition for an incorrectly confirmed batch. The caller must attest that payroll has not been paid, provide the exact batch number and a reason, and the batch must have no settlement adjustments. The batch becomes `cancelled`; linked submission items return to `unsettled`, linked supplements return to `approved`, and their batch links are cleared. Original settlement items, payout snapshots, confirmation metadata, totals, and audit evidence are retained permanently.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [SuperAdmin]
+      parameters:
+        - in: path
+          name: batch_id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, expected_batch_no, confirm_unpaid]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: Human-reviewed reason stored in the immutable audit event and batch cancellation metadata.
+                expected_batch_no:
+                  type: string
+                  minLength: 1
+                  description: Exact visible batch number typed by the operator to prevent reversing the wrong batch.
+                confirm_unpaid:
+                  type: boolean
+                  enum: [true]
+                  description: Required operator attestation that payroll for this batch has not been paid. Paid batches must use adjustments instead.
+      responses:
+        '200':
+          description: Confirmation reversed; financial snapshots retained and source rows released
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [batch_id, status]
+                    properties:
+                      batch_id: { type: integer }
+                      status: { type: string, enum: [cancelled] }
+        '400': { description: Invalid request, missing reason, batch number, or unpaid attestation }
+        '401': { description: Unauthenticated }
+        '403': { description: Super administrator role required }
+        '404': { description: Settlement batch not found }
+        '409': { description: Batch is not confirmed, batch number does not match, or adjustments already exist }
   /v1/asset-workbench/settlement/supplement-permissions:
     get:
       summary: List asset workbench supplement permissions
