@@ -347,6 +347,8 @@ func NewRouter(
 		assetSyncGroup.Use(withAssetSyncTokenAuth())
 		assetSyncGroup.GET("/finalized/manifest", integrationCenterH.FinalizedSyncManifest)
 		assetSyncGroup.POST("/finalized/download-tickets", integrationCenterH.FinalizedDownloadTickets)
+		assetSyncGroup.GET("/external-current/manifest", integrationCenterH.ExternalCurrentSyncManifest)
+		assetSyncGroup.POST("/external-current/download-tickets", integrationCenterH.ExternalCurrentDownloadTickets)
 
 		externalAssetIntegrationGroup := integrationGroup.Group("/external-assets")
 		externalAssetIntegrationGroup.Use(withExternalAssetEventTokenAuth())

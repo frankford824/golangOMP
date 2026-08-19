@@ -547,6 +547,7 @@ func main() {
 	assetWorkbenchH := handler.NewAssetWorkbenchHandler(assetWorkbenchSvc, cfg.AssetWorkbench.CookieDomain)
 	integrationCenterH := handler.NewIntegrationCenterHandler(externalAssetSvc)
 	integrationCenterH.SetFinalizedAssetSyncService(globalAssetCenterSvc)
+	integrationCenterH.SetExternalAssetSyncService(externalAssetSvc)
 	codeRuleH := handler.NewCodeRuleHandler(codeRuleSvc)
 	auditV7H := handler.NewAuditV7Handler(auditV7Svc, taskEventSvc)
 	serverLogSvc := service.NewServerLogService(serverLogRepo)

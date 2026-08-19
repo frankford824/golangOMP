@@ -54,6 +54,68 @@ func retryExternalAssetLockConflict(ctx context.Context, run func() error) error
 
 func NewExternalAssetRepo(db *DB) repo.ExternalAssetRepo { return &externalAssetRepo{db: db} }
 
+func NewExternalAssetSyncRepo(db *DB) repo.ExternalAssetSyncRepo { return &externalAssetRepo{db: db} }
+
+func (r *externalAssetRepo) ListExternalAssetSyncSnapshot(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix) ([]repo.ExternalAssetSyncRow, error) {
+	return r.listExternalAssetSyncRows(ctx, prefixes, nil, true)
+}
+
+func (r *externalAssetRepo) ListCurrentExternalAssetsForSyncByIDs(ctx context.Context, ids []int64, prefixes []repo.ExternalAssetOriginPrefix) ([]repo.ExternalAssetSyncRow, error) {
+	return r.listExternalAssetSyncRows(ctx, prefixes, ids, false)
+}
+
+func (r *externalAssetRepo) listExternalAssetSyncRows(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, ids []int64, includeMissing bool) ([]repo.ExternalAssetSyncRow, error) {
+	prefixWhere, prefixArgs := externalAssetOriginPrefixWhere(prefixes)
+	if prefixWhere == "" {
+		return []repo.ExternalAssetSyncRow{}, nil
+	}
+	where := []string{"is_dir = 0", "(" + prefixWhere + ")"}
+	args := append([]interface{}{}, prefixArgs...)
+	if includeMissing {
+		where = append(where, "(status = 'missing' OR (status = 'indexed' AND oss_sync_status = 'ready' AND COALESCE(TRIM(oss_original_key), '') <> ''))")
+	} else {
+		if len(ids) == 0 {
+			return []repo.ExternalAssetSyncRow{}, nil
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		where = append(where, "status = 'indexed'", "oss_sync_status = 'ready'", "COALESCE(TRIM(oss_original_key), '') <> ''", "id IN ("+placeholders+")")
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, provider, kind, mount_path, origin_path_hash, origin_path, parent_path,
+		       file_name, mime_type, file_size, status, oss_sync_status,
+		       COALESCE(oss_original_key, ''), fp.source_modified_at, external_asset_records.updated_at
+		  FROM external_asset_records
+		  LEFT JOIN external_asset_source_fingerprints fp USING (origin_path_hash)
+		 WHERE `+strings.Join(where, " AND ")+`
+		 ORDER BY origin_path, id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list external asset sync rows: %w", err)
+	}
+	defer rows.Close()
+	out := make([]repo.ExternalAssetSyncRow, 0)
+	for rows.Next() {
+		var item repo.ExternalAssetSyncRow
+		var kind, status, ossStatus string
+		var sourceModifiedAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.Provider, &kind, &item.MountPath, &item.OriginPathHash, &item.OriginPath, &item.ParentPath,
+			&item.FileName, &item.MimeType, &item.FileSize, &status, &ossStatus, &item.OSSOriginalKey, &sourceModifiedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan external asset sync row: %w", err)
+		}
+		item.Kind = domain.ExternalAssetKind(kind)
+		item.Status = domain.ExternalAssetStatus(status)
+		item.OSSSyncStatus = domain.ExternalAssetOSSStatus(ossStatus)
+		item.SourceModifiedAt = fromNullTime(sourceModifiedAt)
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func NewExternalAssetRepoWithAIRetrieval(db *DB, embeddingVersion string) repo.ExternalAssetRepo {
 	return &externalAssetRepo{db: db, embeddingVersion: strings.TrimSpace(embeddingVersion)}
 }

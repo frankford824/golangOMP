@@ -13,7 +13,20 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 	assetcenter "workflow/service/asset_center"
+	externalassets "workflow/service/external_assets"
 )
+
+type integrationExternalSyncStub struct {
+	manifest *externalassets.ExternalCurrentManifest
+}
+
+func (s integrationExternalSyncStub) ExternalCurrentSyncManifest(context.Context) (*externalassets.ExternalCurrentManifest, *domain.AppError) {
+	return s.manifest, nil
+}
+
+func (s integrationExternalSyncStub) ExternalCurrentDownloadTickets(context.Context, []int64) (*externalassets.ExternalCurrentTicketResponse, *domain.AppError) {
+	return &externalassets.ExternalCurrentTicketResponse{}, nil
+}
 
 type integrationFinalizedSyncRepoStub struct {
 	rows []repo.ProductionPackageAsset
@@ -82,5 +95,27 @@ func TestFinalizedSyncManifestReturnsETagEnvelopeAnd304(t *testing.T) {
 	router.ServeHTTP(second, secondRequest)
 	if second.Code != http.StatusNotModified || second.Body.Len() != 0 {
 		t.Fatalf("conditional response status=%d body=%q", second.Code, second.Body.String())
+	}
+}
+
+func TestExternalCurrentManifestReturnsETagAnd304(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := NewIntegrationCenterHandler(nil)
+	handler.SetExternalAssetSyncService(integrationExternalSyncStub{manifest: &externalassets.ExternalCurrentManifest{
+		SchemaVersion: 1, ManifestID: "abc123", GeneratedAt: time.Unix(1, 0).UTC(), Items: []externalassets.ExternalCurrentManifestItem{},
+	}})
+	router := gin.New()
+	router.GET("/manifest", handler.ExternalCurrentSyncManifest)
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/manifest", nil))
+	if first.Code != http.StatusOK || first.Header().Get("ETag") != `W/"abc123"` {
+		t.Fatalf("status=%d etag=%q body=%s", first.Code, first.Header().Get("ETag"), first.Body.String())
+	}
+	request := httptest.NewRequest(http.MethodGet, "/manifest", nil)
+	request.Header.Set("If-None-Match", first.Header().Get("ETag"))
+	second := httptest.NewRecorder()
+	router.ServeHTTP(second, request)
+	if second.Code != http.StatusNotModified || second.Body.Len() != 0 {
+		t.Fatalf("status=%d body=%q", second.Code, second.Body.String())
 	}
 }

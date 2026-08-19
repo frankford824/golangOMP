@@ -6806,6 +6806,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/integration/asset-sync/external-current/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the complete current external-library overlay and path tombstones
+         * @description Returns OSS-ready current external source files under configured export roots plus explicit tombstones for paths that left the source. This contract is independent from finalized task revisions and must not be interpreted as business approval. `relative_path` maps into the local library mirror; `source_modified_at`, size and ticket fingerprints make same-path replacements detectable. The weak ETag contains the semantic manifest hash and excludes `generated_at`.
+         */
+        get: operations["getExternalCurrentAssetSyncManifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-sync/external-current/download-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revalidate current external records and issue OSS download tickets
+         * @description Returns one ordered status per distinct external asset ID. Only records that remain indexed, OSS-ready and inside configured export roots can be ready. Tombstones and superseded records return not_current. File bytes are downloaded directly from OSS.
+         */
+        post: operations["createExternalCurrentAssetDownloadTickets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/integration/external-assets/events": {
         parameters: {
             query?: never;
@@ -21086,6 +21126,72 @@ export interface components {
         FinalizedDownloadTicketResponse: {
             data: components["schemas"]["FinalizedDownloadTicketData"];
         };
+        ExternalCurrentManifestItem: {
+            /** Format: int64 */
+            external_asset_id: number;
+            origin_path_hash: string;
+            /** @description Path relative to the configured current external root; safe for local mirror placement. */
+            relative_path: string;
+            file_name: string;
+            mime_type: string;
+            /** Format: int64 */
+            file_size: number;
+            /** @description Present only for active OSS-ready objects. */
+            storage_key?: string;
+            /** Format: date-time */
+            source_modified_at: string | null;
+            /** Format: date-time */
+            record_updated_at: string;
+            /** @description True is an authoritative path tombstone and never carries a download ticket. */
+            deleted: boolean;
+        };
+        ExternalCurrentManifest: {
+            /** @enum {integer} */
+            schema_version: 1;
+            manifest_id: string;
+            /** Format: date-time */
+            generated_at: string;
+            item_count: number;
+            active_count: number;
+            deleted_count: number;
+            /** Format: int64 */
+            total_object_bytes: number;
+            items: components["schemas"]["ExternalCurrentManifestItem"][];
+        };
+        ExternalCurrentManifestResponse: {
+            data: components["schemas"]["ExternalCurrentManifest"];
+        };
+        ExternalCurrentDownloadTicketRequest: {
+            external_asset_ids: number[];
+        };
+        ExternalCurrentDownloadTicketResult: {
+            /** Format: int64 */
+            external_asset_id: number;
+            /** @enum {string} */
+            status: "ready" | "missing" | "size_mismatch" | "not_current" | "error";
+            origin_path_hash?: string;
+            relative_path?: string;
+            file_name?: string;
+            storage_key?: string;
+            /** Format: int64 */
+            expected_size?: number;
+            /** Format: int64 */
+            actual_size?: number;
+            etag?: string;
+            crc64_ecma?: string;
+            /** Format: uri */
+            download_url?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            retryable: boolean;
+            error_message?: string;
+        };
+        ExternalCurrentDownloadTicketData: {
+            results: components["schemas"]["ExternalCurrentDownloadTicketResult"][];
+        };
+        ExternalCurrentDownloadTicketResponse: {
+            data: components["schemas"]["ExternalCurrentDownloadTicketData"];
+        };
         CodeRule: {
             id?: number;
             /** @enum {string} */
@@ -23749,6 +23855,95 @@ export interface operations {
                 content?: never;
             };
             /** @description Current-finalized database query failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getExternalCurrentAssetSyncManifest: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete external-current overlay manifest */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalCurrentManifestResponse"];
+                };
+            };
+            /** @description Manifest content has not changed */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid dedicated machine token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description External-current query or manifest construction failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createExternalCurrentAssetDownloadTickets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalCurrentDownloadTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Per-object OSS availability and download tickets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalCurrentDownloadTicketResponse"];
+                };
+            };
+            /** @description Invalid JSON or external_asset_ids count/value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid dedicated machine token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Current external query failed */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -9,6 +9,7 @@ import (
 
 	"workflow/domain"
 	assetcenter "workflow/service/asset_center"
+	externalassets "workflow/service/external_assets"
 )
 
 // IntegrationCenterHandler owns the narrow production machine boundaries:
@@ -16,6 +17,7 @@ import (
 type IntegrationCenterHandler struct {
 	externalAssetEvents externalAssetEventService
 	assetSync           finalizedAssetSyncService
+	externalAssetSync   externalAssetSyncService
 }
 
 type finalizedAssetSyncService interface {
@@ -25,6 +27,15 @@ type finalizedAssetSyncService interface {
 
 func (h *IntegrationCenterHandler) SetFinalizedAssetSyncService(svc finalizedAssetSyncService) {
 	h.assetSync = svc
+}
+
+type externalAssetSyncService interface {
+	ExternalCurrentSyncManifest(context.Context) (*externalassets.ExternalCurrentManifest, *domain.AppError)
+	ExternalCurrentDownloadTickets(context.Context, []int64) (*externalassets.ExternalCurrentTicketResponse, *domain.AppError)
+}
+
+func (h *IntegrationCenterHandler) SetExternalAssetSyncService(svc externalAssetSyncService) {
+	h.externalAssetSync = svc
 }
 
 type externalAssetEventService interface {
@@ -69,6 +80,48 @@ func (h *IntegrationCenterHandler) FinalizedDownloadTickets(c *gin.Context) {
 		return
 	}
 	result, appErr := h.assetSync.FinalizedDownloadTickets(c.Request.Context(), request.TaskAssetIDs)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *IntegrationCenterHandler) ExternalCurrentSyncManifest(c *gin.Context) {
+	if h.externalAssetSync == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "external current sync service is not configured", nil))
+		return
+	}
+	manifest, appErr := h.externalAssetSync.ExternalCurrentSyncManifest(c.Request.Context())
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	etag := `W/"` + manifest.ManifestID + `"`
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "private, no-cache")
+	if requestETagMatches(c.GetHeader("If-None-Match"), manifest.ManifestID) {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	respondOK(c, manifest)
+}
+
+type externalCurrentDownloadTicketsRequest struct {
+	ExternalAssetIDs []int64 `json:"external_asset_ids"`
+}
+
+func (h *IntegrationCenterHandler) ExternalCurrentDownloadTickets(c *gin.Context) {
+	if h.externalAssetSync == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "external current sync service is not configured", nil))
+		return
+	}
+	var request externalCurrentDownloadTicketsRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.externalAssetSync.ExternalCurrentDownloadTickets(c.Request.Context(), request.ExternalAssetIDs)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

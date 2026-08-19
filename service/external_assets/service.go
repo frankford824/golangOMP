@@ -63,6 +63,7 @@ type Config struct {
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	OSSRequiredPrefixes []string
+	SyncExportRoots     []string
 	EventRoots          []string
 	LocalPathMappings   map[string]string
 	PrepareInterval     time.Duration
@@ -148,6 +149,7 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		OSSOriginalPrefix:   strings.Trim(strings.TrimSpace(cfg.OSSOriginalPrefix), "/"),
 		OSSPreviewPrefix:    strings.Trim(strings.TrimSpace(cfg.OSSPreviewPrefix), "/"),
 		OSSRequiredPrefixes: ParseOSSPrefixes(cfg.OSSRequiredPrefixes),
+		SyncExportRoots:     ParseOSSPrefixes(cfg.SyncExportRoots),
 		EventRoots:          ParseOSSPrefixes(cfg.EventRoots),
 		LocalPathMappings:   ParseLocalPathMappings(cfg.LocalPathMappings),
 		PrepareInterval:     cfg.PrepareInterval,

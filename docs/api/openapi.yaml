@@ -4694,6 +4694,78 @@ components:
       required: [data]
       properties:
         data: { $ref: '#/components/schemas/FinalizedDownloadTicketData' }
+    ExternalCurrentManifestItem:
+      type: object
+      required: [external_asset_id, origin_path_hash, relative_path, file_name, mime_type, file_size, source_modified_at, record_updated_at, deleted]
+      properties:
+        external_asset_id: { type: integer, format: int64, minimum: 1 }
+        origin_path_hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        relative_path: { type: string, minLength: 1, description: Path relative to the configured current external root; safe for local mirror placement. }
+        file_name: { type: string, minLength: 1 }
+        mime_type: { type: string }
+        file_size: { type: integer, format: int64, minimum: 0 }
+        storage_key: { type: string, description: Present only for active OSS-ready objects. }
+        source_modified_at: { type: string, format: date-time, nullable: true }
+        record_updated_at: { type: string, format: date-time }
+        deleted: { type: boolean, description: True is an authoritative path tombstone and never carries a download ticket. }
+    ExternalCurrentManifest:
+      type: object
+      required: [schema_version, manifest_id, generated_at, item_count, active_count, deleted_count, total_object_bytes, items]
+      properties:
+        schema_version: { type: integer, enum: [1] }
+        manifest_id: { type: string, pattern: '^[0-9a-f]{64}$' }
+        generated_at: { type: string, format: date-time }
+        item_count: { type: integer, minimum: 0 }
+        active_count: { type: integer, minimum: 0 }
+        deleted_count: { type: integer, minimum: 0 }
+        total_object_bytes: { type: integer, format: int64, minimum: 0 }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ExternalCurrentManifestItem' }
+    ExternalCurrentManifestResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ExternalCurrentManifest' }
+    ExternalCurrentDownloadTicketRequest:
+      type: object
+      required: [external_asset_ids]
+      properties:
+        external_asset_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { type: integer, format: int64, minimum: 1 }
+    ExternalCurrentDownloadTicketResult:
+      type: object
+      required: [external_asset_id, status, retryable]
+      properties:
+        external_asset_id: { type: integer, format: int64 }
+        status: { type: string, enum: [ready, missing, size_mismatch, not_current, error] }
+        origin_path_hash: { type: string }
+        relative_path: { type: string }
+        file_name: { type: string }
+        storage_key: { type: string }
+        expected_size: { type: integer, format: int64, minimum: 0 }
+        actual_size: { type: integer, format: int64, minimum: 0 }
+        etag: { type: string }
+        crc64_ecma: { type: string }
+        download_url: { type: string, format: uri }
+        expires_at: { type: string, format: date-time }
+        retryable: { type: boolean }
+        error_message: { type: string }
+    ExternalCurrentDownloadTicketData:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/ExternalCurrentDownloadTicketResult' }
+    ExternalCurrentDownloadTicketResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ExternalCurrentDownloadTicketData' }
     CodeRule:
       type: object
       properties:
@@ -11240,6 +11312,63 @@ paths:
           description: Missing or invalid dedicated machine token
         '500':
           description: Current-finalized database query failed
+  /v1/integration/asset-sync/external-current/manifest:
+    get:
+      operationId: getExternalCurrentAssetSyncManifest
+      summary: Get the complete current external-library overlay and path tombstones
+      description: |
+        Returns OSS-ready current external source files under configured export roots plus explicit tombstones for paths that left the source. This contract is independent from finalized task revisions and must not be interpreted as business approval. `relative_path` maps into the local library mirror; `source_modified_at`, size and ticket fingerprints make same-path replacements detectable. The weak ETag contains the semantic manifest hash and excludes `generated_at`.
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth:
+        mode: dedicated_pre_shared_token
+        header: X-Asset-Sync-Token
+      security:
+        - AssetSyncToken: []
+      parameters:
+        - in: header
+          name: If-None-Match
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Complete external-current overlay manifest
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalCurrentManifestResponse' }
+        '304': { description: Manifest content has not changed }
+        '401': { description: Missing or invalid dedicated machine token }
+        '500': { description: External-current query or manifest construction failed }
+  /v1/integration/asset-sync/external-current/download-tickets:
+    post:
+      operationId: createExternalCurrentAssetDownloadTickets
+      summary: Revalidate current external records and issue OSS download tickets
+      description: |
+        Returns one ordered status per distinct external asset ID. Only records that remain indexed, OSS-ready and inside configured export roots can be ready. Tombstones and superseded records return not_current. File bytes are downloaded directly from OSS.
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth:
+        mode: dedicated_pre_shared_token
+        header: X-Asset-Sync-Token
+      security:
+        - AssetSyncToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalCurrentDownloadTicketRequest' }
+      responses:
+        '200':
+          description: Per-object OSS availability and download tickets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalCurrentDownloadTicketResponse' }
+        '400': { description: Invalid JSON or external_asset_ids count/value }
+        '401': { description: Missing or invalid dedicated machine token }
+        '500': { description: Current external query failed }
   /v1/integration/external-assets/events:
     post:
       summary: Ingest NAS filesystem events
