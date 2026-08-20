@@ -950,12 +950,15 @@ onMounted(async () => {
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'action'" class="aw-grid-actions">
             <button class="aw-secondary-button" type="button" @click="startPriceSupersede(gridRowAsPrice(row))">修改价格</button>
-            <details class="aw-row-menu">
-              <summary>更多</summary>
-              <div class="aw-row-menu__panel">
-                <button type="button" @click="requestTogglePriceRule(gridRowAsPrice(row))">{{ gridRowAsPrice(row).enabled ? '停用规则' : '重新启用' }}</button>
-              </div>
-            </details>
+            <button
+              class="aw-secondary-button"
+              :class="{ 'aw-secondary-button--danger': gridRowAsPrice(row).enabled }"
+              type="button"
+              :aria-label="`${gridRowAsPrice(row).enabled ? '停用' : '启用'}单价规则：${priceRuleIdentity(gridRowAsPrice(row))}`"
+              @click="requestTogglePriceRule(gridRowAsPrice(row))"
+            >
+              {{ gridRowAsPrice(row).enabled ? '停用' : '启用' }}
+            </button>
           </div>
           <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPrice(row).worker_type).tone)">{{ value }}</span>
           <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPrice(row).enabled).tone)">{{ value }}</span>
@@ -1002,7 +1005,7 @@ onMounted(async () => {
           </div>
           <div class="aw-inline-actions">
             <button class="aw-secondary-button" type="button" @click="pendingPriceToggle = null">取消</button>
-            <button class="aw-secondary-button" type="button" @click="confirmPriceToggle">确认停用</button>
+            <button class="aw-secondary-button aw-secondary-button--danger" type="button" @click="confirmPriceToggle">确认停用</button>
           </div>
         </section>
       </div>
