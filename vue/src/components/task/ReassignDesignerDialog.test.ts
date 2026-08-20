@@ -35,6 +35,8 @@ describe('ReassignDesignerDialog', () => {
 
   it('accepts numeric candidate ids and waits for parent success before closing', async () => {
     const wrapper = mountDialog()
+    const modalPanel = document.body.querySelector('[role="dialog"] > div') as HTMLElement | null
+    expect(modalPanel?.style.maxWidth).toBe('48rem')
     const vm = wrapper.vm as unknown as {
       reasonCode: string
       selectedId: string | number

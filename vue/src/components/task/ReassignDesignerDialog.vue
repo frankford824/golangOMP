@@ -3,6 +3,7 @@
     :model-value="modelValue"
     :title="isInitialAssignment ? '指派设计师' : '重新指派设计师'"
     :show-confirm="false"
+    panel-max-width="48rem"
     @update:model-value="$emit('update:modelValue', $event)"
   >
     <template #default>
@@ -400,6 +401,7 @@ function submitConfirm() {
 
 .reassign-footer {
   display: flex;
+  flex-wrap: wrap;
   flex-shrink: 0;
   justify-content: flex-end;
   gap: 0.5rem;

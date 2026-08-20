@@ -75,8 +75,8 @@ function v8NumericTaskContract(task: MockTask, taskId: string) {
     workflow_contract_version: 2,
     business_lane: task.task_type === 'customer_customization' ? 'customization' : 'normal',
     allowed_actions: isRetouchTask
-      ? ['task.design.submit']
-      : ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
+      ? ['task.design.submit', 'task.assign']
+      : ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover', 'task.assign'],
     product_name_snapshot: task.title,
     primary_sku_code: 'SKU-MOCK-1002',
     current_handler_name: isRetouchTask ? '修图演示' : '审核演示',
