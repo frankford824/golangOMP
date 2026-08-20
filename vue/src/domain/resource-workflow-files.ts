@@ -3,9 +3,17 @@ import JSZip from 'jszip'
 const SOURCE_BUNDLE_MAX_BYTES = 299 * 1024 * 1024
 const FIXED_ZIP_DATE = new Date('1980-01-01T00:00:00.000Z')
 const IMAGE_EXTENSIONS = new Set(['avif', 'bmp', 'gif', 'heic', 'heif', 'jpeg', 'jpg', 'png', 'svg', 'tif', 'tiff', 'webp'])
+const FINAL_DESIGN_EXTENSIONS = new Set(['ai', 'cdr', 'plt', 'psb', 'psd'])
 const FINAL_DOCUMENT_EXTENSIONS = new Set(['pdf'])
+const FINAL_DIRECT_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...FINAL_DESIGN_EXTENSIONS, ...FINAL_DOCUMENT_EXTENSIONS])
 
-export const FINAL_UPLOAD_ACCEPT_ATTRIBUTE = 'image/*,.pdf,application/pdf,.zip,application/zip'
+export const FINAL_UPLOAD_ACCEPT_ATTRIBUTE = [
+  'image/*',
+  ...[...FINAL_DIRECT_EXTENSIONS].sort().map((extension) => `.${extension}`),
+  'application/pdf',
+  '.zip',
+  'application/zip',
+].join(',')
 
 function safeName(name: string, fallback: string) {
   const normalized = name
@@ -28,13 +36,8 @@ function isArchiveMetadata(path: string) {
     normalized.split('/').pop() === '.DS_Store'
 }
 
-function isImageEntry(path: string) {
-  return IMAGE_EXTENSIONS.has(fileExtension(path))
-}
-
 function isFinalEntry(path: string) {
-  const extension = fileExtension(path)
-  return IMAGE_EXTENSIONS.has(extension) || FINAL_DOCUMENT_EXTENSIONS.has(extension)
+  return FINAL_DIRECT_EXTENSIONS.has(fileExtension(path))
 }
 
 function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
@@ -108,9 +111,8 @@ export async function expandFinalUploadFiles(files: File[]): Promise<File[]> {
 
   for (const file of files) {
     if (fileExtension(file.name) !== 'zip') {
-      const isPDF = file.type === 'application/pdf' || fileExtension(file.name) === 'pdf'
-      if (!file.type.startsWith('image/') && !isImageEntry(file.name) && !isPDF) {
-        throw new Error(`成品只支持图片、PDF 或包含图片/PDF 的 ZIP：${file.name}`)
+      if (!isFinalEntry(file.name)) {
+        throw new Error(`成品只支持图片、PSD/PSB/AI/CDR/PLT、PDF 或包含这些格式的 ZIP：${file.name}`)
       }
       const name = uniqueFileName(safeName(file.name, 'final-file'), usedNames)
       expanded.push(name === file.name ? file : new File([file], name, { type: file.type, lastModified: file.lastModified }))
@@ -127,7 +129,7 @@ export async function expandFinalUploadFiles(files: File[]): Promise<File[]> {
       .filter((entry) => !entry.dir && !isArchiveMetadata(entry.name) && isFinalEntry(entry.name))
       .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN', { numeric: true }))
     if (!entries.length) {
-      throw new Error(`成品压缩包内没有支持的图片或 PDF：${file.name}`)
+      throw new Error(`成品压缩包内没有支持的图片、设计文件或 PDF：${file.name}`)
     }
     for (const entry of entries) {
       const baseName = safeName(entry.name.replace(/\\/g, '/').split('/').pop() || '', 'final-file')
@@ -143,8 +145,12 @@ export async function expandFinalUploadFiles(files: File[]): Promise<File[]> {
 function finalMimeType(name: string) {
   const extension = fileExtension(name)
   if (extension === 'pdf') return 'application/pdf'
+  if (extension === 'psd') return 'image/vnd.adobe.photoshop'
+  if (extension === 'ai') return 'application/postscript'
+  if (extension === 'plt') return 'application/vnd.hp-hpgl'
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
   if (extension === 'svg') return 'image/svg+xml'
   if (extension === 'tif' || extension === 'tiff') return 'image/tiff'
-  return extension ? `image/${extension}` : 'application/octet-stream'
+  if (IMAGE_EXTENSIONS.has(extension)) return `image/${extension}`
+  return 'application/octet-stream'
 }

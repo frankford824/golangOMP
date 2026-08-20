@@ -139,7 +139,7 @@
                 </div>
                 <template v-else>
                   <label class="drop-zone final-drop">
-                    <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length && entry.row.mode === 'set' ? `继续添加成品（当前 ${entry.row.finals.length} 个文件）` : entry.row.finals.length ? '替换单项成品' : '上传最终成品图、PDF 或成品 ZIP' }}</span>
+                    <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length && entry.row.mode === 'set' ? `继续添加成品（当前 ${entry.row.finals.length} 个文件）` : entry.row.finals.length ? '替换单项成品' : '上传最终成品图/文件（图片 / PSD / PSB / AI / CDR / PLT / PDF / ZIP）' }}</span>
                     <input type="file" :accept="FINAL_UPLOAD_ACCEPT_ATTRIBUTE" :multiple="entry.row.mode === 'set'" :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
                   </label>
                   <button v-if="entry.row.finals.length" type="button" class="clear-finals" :disabled="Boolean(entry.row.uploading)" @click="clearFinals(entry.row)">清空本组成品</button>

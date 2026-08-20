@@ -355,6 +355,31 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
+  it('accepts a PSD as the single finalized delivery and exposes the design-format picker', async () => {
+    mocks.upload.mockResolvedValueOnce({ version: { id: 212 } })
+    const wrapper = mountPanel(['task.audit.approve'])
+    const fileInput = wrapper.get('.final-drop input[type="file"]')
+    const accept = fileInput.attributes('accept')
+    for (const extension of ['.psd', '.psb', '.ai', '.cdr', '.plt', '.pdf', '.tif']) {
+      expect(accept).toContain(extension)
+    }
+
+    const psd = new File(['8BPS'], '审核成品.psd', { type: 'image/vnd.adobe.photoshop' })
+    Object.defineProperty(fileInput.element, 'files', { configurable: true, value: [psd] })
+    await fileInput.trigger('change')
+    await flushPromises()
+
+    expect(mocks.upload).toHaveBeenCalledWith(
+      '41',
+      psd,
+      expect.objectContaining({ asset_kind: 'delivery', target_sku_code: 'SKU-001', remark: '审核成品.psd' }),
+      undefined,
+    )
+    expect(wrapper.text()).toContain('审核成品.psd')
+    expect(wrapper.text()).not.toContain('成品只支持图片')
+    wrapper.unmount()
+  })
+
   it('allows the auditor to change one mode and apply the first mode to every SKU', async () => {
     const auditBundle = bundleWithGroups(3)
     if (auditBundle.groups[0].working_revision) auditBundle.groups[0].working_revision.mode = 'set'

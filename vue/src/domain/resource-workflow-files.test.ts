@@ -40,25 +40,39 @@ describe('resource workflow file preparation', () => {
     expect(files.map((file) => file.type)).toEqual(['image/jpeg', 'image/png'])
   })
 
-  it('accepts PDF final files directly and from a mixed final ZIP', async () => {
-    const direct = new File(['%PDF-direct'], '单图成品.pdf', { type: 'application/pdf' })
-    expect(await expandFinalUploadFiles([direct])).toEqual([direct])
+  it('accepts image, design and PDF final files directly and from a mixed final ZIP', async () => {
+    const direct = [
+      new File(['%PDF-direct'], '单图成品.pdf', { type: 'application/pdf' }),
+      new File(['psd'], '印刷成品.psd'),
+      new File(['psb'], '大画布成品.psb'),
+      new File(['ai'], '矢量成品.ai'),
+      new File(['cdr'], '排版成品.cdr'),
+      new File(['plt'], '刀版成品.plt'),
+    ]
+    expect(await expandFinalUploadFiles(direct)).toEqual(direct)
 
     const zip = new JSZip()
     zip.file('01-正面.png', 'front')
     zip.file('02-印刷稿.pdf', '%PDF-zip')
+    zip.file('03-设计稿.psd', 'psd')
+    zip.file('04-矢量稿.ai', 'ai')
     zip.file('说明.txt', 'ignored')
     const archive = new File([await zip.generateAsync({ type: 'blob' })], '混合成品.zip', { type: 'application/zip' })
 
     const files = await expandFinalUploadFiles([archive])
-    expect(files.map((file) => file.name)).toEqual(['01-正面.png', '02-印刷稿.pdf'])
-    expect(files.map((file) => file.type)).toEqual(['image/png', 'application/pdf'])
+    expect(files.map((file) => file.name)).toEqual(['01-正面.png', '02-印刷稿.pdf', '03-设计稿.psd', '04-矢量稿.ai'])
+    expect(files.map((file) => file.type)).toEqual(['image/png', 'application/pdf', 'image/vnd.adobe.photoshop', 'application/postscript'])
   })
 
   it('rejects an archive without final images', async () => {
     const zip = new JSZip()
     zip.file('README.txt', 'empty')
     const archive = new File([await zip.generateAsync({ type: 'blob' })], 'empty.zip')
-    await expect(expandFinalUploadFiles([archive])).rejects.toThrow('没有支持的图片或 PDF')
+    await expect(expandFinalUploadFiles([archive])).rejects.toThrow('没有支持的图片、设计文件或 PDF')
+  })
+
+  it('rejects unrelated executable files', async () => {
+    const executable = new File(['MZ'], 'installer.exe', { type: 'application/octet-stream' })
+    await expect(expandFinalUploadFiles([executable])).rejects.toThrow('成品只支持图片、PSD/PSB/AI/CDR/PLT、PDF')
   })
 })
