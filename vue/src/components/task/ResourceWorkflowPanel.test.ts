@@ -48,6 +48,7 @@ vi.mock('@/services/api/tasksApi', () => ({
 
 import ResourceWorkflowPanel from './ResourceWorkflowPanel.vue'
 import type { ResourceBundle } from '@/services/api/resourceGroupsApi'
+import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 
 function arrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
@@ -120,6 +121,61 @@ function bundleWithGroups(count: number): ResourceBundle {
   }
 }
 
+function retouchBundle(): ResourceBundle {
+  return {
+    task_id: 41,
+    workflow_revision: 8,
+    groups: [1, 2].map((order) => ({
+      id: 90 + order,
+      task_id: 41,
+      scope_kind: 'retouch_requirement' as const,
+      retouch_requirement_id: 500 + order,
+      sku_code: `RET-${order}`,
+      lock_version: 1,
+      migration_incomplete: false,
+      finalized_revision: {
+        id: 190 + order,
+        group_id: 90 + order,
+        revision_no: 1,
+        status: 'finalized' as const,
+        mode: 'single' as const,
+        source_stage: 'retouch' as const,
+        created_by: 7,
+        legacy_migration: false,
+        created_at: '2026-08-20T00:00:00Z',
+        items: [],
+        references: [],
+      },
+    })),
+  }
+}
+
+function folderFile(path: string): File {
+  const name = path.split('/').pop() || 'final.png'
+  const file = new File(['file'], name, { type: name.endsWith('.png') ? 'image/png' : 'image/vnd.adobe.photoshop' })
+  Object.defineProperty(file, 'webkitRelativePath', { configurable: true, value: path })
+  return file
+}
+
+const retouchRequirements: RetouchRequirement[] = [
+  {
+    id: 501,
+    taskId: 41,
+    description: '清理主图背景',
+    skuCode: 'RET-1',
+    sortOrder: 1,
+    sourceAssets: [{ id: '701', file_role: 'source', versions: [{ id: '801', file_role: 'source', file_name: '主图.png' }] }],
+  },
+  {
+    id: 502,
+    taskId: 41,
+    description: '修复细节',
+    skuCode: 'RET-2',
+    sortOrder: 2,
+    sourceAssets: [{ id: '702', file_role: 'source', versions: [{ id: '802', file_role: 'source', file_name: '细节图.png' }] }],
+  },
+]
+
 function button(wrapper: ReturnType<typeof mountPanel>, label: string) {
   const target = wrapper.findAll('button').find((item) => item.text() === label)
   if (!target) throw new Error(`missing button ${label}`)
@@ -188,6 +244,75 @@ describe('ResourceWorkflowPanel action contract', () => {
     expect(wrapper.text()).toContain('审核修改成品/源文件')
     expect(wrapper.text()).toContain('确认重开并修改文件')
     expect(wrapper.text()).not.toContain('提交修图成品')
+  })
+
+  it('uploads one retouch output folder and maps files to every requirement', async () => {
+    mocks.upload
+      .mockResolvedValueOnce({ version: { id: 301 } })
+      .mockResolvedValueOnce({ version: { id: 302 } })
+      .mockResolvedValueOnce({ version: { id: 303 } })
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'retouch_task',
+        bundle: retouchBundle(),
+        retouchRequirements,
+        allowedActions: ['task.design.submit'],
+      },
+    })
+
+    expect(wrapper.text()).toContain('批量上传成品文件夹')
+    expect(wrapper.text()).toContain('支持整目录批量上传')
+    const input = wrapper.get('[aria-label="选择修图成品文件夹"]')
+    expect(input.attributes()).toHaveProperty('webkitdirectory')
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [
+        folderFile('成品/需求1/主图-完成.png'),
+        folderFile('成品/需求2/细节图-正面.psd'),
+        folderFile('成品/需求2/细节图-背面.png'),
+      ],
+    })
+    await input.trigger('change')
+    await vi.waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(3))
+    await flushPromises()
+
+    expect(mocks.upload.mock.calls.map((call) => [(call[1] as File).name, call[3]])).toEqual([
+      ['主图-完成.png', { retouchRequirementId: 501 }],
+      ['细节图-正面.psd', { retouchRequirementId: 502 }],
+      ['细节图-背面.png', { retouchRequirementId: 502 }],
+    ])
+    expect(wrapper.text()).toContain('文件夹批量上传完成：2 项修图需求，共 3 个成品文件。')
+    expect(wrapper.text()).toContain('主图-完成.png')
+    expect(wrapper.text()).toContain('细节图-正面.psd')
+    expect(wrapper.text()).toContain('细节图-背面.png')
+    expect(wrapper.findAll('.mode-control button.selected').map((item) => item.text())).toEqual(['单图', '套装'])
+    wrapper.unmount()
+  })
+
+  it('does not upload a retouch folder when files cannot be mapped safely', async () => {
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'retouch_task',
+        bundle: retouchBundle(),
+        retouchRequirements,
+        allowedActions: ['task.design.submit'],
+      },
+    })
+    const input = wrapper.get('[aria-label="选择修图成品文件夹"]')
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [folderFile('成品/无法识别.png')],
+    })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(mocks.upload).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toContain('文件夹上传未开始')
+    expect(wrapper.get('[role="alert"]').text()).toContain('无法匹配需求')
+    expect(wrapper.get('[role="alert"]').text()).toContain('缺少成品')
+    wrapper.unmount()
   })
 
   it('shows the operations set suggestion without changing the design decision', () => {

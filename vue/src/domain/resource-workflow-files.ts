@@ -40,6 +40,11 @@ function isFinalEntry(path: string) {
   return FINAL_DIRECT_EXTENSIONS.has(fileExtension(path))
 }
 
+export function isSupportedFinalUploadFilename(filename: string): boolean {
+  const extension = fileExtension(filename)
+  return extension === 'zip' || FINAL_DIRECT_EXTENSIONS.has(extension)
+}
+
 function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer()
   return new Promise((resolve, reject) => {

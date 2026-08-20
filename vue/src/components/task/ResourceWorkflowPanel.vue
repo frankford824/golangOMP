@@ -10,6 +10,21 @@
       </div>
       <div class="workspace-tools">
         <span class="workspace-count"><Boxes :size="15" aria-hidden="true" />{{ rows.length }} 个资源单元</span>
+        <button v-if="isRetouchStage && rows.length" type="button" class="quiet-button" :disabled="folderUploading || rows.some((row) => Boolean(row.uploading))" @click="retouchFolderInput?.click()">
+          <FolderUp :size="15" aria-hidden="true" />{{ folderUploading ? folderUploadProgress : '批量上传成品文件夹' }}
+        </button>
+        <input
+          v-if="isRetouchStage"
+          ref="retouchFolderInput"
+          class="sr-only"
+          type="file"
+          :accept="FINAL_UPLOAD_ACCEPT_ATTRIBUTE"
+          multiple
+          webkitdirectory=""
+          directory=""
+          aria-label="选择修图成品文件夹"
+          @change="uploadRetouchFolder"
+        />
         <button v-if="canBulkApplyMode && rows.length > 1" class="quiet-button" @click="applyFirstMode"><CopyCheck :size="15" aria-hidden="true" />{{ isAuditStage ? '统一按首个模式变更全部' : '将首个模式应用到全部' }}</button>
       </div>
     </header>
@@ -41,6 +56,11 @@
       <ShieldCheck :size="17" aria-hidden="true" />
       <strong>按设计模式完成定稿</strong>
       <span>单图上传 1 张，套装至少上传 2 张并排序。未替换源文件时，默认保留设计师提交的源文件。</span>
+    </aside>
+    <aside v-else-if="isRetouchStage" class="contract-note retouch-folder-note">
+      <FolderUp :size="17" aria-hidden="true" />
+      <strong>支持整目录批量上传</strong>
+      <span>优先沿用批量下载生成的“需求1 / 需求2”目录；平铺文件夹可保留原素材文件名或在路径中包含 SKU。无法唯一匹配时不会开始上传。</span>
     </aside>
 
     <section v-if="isAuditStage && auditReferences.length" class="audit-references" aria-label="审核参考图">
@@ -230,6 +250,7 @@ import {
   Download,
   FilePenLine,
   FileText,
+  FolderUp,
   Images,
   Info,
   LockKeyhole,
@@ -247,6 +268,9 @@ import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type Resour
 import { assetsApi, type ReferenceFileRef } from '@/services/api/assetsApi'
 import { tasksApi } from '@/services/api/tasksApi'
 import { buildSourceBundleFile, expandFinalUploadFiles, FINAL_UPLOAD_ACCEPT_ATTRIBUTE } from '@/domain/resource-workflow-files'
+import { buildRetouchFolderUploadPlan, retouchFolderUploadPlanError, type RetouchFolderUploadTarget } from '@/domain/retouch-folder-upload'
+import { retouchSourceAssetsToDisplayItems } from '@/domain/retouch-requirement-assets'
+import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
 type UploadedFile = { id: number; assetId?: number; name: string; inherited?: boolean }
@@ -263,7 +287,7 @@ type EditorRow = {
 
 type WorkflowReference = (ResourceReference | ReferenceFileRef) & { preview_url?: string | null }
 
-const props = defineProps<{ taskId: number; taskType: string; businessLane?: string; bundle: ResourceBundle; referenceCount?: number; taskReferences?: ReferenceFileRef[]; skuModeHints?: Record<string, boolean>; allowedActions: string[] }>()
+const props = defineProps<{ taskId: number; taskType: string; businessLane?: string; bundle: ResourceBundle; referenceCount?: number; taskReferences?: ReferenceFileRef[]; skuModeHints?: Record<string, boolean>; retouchRequirements?: RetouchRequirement[]; allowedActions: string[] }>()
 const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean] }>()
 const skuModeHints = computed(() => props.skuModeHints ?? {})
 const rows = ref<EditorRow[]>([])
@@ -279,6 +303,9 @@ const pendingAction = ref<'approve' | 'return_to_design' | 'reopen' | null>(null
 const confirmDialog = ref<HTMLElement | null>(null)
 const confirmCancelButton = ref<HTMLButtonElement | null>(null)
 const editorViewport = ref<HTMLElement | null>(null)
+const retouchFolderInput = ref<HTMLInputElement | null>(null)
+const folderUploading = ref(false)
+const folderUploadProgress = ref('准备上传…')
 const editorScrollTop = ref(0)
 const editorViewportHeight = ref(560)
 const editorRowHeight = ref(330)
@@ -341,7 +368,7 @@ const editorVisibleStart = computed(() => Math.max(0, Math.floor(editorScrollTop
 const editorVisibleCount = computed(() => Math.ceil(editorViewportHeight.value / editorRowHeight.value) + editorOverscan * 2)
 const visibleEditorRows = computed(() => rows.value.slice(editorVisibleStart.value, editorVisibleStart.value + editorVisibleCount.value).map((row, offset) => ({ row, groupIndex: editorVisibleStart.value + offset })))
 const editorWindowOffset = computed(() => editorVisibleStart.value * editorRowHeight.value)
-const isDirty = computed(() => changedGroups.value.size > 0 || rows.value.some((row) => Boolean(row.uploading)))
+const isDirty = computed(() => folderUploading.value || changedGroups.value.size > 0 || rows.value.some((row) => Boolean(row.uploading)))
 const dirtyLabel = computed(() => {
   if (isDirty.value) return '当前修改尚未提交'
   if (isDesignStage.value) {
@@ -516,6 +543,82 @@ async function removeSource(row: EditorRow) {
     deletingSourceAssetID.value = null
   }
 }
+function retouchFolderTargets(): RetouchFolderUploadTarget[] {
+  return rows.value.map((row, index) => {
+    const requirementId = row.group.retouch_requirement_id
+    const requirement = props.retouchRequirements?.find((item) => item.id === requirementId) || props.retouchRequirements?.[index]
+    return {
+      groupId: row.group.id,
+      order: index + 1,
+      requirementId,
+      skuCode: row.group.sku_code || requirement?.skuCode,
+      sourceFileNames: retouchSourceAssetsToDisplayItems(requirement?.sourceAssets || []).map((item) => item.fileName),
+    }
+  })
+}
+async function uploadRetouchFolder(event: Event) {
+  const input = event.target as HTMLInputElement
+  const selected = [...(input.files || [])]
+  if (!selected.length || folderUploading.value) return
+  error.value = ''
+  success.value = ''
+  const plan = buildRetouchFolderUploadPlan(selected, retouchFolderTargets())
+  const planError = retouchFolderUploadPlanError(plan)
+  if (planError) {
+    error.value = `文件夹上传未开始：${planError}。请沿用批量下载的“需求1 / 需求2”目录，或保留原素材文件名。`
+    input.value = ''
+    return
+  }
+
+  folderUploading.value = true
+  folderUploadProgress.value = `0 / ${plan.items.length} 项`
+  const failures: string[] = []
+  let completed = 0
+  let uploadedFileCount = 0
+  try {
+    for (const item of plan.items) {
+      const row = rows.value.find((candidate) => candidate.group.id === item.target.groupId)
+      if (!row) {
+        failures.push(`需求${item.target.order}已不在当前任务中`)
+        continue
+      }
+      row.uploading = `需求${item.target.order}的文件夹成品`
+      try {
+        const files = await expandFinalUploadFiles(item.files)
+        const uploadedFiles: UploadedFile[] = []
+        for (const file of files) {
+          row.uploading = `需求${item.target.order} · ${file.name}`
+          const uploaded = await uploadTaskFileViaAssetSession(String(props.taskId), file, {
+            asset_kind: 'delivery',
+            target_sku_code: row.group.sku_code || undefined,
+            remark: file.name,
+          }, uploadOptions(row))
+          uploadedFiles.push({ id: assetVersionId(uploaded), name: file.name })
+        }
+        row.mode = uploadedFiles.length > 1 ? 'set' : 'single'
+        row.finals = uploadedFiles
+        markChanged(row.group.id)
+        completed += 1
+        uploadedFileCount += uploadedFiles.length
+      } catch (cause) {
+        failures.push(`需求${item.target.order}：${cause instanceof Error ? cause.message : '上传失败'}`)
+      } finally {
+        row.uploading = ''
+        folderUploadProgress.value = `${completed + failures.length} / ${plan.items.length} 项`
+      }
+    }
+
+    if (failures.length) {
+      error.value = `文件夹批量上传完成 ${completed} 项，失败 ${failures.length} 项：${failures.slice(0, 3).join('；')}`
+    } else {
+      success.value = `文件夹批量上传完成：${completed} 项修图需求，共 ${uploadedFileCount} 个成品文件。`
+    }
+  } finally {
+    folderUploading.value = false
+    folderUploadProgress.value = '准备上传…'
+    input.value = ''
+  }
+}
 async function uploadFinals(event: Event, row: EditorRow) {
   const input = event.target as HTMLInputElement
   const selected = [...(input.files || [])]
@@ -546,7 +649,7 @@ function drop(groupIndex:number,index:number) { if (!dragged || dragged.groupInd
 function validFinals(row: EditorRow) { return row.mode === 'single' ? row.finals.length === 1 : row.finals.length >= 2 }
 const validDesign = computed(() => rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && ['single','set'].includes(row.mode)) && !rows.value.some((row) => row.uploading))
 const validAudit = computed(() => rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && validFinals(row)) && !rows.value.some((row) => row.uploading))
-const validRetouch = computed(() => rows.value.length > 0 && rows.value.every((row) => validFinals(row)) && !rows.value.some((row) => row.uploading))
+const validRetouch = computed(() => rows.value.length > 0 && rows.value.every((row) => validFinals(row)) && !folderUploading.value && !rows.value.some((row) => row.uploading))
 function submission(row: EditorRow): ResourceGroupSubmission {
   const includeFinals = isAuditStage.value || isRetouchStage.value
   const result: ResourceGroupSubmission = { group_id: row.group.id, expected_group_lock_version: row.group.lock_version, mode: row.mode, final_task_asset_ids: includeFinals ? row.finals.map((file) => file.id) : [] }

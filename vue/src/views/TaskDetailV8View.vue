@@ -212,6 +212,7 @@
               :reference-count="displayReferenceFiles.length"
               :task-references="displayReferenceFiles"
               :sku-mode-hints="skuModeHints"
+              :retouch-requirements="retouchRequirements"
               :allowed-actions="task.allowed_actions || []"
               @updated="onWorkflowUpdated"
               @dirty-change="workflowDirty = $event"

@@ -66,17 +66,20 @@ function parseTaskIdFromRoot(path: string): string | null {
 }
 
 function v8NumericTaskContract(task: MockTask, taskId: string) {
+  const isRetouchTask = task.task_type === 'retouch_task'
   return {
     ...task,
     id: Number(taskId),
-    task_status: task.status === 'completed' ? 'Completed' : 'PendingAudit',
+    task_status: task.status === 'completed' ? 'Completed' : isRetouchTask ? 'InProgress' : 'PendingAudit',
     workflow_revision: 3,
     workflow_contract_version: 2,
     business_lane: task.task_type === 'customer_customization' ? 'customization' : 'normal',
-    allowed_actions: ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
+    allowed_actions: isRetouchTask
+      ? ['task.design.submit']
+      : ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
     product_name_snapshot: task.title,
     primary_sku_code: 'SKU-MOCK-1002',
-    current_handler_name: '审核演示',
+    current_handler_name: isRetouchTask ? '修图演示' : '审核演示',
     owner_department: '设计部',
     owner_org_team: '主图组',
     requirement_description: '完成主图设计并核对套装顺序。',
