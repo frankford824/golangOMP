@@ -10231,6 +10231,20 @@ body.aw-submission-dialog-locked {
   gap: var(--aw-space-2);
 }
 
+.aw-dropzone__piecework-confirmation {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--aw-space-2);
+  margin: 0;
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-dropzone__piecework-confirmation strong {
+  color: var(--aw-accent);
+}
+
 @media (max-width: 680px) {
   .aw-supplement-file-picker__dropzone {
     grid-template-columns: 1fr;

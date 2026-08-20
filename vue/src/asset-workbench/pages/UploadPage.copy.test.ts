@@ -1,0 +1,56 @@
+// @vitest-environment jsdom
+import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
+  assetWorkbenchApi: {
+    listUploadDirectories: vi.fn().mockResolvedValue([
+      { id: 8, name: 'C类', oss_prefix: 'c', difficulty_class: 'C', allowed_file_types: [], enabled: true, sort_order: 1 },
+    ]),
+    listDifficultyClasses: vi.fn().mockResolvedValue([{ id: 1, code: 'C', name: 'C', enabled: true, sort_order: 1 }]),
+  },
+}))
+
+import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
+import { useUploadCenterStore } from '@aw/shared/drive/uploadCenter.store'
+import { withDriveUploadRelativePath } from '@aw/shared/drive/useDriveUpload'
+import UploadPage from './UploadPage.vue'
+
+describe('UploadPage simple piecework copy', () => {
+  let pinia: ReturnType<typeof createPinia>
+
+  beforeEach(() => {
+    pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 22, display_name: 'simple-user' },
+      is_admin: false,
+      capabilities: ['asset.workbench.submit'],
+    } as never)
+  })
+
+  it('uses compact picker labels and keeps displayed work count aligned with piecework groups', async () => {
+    const uploadCenter = useUploadCenterStore()
+    uploadCenter.addItems([
+      new File(['a'], 'a.png', { type: 'image/png' }),
+      new File(['b'], 'b.png', { type: 'image/png' }),
+    ], { source: 'upload-page' })
+    const wrapper = mount(UploadPage, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const dropzoneButtons = wrapper.get('.aw-dropzone').findAll('button').map((button) => button.text().trim())
+    expect(dropzoneButtons).toEqual(['文件', '文件夹', '提交上传'])
+    expect(wrapper.get('.aw-dropzone__piecework-confirmation').text()).toContain('仔细核对作品数量后，点击「提交上传」')
+    expect(wrapper.get('.aw-dropzone__piecework-confirmation').text()).toContain('2 个作品 = 2 个计件数量')
+
+    uploadCenter.clearIdle()
+    uploadCenter.addItems([
+      withDriveUploadRelativePath(new File(['a'], 'front.png', { type: 'image/png' }), '套装/front.png'),
+      withDriveUploadRelativePath(new File(['b'], 'side.png', { type: 'image/png' }), '套装/side.png'),
+    ], { source: 'upload-page' })
+    await flushPromises()
+
+    expect(wrapper.get('.aw-dropzone__piecework-confirmation').text()).toContain('1 个作品 = 1 个计件数量')
+  })
+})
