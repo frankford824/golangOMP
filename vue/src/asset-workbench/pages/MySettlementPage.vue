@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Eye, Gift, RefreshCw, Trash2, Upload, WalletCards } from 'lucide-vue-next'
+import { Eye, FolderOpen, Gift, Images, RefreshCw, Trash2, Upload, WalletCards } from 'lucide-vue-next'
 
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { buildSelfSupplementPayload, duplicateSupplementFileNames } from '@aw/features/supplement/supplementUpload'
+import { buildSelfSupplementPayload, duplicateSupplementFileNames, filterSupplementImageFiles } from '@aw/features/supplement/supplementUpload'
+import { driveUploadRelativePath, filesFromDriveDrop } from '@aw/shared/drive/useDriveUpload'
 import {
   assetWorkbenchApi,
   type MySettlementMonthRow,
@@ -40,12 +41,15 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const uploadError = ref('')
 const uploadNotice = ref('')
+const fileSelectionNotice = ref('')
+const supplementDragActive = ref(false)
 const selectedSupplementIds = ref<number[]>([])
 const supplementDeleteReason = ref('')
 const deletingSupplements = ref(false)
 const deleteDialogOpen = ref(false)
 const deleteDialogMode = ref<'single' | 'batch'>('batch')
 const fileInput = ref<HTMLInputElement | null>(null)
+const folderInput = ref<HTMLInputElement | null>(null)
 const previewDialog = ref({
   open: false,
   title: '',
@@ -90,11 +94,34 @@ function todayDate() {
   return local.toISOString().slice(0, 10)
 }
 
+function applySupplementFiles(files: File[] | FileList | null | undefined) {
+  const selection = filterSupplementImageFiles(files)
+  selectedFiles.value = selection.files
+  fileSelectionNotice.value = selectedFiles.value.length
+    ? `已读取 ${formatInt(selectedFiles.value.length)} 张图片${selection.ignored ? `，忽略 ${formatInt(selection.ignored)} 个非图片或空文件` : ''}`
+    : ''
+  uploadError.value = selectedFiles.value.length
+    ? ''
+    : selection.ignored
+      ? `文件夹中没有可上传图片，已忽略 ${formatInt(selection.ignored)} 个非图片或空文件`
+      : '没有读取到可上传图片'
+  uploadNotice.value = ''
+}
+
 function selectSupplementFiles(event: Event) {
   const input = event.target as HTMLInputElement | null
-  selectedFiles.value = Array.from(input?.files ?? []).filter((file) => file.size > 0)
-  uploadError.value = selectedFiles.value.length ? '' : '没有读取到可上传图片'
-  uploadNotice.value = ''
+  applySupplementFiles(input?.files)
+}
+
+async function dropSupplementFiles(event: DragEvent) {
+  supplementDragActive.value = false
+  try {
+    applySupplementFiles(await filesFromDriveDrop(event.dataTransfer))
+  } catch (err) {
+    selectedFiles.value = []
+    fileSelectionNotice.value = ''
+    uploadError.value = resolveApiUserMessage(err, { fallback: '读取文件夹失败，请改用“选择文件夹”' })
+  }
 }
 
 async function uploadSupplements() {
@@ -112,7 +139,7 @@ async function uploadSupplements() {
       const uploaded = await uploadWorkbenchFile(file, {
         uploadDirectoryId: directory.id,
         expectedBusinessMonth: permission.business_month,
-        relativePath: file.name,
+        relativePath: driveUploadRelativePath(file),
         onProgress: (progress) => {
           uploadProgress.value = Math.round(((index + progress.percent / 100) / uploadFiles.length) * 100)
         },
@@ -125,6 +152,8 @@ async function uploadSupplements() {
     uploadNotice.value = `补录上传完成：${formatInt(success)} 个作品，统一计入 ${permission.business_month} 补录工资。`
     selectedFiles.value = []
     if (fileInput.value) fileInput.value.value = ''
+    if (folderInput.value) folderInput.value.value = ''
+    fileSelectionNotice.value = ''
     await settlementRequest.run()
   } catch (err) {
     selectedFiles.value = uploadFiles.slice(success)
@@ -345,10 +374,33 @@ onMounted(() => {
             </option>
           </select>
         </label>
-        <label>
-          选择补录图片
-          <input ref="fileInput" type="file" accept="image/*" multiple @change="selectSupplementFiles" />
-        </label>
+        <div class="aw-form-grid__full aw-supplement-file-picker">
+          <span class="aw-supplement-file-picker__label">选择补录图片</span>
+          <div
+            class="aw-supplement-file-picker__dropzone"
+            :class="{ 'is-active': supplementDragActive }"
+            @dragenter.prevent="supplementDragActive = true"
+            @dragover.prevent="supplementDragActive = true"
+            @dragleave.self="supplementDragActive = false"
+            @drop.prevent="dropSupplementFiles"
+          >
+            <Images :size="24" aria-hidden="true" />
+            <div>
+              <strong>拖入图片或整个文件夹</strong>
+              <span>文件夹会递归读取；压缩包、空文件和其他非图片文件会自动忽略。</span>
+            </div>
+            <div class="aw-supplement-file-picker__actions">
+              <button class="aw-secondary-button" type="button" @click="fileInput?.click()">选择文件</button>
+              <button class="aw-secondary-button" type="button" @click="folderInput?.click()">
+                <FolderOpen :size="15" aria-hidden="true" />
+                选择文件夹
+              </button>
+            </div>
+          </div>
+          <input ref="fileInput" class="aw-visually-hidden" type="file" accept="image/*" multiple aria-label="选择补录图片文件" @change="selectSupplementFiles" />
+          <input ref="folderInput" class="aw-visually-hidden" type="file" accept="image/*" multiple webkitdirectory directory aria-label="选择补录图片文件夹" @change="selectSupplementFiles" />
+          <span v-if="fileSelectionNotice" class="aw-supplement-file-picker__notice">{{ fileSelectionNotice }}</span>
+        </div>
       </div>
       <p v-else class="aw-inline-alert aw-inline-alert--info">当前自然月没有补录权限；请先联系管理员申请，管理员可随时开放或关闭。</p>
 

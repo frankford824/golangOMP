@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildSelfSupplementPayload, duplicateSupplementFileNames } from './supplementUpload'
+import { buildSelfSupplementPayload, duplicateSupplementFileNames, filterSupplementImageFiles } from './supplementUpload'
 
 describe('asset workbench self supplement upload', () => {
+  it('keeps folder images and reports archives, empty files, and other documents as ignored', () => {
+    const imageWithoutMime = new File(['image'], '子目录海报.PNG')
+    const imageWithMime = new File(['image'], '封面', { type: 'image/jpeg' })
+    const archive = new File(['archive'], '历史素材.rar', { type: 'application/vnd.rar' })
+    const empty = new File([], '空图.jpg', { type: 'image/jpeg' })
+
+    expect(filterSupplementImageFiles([imageWithoutMime, imageWithMime, archive, empty])).toEqual({
+      files: [imageWithoutMime, imageWithMime],
+      ignored: 2,
+    })
+  })
+
   it('warns for names already uploaded and duplicates in the new selection', () => {
     const files = [{ name: '海报.jpg' }, { name: '挂布.png' }, { name: '挂布.png' }] as File[]
     expect(duplicateSupplementFileNames(files, [{

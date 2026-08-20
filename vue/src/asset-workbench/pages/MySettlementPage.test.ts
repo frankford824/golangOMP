@@ -6,10 +6,16 @@ const mocks = vi.hoisted(() => ({
   mySettlement: vi.fn(),
   listUploadDirectories: vi.fn(),
   batchDeleteSettlementSupplements: vi.fn(),
+  createSettlementSupplement: vi.fn(),
+  uploadWorkbenchFile: vi.fn(),
 }))
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
   assetWorkbenchApi: mocks,
+}))
+
+vi.mock('@aw/features/upload/uploadFlow', () => ({
+  uploadWorkbenchFile: mocks.uploadWorkbenchFile,
 }))
 
 vi.mock('@aw/shared/preview/WorkbenchPreviewDialog.vue', () => ({
@@ -58,6 +64,8 @@ describe('MySettlementPage supplement deletion', () => {
     })
     mocks.listUploadDirectories.mockResolvedValue([])
     mocks.batchDeleteSettlementSupplements.mockResolvedValue({ deleted_ids: [601], supplements: [] })
+    mocks.createSettlementSupplement.mockResolvedValue({})
+    mocks.uploadWorkbenchFile.mockResolvedValue({ sessionId: 'folder-session' })
   })
 
   it('opens single-record deletion from the row header and confirms without a bottom action panel', async () => {
@@ -102,5 +110,47 @@ describe('MySettlementPage supplement deletion', () => {
     await flushPromises()
 
     expect(mocks.batchDeleteSettlementSupplements).toHaveBeenCalledWith([601, 602], '批量误传')
+  })
+
+  it('accepts a folder selection, keeps image paths, and reports ignored non-images', async () => {
+    mocks.mySettlement.mockResolvedValue({
+      estimated_net_amount: 0,
+      months: [],
+      supplement_permission: { id: 1, payee_user_id: 1001, business_month: '2026-07', enabled: true },
+      supplements: [],
+    })
+    mocks.listUploadDirectories.mockResolvedValue([
+      { id: 8, name: 'C类', oss_prefix: 'c', difficulty_class: 'C', enabled: true, sort_order: 1 },
+    ])
+    const wrapper = mount(MySettlementPage)
+    await flushPromises()
+
+    const first = new File(['image-a'], 'a.png', { type: 'image/png' })
+    const second = new File(['image-b'], 'b.jpg', { type: 'image/jpeg' })
+    const archive = new File(['archive'], 'old.rar', { type: 'application/vnd.rar' })
+    Object.defineProperty(first, 'webkitRelativePath', { configurable: true, value: '补录文件夹/a.png' })
+    Object.defineProperty(second, 'webkitRelativePath', { configurable: true, value: '补录文件夹/子目录/b.jpg' })
+    Object.defineProperty(archive, 'webkitRelativePath', { configurable: true, value: '补录文件夹/old.rar' })
+    const folderInput = wrapper.get('input[aria-label="选择补录图片文件夹"]')
+    Object.defineProperty(folderInput.element, 'files', { configurable: true, value: [first, second, archive] })
+    await folderInput.trigger('change')
+
+    expect(folderInput.attributes()).toHaveProperty('webkitdirectory')
+    expect(wrapper.text()).toContain('已读取 2 张图片，忽略 1 个非图片或空文件')
+    expect(wrapper.text()).toContain('上传 2 个补录作品')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    await wrapper.findAll('button').find((button) => button.text().includes('上传 2 个补录作品'))!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.uploadWorkbenchFile).toHaveBeenNthCalledWith(1, first, expect.objectContaining({
+      uploadDirectoryId: 8,
+      relativePath: '补录文件夹/a.png',
+    }))
+    expect(mocks.uploadWorkbenchFile).toHaveBeenNthCalledWith(2, second, expect.objectContaining({
+      uploadDirectoryId: 8,
+      relativePath: '补录文件夹/子目录/b.jpg',
+    }))
+    expect(mocks.createSettlementSupplement).toHaveBeenCalledTimes(2)
   })
 })

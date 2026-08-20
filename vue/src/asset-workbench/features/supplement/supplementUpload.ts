@@ -7,8 +7,21 @@ import type {
 
 type NamedFile = Pick<File, 'name'>
 
+const supplementImageExtension = /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i
+
 function normalizedFilename(value: string) {
   return value.trim().toLocaleLowerCase('zh-CN')
+}
+
+export function isSupplementImageFile(file: File): boolean {
+  if (file.size <= 0) return false
+  return file.type.toLowerCase().startsWith('image/') || supplementImageExtension.test(file.name)
+}
+
+export function filterSupplementImageFiles(files: File[] | FileList | null | undefined) {
+  const candidates = Array.from(files ?? [])
+  const accepted = candidates.filter(isSupplementImageFile)
+  return { files: accepted, ignored: candidates.length - accepted.length }
 }
 
 export function duplicateSupplementFileNames(files: NamedFile[], supplements: SettlementSupplementRow[]): string[] {
