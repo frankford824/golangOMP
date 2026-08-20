@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildSelfSupplementPayload, duplicateSupplementFileNames, filterSupplementImageFiles } from './supplementUpload'
+import { buildSelfSupplementPayload, duplicateSupplementFileNames, filterSupplementUploadFiles } from './supplementUpload'
 
 describe('asset workbench self supplement upload', () => {
-  it('keeps folder images and reports archives, empty files, and other documents as ignored', () => {
+  it('accepts archives when the directory is unrestricted and enforces configured file types', () => {
     const imageWithoutMime = new File(['image'], '子目录海报.PNG')
     const imageWithMime = new File(['image'], '封面', { type: 'image/jpeg' })
     const archive = new File(['archive'], '历史素材.rar', { type: 'application/vnd.rar' })
     const empty = new File([], '空图.jpg', { type: 'image/jpeg' })
 
-    expect(filterSupplementImageFiles([imageWithoutMime, imageWithMime, archive, empty])).toEqual({
+    expect(filterSupplementUploadFiles([imageWithoutMime, imageWithMime, archive, empty])).toEqual({
+      files: [imageWithoutMime, imageWithMime, archive],
+      ignored: 1,
+    })
+    expect(filterSupplementUploadFiles([imageWithoutMime, imageWithMime, archive], ['image/*', 'png'])).toEqual({
       files: [imageWithoutMime, imageWithMime],
-      ignored: 2,
+      ignored: 1,
     })
   })
 
@@ -33,7 +37,7 @@ describe('asset workbench self supplement upload', () => {
   it('derives payee, settlement month, and price category from permission and upload directory', () => {
     expect(buildSelfSupplementPayload(
       { name: '海报.jpg' } as File,
-      'session-1',
+      ['session-1', 'session-2'],
       '2026-06-15',
       { id: 1, payee_user_id: 1001, business_month: '2026-07', enabled: true, reason: '', granted_by: 9, granted_at: '' },
       { id: 8, name: 'A类成品', oss_prefix: 'a', description: '', difficulty_class: 'A', allowed_file_types: ['jpg'], enabled: true, sort_order: 1, created_by: 9 },
@@ -44,7 +48,7 @@ describe('asset workbench self supplement upload', () => {
       supplement_date: '2026-06-15',
       difficulty_class: 'A',
       gross_amount: 0,
-      upload_session_ids: ['session-1'],
+      upload_session_ids: ['session-1', 'session-2'],
     }))
   })
 })

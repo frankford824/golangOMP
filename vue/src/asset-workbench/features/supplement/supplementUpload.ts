@@ -7,21 +7,26 @@ import type {
 
 type NamedFile = Pick<File, 'name'>
 
-const supplementImageExtension = /\.(avif|bmp|gif|heic|heif|jpe?g|png|svg|tiff?|webp)$/i
-
 function normalizedFilename(value: string) {
   return value.trim().toLocaleLowerCase('zh-CN')
 }
 
-export function isSupplementImageFile(file: File): boolean {
-  if (file.size <= 0) return false
-  return file.type.toLowerCase().startsWith('image/') || supplementImageExtension.test(file.name)
+export function filterSupplementUploadFiles(files: File[] | FileList | null | undefined, allowedFileTypes: string[] = []) {
+  const candidates = Array.from(files ?? [])
+  const allowed = allowedFileTypes.map((value) => value.trim().toLowerCase().replace(/^\.+/, '')).filter(Boolean)
+  const accepted = candidates.filter((file) => file.size > 0 && supplementFileAllowed(file, allowed))
+  return { files: accepted, ignored: candidates.length - accepted.length }
 }
 
-export function filterSupplementImageFiles(files: File[] | FileList | null | undefined) {
-  const candidates = Array.from(files ?? [])
-  const accepted = candidates.filter(isSupplementImageFile)
-  return { files: accepted, ignored: candidates.length - accepted.length }
+function supplementFileAllowed(file: File, allowed: string[]) {
+  if (!allowed.length) return true
+  const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() || '' : ''
+  const mimeType = file.type.trim().toLowerCase()
+  return allowed.some((value) => (
+    (extension && value === extension)
+    || (mimeType && value === mimeType)
+    || (mimeType && value.endsWith('/*') && mimeType.startsWith(value.slice(0, -1)))
+  ))
 }
 
 export function duplicateSupplementFileNames(files: NamedFile[], supplements: SettlementSupplementRow[]): string[] {
@@ -45,7 +50,7 @@ export function duplicateSupplementFileNames(files: NamedFile[], supplements: Se
 
 export function buildSelfSupplementPayload(
   file: NamedFile,
-  sessionId: string,
+  sessionIds: string | string[],
   supplementDate: string,
   permission: SupplementPermissionRow,
   directory: UploadDirectoryRow,
@@ -60,6 +65,6 @@ export function buildSelfSupplementPayload(
     page_count: 1,
     gross_amount: 0,
     status: 'approved',
-    upload_session_ids: [sessionId],
+    upload_session_ids: Array.isArray(sessionIds) ? sessionIds : [sessionIds],
   }
 }

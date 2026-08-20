@@ -3,8 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { Eye, FolderOpen, Gift, Images, RefreshCw, Trash2, Upload, WalletCards } from 'lucide-vue-next'
 
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { buildSelfSupplementPayload, duplicateSupplementFileNames, filterSupplementImageFiles } from '@aw/features/supplement/supplementUpload'
-import { driveUploadRelativePath, filesFromDriveDrop } from '@aw/shared/drive/useDriveUpload'
+import { buildSelfSupplementPayload, duplicateSupplementFileNames, filterSupplementUploadFiles } from '@aw/features/supplement/supplementUpload'
+import { driveUploadRelativePath, filesFromDriveDrop, groupDriveUploadPieceworkItems, isSafeDriveUploadPath } from '@aw/shared/drive/useDriveUpload'
 import {
   assetWorkbenchApi,
   type MySettlementMonthRow,
@@ -60,11 +60,21 @@ const previewDialog = ref({
   metaRows: [] as Array<[string, string]>,
 })
 const selectedDirectory = computed(() => uploadDirectories.value.find((item) => item.id === selectedDirectoryId.value) ?? null)
-const duplicateFilenames = computed(() => duplicateSupplementFileNames(selectedFiles.value, supplements.value))
+const selectedSupplementItems = computed(() => selectedFiles.value.map((file) => ({ file, relativePath: driveUploadRelativePath(file) })))
+const selectedSupplementGroups = computed(() => groupDriveUploadPieceworkItems(selectedSupplementItems.value))
+const selectedSupplementWorkNames = computed(() => selectedSupplementGroups.value.map((group) => ({ name: supplementGroupName(group) })))
+const duplicateFilenames = computed(() => duplicateSupplementFileNames(selectedSupplementWorkNames.value, supplements.value))
 const supplementUploadOpen = computed(() => Boolean(supplementPermission.value?.enabled))
 const canUploadSupplement = computed(() =>
-  supplementUploadOpen.value && Boolean(selectedDirectory.value) && selectedFiles.value.length > 0 && Boolean(supplementDate.value) && !uploading.value,
+  supplementUploadOpen.value && Boolean(selectedDirectory.value) && selectedSupplementGroups.value.length > 0 && Boolean(supplementDate.value) && !uploading.value,
 )
+const supplementAcceptString = computed(() => {
+  const allowed = selectedDirectory.value?.allowed_file_types ?? []
+  return allowed.map((value) => value.trim()).filter(Boolean).map((value) => value.includes('/') ? value : `.${value.replace(/^\.+/, '')}`).join(',')
+})
+const supplementAllowedLabel = computed(() => selectedDirectory.value?.allowed_file_types?.length
+  ? selectedDirectory.value.allowed_file_types.join('、')
+  : '全部格式')
 const deletableSupplements = computed(() => activeSupplements.value.filter((row) => ['draft', 'approved'].includes(row.status)))
 const selectedSupplements = computed(() => deletableSupplements.value.filter((row) => selectedSupplementIds.value.includes(row.id)))
 const allSupplementsSelected = computed(() => deletableSupplements.value.length > 0 && deletableSupplements.value.every((row) => selectedSupplementIds.value.includes(row.id)))
@@ -95,17 +105,26 @@ function todayDate() {
 }
 
 function applySupplementFiles(files: File[] | FileList | null | undefined) {
-  const selection = filterSupplementImageFiles(files)
+  const candidates = Array.from(files ?? [])
+  const safeFiles = candidates.filter((file) => isSafeDriveUploadPath(driveUploadRelativePath(file)))
+  const selection = filterSupplementUploadFiles(safeFiles, selectedDirectory.value?.allowed_file_types ?? [])
+  const ignored = selection.ignored + candidates.length - safeFiles.length
   selectedFiles.value = selection.files
   fileSelectionNotice.value = selectedFiles.value.length
-    ? `已读取 ${formatInt(selectedFiles.value.length)} 张图片${selection.ignored ? `，忽略 ${formatInt(selection.ignored)} 个非图片或空文件` : ''}`
+    ? `已读取 ${formatInt(selectedFiles.value.length)} 个文件，归为 ${formatInt(selectedSupplementGroups.value.length)} 个补录作品${ignored ? `；忽略 ${formatInt(ignored)} 个空文件、隐藏路径或不符合目录格式限制的文件` : ''}`
     : ''
   uploadError.value = selectedFiles.value.length
     ? ''
-    : selection.ignored
-      ? `文件夹中没有可上传图片，已忽略 ${formatInt(selection.ignored)} 个非图片或空文件`
-      : '没有读取到可上传图片'
+    : ignored
+      ? `没有读取到可上传文件，已忽略 ${formatInt(ignored)} 个空文件、隐藏路径或不符合目录格式限制的文件（允许：${supplementAllowedLabel.value}）`
+      : '没有读取到可上传文件'
   uploadNotice.value = ''
+}
+
+function supplementGroupName(group: { isFolder: boolean; items: Array<{ file: File; relativePath: string }> }) {
+  const first = group.items[0]
+  if (!first) return '补录作品'
+  return group.isFolder ? first.relativePath.split('/')[0] || first.file.name : first.file.name
 }
 
 function selectSupplementFiles(event: Event) {
@@ -127,37 +146,48 @@ async function dropSupplementFiles(event: DragEvent) {
 async function uploadSupplements() {
   const permission = supplementPermission.value
   const directory = selectedDirectory.value
-  if (!permission?.enabled || !directory || !supplementDate.value || !selectedFiles.value.length) return
+  if (!permission?.enabled || !directory || !supplementDate.value || !selectedSupplementGroups.value.length) return
   uploading.value = true
   uploadProgress.value = 0
   uploadError.value = ''
   uploadNotice.value = ''
-  let success = 0
-  const uploadFiles = [...selectedFiles.value]
+  let completedWorks = 0
+  let processedFiles = 0
+  const uploadGroups = selectedSupplementGroups.value.map((group) => ({ ...group, items: [...group.items] }))
+  const totalFiles = uploadGroups.reduce((count, group) => count + group.items.length, 0)
   try {
-    for (const [index, file] of uploadFiles.entries()) {
-      const uploaded = await uploadWorkbenchFile(file, {
-        uploadDirectoryId: directory.id,
-        expectedBusinessMonth: permission.business_month,
-        relativePath: driveUploadRelativePath(file),
-        onProgress: (progress) => {
-          uploadProgress.value = Math.round(((index + progress.percent / 100) / uploadFiles.length) * 100)
-        },
-      })
+    for (const group of uploadGroups) {
+      const sessionIds: string[] = []
+      const uploadBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${completedWorks}`
+      for (const item of group.items) {
+        const fileIndex = processedFiles
+        const uploaded = await uploadWorkbenchFile(item.file, {
+          uploadDirectoryId: directory.id,
+          uploadBatchId,
+          expectedBusinessMonth: permission.business_month,
+          relativePath: item.relativePath,
+          isFolderUpload: group.isFolder,
+          onProgress: (progress) => {
+            uploadProgress.value = Math.round(((fileIndex + progress.percent / 100) / totalFiles) * 100)
+          },
+        })
+        sessionIds.push(uploaded.sessionId)
+        processedFiles += 1
+      }
       await assetWorkbenchApi.createSettlementSupplement(
-        buildSelfSupplementPayload(file, uploaded.sessionId, supplementDate.value, permission, directory),
+        buildSelfSupplementPayload({ name: supplementGroupName(group) }, sessionIds, supplementDate.value, permission, directory),
       )
-      success += 1
+      completedWorks += 1
     }
-    uploadNotice.value = `补录上传完成：${formatInt(success)} 个作品，统一计入 ${permission.business_month} 补录工资。`
+    uploadNotice.value = `补录上传完成：${formatInt(completedWorks)} 个作品，共 ${formatInt(totalFiles)} 个文件，统一计入 ${permission.business_month} 补录工资。`
     selectedFiles.value = []
     if (fileInput.value) fileInput.value.value = ''
     if (folderInput.value) folderInput.value.value = ''
     fileSelectionNotice.value = ''
     await settlementRequest.run()
   } catch (err) {
-    selectedFiles.value = uploadFiles.slice(success)
-    uploadError.value = resolveApiUserMessage(err, { fallback: `补录上传中断，已完成 ${success} 个作品，请核对记录后重试。` })
+    selectedFiles.value = uploadGroups.slice(completedWorks).flatMap((group) => group.items.map((item) => item.file))
+    uploadError.value = resolveApiUserMessage(err, { fallback: `补录上传中断，已完成 ${completedWorks} 个作品，请核对记录后重试。` })
   } finally {
     uploading.value = false
   }
@@ -363,7 +393,8 @@ onMounted(() => {
       <div v-if="supplementUploadOpen" class="aw-form-grid">
         <label>
           补录日期
-          <input v-model="supplementDate" type="date" />
+          <input v-model="supplementDate" type="date" aria-describedby="supplement-date-help" />
+          <span id="supplement-date-help" class="aw-copy">指作品原本应该上传、但因遗漏未上传的日期。</span>
         </label>
         <label>
           上传目录 / 计价分类
@@ -375,7 +406,7 @@ onMounted(() => {
           </select>
         </label>
         <div class="aw-form-grid__full aw-supplement-file-picker">
-          <span class="aw-supplement-file-picker__label">选择补录图片</span>
+          <span class="aw-supplement-file-picker__label">选择补录文件</span>
           <div
             class="aw-supplement-file-picker__dropzone"
             :class="{ 'is-active': supplementDragActive }"
@@ -386,8 +417,8 @@ onMounted(() => {
           >
             <Images :size="24" aria-hidden="true" />
             <div>
-              <strong>拖入图片或整个文件夹</strong>
-              <span>文件夹会递归读取；压缩包、空文件和其他非图片文件会自动忽略。</span>
+              <strong>拖入文件、压缩包或整个文件夹</strong>
+              <span>文件夹按正常交稿规则计为 1 个作品；允许：{{ supplementAllowedLabel }}。</span>
             </div>
             <div class="aw-supplement-file-picker__actions">
               <button class="aw-secondary-button" type="button" @click="fileInput?.click()">选择文件</button>
@@ -397,8 +428,8 @@ onMounted(() => {
               </button>
             </div>
           </div>
-          <input ref="fileInput" class="aw-visually-hidden" type="file" accept="image/*" multiple aria-label="选择补录图片文件" @change="selectSupplementFiles" />
-          <input ref="folderInput" class="aw-visually-hidden" type="file" accept="image/*" multiple webkitdirectory directory aria-label="选择补录图片文件夹" @change="selectSupplementFiles" />
+          <input ref="fileInput" class="aw-visually-hidden" type="file" :accept="supplementAcceptString" multiple aria-label="选择补录文件" @change="selectSupplementFiles" />
+          <input ref="folderInput" class="aw-visually-hidden" type="file" :accept="supplementAcceptString" multiple webkitdirectory directory aria-label="选择补录文件夹" @change="selectSupplementFiles" />
           <span v-if="fileSelectionNotice" class="aw-supplement-file-picker__notice">{{ fileSelectionNotice }}</span>
         </div>
       </div>
@@ -407,7 +438,7 @@ onMounted(() => {
       <div v-if="supplementUploadOpen" class="aw-inline-actions">
         <button class="aw-primary-button" type="button" :disabled="!canUploadSupplement" @click="uploadSupplements">
           <Upload :size="16" aria-hidden="true" />
-          {{ uploading ? `上传中 ${uploadProgress}%` : `上传 ${formatInt(selectedFiles.length)} 个补录作品` }}
+          {{ uploading ? `上传中 ${uploadProgress}%` : `上传 ${formatInt(selectedSupplementGroups.length)} 个补录作品` }}
         </button>
         <span v-if="selectedDirectory" class="aw-copy">按 {{ selectedDirectory.difficulty_class }} 类自动计价</span>
       </div>
@@ -488,7 +519,7 @@ onMounted(() => {
       </div>
       <div v-else class="aw-empty-state">
         <h3>当前月还没有补录记录</h3>
-        <p>补录权限开放后，在上方选择日期、目录和图片即可上传。</p>
+        <p>补录权限开放后，在上方选择日期、目录和文件即可上传。</p>
       </div>
     </div>
 

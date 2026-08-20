@@ -112,7 +112,7 @@ describe('MySettlementPage supplement deletion', () => {
     expect(mocks.batchDeleteSettlementSupplements).toHaveBeenCalledWith([601, 602], '批量误传')
   })
 
-  it('accepts a folder selection, keeps image paths, and reports ignored non-images', async () => {
+  it('groups a folder as one supplement work and accepts archives when the directory is unrestricted', async () => {
     mocks.mySettlement.mockResolvedValue({
       estimated_net_amount: 0,
       months: [],
@@ -125,22 +125,25 @@ describe('MySettlementPage supplement deletion', () => {
     const wrapper = mount(MySettlementPage)
     await flushPromises()
 
+    expect(wrapper.get('#supplement-date-help').text()).toBe('指作品原本应该上传、但因遗漏未上传的日期。')
+    expect(wrapper.get('input[type="date"]').attributes('aria-describedby')).toBe('supplement-date-help')
+
     const first = new File(['image-a'], 'a.png', { type: 'image/png' })
     const second = new File(['image-b'], 'b.jpg', { type: 'image/jpeg' })
     const archive = new File(['archive'], 'old.rar', { type: 'application/vnd.rar' })
     Object.defineProperty(first, 'webkitRelativePath', { configurable: true, value: '补录文件夹/a.png' })
     Object.defineProperty(second, 'webkitRelativePath', { configurable: true, value: '补录文件夹/子目录/b.jpg' })
     Object.defineProperty(archive, 'webkitRelativePath', { configurable: true, value: '补录文件夹/old.rar' })
-    const folderInput = wrapper.get('input[aria-label="选择补录图片文件夹"]')
+    const folderInput = wrapper.get('input[aria-label="选择补录文件夹"]')
     Object.defineProperty(folderInput.element, 'files', { configurable: true, value: [first, second, archive] })
     await folderInput.trigger('change')
 
     expect(folderInput.attributes()).toHaveProperty('webkitdirectory')
-    expect(wrapper.text()).toContain('已读取 2 张图片，忽略 1 个非图片或空文件')
-    expect(wrapper.text()).toContain('上传 2 个补录作品')
+    expect(wrapper.text()).toContain('已读取 3 个文件，归为 1 个补录作品')
+    expect(wrapper.text()).toContain('上传 1 个补录作品')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 
-    await wrapper.findAll('button').find((button) => button.text().includes('上传 2 个补录作品'))!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('上传 1 个补录作品'))!.trigger('click')
     await flushPromises()
 
     expect(mocks.uploadWorkbenchFile).toHaveBeenNthCalledWith(1, first, expect.objectContaining({
@@ -151,6 +154,14 @@ describe('MySettlementPage supplement deletion', () => {
       uploadDirectoryId: 8,
       relativePath: '补录文件夹/子目录/b.jpg',
     }))
-    expect(mocks.createSettlementSupplement).toHaveBeenCalledTimes(2)
+    expect(mocks.uploadWorkbenchFile).toHaveBeenNthCalledWith(3, archive, expect.objectContaining({
+      uploadDirectoryId: 8,
+      relativePath: '补录文件夹/old.rar',
+    }))
+    expect(mocks.createSettlementSupplement).toHaveBeenCalledTimes(1)
+    expect(mocks.createSettlementSupplement).toHaveBeenCalledWith(expect.objectContaining({
+      order_no: '补录文件夹',
+      upload_session_ids: ['folder-session', 'folder-session', 'folder-session'],
+    }))
   })
 })
