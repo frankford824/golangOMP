@@ -725,7 +725,10 @@ function materialMatchesActiveFilters(asset: SystemAssetRow): boolean {
     if (materialAssetSource(asset) !== 'system') return false
     if (materialBusinessLaneOf(asset) !== materialBusinessLaneFilter.value) return false
   }
-  if (materialFormatFilter.value !== 'all' && materialFormatCategoryOf(asset) !== materialFormatFilter.value) return false
+  // Managers receive format-filtered pages from the backend. A resource group
+  // may match through its source PSD while its visible cover is a PNG, so
+  // reclassifying only the cover here would incorrectly hide the whole group.
+  if (!canManageDrive.value && materialFormatFilter.value !== 'all' && materialFormatCategoryOf(asset) !== materialFormatFilter.value) return false
   return true
 }
 

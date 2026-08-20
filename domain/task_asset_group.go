@@ -239,6 +239,7 @@ type ResourceGroupListParams struct {
 	Page                int
 	PageSize            int
 	Access              ResourceGroupAccessFilter
+	KeepGroupView       bool
 }
 
 // FlatResourceItem is one cross-SKU resource row used when the asset-center

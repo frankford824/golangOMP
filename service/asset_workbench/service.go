@@ -5975,7 +5975,7 @@ func (s *Service) searchResourceGroupMaterials(ctx context.Context, actor domain
 	for len(items) < limit {
 		result, appErr := s.resourceGroups.ListResourceGroups(ctx, actor, domain.ResourceGroupListParams{
 			Query: query, FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)), BusinessLane: businessLane,
-			Page: page, PageSize: chunkSize,
+			Page: page, PageSize: chunkSize, KeepGroupView: true,
 		})
 		if appErr != nil {
 			return nil, 0, appErr

@@ -84,5 +84,35 @@ describe('DrivePage operational browsing', () => {
     }), expect.any(AbortSignal))
     const laneOptions = wrapper.get('select[aria-label="素材分类"]').findAll('option').map((option) => option.text())
     expect(laneOptions).toEqual(['全部分类', '常规', '定制'])
+
+    browseMaterials.mockResolvedValue({
+      path: '/系统资源', folders: [], total: 1, page: 1, size: 100,
+      files: [{
+        id: 8,
+        source_type: 'task_resource_group',
+        resource_id: 'group:8',
+        resource_group_id: 8,
+        finalized_revision_id: 70,
+        resource_mode: 'set',
+        resource_item_count: 2,
+        task_no: 'RW-008',
+        sku_code: 'SKU-008',
+        product_name: '定制套装',
+        business_lane: 'customization',
+        file_name: 'cover.png',
+        mime_type: 'image/png',
+      }],
+    })
+    await wrapper.get('select[aria-label="素材来源"]').setValue('system')
+    await wrapper.get('select[aria-label="素材分类"]').setValue('customization')
+    await wrapper.get('select[aria-label="素材格式"]').setValue('design')
+    await flushPromises()
+
+    expect(browseMaterials).toHaveBeenLastCalledWith(expect.objectContaining({
+      source: 'system',
+      business_lane: 'customization',
+      format_category: 'design',
+    }), expect.any(AbortSignal))
+    expect(wrapper.find('resource-group-material-card-stub').exists()).toBe(true)
   })
 })

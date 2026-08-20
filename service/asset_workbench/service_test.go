@@ -1615,6 +1615,16 @@ func (s *resourceGroupMaterialProviderStub) ListResourceGroups(_ context.Context
 			}
 		}
 		items = filtered
+		if !params.KeepGroupView {
+			flatItems := make([]domain.FlatResourceItem, 0, len(items))
+			for _, item := range items {
+				flatItems = append(flatItems, domain.FlatResourceItem{GroupID: item.ID, TaskID: item.TaskID, FileName: "matching-file"})
+			}
+			return &domain.ResourceGroupListResult{
+				Items: []domain.TaskAssetGroup{}, FlatItems: flatItems, ViewMode: "flat",
+				Page: params.Page, PageSize: params.PageSize, Total: int64(len(flatItems)),
+			}, nil
+		}
 	}
 	start := (params.Page - 1) * params.PageSize
 	if start > len(items) {
@@ -5681,6 +5691,9 @@ func TestSystemSearchPushesResourceGroupLaneAndFormatFiltersIntoCountAndPage(t *
 		t.Fatalf("resource group queries = %+v", groups.queries)
 	}
 	for index, query := range groups.queries {
+		if !query.KeepGroupView {
+			t.Fatalf("asset workbench format search must keep group view: %+v", query)
+		}
 		if query.BusinessLane != domain.TaskBusinessLaneCustomization {
 			t.Fatalf("resource group filters not pushed down: %+v", query)
 		}

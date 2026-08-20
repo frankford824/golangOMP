@@ -16,6 +16,7 @@ func TestResourceGroupListShouldFlatten(t *testing.T) {
 		{"explicit all format stays group", domain.ResourceGroupListParams{FormatCategory: domain.AssetFormatCategoryAll}, false},
 		{"resource role forces flat", domain.ResourceGroupListParams{ResourceRole: domain.ResourceRoleFilterReference}, true},
 		{"image format forces flat", domain.ResourceGroupListParams{FormatCategory: domain.AssetFormatCategoryImage}, true},
+		{"internal group view keeps matching groups", domain.ResourceGroupListParams{FormatCategory: domain.AssetFormatCategoryImage, KeepGroupView: true}, false},
 		{"document alias forces flat", domain.ResourceGroupListParams{FormatCategory: "document"}, true},
 	}
 	for _, tc := range cases {
