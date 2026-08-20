@@ -61,6 +61,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { NButton, NCheckbox, NDatePicker, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
 import type { ActiveTaskStatus as TaskStatus } from '@/domain/types/task'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
+import { TASK_PRIORITY_OPTIONS } from '@/domain/task-priority'
 
 export interface TaskListFilters { status: TaskStatus[]; taskCategory: string; taskType: string; priority: string; creatorId: string; assigneeId: string; dateFrom: string; dateTo: string; overdueOnly: boolean; ownerDepartment: string; ownerOrgTeam: string }
 const emptyFilters = (): TaskListFilters => ({ status: [], taskCategory: '', taskType: '', priority: '', creatorId: '', assigneeId: '', dateFrom: '', dateTo: '', overdueOnly: false, ownerDepartment: '', ownerOrgTeam: '' })
@@ -83,7 +84,7 @@ function onDateTo(value: number | null) { patch({ dateTo: formatDate(value) }) }
 const statusOptions = [{ value: 'Draft', label: '草稿' }, { value: 'PendingAssign', label: '待指派' }, { value: 'InProgress', label: '进行中' }, { value: 'PendingAudit', label: '待审核' }, { value: 'Completed', label: '已结单' }, { value: 'Archived', label: '已归档' }, { value: 'Blocked', label: '阻塞' }, { value: 'Cancelled', label: '已取消' }]
 const taskCategoryOptions = [{ label: '常规任务', value: 'normal' }, { label: '定制任务', value: 'customization' }]
 const taskTypeOptions = [{ label: '原有产品开发', value: 'ORIGINAL_PRODUCT_DEV' }, { label: '新品开发', value: 'NEW_PRODUCT_DEV' }, { label: '策划 SKU', value: 'SKU_PLANNING' }, { label: 'P 图任务', value: 'RETOUCH_TASK' }, { label: '客户定制', value: 'CUSTOMER_CUSTOMIZATION' }, { label: '常规定制', value: 'REGULAR_CUSTOMIZATION' }]
-const priorityOptions = [{ label: '普通', value: 'normal' }, { label: '加急', value: 'high' }, { label: '出单画图', value: 'drawing' }]
+const priorityOptions = [...TASK_PRIORITY_OPTIONS]
 const {
   creatorOptions,
   assigneeOptions,

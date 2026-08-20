@@ -61,6 +61,14 @@
           clearable
         />
         <BaseSelect
+          v-model="quickPriority"
+          class="quick-priority"
+          :options="quickPriorityOptions"
+          placeholder="全部优先级"
+          aria-label="快捷优先级筛选"
+          clearable
+        />
+        <BaseSelect
           v-model="sortKey"
           class="task-sort-field"
           :options="sortFieldOptions"
@@ -604,6 +612,7 @@ import { formatTaskActionDenyMessage } from '@/domain/task-action-deny'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
 import { getTaskCenterCardStatusLabel } from '@/domain/task-center-card-status'
 import { expandTaskListStatusFilter } from '@/domain/task-list-status-filter'
+import { TASK_PRIORITY_OPTIONS } from '@/domain/task-priority'
 import {
   canClaimTaskFromCenter,
   taskCenterClaimButtonLabel,
@@ -916,6 +925,7 @@ const filters = ref<TaskListFilters>({
 })
 const quickKeyword = ref(searchKeyword.value)
 const quickStatus = ref<ActiveTaskStatus | ''>('')
+const quickPriority = ref('')
 const quickStatusOptions: BaseSelectOption[] = [
   { label: '全部状态', value: '' },
   { label: '待指派', value: 'PendingAssign' },
@@ -925,6 +935,10 @@ const quickStatusOptions: BaseSelectOption[] = [
   { label: '已归档', value: 'Archived' },
   { label: '阻塞', value: 'Blocked' },
   { label: '已取消', value: 'Cancelled' },
+]
+const quickPriorityOptions: BaseSelectOption[] = [
+  { label: '全部优先级', value: '' },
+  ...TASK_PRIORITY_OPTIONS,
 ]
 type ActiveFilterKey = 'keyword' | 'operationalBucket' | keyof TaskListFilters
 const statusDisplay: Partial<Record<ActiveTaskStatus, string>> = { Draft: '草稿', PendingAssign: '待指派', Assigned: '已指派', InProgress: '进行中', PendingAudit: '待审核', Completed: '已结单', Archived: '已归档', Cancelled: '已取消', Blocked: '阻塞' }
@@ -951,7 +965,11 @@ const activeFilterChips = computed(() => {
 
 function applyQuickFilters() {
   searchKeyword.value = quickKeyword.value.trim()
-  filters.value = { ...filters.value, status: quickStatus.value ? [quickStatus.value] : [] }
+  filters.value = {
+    ...filters.value,
+    status: quickStatus.value ? [quickStatus.value] : [],
+    priority: quickPriority.value,
+  }
   page.value = 1
   void refreshList(true)
 }
@@ -960,6 +978,7 @@ function removeActiveFilter(key: ActiveFilterKey) {
   if (key === 'operationalBucket') operationalBucket.value = ''
   else if (key === 'keyword') { searchKeyword.value = ''; quickKeyword.value = '' }
   else if (key === 'status') { filters.value = { ...filters.value, status: [] }; quickStatus.value = '' }
+  else if (key === 'priority') { filters.value = { ...filters.value, priority: '' }; quickPriority.value = '' }
   else if (key === 'dateFrom' || key === 'dateTo') filters.value = { ...filters.value, dateFrom: '', dateTo: '' }
   else if (key === 'overdueOnly') filters.value = { ...filters.value, overdueOnly: false }
   else filters.value = { ...filters.value, [key]: '' }
@@ -971,6 +990,7 @@ function clearAllTaskFilters() {
   searchKeyword.value = ''
   quickKeyword.value = ''
   quickStatus.value = ''
+  quickPriority.value = ''
   operationalBucket.value = ''
   filters.value = { ...defaultTaskFilters }
   page.value = 1
@@ -1038,6 +1058,7 @@ if (typeof route.query.sort === 'string') {
   }
 }
 quickStatus.value = filters.value.status.length === 1 ? filters.value.status[0] : ''
+quickPriority.value = filters.value.priority
 
 function setTaskTab(tab: TaskListTab) {
   if (activeTab.value === tab) return
@@ -1146,6 +1167,7 @@ function onFilterApply(nextFilters: TaskListFilters, nextKeyword: string) {
   searchKeyword.value = nextKeyword
   quickKeyword.value = nextKeyword
   quickStatus.value = nextFilters.status.length === 1 ? nextFilters.status[0] : ''
+  quickPriority.value = nextFilters.priority
   advancedFilterOpen.value = false
   page.value = 1
   void refreshList(true)
@@ -1156,6 +1178,7 @@ function onFilterReset(nextFilters: TaskListFilters, nextKeyword: string) {
   searchKeyword.value = nextKeyword
   quickKeyword.value = nextKeyword
   quickStatus.value = ''
+  quickPriority.value = ''
   advancedFilterOpen.value = false
   page.value = 1
   void refreshList(true)
@@ -1913,6 +1936,8 @@ watch(
     }
     if (JSON.stringify(filters.value) !== JSON.stringify(nextFilters)) {
       filters.value = nextFilters
+      quickStatus.value = nextFilters.status.length === 1 ? nextFilters.status[0] : ''
+      quickPriority.value = nextFilters.priority
       changed = true
       filterChanged = true
     }
@@ -3110,6 +3135,10 @@ watch(totalPages, (value) => {
   flex: 0 0 10rem;
 }
 
+.quick-priority {
+  flex: 0 0 10rem;
+}
+
 .task-sort-field {
   flex: 0 0 10.5rem;
 }
@@ -3165,7 +3194,8 @@ watch(totalPages, (value) => {
     flex-basis: 100%;
   }
 
-  .quick-status {
+  .quick-status,
+  .quick-priority {
     flex: 1 1 9rem;
   }
 

@@ -48,7 +48,7 @@ export function ensureMockSeed(): void {
       task_no: 'T-20260423-1003',
       task_type: 'retouch_task',
       title: '主图精修任务',
-      priority: 'normal',
+      priority: 'drawing',
       status: 'pending_claim',
       created_by: 'ops_demo',
       created_at: isoNowMinus(50),
