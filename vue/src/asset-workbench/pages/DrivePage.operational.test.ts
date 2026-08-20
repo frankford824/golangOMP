@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const browseMaterials = vi.hoisted(() => vi.fn())
 const listClientMaterials = vi.hoisted(() => vi.fn())
+const batchUpdateClientMaterials = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-router', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('vue-router')>()
@@ -29,6 +30,7 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
       listUploadDirectoriesAdmin: vi.fn().mockResolvedValue([]),
       listClientMaterials,
       browseMaterials,
+      batchUpdateClientMaterials,
     },
   }
 })
@@ -47,12 +49,15 @@ describe('DrivePage operational browsing', () => {
     vi.clearAllMocks()
     browseMaterials.mockResolvedValue({ path: '', folders: [], files: [], total: 0, page: 1, page_size: 100 })
     listClientMaterials.mockResolvedValue([])
+    batchUpdateClientMaterials.mockResolvedValue({
+      requested: 1, created: 1, updated: 0, removed: 0, skipped: 0, failed: 0, items: [], failures: [], async_required: false,
+    })
     const pinia = createPinia()
     setActivePinia(pinia)
     useAssetWorkbenchSessionStore().setBootstrap({
       actor: { id: 1, display_name: 'admin' },
       is_admin: true,
-      capabilities: ['asset.workbench.manage', 'asset.workbench.material.download'],
+      capabilities: ['asset.workbench.material.download', 'asset.publish'],
     } as never)
   })
 
@@ -114,5 +119,52 @@ describe('DrivePage operational browsing', () => {
       format_category: 'design',
     }), expect.any(AbortSignal))
     expect(wrapper.find('resource-group-material-card-stub').exists()).toBe(true)
+  })
+
+  it('publishes selected canonical resource groups through the existing batch endpoint', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 1, display_name: 'admin' },
+      is_admin: true,
+      capabilities: ['asset.workbench.material.download', 'asset.publish'],
+    } as never)
+    const wrapper = shallowMount(DrivePage, {
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    const panel = wrapper.findComponent({ name: 'ResourceLibraryPanel' })
+    expect(panel.exists()).toBe(true)
+    expect(panel.props('canPublish')).toBe(true)
+    panel.vm.$emit('batch-publish', {
+      assets: [{
+        id: 9,
+        source_type: 'task_resource_group',
+        resource_id: 'group:9',
+        resource_group_id: 9,
+        finalized_revision_id: 80,
+        cover_revision_item_id: 801,
+        resource_mode: 'single',
+        resource_item_count: 1,
+        product_name: '可批量上架单图',
+      }],
+    })
+    await flushPromises()
+
+    expect(batchUpdateClientMaterials).toHaveBeenCalledWith({
+      action: 'publish',
+      items: [expect.objectContaining({
+        source_type: 'task_resource_group',
+        source_ref: 'group:9',
+        resource_group_id: 9,
+        finalized_revision_id: 80,
+        cover_revision_item_id: 801,
+      })],
+      selection_scope: 'selected',
+    })
   })
 })

@@ -63,6 +63,28 @@ const group = {
   finalized_revision: finalizedRevision,
 }
 
+const singleRevision = {
+  ...finalizedRevision,
+  id: 80,
+  group_id: 9,
+  mode: 'single' as const,
+  items: [
+    { id: 801, revision_id: 80, task_asset_id: 2001, sort_order: 1, file: { task_asset_id: 2001, file_name: 'single.png', mime_type: 'image/png' } },
+  ],
+}
+
+const singleGroup = {
+  ...group,
+  id: 9,
+  task_id: 4,
+  finalized_revision_id: 80,
+  task_no: 'RW-009',
+  sku_code: 'SKU-009',
+  product_name: '可批量上架单图',
+  business_lane: 'normal',
+  finalized_revision: singleRevision,
+}
+
 function listResult() {
   return { items: [group], flat_items: [], view_mode: 'group' as const, page: 1, page_size: 36, total: 1 }
 }
@@ -114,5 +136,53 @@ describe('ResourceLibraryPanel', () => {
       selection: { finalizedRevisionId: 70, coverRevisionItemId: 702 },
     })
     wrapper.unmount()
+  })
+
+  it('filters the complete matching resource set by enabled publication state', async () => {
+    listResourceGroups.mockResolvedValue({
+      items: [group, singleGroup], flat_items: [], view_mode: 'group', page: 1, page_size: 200, total: 2,
+    })
+    const wrapper = mount(ResourceLibraryPanel, {
+      props: {
+        canPublish: true,
+        clientMaterials: [{ id: 501, resource_group_id: 8, enabled: true } as never],
+      },
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+
+    await wrapper.get('select[aria-label="上架状态"]').setValue('published')
+    await flushPromises()
+
+    expect(listResourceGroups).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, page_size: 200 }))
+    expect(wrapper.text()).toContain('夏季主图套装')
+    expect(wrapper.text()).not.toContain('可批量上架单图')
+
+    await wrapper.get('select[aria-label="上架状态"]').setValue('unpublished')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('夏季主图套装')
+    expect(wrapper.text()).toContain('可批量上架单图')
+  })
+
+  it('selects finalized single-image groups for batch publish and excludes sets', async () => {
+    listResourceGroups.mockResolvedValue({
+      items: [group, singleGroup], flat_items: [], view_mode: 'group', page: 1, page_size: 36, total: 2,
+    })
+    const wrapper = mount(ResourceLibraryPanel, {
+      props: { canPublish: true, clientMaterials: [] },
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('input[aria-label="不可批量上架：夏季主图套装"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('input[aria-label="选择批量上架：可批量上架单图"]').setValue(true)
+    const batchButton = wrapper.findAll('button').find((button) => button.text() === '批量上架（1）')
+    if (!batchButton) throw new Error('missing batch publish button')
+    await batchButton.trigger('click')
+
+    expect(wrapper.emitted('batch-publish')?.[0]?.[0]).toMatchObject({
+      assets: [{ resource_group_id: 9, finalized_revision_id: 80, cover_revision_item_id: 801, resource_mode: 'single' }],
+    })
   })
 })

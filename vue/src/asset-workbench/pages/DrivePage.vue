@@ -117,6 +117,7 @@ const operationalViewMode = ref<OperationalViewMode>('resources')
 const driveSpreadsheetOpen = ref(false)
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
+const canPublishClientMaterials = computed(() => canManageDrive.value || capabilities.value.has('asset.publish'))
 const canMaintainItems = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const canListUploadDirectories = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canUseOperational = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.material.download'))
@@ -1665,7 +1666,7 @@ function goDrivesHome() {
 function openOperational() {
   activeMode.value = 'operational'
   selectedFile.value = null
-  if (canManageDrive.value) void refreshClientMaterials({ silent: true })
+  if (canPublishClientMaterials.value) void refreshClientMaterials({ silent: true })
   if (operationalViewMode.value === 'paths' && !materialItems.value.length) {
     void loadMaterialFolder(materialDefaultFolderPathForSource())
   }
@@ -2582,7 +2583,7 @@ function selectClientMaterial(material: ClientMaterialRow) {
 }
 
 async function refreshClientMaterials(options: { silent?: boolean } = {}) {
-  if (!canManageDrive.value || (clientMaterialLoading.value && !options.silent)) return
+  if (!canPublishClientMaterials.value || (clientMaterialLoading.value && !options.silent)) return
   if (!options.silent) clientMaterialLoading.value = true
   clientMaterialError.value = ''
   try {
@@ -2856,6 +2857,24 @@ async function batchUpdateSelectedClientMaterials(action: 'publish' | 'disable' 
     await finishClientMaterialBatch(action, result)
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '批量处理客户端素材失败'
+  } finally {
+    batchUpdatingClientMaterials.value = false
+  }
+}
+
+async function batchPublishResourceGroupMaterials(assets: SystemAssetRow[]) {
+  if (batchUpdatingClientMaterials.value || publishingClientMaterial.value || !assets.length) return
+  batchUpdatingClientMaterials.value = true
+  actionError.value = ''
+  try {
+    const result = await assetWorkbenchApi.batchUpdateClientMaterials({
+      action: 'publish',
+      items: assets.map((asset) => publishPayloadForMaterial(asset)),
+      selection_scope: 'selected',
+    })
+    await finishClientMaterialBatch('publish', result)
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : '资源库批量上架失败'
   } finally {
     batchUpdatingClientMaterials.value = false
   }
@@ -3755,10 +3774,11 @@ onBeforeUnmount(() => {
           <template v-else-if="operationalViewMode === 'resources'">
             <ResourceLibraryPanel
               :initial-query="materialQuery"
-              :can-publish="canManageDrive"
+              :can-publish="canPublishClientMaterials"
               :client-materials="clientMaterials"
-              :publishing="publishingClientMaterial"
+              :publishing="publishingClientMaterial || batchUpdatingClientMaterials"
               @publish="publishResourceGroupMaterial($event.asset, $event.selection)"
+              @batch-publish="batchPublishResourceGroupMaterials($event.assets)"
             />
           </template>
           <template v-else>
