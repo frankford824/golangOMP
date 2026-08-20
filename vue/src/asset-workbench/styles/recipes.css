@@ -10039,6 +10039,7 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-resource-library-card {
+  position: relative;
   display: grid;
   grid-template-rows: calc(var(--aw-space-10) * 4.25) auto auto;
   min-width: 0;
@@ -10047,6 +10048,16 @@ body.aw-submission-dialog-locked {
   border-radius: var(--aw-radius-lg);
   background: var(--aw-surface);
   box-shadow: var(--aw-shadow-panel);
+}
+
+.aw-resource-library-card.is-selected {
+  outline: 2px solid var(--aw-accent);
+  outline-offset: 2px;
+}
+
+.aw-resource-library-card > .aw-resource-library__group-check {
+  left: auto;
+  right: var(--aw-space-3);
 }
 
 .aw-resource-library-card__preview {
@@ -10089,6 +10100,24 @@ body.aw-submission-dialog-locked {
   font-weight: var(--aw-weight-strong);
 }
 
+.aw-resource-library-card__publication {
+  position: absolute;
+  right: var(--aw-space-3);
+  bottom: var(--aw-space-3);
+  padding: var(--aw-space-1) var(--aw-space-2);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-surface);
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-weight-strong);
+  box-shadow: var(--aw-shadow-soft);
+}
+
+.aw-resource-library-card__publication.is-published {
+  background: var(--aw-chip-success-bg);
+  color: var(--aw-success);
+}
+
 .aw-resource-library-card__body {
   display: grid;
   gap: var(--aw-space-1);
@@ -10117,6 +10146,7 @@ body.aw-submission-dialog-locked {
 
 .aw-resource-library-card__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--aw-space-2);
   padding: 0 var(--aw-space-3) var(--aw-space-3);

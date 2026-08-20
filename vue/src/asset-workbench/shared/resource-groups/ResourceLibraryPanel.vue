@@ -44,6 +44,7 @@ const error = ref('')
 const groups = ref<ResourceGroup[]>([])
 const flatItems = ref<FlatResourceItem[]>([])
 const selectedGroupIDs = ref(new Set<number>())
+const selectedFlatFinals = ref(new Map<number, FlatResourceItem>())
 const viewMode = ref<'group' | 'flat'>('group')
 const page = ref(1)
 const pageSize = 36
@@ -75,6 +76,19 @@ const allBatchEligibleSelected = computed(() => (
   && batchEligibleGroups.value.every((group) => selectedGroupIDs.value.has(group.id))
 ))
 const setGroupCount = computed(() => groups.value.filter((group) => group.finalized_revision_id && !canBatchPublish(group)).length)
+const isFinalFlatView = computed(() => viewMode.value === 'flat' && role.value === 'final')
+const selectedFlatItems = computed(() => [...selectedFlatFinals.value.values()])
+const flatBatchEligibleItems = computed(() => {
+  const firstByGroup = new Map<number, FlatResourceItem>()
+  for (const item of flatItems.value) {
+    if (item.resource_role === 'final' && !firstByGroup.has(item.group_id)) firstByGroup.set(item.group_id, item)
+  }
+  return [...firstByGroup.values()]
+})
+const allFlatBatchEligibleSelected = computed(() => (
+  flatBatchEligibleItems.value.length > 0
+  && flatBatchEligibleItems.value.every((item) => selectedFlatFinals.value.has(item.group_id))
+))
 
 watch(() => props.initialQuery, (value) => {
   if (value === undefined || value === query.value) return
@@ -84,6 +98,9 @@ watch(() => props.initialQuery, (value) => {
 
 watch(() => props.clientMaterials, () => {
   selectedGroupIDs.value = new Set([...selectedGroupIDs.value].filter((groupID) => !publicationByGroupID.value.get(groupID)?.enabled))
+  selectedFlatFinals.value = new Map(
+    [...selectedFlatFinals.value].filter(([, item]) => !isFlatFinalPublished(item)),
+  )
   if (publicationStatus.value) {
     page.value = 1
     void load()
@@ -100,8 +117,10 @@ function listParams(targetPage: number, targetPageSize: number) {
   } as const
 }
 
-function matchesPublicationStatus(groupID: number) {
-  const published = publicationByGroupID.value.get(groupID)?.enabled === true
+function matchesPublicationStatus(groupID: number, item?: FlatResourceItem) {
+  const published = item?.resource_role === 'final'
+    ? isFlatFinalPublished(item)
+    : publicationByGroupID.value.get(groupID)?.enabled === true
   return publicationStatus.value === 'published' ? published : !published
 }
 
@@ -129,7 +148,7 @@ async function loadStatusFiltered(currentRequest: number) {
   } while (scanned < serverTotal)
 
   const filteredGroups = allGroups.filter((group) => matchesPublicationStatus(group.id))
-  const filteredFlatItems = allFlatItems.filter((item) => matchesPublicationStatus(item.group_id))
+  const filteredFlatItems = allFlatItems.filter((item) => matchesPublicationStatus(item.group_id, item))
   const filteredTotal = resolvedViewMode === 'flat' ? filteredFlatItems.length : filteredGroups.length
   const offset = (page.value - 1) * pageSize
   return {
@@ -162,6 +181,10 @@ async function load() {
     }
     for (const group of groups.value) groupCache.set(group.id, group)
     selectedGroupIDs.value = new Set([...selectedGroupIDs.value].filter((groupID) => groups.value.some((group) => group.id === groupID)))
+    const visibleFlatKeys = new Set(flatItems.value.map((item) => flatItemKey(item)))
+    selectedFlatFinals.value = new Map(
+      [...selectedFlatFinals.value].filter(([, item]) => visibleFlatKeys.has(flatItemKey(item))),
+    )
   } catch (cause) {
     if (currentRequest !== requestID) return
     groups.value = []
@@ -176,24 +199,28 @@ async function load() {
 function search() {
   page.value = 1
   selectedGroupIDs.value = new Set()
+  selectedFlatFinals.value = new Map()
   return load()
 }
 
 function changeRole() {
   page.value = 1
   selectedGroupIDs.value = new Set()
+  selectedFlatFinals.value = new Map()
   void load()
 }
 
 function changeBusinessLane() {
   page.value = 1
   selectedGroupIDs.value = new Set()
+  selectedFlatFinals.value = new Map()
   void load()
 }
 
 function changePublicationStatus() {
   page.value = 1
   selectedGroupIDs.value = new Set()
+  selectedFlatFinals.value = new Map()
   void load()
 }
 
@@ -299,6 +326,77 @@ function groupAsMaterialAsset(group: ResourceGroup): SystemAssetRow {
     mime_type: cover?.mimeType,
     preview_available: Boolean(cover),
   }
+}
+
+function flatItemKey(item: FlatResourceItem) {
+  return `${item.group_id}:${item.revision_id}:${item.resource_item_id}`
+}
+
+function flatItemAsMaterialAsset(item: FlatResourceItem): SystemAssetRow {
+  const title = [item.sku_code || item.task_no || `资源组 ${item.group_id}`, item.file_name].filter(Boolean).join(' · ')
+  return {
+    id: item.group_id,
+    source_type: 'task_resource_group',
+    source_label: '任务资源组',
+    resource_id: `group:${item.group_id}`,
+    resource_group_id: item.group_id,
+    finalized_revision_id: item.revision_id,
+    cover_revision_item_id: item.resource_item_id,
+    scope_sku_code: item.sku_code,
+    sku_code: item.sku_code,
+    product_name: title,
+    task_no: item.task_no,
+    file_name: item.file_name,
+    mime_type: item.mime_type,
+    preview_available: true,
+  }
+}
+
+function publicationForFlatItem(item: FlatResourceItem) {
+  const material = publicationByGroupID.value.get(item.group_id)
+  if (!material?.enabled) return null
+  if (material.finalized_revision_id !== item.revision_id || material.cover_revision_item_id !== item.resource_item_id) return null
+  return material
+}
+
+function isFlatFinalPublished(item: FlatResourceItem) {
+  return Boolean(publicationForFlatItem(item))
+}
+
+function flatItemPublicationLabel(item: FlatResourceItem) {
+  return isFlatFinalPublished(item) ? '已上架' : '未上架'
+}
+
+function toggleFlatFinal(item: FlatResourceItem, checked: boolean) {
+  if (!props.canPublish || item.resource_role !== 'final') return
+  const next = new Map(selectedFlatFinals.value)
+  if (checked) next.set(item.group_id, item)
+  else if (flatItemKey(next.get(item.group_id) || item) === flatItemKey(item)) next.delete(item.group_id)
+  selectedFlatFinals.value = next
+}
+
+function flatFinalSelected(item: FlatResourceItem) {
+  const selected = selectedFlatFinals.value.get(item.group_id)
+  return Boolean(selected && flatItemKey(selected) === flatItemKey(item))
+}
+
+function toggleAllFlatBatchEligible() {
+  selectedFlatFinals.value = allFlatBatchEligibleSelected.value
+    ? new Map()
+    : new Map(flatBatchEligibleItems.value.map((item) => [item.group_id, item]))
+}
+
+function publishFlatFinal(item: FlatResourceItem) {
+  if (props.publishing || item.resource_role !== 'final') return
+  emit('publish', {
+    asset: flatItemAsMaterialAsset(item),
+    selection: { finalizedRevisionId: item.revision_id, coverRevisionItemId: item.resource_item_id },
+  })
+}
+
+function batchPublishFlatSelected() {
+  if (props.publishing || !selectedFlatItems.value.length) return
+  emit('batch-publish', { assets: selectedFlatItems.value.map(flatItemAsMaterialAsset) })
 }
 
 function publicationForGroup(group: ResourceGroup) {
@@ -412,23 +510,59 @@ onMounted(load)
     <p v-if="loading && !groups.length && !flatItems.length" class="aw-drive-empty" role="status">正在读取主工程当前资源…</p>
     <p v-else-if="!loading && !groups.length && !flatItems.length" class="aw-drive-empty">没有找到符合条件的资源</p>
 
-    <div v-if="viewMode === 'flat' && flatItems.length" class="aw-resource-library__grid aw-resource-library__grid--flat">
-      <article v-for="item in flatItems" :key="`${item.group_id}:${item.revision_id}:${item.resource_role}:${item.resource_item_id}`" class="aw-resource-library-card">
-        <button class="aw-resource-library-card__preview" type="button" @click="openItemPreview(item)">
-          <CanonicalResourceThumb :item="item" :alt="item.file_name" />
-          <span class="aw-resource-library-card__role">{{ canonicalResourceRoleLabel(item.resource_role) }}</span>
-        </button>
-        <div class="aw-resource-library-card__body">
-          <strong :title="item.file_name">{{ item.file_name }}</strong>
-          <span>{{ item.sku_code || '任务级资源' }} · {{ item.task_no || item.task_id }}</span>
-          <small>{{ item.resource_owner_name || '资源所属人待补充' }} · {{ formatDate(item.resource_created_at) }}</small>
+    <template v-if="viewMode === 'flat' && flatItems.length">
+      <section v-if="canPublish && isFinalFlatView" class="aw-resource-library__batch" aria-label="最终成品批量上架">
+        <div>
+          <strong>{{ selectedFlatItems.length ? `已选 ${selectedFlatItems.length} 个最终成品` : '批量上架最终成品' }}</strong>
+          <span>同一资源组只能选择一张客户端封面；改选同组其他成品会自动替换。</span>
         </div>
-        <div class="aw-resource-library-card__actions">
-          <button type="button" @click="openItemPreview(item)"><Eye :size="14" aria-hidden="true" />预览</button>
-          <button type="button" @click="downloadItem(item)"><Download :size="14" aria-hidden="true" />下载</button>
+        <div class="aw-resource-library__batch-actions">
+          <button class="aw-secondary-button" type="button" :disabled="publishing || !flatBatchEligibleItems.length" @click="toggleAllFlatBatchEligible">
+            {{ allFlatBatchEligibleSelected ? '取消全选' : '全选本页（每组首张）' }}
+          </button>
+          <button class="aw-primary-button" type="button" :disabled="publishing || !selectedFlatItems.length" @click="batchPublishFlatSelected">
+            {{ publishing ? '上架中…' : `批量上架${selectedFlatItems.length ? `（${selectedFlatItems.length}）` : ''}` }}
+          </button>
         </div>
-      </article>
-    </div>
+      </section>
+      <div class="aw-resource-library__grid aw-resource-library__grid--flat">
+        <article
+          v-for="item in flatItems"
+          :key="`${item.group_id}:${item.revision_id}:${item.resource_role}:${item.resource_item_id}`"
+          class="aw-resource-library-card"
+          :class="{ 'is-selected': flatFinalSelected(item) }"
+        >
+          <label v-if="canPublish && isFinalFlatView" class="aw-resource-library__group-check" title="选择后批量上架">
+            <input
+              type="checkbox"
+              :checked="flatFinalSelected(item)"
+              :disabled="publishing"
+              :aria-label="`选择批量上架：${item.file_name}`"
+              @change="toggleFlatFinal(item, ($event.target as HTMLInputElement).checked)"
+            />
+          </label>
+          <button class="aw-resource-library-card__preview" type="button" @click="openItemPreview(item)">
+            <CanonicalResourceThumb :item="item" :alt="item.file_name" />
+            <span class="aw-resource-library-card__role">{{ canonicalResourceRoleLabel(item.resource_role) }}</span>
+            <span v-if="canPublish && isFinalFlatView" class="aw-resource-library-card__publication" :class="{ 'is-published': isFlatFinalPublished(item) }">
+              {{ flatItemPublicationLabel(item) }}
+            </span>
+          </button>
+          <div class="aw-resource-library-card__body">
+            <strong :title="item.file_name">{{ item.file_name }}</strong>
+            <span>{{ item.sku_code || '任务级资源' }} · {{ item.task_no || item.task_id }}</span>
+            <small>{{ item.resource_owner_name || '资源所属人待补充' }} · {{ formatDate(item.resource_created_at) }}</small>
+          </div>
+          <div class="aw-resource-library-card__actions">
+            <button type="button" @click="openItemPreview(item)"><Eye :size="14" aria-hidden="true" />预览</button>
+            <button type="button" @click="downloadItem(item)"><Download :size="14" aria-hidden="true" />下载</button>
+            <button v-if="canPublish && isFinalFlatView" type="button" :disabled="publishing" @click="publishFlatFinal(item)">
+              {{ isFlatFinalPublished(item) ? '重新上架' : '上架此成品' }}
+            </button>
+          </div>
+        </article>
+      </div>
+    </template>
 
     <template v-else-if="groups.length">
       <section v-if="canPublish" class="aw-resource-library__batch" aria-label="资源库批量上架">

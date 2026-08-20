@@ -85,6 +85,12 @@ const singleGroup = {
   finalized_revision: singleRevision,
 }
 
+const flatFinalItems = [
+  { group_id: 8, task_id: 3, revision_id: 70, resource_item_id: 701, task_asset_id: 1001, sort_order: 1, task_no: 'RW-008', task_type: 'customer_customization', sku_code: 'SKU-008', resource_role: 'final' as const, file_name: 'front.png', mime_type: 'image/png', resource_created_at: '2026-08-18T00:00:00Z' },
+  { group_id: 8, task_id: 3, revision_id: 70, resource_item_id: 702, task_asset_id: 1002, sort_order: 2, task_no: 'RW-008', task_type: 'customer_customization', sku_code: 'SKU-008', resource_role: 'final' as const, file_name: 'side.png', mime_type: 'image/png', resource_created_at: '2026-08-18T00:00:00Z' },
+  { group_id: 9, task_id: 4, revision_id: 80, resource_item_id: 801, task_asset_id: 2001, sort_order: 1, task_no: 'RW-009', task_type: 'original_product_development', sku_code: 'SKU-009', resource_role: 'final' as const, file_name: 'single.png', mime_type: 'image/png', resource_created_at: '2026-08-18T00:00:00Z' },
+]
+
 function listResult() {
   return { items: [group], flat_items: [], view_mode: 'group' as const, page: 1, page_size: 36, total: 1 }
 }
@@ -184,5 +190,69 @@ describe('ResourceLibraryPanel', () => {
     expect(wrapper.emitted('batch-publish')?.[0]?.[0]).toMatchObject({
       assets: [{ resource_group_id: 9, finalized_revision_id: 80, cover_revision_item_id: 801, resource_mode: 'single' }],
     })
+  })
+
+  it('allows final-result cards to select one cover per group and publish singly or in batch', async () => {
+    listResourceGroups.mockResolvedValue({
+      items: [], flat_items: flatFinalItems, view_mode: 'flat', page: 1, page_size: 36, total: 3,
+    })
+    const wrapper = mount(ResourceLibraryPanel, {
+      props: {
+        canPublish: true,
+        clientMaterials: [{ id: 501, resource_group_id: 8, finalized_revision_id: 70, cover_revision_item_id: 701, enabled: true } as never],
+      },
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+
+    await wrapper.get('select[aria-label="资源类型"]').setValue('final')
+    await flushPromises()
+
+    wrapper.get('input[aria-label="选择批量上架：front.png"]')
+    expect(wrapper.text()).toContain('上架此成品')
+    expect(wrapper.text()).toContain('已上架')
+
+    await wrapper.get('input[aria-label="选择批量上架：front.png"]').setValue(true)
+    await wrapper.get('input[aria-label="选择批量上架：side.png"]').setValue(true)
+    expect((wrapper.get('input[aria-label="选择批量上架：front.png"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('input[aria-label="选择批量上架：side.png"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('input[aria-label="选择批量上架：single.png"]').setValue(true)
+
+    await textButton(wrapper, '批量上架（2）').trigger('click')
+    expect(wrapper.emitted('batch-publish')?.[0]?.[0]).toMatchObject({
+      assets: [
+        { resource_group_id: 8, finalized_revision_id: 70, cover_revision_item_id: 702 },
+        { resource_group_id: 9, finalized_revision_id: 80, cover_revision_item_id: 801 },
+      ],
+    })
+
+    const publishButtons = wrapper.findAll('button').filter((button) => button.text() === '上架此成品')
+    await publishButtons[0].trigger('click')
+    expect(wrapper.emitted('publish')?.[0]?.[0]).toMatchObject({
+      asset: { resource_group_id: 8, finalized_revision_id: 70, cover_revision_item_id: 702 },
+      selection: { finalizedRevisionId: 70, coverRevisionItemId: 702 },
+    })
+  })
+
+  it('treats only the pinned final item as published in final-result status filtering', async () => {
+    listResourceGroups.mockResolvedValue({
+      items: [], flat_items: flatFinalItems, view_mode: 'flat', page: 1, page_size: 200, total: 3,
+    })
+    const wrapper = mount(ResourceLibraryPanel, {
+      props: {
+        canPublish: true,
+        clientMaterials: [{ id: 501, resource_group_id: 8, finalized_revision_id: 70, cover_revision_item_id: 701, enabled: true } as never],
+      },
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+
+    await wrapper.get('select[aria-label="资源类型"]').setValue('final')
+    await wrapper.get('select[aria-label="上架状态"]').setValue('published')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('front.png')
+    expect(wrapper.text()).not.toContain('side.png')
+    expect(wrapper.text()).not.toContain('single.png')
   })
 })
