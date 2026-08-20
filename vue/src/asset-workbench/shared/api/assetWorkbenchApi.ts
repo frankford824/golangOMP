@@ -973,6 +973,7 @@ export interface DriveFileRow {
   page_count?: number
   gross_amount?: number
   business_month: string
+  operation_source?: 'normal_upload' | 'client_supplement' | 'admin_supplement'
   created_at: string
   locate_page?: number
   locate_page_size?: number

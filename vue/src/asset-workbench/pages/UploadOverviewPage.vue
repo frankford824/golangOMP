@@ -265,9 +265,20 @@ function statusToneClass(value?: string) {
   return 'aw-chip--neutral'
 }
 
+function fileOperationLabel(file: DriveFileRow) {
+  if (file.operation_source === 'client_supplement') return '客户端补录'
+  if (file.operation_source === 'admin_supplement') return '管理员补录'
+  return '正常上传'
+}
+
+function isSupplementOperation(file: DriveFileRow) {
+  return file.operation_source === 'client_supplement' || file.operation_source === 'admin_supplement'
+}
+
 function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
   const rows: Array<[string, string]> = [
     ['上传人', fileOwnerLabel(file)],
+    ['操作来源', fileOperationLabel(file)],
     ['上传时间', formatDateTime(file.created_at)],
     ['分类', file.upload_directory_name || '未分类'],
     ['作品名称', fileDisplayName(file)],
@@ -350,6 +361,7 @@ function csvEscape(value: unknown) {
 function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDisplayState>) {
   return [
     fileOwnerLabel(file),
+    fileOperationLabel(file),
     formatDateTime(file.created_at),
     file.upload_directory_name || '未分类',
     fileDisplayName(file),
@@ -738,7 +750,7 @@ async function exportCurrentFilter() {
       if (rows.length >= result.total || rows.length >= exportLimit || result.items.length === 0) break
       nextPage += 1
     }
-    const header = ['创建人', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小', '计价说明']
+    const header = ['创建人', '操作来源', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小', '计价说明']
     const exportPieceworkLookup = buildPieceworkDisplayByFileID(rows)
     const csv = [header, ...rows.map((file) => fileToExportRow(file, exportPieceworkLookup))].map((row) => row.map(csvEscape).join(',')).join('\n')
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
@@ -775,7 +787,7 @@ onBeforeUnmount(() => {
       <div class="aw-upload-ledger__hero-copy">
         <p class="aw-eyebrow">上传总览</p>
         <h2>全站上传台账</h2>
-        <span>按创建人、创建日期、分类、作品名称和格式跟踪已上传作品。</span>
+        <span>按创建人、创建日期、分类、作品名称、格式和操作来源跟踪已上传作品。</span>
       </div>
       <dl class="aw-upload-ledger__summary" aria-label="当前筛选汇总">
         <div>
@@ -973,6 +985,9 @@ onBeforeUnmount(() => {
                 <td class="aw-upload-ledger__owner">
                   <strong :title="fileOwnerLabel(file)">{{ fileOwnerLabel(file) }}</strong>
                   <small v-if="fileOwnerSecondary(file)" :title="fileOwnerSecondary(file)">{{ fileOwnerSecondary(file) }}</small>
+                  <span v-if="isSupplementOperation(file)" class="aw-chip aw-upload-ledger__source" :class="file.operation_source === 'client_supplement' ? 'aw-chip--info' : 'aw-chip--neutral'">
+                    {{ fileOperationLabel(file) }}
+                  </span>
                 </td>
                 <td class="aw-upload-ledger__date">{{ formatDateTime(file.created_at) }}</td>
                 <td>

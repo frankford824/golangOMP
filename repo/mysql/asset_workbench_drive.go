@@ -159,7 +159,13 @@ func driveFileColumns() string {
 		f.relative_path, f.upload_batch_id, f.is_folder_upload,
 		f.file_type, f.mime_type, f.file_size, f.preview_status,
 		i.qc_status, i.pricing_status, i.settlement_status, i.page_count,
-		i.gross_amount, i.business_month, f.created_at`
+		i.gross_amount, i.business_month,
+		CASE
+			WHEN i.entry_kind = 'supplement' AND s.submitter_user_id = i.payee_user_id THEN 'client_supplement'
+			WHEN i.entry_kind = 'supplement' THEN 'admin_supplement'
+			ELSE 'normal_upload'
+		END AS operation_source,
+		f.created_at`
 }
 
 func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchDriveFile, error) {
@@ -171,7 +177,7 @@ func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.Ass
 		&item.OriginalFilename, &item.DisplayName, &item.RelativePath, &item.UploadBatchID, &item.IsFolderUpload,
 		&item.FileType, &item.MimeType, &item.FileSize, &item.PreviewStatus,
 		&item.QCStatus, &item.PricingStatus, &item.SettlementStatus, &item.PageCount,
-		&item.GrossAmount, &item.BusinessMonth, &item.CreatedAt,
+		&item.GrossAmount, &item.BusinessMonth, &item.OperationSource, &item.CreatedAt,
 	); err != nil {
 		return nil, err
 	}

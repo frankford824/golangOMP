@@ -14865,6 +14865,10 @@ paths:
                         page_count: { type: integer }
                         gross_amount: { type: number }
                         business_month: { type: string }
+                        operation_source:
+                          type: string
+                          enum: [normal_upload, client_supplement, admin_supplement]
+                          description: Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
                         created_at: { type: string, format: date-time }
                         locate_page:
                           type: integer

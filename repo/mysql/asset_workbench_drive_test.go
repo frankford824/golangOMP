@@ -23,6 +23,9 @@ func TestDriveListFilesWithoutOrderListsDirectoryByUploadTime(t *testing.T) {
 			if expectedSQL == "drive-list-files-select" && !strings.Contains(actualSQL, "ORDER BY f.created_at DESC, f.id DESC") {
 				return fmt.Errorf("DriveListFiles should sort directory files by upload time:\n%s", actualSQL)
 			}
+			if expectedSQL == "drive-list-files-select" && !strings.Contains(actualSQL, "s.submitter_user_id = i.payee_user_id THEN 'client_supplement'") {
+				return fmt.Errorf("DriveListFiles should classify client supplement uploads:\n%s", actualSQL)
+			}
 		}
 		return nil
 	})))
@@ -43,7 +46,7 @@ func TestDriveListFilesWithoutOrderListsDirectoryByUploadTime(t *testing.T) {
 			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
 			"file_type", "mime_type", "file_size", "preview_status",
 			"qc_status", "pricing_status", "settlement_status", "page_count",
-			"gross_amount", "business_month", "created_at",
+			"gross_amount", "business_month", "operation_source", "created_at",
 		}).AddRow(
 			int64(42), int64(11), int64(21), "SUB-001", int64(7),
 			"张三", "zhangsan",
@@ -51,7 +54,7 @@ func TestDriveListFilesWithoutOrderListsDirectoryByUploadTime(t *testing.T) {
 			"sample.jpg", "sample.jpg", "folder/sample.jpg", "batch-1", true,
 			"jpg", "image/jpeg", int64(1024), "ready",
 			"passed", "priced", "pending", 1,
-			12.5, "2026-07", now,
+			12.5, "2026-07", "client_supplement", now,
 		))
 
 	workbenchRepo := NewAssetWorkbenchRepo(New(db))
@@ -59,7 +62,7 @@ func TestDriveListFilesWithoutOrderListsDirectoryByUploadTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DriveListFiles() error = %v", err)
 	}
-	if total != 1 || len(items) != 1 || items[0].ID != 42 {
+	if total != 1 || len(items) != 1 || items[0].ID != 42 || items[0].OperationSource != "client_supplement" {
 		t.Fatalf("DriveListFiles() total=%d items=%+v, want one file 42", total, items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -129,7 +132,7 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
 			"file_type", "mime_type", "file_size", "preview_status",
 			"qc_status", "pricing_status", "settlement_status", "page_count",
-			"gross_amount", "business_month", "created_at",
+			"gross_amount", "business_month", "operation_source", "created_at",
 		}))
 
 	workbenchRepo := NewAssetWorkbenchRepo(New(db))
@@ -176,7 +179,7 @@ func TestDriveListFilesAppliesUploadOverviewSort(t *testing.T) {
 			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
 			"file_type", "mime_type", "file_size", "preview_status",
 			"qc_status", "pricing_status", "settlement_status", "page_count",
-			"gross_amount", "business_month", "created_at",
+			"gross_amount", "business_month", "operation_source", "created_at",
 		}))
 
 	workbenchRepo := NewAssetWorkbenchRepo(New(db))
@@ -360,7 +363,7 @@ func TestDriveLocateFileFiltersVoidedItems(t *testing.T) {
 			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
 			"file_type", "mime_type", "file_size", "preview_status",
 			"qc_status", "pricing_status", "settlement_status", "page_count",
-			"gross_amount", "business_month", "created_at",
+			"gross_amount", "business_month", "operation_source", "created_at",
 		}).AddRow(
 			int64(42), int64(11), int64(21), "SUB-001", int64(7),
 			"张三", "zhangsan",
@@ -368,7 +371,7 @@ func TestDriveLocateFileFiltersVoidedItems(t *testing.T) {
 			"sample.jpg", "sample.jpg", "folder/sample.jpg", "batch-1", true,
 			"jpg", "image/jpeg", int64(1024), "ready",
 			"passed", "priced", "pending", 1,
-			12.5, "2026-07", now,
+			12.5, "2026-07", "normal_upload", now,
 		))
 	mock.ExpectQuery("drive-locate-page").
 		WithArgs(int64(3), now, now, int64(42)).

@@ -6639,6 +6639,11 @@ body.aw-submission-dialog-locked {
   font-size: var(--aw-font-size-xs);
 }
 
+.aw-upload-ledger__source {
+  display: inline-flex;
+  margin-top: 4px;
+}
+
 .aw-upload-ledger__format {
   display: grid;
   gap: 4px;
