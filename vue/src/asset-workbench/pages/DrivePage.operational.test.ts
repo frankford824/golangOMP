@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const browseMaterials = vi.hoisted(() => vi.fn())
 const listClientMaterials = vi.hoisted(() => vi.fn())
 const batchUpdateClientMaterials = vi.hoisted(() => vi.fn())
+const overviewSearch = vi.hoisted(() => vi.fn())
+const previewClientMaterial = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-router', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('vue-router')>()
@@ -31,6 +33,8 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
       listClientMaterials,
       browseMaterials,
       batchUpdateClientMaterials,
+      overviewSearch,
+      previewClientMaterial,
     },
   }
 })
@@ -52,6 +56,8 @@ describe('DrivePage operational browsing', () => {
     batchUpdateClientMaterials.mockResolvedValue({
       requested: 1, created: 1, updated: 0, removed: 0, skipped: 0, failed: 0, items: [], failures: [], async_required: false,
     })
+    overviewSearch.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 60 })
+    previewClientMaterial.mockResolvedValue({ download_mode: 'direct', download_url: 'https://preview.test/client.png', filename: 'client.png', mime_type: 'image/png' })
     const pinia = createPinia()
     setActivePinia(pinia)
     useAssetWorkbenchSessionStore().setBootstrap({
@@ -213,5 +219,49 @@ describe('DrivePage operational browsing', () => {
     expect(materialCard.exists()).toBe(true)
     expect(materialCard.props('asset')).toMatchObject({ material_id: 501, resource_group_id: 8, product_name: '管理员已上架定制素材' })
     expect(wrapper.findAll('button').some((button) => button.text() === '资源组')).toBe(false)
+  })
+
+  it('keeps published client-material hits in client unified search and hides raw system resources', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 22, display_name: 'client-user' },
+      is_admin: false,
+      capabilities: ['asset.workbench.material.download'],
+    } as never)
+    overviewSearch.mockResolvedValue({
+      items: [
+        {
+          source: 'client_material', scope: 'operational', source_label: '可下载素材', id: 501,
+          title: 'DZK000394 已上架素材', primary_code: 'group:8', secondary_code: 'DZK000394', status: 'enabled',
+          created_at: '2026-08-20T00:00:00Z', updated_at: '2026-08-20T00:00:00Z', route_path: '/drive?scope=operational&material_id=501',
+          meta_json: { material_id: 501, resource_group_id: 8, source_type: 'task_resource_group', source_ref: 'group:8', resource_id: 'group:8', filename: 'cover.png', mime_type: 'image/png', preview_available: true },
+        },
+        {
+          source: 'system_asset', scope: 'operational', source_label: '系统资源', id: 9001,
+          title: '未发布主工程素材', primary_code: 'raw:9001', secondary_code: 'DZK000394', status: 'active',
+          created_at: '2026-08-20T00:00:00Z', updated_at: '2026-08-20T00:00:00Z', route_path: '/drive?scope=operational', meta_json: {},
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 60,
+    })
+    const wrapper = shallowMount(DrivePage, {
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('DZK000394')
+    await wrapper.get('form.aw-drive__search--global').trigger('submit')
+    await flushPromises()
+
+    expect(overviewSearch).toHaveBeenCalledWith(expect.objectContaining({ q: 'DZK000394', scope: 'all' }), expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('DZK000394 已上架素材')
+    expect(wrapper.text()).not.toContain('未发布主工程素材')
+    expect(wrapper.text()).toContain('共 1 条')
   })
 })

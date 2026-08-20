@@ -1231,6 +1231,11 @@ function isOperationalSearchHit(row: OverviewSearchRow): boolean {
   return row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material'
 }
 
+function includeUnifiedSearchHit(row: OverviewSearchRow): boolean {
+  if (!isOperationalSearchHit(row)) return true
+  return clientPublishedView.value && row.source === 'client_material'
+}
+
 function searchHitMaterial(row: OverviewSearchRow): SystemAssetRow {
   return materialFromOverview(row)
 }
@@ -1770,10 +1775,10 @@ async function runUnifiedSearch() {
   try {
     const result = await assetWorkbenchApi.overviewSearch({ q, scope: searchScope.value, page: 1, page_size: 60 }, searchAbortController.signal)
     if (requestID !== searchRequestSeq) return
-    // Operational resources are deliberately excluded from the legacy overview
-    // index. Their search, preview, and download all live in ResourceLibraryPanel
-    // and use /v1/resource-groups plus immutable task-asset identities.
-    const items = (Array.isArray(result.items) ? result.items : []).filter((item) => !isOperationalSearchHit(item))
+    // Main-project system resources stay in ResourceLibraryPanel. Client users
+    // keep enabled client_material hits because those rows are the published
+    // catalog they are allowed to search and download.
+    const items = (Array.isArray(result.items) ? result.items : []).filter(includeUnifiedSearchHit)
     searchResults.value = items
     searchTotal.value = items.length
     void prefetchSearchResultPreviews(items)
