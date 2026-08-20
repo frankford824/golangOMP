@@ -31,4 +31,11 @@ type ExternalAssetSyncRow struct {
 type ExternalAssetSyncRepo interface {
 	ListExternalAssetSyncSnapshot(context.Context, []ExternalAssetOriginPrefix) ([]ExternalAssetSyncRow, error)
 	ListCurrentExternalAssetsForSyncByIDs(context.Context, []int64, []ExternalAssetOriginPrefix) ([]ExternalAssetSyncRow, error)
+	GetExternalAssetSyncHead(context.Context, []ExternalAssetOriginPrefix) (ExternalAssetSyncCursor, error)
+	ListExternalAssetSyncChanges(context.Context, []ExternalAssetOriginPrefix, ExternalAssetSyncCursor, int) ([]ExternalAssetSyncRow, bool, error)
+}
+
+type ExternalAssetSyncCursor struct {
+	UpdatedAt time.Time
+	ID        int64
 }

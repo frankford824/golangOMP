@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -31,6 +33,8 @@ func (h *IntegrationCenterHandler) SetFinalizedAssetSyncService(svc finalizedAss
 
 type externalAssetSyncService interface {
 	ExternalCurrentSyncManifest(context.Context) (*externalassets.ExternalCurrentManifest, *domain.AppError)
+	ExternalCurrentSyncHead(context.Context) (*externalassets.ExternalCurrentSyncHead, *domain.AppError)
+	ExternalCurrentSyncChanges(context.Context, string, int, time.Duration) (*externalassets.ExternalCurrentSyncChanges, *domain.AppError)
 	ExternalCurrentDownloadTickets(context.Context, []int64) (*externalassets.ExternalCurrentTicketResponse, *domain.AppError)
 }
 
@@ -105,6 +109,52 @@ func (h *IntegrationCenterHandler) ExternalCurrentSyncManifest(c *gin.Context) {
 		return
 	}
 	respondOK(c, manifest)
+}
+
+func (h *IntegrationCenterHandler) ExternalCurrentSyncHead(c *gin.Context) {
+	if h.externalAssetSync == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "external current sync service is not configured", nil))
+		return
+	}
+	result, appErr := h.externalAssetSync.ExternalCurrentSyncHead(c.Request.Context())
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *IntegrationCenterHandler) ExternalCurrentSyncChanges(c *gin.Context) {
+	if h.externalAssetSync == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "external current sync service is not configured", nil))
+		return
+	}
+	limit := 500
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 500 {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "limit must be between 1 and 500", nil))
+			return
+		}
+		limit = value
+	}
+	waitSeconds := 20
+	if raw := strings.TrimSpace(c.Query("wait_seconds")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 || value > 30 {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "wait_seconds must be between 0 and 30", nil))
+			return
+		}
+		waitSeconds = value
+	}
+	result, appErr := h.externalAssetSync.ExternalCurrentSyncChanges(
+		c.Request.Context(), c.Query("cursor"), limit, time.Duration(waitSeconds)*time.Second,
+	)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 type externalCurrentDownloadTicketsRequest struct {

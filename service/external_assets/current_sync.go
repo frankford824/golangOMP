@@ -3,11 +3,13 @@ package externalassets
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +26,8 @@ const (
 type externalCurrentSyncRepo interface {
 	ListExternalAssetSyncSnapshot(context.Context, []repo.ExternalAssetOriginPrefix) ([]repo.ExternalAssetSyncRow, error)
 	ListCurrentExternalAssetsForSyncByIDs(context.Context, []int64, []repo.ExternalAssetOriginPrefix) ([]repo.ExternalAssetSyncRow, error)
+	GetExternalAssetSyncHead(context.Context, []repo.ExternalAssetOriginPrefix) (repo.ExternalAssetSyncCursor, error)
+	ListExternalAssetSyncChanges(context.Context, []repo.ExternalAssetOriginPrefix, repo.ExternalAssetSyncCursor, int) ([]repo.ExternalAssetSyncRow, bool, error)
 }
 
 type ExternalCurrentManifest struct {
@@ -81,6 +85,21 @@ type ExternalCurrentTicketResponse struct {
 	Results []ExternalCurrentTicketResult `json:"results"`
 }
 
+type ExternalCurrentSyncHead struct {
+	SchemaVersion int       `json:"schema_version"`
+	Cursor        string    `json:"cursor"`
+	ObservedAt    time.Time `json:"observed_at"`
+}
+
+type ExternalCurrentSyncChanges struct {
+	SchemaVersion int                           `json:"schema_version"`
+	Cursor        string                        `json:"cursor"`
+	NextCursor    string                        `json:"next_cursor"`
+	HasMore       bool                          `json:"has_more"`
+	GeneratedAt   time.Time                     `json:"generated_at"`
+	Items         []ExternalCurrentManifestItem `json:"items"`
+}
+
 func (s *Service) ExternalCurrentSyncManifest(ctx context.Context) (*ExternalCurrentManifest, *domain.AppError) {
 	repository, prefixes, appErr := s.externalCurrentSyncDependencies()
 	if appErr != nil {
@@ -103,19 +122,11 @@ func buildExternalCurrentManifest(rows []repo.ExternalAssetSyncRow, prefixes []r
 	activeCount := 0
 	deletedCount := 0
 	for _, row := range rows {
-		relativePath, ok := externalCurrentRelativePath(row.MountPath, row.OriginPath, prefixes)
-		if !ok || ignoredExternalCurrentName(row.FileName) {
+		item, ok := externalCurrentManifestItemFromRow(row, prefixes)
+		if !ok {
 			continue
 		}
-		deleted := row.Status == domain.ExternalAssetStatusMissing
-		item := ExternalCurrentManifestItem{
-			ExternalAssetID: row.ID, OriginPathHash: strings.TrimSpace(row.OriginPathHash), RelativePath: relativePath,
-			FileName: strings.TrimSpace(row.FileName), MimeType: strings.TrimSpace(row.MimeType), FileSize: row.FileSize,
-			StorageKey: strings.TrimSpace(row.OSSOriginalKey), SourceModifiedAt: normalizedExternalCurrentTime(row.SourceModifiedAt),
-			RecordUpdatedAt: row.UpdatedAt.UTC(), Deleted: deleted,
-		}
-		if deleted {
-			item.StorageKey = ""
+		if item.Deleted {
 			deletedCount++
 		} else {
 			activeCount++
@@ -149,6 +160,114 @@ func buildExternalCurrentManifest(rows []repo.ExternalAssetSyncRow, prefixes []r
 		SchemaVersion: ExternalCurrentSyncSchemaVersion, ManifestID: hex.EncodeToString(digest[:]), GeneratedAt: generatedAt,
 		ItemCount: len(items), ActiveCount: activeCount, DeletedCount: deletedCount, TotalObjectBytes: totalBytes, Items: items,
 	}, nil
+}
+
+func (s *Service) ExternalCurrentSyncHead(ctx context.Context) (*ExternalCurrentSyncHead, *domain.AppError) {
+	repository, prefixes, appErr := s.externalCurrentSyncDependencies()
+	if appErr != nil {
+		return nil, appErr
+	}
+	cursor, err := repository.GetExternalAssetSyncHead(ctx, prefixes)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, fmt.Sprintf("get external current head: %v", err), nil)
+	}
+	return &ExternalCurrentSyncHead{SchemaVersion: ExternalCurrentSyncSchemaVersion, Cursor: encodeExternalCurrentCursor(cursor), ObservedAt: time.Now().UTC()}, nil
+}
+
+func (s *Service) ExternalCurrentSyncChanges(ctx context.Context, rawCursor string, limit int, wait time.Duration) (*ExternalCurrentSyncChanges, *domain.AppError) {
+	after, err := decodeExternalCurrentCursor(rawCursor)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid external current cursor", nil)
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	if wait < 0 || wait > 30*time.Second {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "wait_seconds must be between 0 and 30", nil)
+	}
+	repository, prefixes, appErr := s.externalCurrentSyncDependencies()
+	if appErr != nil {
+		return nil, appErr
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		rows, hasMore, queryErr := repository.ListExternalAssetSyncChanges(ctx, prefixes, after, limit)
+		if queryErr != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, fmt.Sprintf("list external current changes: %v", queryErr), nil)
+		}
+		items := make([]ExternalCurrentManifestItem, 0, len(rows))
+		for _, row := range rows {
+			if item, ok := externalCurrentManifestItemFromRow(row, prefixes); ok {
+				items = append(items, item)
+			}
+		}
+		next := after
+		if len(rows) > 0 {
+			last := rows[len(rows)-1]
+			next = repo.ExternalAssetSyncCursor{UpdatedAt: last.UpdatedAt, ID: last.ID}
+		}
+		if len(rows) > 0 || wait == 0 || !time.Now().Before(deadline) {
+			return &ExternalCurrentSyncChanges{
+				SchemaVersion: ExternalCurrentSyncSchemaVersion,
+				Cursor:        encodeExternalCurrentCursor(after), NextCursor: encodeExternalCurrentCursor(next),
+				HasMore: hasMore, GeneratedAt: time.Now().UTC(), Items: items,
+			}, nil
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, ctx.Err().Error(), nil)
+		case <-timer.C:
+		}
+	}
+}
+
+func externalCurrentManifestItemFromRow(row repo.ExternalAssetSyncRow, prefixes []repo.ExternalAssetOriginPrefix) (ExternalCurrentManifestItem, bool) {
+	relativePath, ok := externalCurrentRelativePath(row.MountPath, row.OriginPath, prefixes)
+	if !ok || ignoredExternalCurrentName(row.FileName) {
+		return ExternalCurrentManifestItem{}, false
+	}
+	deleted := row.Status == domain.ExternalAssetStatusMissing
+	item := ExternalCurrentManifestItem{
+		ExternalAssetID: row.ID, OriginPathHash: strings.TrimSpace(row.OriginPathHash), RelativePath: relativePath,
+		FileName: strings.TrimSpace(row.FileName), MimeType: strings.TrimSpace(row.MimeType), FileSize: row.FileSize,
+		StorageKey: strings.TrimSpace(row.OSSOriginalKey), SourceModifiedAt: normalizedExternalCurrentTime(row.SourceModifiedAt),
+		RecordUpdatedAt: row.UpdatedAt.UTC(), Deleted: deleted,
+	}
+	if deleted {
+		item.StorageKey = ""
+	}
+	return item, true
+}
+
+func encodeExternalCurrentCursor(cursor repo.ExternalAssetSyncCursor) string {
+	payload := "v1:" + strconv.FormatInt(cursor.UpdatedAt.UTC().UnixMicro(), 10) + ":" + strconv.FormatInt(cursor.ID, 10)
+	return base64.RawURLEncoding.EncodeToString([]byte(payload))
+}
+
+func decodeExternalCurrentCursor(value string) (repo.ExternalAssetSyncCursor, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return repo.ExternalAssetSyncCursor{}, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return repo.ExternalAssetSyncCursor{}, err
+	}
+	parts := strings.Split(string(raw), ":")
+	if len(parts) != 3 || parts[0] != "v1" {
+		return repo.ExternalAssetSyncCursor{}, fmt.Errorf("unsupported cursor")
+	}
+	micros, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || micros < 0 {
+		return repo.ExternalAssetSyncCursor{}, fmt.Errorf("invalid cursor time")
+	}
+	id, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || id < 0 {
+		return repo.ExternalAssetSyncCursor{}, fmt.Errorf("invalid cursor id")
+	}
+	return repo.ExternalAssetSyncCursor{UpdatedAt: time.UnixMicro(micros).UTC(), ID: id}, nil
 }
 
 func (s *Service) ExternalCurrentDownloadTickets(ctx context.Context, values []int64) (*ExternalCurrentTicketResponse, *domain.AppError) {

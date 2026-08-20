@@ -1,10 +1,10 @@
-# V1 API 速查表(256 path · 一行一条)
+# V1 API 速查表(258 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 256 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 258 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -109,6 +109,8 @@
 | GET | `/v1/integration/asset-sync/finalized/manifest` | Get the complete current finalized production manifest | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/integration/asset-sync/finalized/download-tickets` | Stat finalized OSS objects and issue short-lived download tickets | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/integration/asset-sync/external-current/manifest` | Get the complete current external-library overlay and path tombstones | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/integration/asset-sync/external-current/head` | Capture the external-current change-feed high-water cursor | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/integration/asset-sync/external-current/changes` | Long-poll the low-latency external-current change feed | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/integration/asset-sync/external-current/download-tickets` | Revalidate current external records and issue OSS download tickets | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/integration/external-assets/events` | Ingest NAS filesystem events | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/events` | List task events | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

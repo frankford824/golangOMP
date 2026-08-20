@@ -4727,6 +4727,35 @@ components:
       required: [data]
       properties:
         data: { $ref: '#/components/schemas/ExternalCurrentManifest' }
+    ExternalCurrentSyncHead:
+      type: object
+      required: [schema_version, cursor, observed_at]
+      properties:
+        schema_version: { type: integer, enum: [1] }
+        cursor: { type: string, minLength: 1, description: Opaque updated_at-plus-id high-water cursor captured before a full manifest bootstrap. }
+        observed_at: { type: string, format: date-time }
+    ExternalCurrentSyncHeadResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ExternalCurrentSyncHead' }
+    ExternalCurrentSyncChanges:
+      type: object
+      required: [schema_version, cursor, next_cursor, has_more, generated_at, items]
+      properties:
+        schema_version: { type: integer, enum: [1] }
+        cursor: { type: string, description: Cursor supplied by the caller. }
+        next_cursor: { type: string, minLength: 1, description: Advance only after every returned item and required download ticket is durably applied. }
+        has_more: { type: boolean }
+        generated_at: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ExternalCurrentManifestItem' }
+    ExternalCurrentSyncChangesResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/ExternalCurrentSyncChanges' }
     ExternalCurrentDownloadTicketRequest:
       type: object
       required: [external_asset_ids]
@@ -11342,6 +11371,46 @@ paths:
         '304': { description: Manifest content has not changed }
         '401': { description: Missing or invalid dedicated machine token }
         '500': { description: External-current query or manifest construction failed }
+  /v1/integration/asset-sync/external-current/head:
+    get:
+      operationId: getExternalCurrentAssetSyncHead
+      summary: Capture the external-current change-feed high-water cursor
+      description: Call immediately before a full-manifest bootstrap, then consume changes from the returned cursor after the manifest is durably applied. This ordering prevents the normal snapshot/feed handoff gap; periodic full-manifest reconciliation remains authoritative.
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-Asset-Sync-Token }
+      security: [{ AssetSyncToken: [] }]
+      responses:
+        '200':
+          description: Current external record high-water cursor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalCurrentSyncHeadResponse' }
+        '401': { description: Missing or invalid dedicated machine token }
+        '500': { description: External-current head query failed }
+  /v1/integration/asset-sync/external-current/changes:
+    get:
+      operationId: getExternalCurrentAssetSyncChanges
+      summary: Long-poll the low-latency external-current change feed
+      description: |
+        Returns active additions/replacements and explicit tombstones ordered by `(external_asset_records.updated_at, id)`. Replaying the same opaque cursor replays the same visible batch, so clients must persist `next_cursor` only after catalog changes and all ready tickets are durably applied. `has_more=true` means immediately request the next page. This timestamp cursor is a low-latency path, not an absolute database change log: rare same-timestamp lower-ID updates or database-clock anomalies are recovered by the mandatory five-minute complete-manifest reconciliation.
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-Asset-Sync-Token }
+      security: [{ AssetSyncToken: [] }]
+      parameters:
+        - { name: cursor, in: query, required: false, description: Opaque cursor from head or a prior successful changes response; empty starts at epoch., schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 500 } }
+        - { name: wait_seconds, in: query, required: false, description: Long-poll duration when no eligible change is available., schema: { type: integer, minimum: 0, maximum: 30, default: 20 } }
+      responses:
+        '200':
+          description: Ordered low-latency change batch with replayable cursor semantics
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalCurrentSyncChangesResponse' }
+        '400': { description: Invalid cursor, limit or wait_seconds }
+        '401': { description: Missing or invalid dedicated machine token }
+        '500': { description: External-current change query failed }
   /v1/integration/asset-sync/external-current/download-tickets:
     post:
       operationId: createExternalCurrentAssetDownloadTickets

@@ -348,6 +348,8 @@ func NewRouter(
 		assetSyncGroup.GET("/finalized/manifest", integrationCenterH.FinalizedSyncManifest)
 		assetSyncGroup.POST("/finalized/download-tickets", integrationCenterH.FinalizedDownloadTickets)
 		assetSyncGroup.GET("/external-current/manifest", integrationCenterH.ExternalCurrentSyncManifest)
+		assetSyncGroup.GET("/external-current/head", integrationCenterH.ExternalCurrentSyncHead)
+		assetSyncGroup.GET("/external-current/changes", integrationCenterH.ExternalCurrentSyncChanges)
 		assetSyncGroup.POST("/external-current/download-tickets", integrationCenterH.ExternalCurrentDownloadTickets)
 
 		externalAssetIntegrationGroup := integrationGroup.Group("/external-assets")

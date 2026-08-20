@@ -6826,6 +6826,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/integration/asset-sync/external-current/head": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Capture the external-current change-feed high-water cursor
+         * @description Call immediately before a full-manifest bootstrap, then consume changes from the returned cursor after the manifest is durably applied. This ordering prevents the normal snapshot/feed handoff gap; periodic full-manifest reconciliation remains authoritative.
+         */
+        get: operations["getExternalCurrentAssetSyncHead"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-sync/external-current/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Long-poll the low-latency external-current change feed
+         * @description Returns active additions/replacements and explicit tombstones ordered by `(external_asset_records.updated_at, id)`. Replaying the same opaque cursor replays the same visible batch, so clients must persist `next_cursor` only after catalog changes and all ready tickets are durably applied. `has_more=true` means immediately request the next page. This timestamp cursor is a low-latency path, not an absolute database change log: rare same-timestamp lower-ID updates or database-clock anomalies are recovered by the mandatory five-minute complete-manifest reconciliation.
+         */
+        get: operations["getExternalCurrentAssetSyncChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/integration/asset-sync/external-current/download-tickets": {
         parameters: {
             query?: never;
@@ -21257,6 +21297,32 @@ export interface components {
         ExternalCurrentManifestResponse: {
             data: components["schemas"]["ExternalCurrentManifest"];
         };
+        ExternalCurrentSyncHead: {
+            /** @enum {integer} */
+            schema_version: 1;
+            /** @description Opaque updated_at-plus-id high-water cursor captured before a full manifest bootstrap. */
+            cursor: string;
+            /** Format: date-time */
+            observed_at: string;
+        };
+        ExternalCurrentSyncHeadResponse: {
+            data: components["schemas"]["ExternalCurrentSyncHead"];
+        };
+        ExternalCurrentSyncChanges: {
+            /** @enum {integer} */
+            schema_version: 1;
+            /** @description Cursor supplied by the caller. */
+            cursor: string;
+            /** @description Advance only after every returned item and required download ticket is durably applied. */
+            next_cursor: string;
+            has_more: boolean;
+            /** Format: date-time */
+            generated_at: string;
+            items: components["schemas"]["ExternalCurrentManifestItem"][];
+        };
+        ExternalCurrentSyncChangesResponse: {
+            data: components["schemas"]["ExternalCurrentSyncChanges"];
+        };
         ExternalCurrentDownloadTicketRequest: {
             external_asset_ids: number[];
         };
@@ -23995,6 +24061,87 @@ export interface operations {
                 content?: never;
             };
             /** @description External-current query or manifest construction failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getExternalCurrentAssetSyncHead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current external record high-water cursor */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalCurrentSyncHeadResponse"];
+                };
+            };
+            /** @description Missing or invalid dedicated machine token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description External-current head query failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getExternalCurrentAssetSyncChanges: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from head or a prior successful changes response; empty starts at epoch. */
+                cursor?: string;
+                limit?: number;
+                /** @description Long-poll duration when no eligible change is available. */
+                wait_seconds?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordered low-latency change batch with replayable cursor semantics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalCurrentSyncChangesResponse"];
+                };
+            };
+            /** @description Invalid cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid dedicated machine token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description External-current change query failed */
             500: {
                 headers: {
                     [name: string]: unknown;

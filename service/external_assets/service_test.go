@@ -1384,6 +1384,26 @@ type externalAssetRepoStub struct {
 	ossPriorityReads         []repo.ExternalAssetOriginPrefix
 	directoryEntriesByParent map[string][]domain.ExternalAssetDirectoryEntry
 	previewPrefixMarks       []repo.ExternalAssetOriginPrefix
+	syncHead                 repo.ExternalAssetSyncCursor
+	syncSnapshot             []repo.ExternalAssetSyncRow
+	syncChanges              []repo.ExternalAssetSyncRow
+	syncHasMore              bool
+}
+
+func (r *externalAssetRepoStub) ListExternalAssetSyncSnapshot(context.Context, []repo.ExternalAssetOriginPrefix) ([]repo.ExternalAssetSyncRow, error) {
+	return append([]repo.ExternalAssetSyncRow(nil), r.syncSnapshot...), nil
+}
+
+func (r *externalAssetRepoStub) ListCurrentExternalAssetsForSyncByIDs(context.Context, []int64, []repo.ExternalAssetOriginPrefix) ([]repo.ExternalAssetSyncRow, error) {
+	return append([]repo.ExternalAssetSyncRow(nil), r.syncSnapshot...), nil
+}
+
+func (r *externalAssetRepoStub) GetExternalAssetSyncHead(context.Context, []repo.ExternalAssetOriginPrefix) (repo.ExternalAssetSyncCursor, error) {
+	return r.syncHead, nil
+}
+
+func (r *externalAssetRepoStub) ListExternalAssetSyncChanges(context.Context, []repo.ExternalAssetOriginPrefix, repo.ExternalAssetSyncCursor, int) ([]repo.ExternalAssetSyncRow, bool, error) {
+	return append([]repo.ExternalAssetSyncRow(nil), r.syncChanges...), r.syncHasMore, nil
 }
 
 func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {

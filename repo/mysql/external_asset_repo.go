@@ -64,6 +64,72 @@ func (r *externalAssetRepo) ListCurrentExternalAssetsForSyncByIDs(ctx context.Co
 	return r.listExternalAssetSyncRows(ctx, prefixes, ids, false)
 }
 
+func (r *externalAssetRepo) GetExternalAssetSyncHead(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix) (repo.ExternalAssetSyncCursor, error) {
+	prefixWhere, args := externalAssetOriginPrefixWhere(prefixes)
+	if prefixWhere == "" {
+		return repo.ExternalAssetSyncCursor{}, nil
+	}
+	var cursor repo.ExternalAssetSyncCursor
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT updated_at, id
+		  FROM external_asset_records
+		 WHERE is_dir=0 AND (`+prefixWhere+`)
+		 ORDER BY updated_at DESC, id DESC
+		 LIMIT 1`, args...).Scan(&cursor.UpdatedAt, &cursor.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return repo.ExternalAssetSyncCursor{}, nil
+	}
+	if err != nil {
+		return repo.ExternalAssetSyncCursor{}, fmt.Errorf("get external asset sync head: %w", err)
+	}
+	return cursor, nil
+}
+
+func (r *externalAssetRepo) ListExternalAssetSyncChanges(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, after repo.ExternalAssetSyncCursor, limit int) ([]repo.ExternalAssetSyncRow, bool, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	prefixWhere, prefixArgs := externalAssetOriginPrefixWhere(prefixes)
+	if prefixWhere == "" {
+		return []repo.ExternalAssetSyncRow{}, false, nil
+	}
+	args := append([]interface{}{}, prefixArgs...)
+	args = append(args, after.UpdatedAt, after.UpdatedAt, after.ID, limit+1)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT external_asset_records.id, external_asset_records.provider, external_asset_records.kind,
+		       external_asset_records.mount_path, external_asset_records.origin_path_hash,
+		       external_asset_records.origin_path, external_asset_records.parent_path,
+		       external_asset_records.file_name, external_asset_records.mime_type,
+		       external_asset_records.file_size, external_asset_records.status,
+		       external_asset_records.oss_sync_status,
+		       COALESCE(external_asset_records.oss_original_key, ''),
+		       fp.source_modified_at, external_asset_records.updated_at
+		  FROM external_asset_records
+		  LEFT JOIN external_asset_source_fingerprints fp USING (origin_path_hash)
+		 WHERE external_asset_records.is_dir=0
+		   AND (`+prefixWhere+`)
+		   AND (external_asset_records.updated_at>? OR (external_asset_records.updated_at=? AND external_asset_records.id>?))
+		   AND (external_asset_records.status='missing' OR (
+		        external_asset_records.status='indexed'
+		        AND external_asset_records.oss_sync_status='ready'
+		        AND COALESCE(TRIM(external_asset_records.oss_original_key), '')<>''
+		   ))
+		 ORDER BY external_asset_records.updated_at, external_asset_records.id
+		 LIMIT ?`, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("list external asset sync changes: %w", err)
+	}
+	items, err := scanExternalAssetSyncRows(rows)
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	return items, hasMore, nil
+}
+
 func (r *externalAssetRepo) listExternalAssetSyncRows(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, ids []int64, includeMissing bool) ([]repo.ExternalAssetSyncRow, error) {
 	prefixWhere, prefixArgs := externalAssetOriginPrefixWhere(prefixes)
 	if prefixWhere == "" {
@@ -99,6 +165,10 @@ func (r *externalAssetRepo) listExternalAssetSyncRows(ctx context.Context, prefi
 	if err != nil {
 		return nil, fmt.Errorf("list external asset sync rows: %w", err)
 	}
+	return scanExternalAssetSyncRows(rows)
+}
+
+func scanExternalAssetSyncRows(rows *sql.Rows) ([]repo.ExternalAssetSyncRow, error) {
 	defer rows.Close()
 	out := make([]repo.ExternalAssetSyncRow, 0)
 	for rows.Next() {

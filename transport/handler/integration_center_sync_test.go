@@ -24,6 +24,14 @@ func (s integrationExternalSyncStub) ExternalCurrentSyncManifest(context.Context
 	return s.manifest, nil
 }
 
+func (s integrationExternalSyncStub) ExternalCurrentSyncHead(context.Context) (*externalassets.ExternalCurrentSyncHead, *domain.AppError) {
+	return &externalassets.ExternalCurrentSyncHead{SchemaVersion: 1, Cursor: "cursor"}, nil
+}
+
+func (s integrationExternalSyncStub) ExternalCurrentSyncChanges(context.Context, string, int, time.Duration) (*externalassets.ExternalCurrentSyncChanges, *domain.AppError) {
+	return &externalassets.ExternalCurrentSyncChanges{SchemaVersion: 1, Cursor: "cursor", NextCursor: "cursor", Items: []externalassets.ExternalCurrentManifestItem{}}, nil
+}
+
 func (s integrationExternalSyncStub) ExternalCurrentDownloadTickets(context.Context, []int64) (*externalassets.ExternalCurrentTicketResponse, *domain.AppError) {
 	return &externalassets.ExternalCurrentTicketResponse{}, nil
 }

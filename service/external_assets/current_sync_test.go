@@ -1,6 +1,8 @@
 package externalassets
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,5 +56,40 @@ func TestNormalizeExternalCurrentTicketIDs(t *testing.T) {
 	}
 	if _, appErr := normalizeExternalCurrentTicketIDs(nil); appErr == nil {
 		t.Fatal("expected empty ticket request to fail")
+	}
+}
+
+func TestExternalCurrentHeadAndChangesCursor(t *testing.T) {
+	updated := time.Date(2026, 8, 19, 10, 11, 12, 0, time.UTC)
+	repository := &externalAssetRepoStub{
+		syncHead: repo.ExternalAssetSyncCursor{UpdatedAt: updated, ID: 99},
+		syncChanges: []repo.ExternalAssetSyncRow{{
+			ID: 100, MountPath: "/p3", OriginPathHash: strings.Repeat("a", 64),
+			OriginPath: "/p3/仓库素材区/徐凯/1/KT/HSC100.jpg", FileName: "HSC100.jpg",
+			MimeType: "image/jpeg", FileSize: 10, Status: domain.ExternalAssetStatusIndexed,
+			OSSSyncStatus: domain.ExternalAssetOSSStatusReady, OSSOriginalKey: "external/HSC100.jpg", UpdatedAt: updated.Add(time.Second),
+		}},
+		syncHasMore: true,
+	}
+	service := NewService(repository, Config{
+		Enabled:         true,
+		Mounts:          []MountConfig{{Path: "/p3", Kind: domain.ExternalAssetKindNASLocal}},
+		SyncExportRoots: []string{"/p3/仓库素材区/徐凯"},
+	}, nil)
+	head, appErr := service.ExternalCurrentSyncHead(context.Background())
+	if appErr != nil || head.Cursor == "" {
+		t.Fatalf("head=%+v appErr=%+v", head, appErr)
+	}
+	decoded, err := decodeExternalCurrentCursor(head.Cursor)
+	if err != nil || decoded.ID != 99 || !decoded.UpdatedAt.Equal(updated) {
+		t.Fatalf("decoded=%+v err=%v", decoded, err)
+	}
+	changes, appErr := service.ExternalCurrentSyncChanges(context.Background(), head.Cursor, 100, 0)
+	if appErr != nil || len(changes.Items) != 1 || !changes.HasMore {
+		t.Fatalf("changes=%+v appErr=%+v", changes, appErr)
+	}
+	next, err := decodeExternalCurrentCursor(changes.NextCursor)
+	if err != nil || next.ID != 100 || !next.UpdatedAt.Equal(updated.Add(time.Second)) {
+		t.Fatalf("next=%+v err=%v", next, err)
 	}
 }
