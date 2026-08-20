@@ -118,6 +118,7 @@ const driveSpreadsheetOpen = ref(false)
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
 const canPublishClientMaterials = computed(() => canManageDrive.value || capabilities.value.has('asset.publish'))
+const clientPublishedView = computed(() => !canPublishClientMaterials.value)
 const canMaintainItems = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const canListUploadDirectories = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canUseOperational = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.material.download'))
@@ -410,7 +411,7 @@ const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
     .map((node) => ({ path: node.path, name: node.name, file_count: node.file_count, direct_file_count: node.direct_file_count }))
 })
 const visibleMaterialFiles = computed(() =>
-  materialQuery.value.trim()
+  clientPublishedView.value || materialQuery.value.trim()
     ? materialItems.value.filter(materialMatchesActiveFilters)
     : materialItems.value.filter((asset) => materialMatchesActiveFilters(asset) && materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
 )
@@ -1666,6 +1667,11 @@ function goDrivesHome() {
 function openOperational() {
   activeMode.value = 'operational'
   selectedFile.value = null
+  if (clientPublishedView.value) {
+    operationalViewMode.value = 'paths'
+    if (!materialItems.value.length) void loadMaterialFolder('')
+    return
+  }
   if (canPublishClientMaterials.value) void refreshClientMaterials({ silent: true })
   if (operationalViewMode.value === 'paths' && !materialItems.value.length) {
     void loadMaterialFolder(materialDefaultFolderPathForSource())
@@ -1673,6 +1679,7 @@ function openOperational() {
 }
 
 function switchOperationalView(mode: OperationalViewMode) {
+  if (mode === 'resources' && clientPublishedView.value) return
   if (operationalViewMode.value === mode) return
   operationalViewMode.value = mode
   activeMaterial.value = null
@@ -1745,10 +1752,11 @@ async function runUnifiedSearch() {
   }
   if (searchScope.value === 'operational') {
     activeMode.value = 'operational'
-    operationalViewMode.value = 'resources'
+    operationalViewMode.value = clientPublishedView.value ? 'paths' : 'resources'
     materialQuery.value = q
     resetSearchState(true)
-    notice.value = `已在主工程资源库中检索：${q}`
+    if (clientPublishedView.value) void loadMaterials(q)
+    notice.value = `已在${clientPublishedView.value ? '已上架素材' : '主工程资源库'}中检索：${q}`
     return
   }
   const requestID = ++searchRequestSeq
@@ -1857,10 +1865,12 @@ function scheduleUnifiedSearch() {
 async function locateSearchRow(row: OverviewSearchRow) {
   if (row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material') {
     activeMode.value = 'operational'
-    operationalViewMode.value = 'resources'
+    operationalViewMode.value = clientPublishedView.value ? 'paths' : 'resources'
     materialQuery.value = row.secondary_code || row.primary_code || row.title || ''
     searchActive.value = false
-    notice.value = materialQuery.value ? `已在主工程资源库中检索：${materialQuery.value}` : '已打开主工程资源库'
+    if (clientPublishedView.value) void loadMaterials(materialQuery.value)
+    const libraryLabel = clientPublishedView.value ? '已上架素材' : '主工程资源库'
+    notice.value = materialQuery.value ? `已在${libraryLabel}中检索：${materialQuery.value}` : `已打开${libraryLabel}`
     return
   }
   const fileID = Number(row.locate?.file_id || 0)
@@ -3063,8 +3073,7 @@ watch(
 onMounted(async () => {
   await Promise.all([loadDifficultyClasses(), loadDirectories()])
   if (hasQueryValue(route.query.scope) && normalizeScope(route.query.scope) === 'operational') {
-    activeMode.value = 'operational'
-    if (canManageDrive.value) void refreshClientMaterials({ silent: true })
+    openOperational()
   }
   const locateId = Number(route.query.file_id || route.query.locate)
   if (locateId > 0) {
@@ -3513,9 +3522,13 @@ onBeforeUnmount(() => {
             </template>
             <template v-else>
               <form class="aw-material-toolbar" @submit.prevent="loadMaterials()">
-                <div class="aw-segmented-control aw-material-toolbar__view-switch" aria-label="运营素材浏览方式">
+                <div v-if="canPublishClientMaterials" class="aw-segmented-control aw-material-toolbar__view-switch" aria-label="运营素材浏览方式">
                   <button type="button" @click="switchOperationalView('resources')">资源组</button>
                   <button :class="{ 'is-active': operationalViewMode === 'paths' }" type="button">路径浏览</button>
+                </div>
+                <div v-else class="aw-material-toolbar__client-label">
+                  <strong>已上架素材</strong>
+                  <span>这里只显示管理员已发布且当前启用的素材</span>
                 </div>
                 <div class="aw-material-toolbar__query">
                   <span class="aw-material-toolbar__search-icon" aria-hidden="true">
@@ -3785,8 +3798,8 @@ onBeforeUnmount(() => {
             <p v-if="materialLoading" class="aw-drive-empty">正在检索素材…</p>
             <p v-else-if="materialError" class="aw-drive-empty">{{ materialError }}</p>
             <p v-else-if="visibleMaterialFolders.length === 0 && visibleMaterialFiles.length === 0" class="aw-drive-empty">没有可见素材，调整关键词后再试</p>
-            <div v-else class="aw-material-drive">
-              <aside class="aw-material-drive__folders" aria-label="全部素材目录">
+            <div v-else class="aw-material-drive" :class="{ 'aw-material-drive--client': clientPublishedView }">
+              <aside v-if="!clientPublishedView" class="aw-material-drive__folders" aria-label="全部素材目录">
                 <div class="aw-material-drive__head">
                   <strong>全部素材目录</strong>
                   <span>{{ materialQuery ? '搜索结果' : '目录浏览' }}</span>
@@ -3826,11 +3839,11 @@ onBeforeUnmount(() => {
               <section class="aw-material-drive__files" aria-label="当前素材目录">
                 <div class="aw-material-drive__summary">
                   <div>
-                    <strong>{{ selectedMaterialFolderNode?.name || '全部素材' }}</strong>
-                    <span>{{ visibleMaterialFolders.length }} 个子目录 · {{ visibleMaterialFiles.length }} / {{ materialFileTotal }} 个素材</span>
+                    <strong>{{ clientPublishedView ? '已上架素材' : selectedMaterialFolderNode?.name || '全部素材' }}</strong>
+                    <span>{{ clientPublishedView ? `${visibleMaterialFiles.length} 个可用素材` : `${visibleMaterialFolders.length} 个子目录 · ${visibleMaterialFiles.length} / ${materialFileTotal} 个素材` }}</span>
                   </div>
                   <button
-                    v-if="selectedMaterialFolderPath"
+                    v-if="!clientPublishedView && selectedMaterialFolderPath"
                     class="aw-grid-button"
                     type="button"
                     @click="openMaterialFolderParent"

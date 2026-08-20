@@ -167,4 +167,51 @@ describe('DrivePage operational browsing', () => {
       selection_scope: 'selected',
     })
   })
+
+  it('shows enabled client materials instead of task-scoped resource groups for non-publishers', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 22, display_name: 'client-user' },
+      is_admin: false,
+      capabilities: ['asset.workbench.material.download'],
+    } as never)
+    listClientMaterials.mockResolvedValue([{
+      id: 501,
+      asset_id: 0,
+      source_type: 'task_resource_group',
+      source_ref: 'group:8',
+      resource_id: 'group:8',
+      resource_group_id: 8,
+      finalized_revision_id: 70,
+      cover_revision_item_id: 701,
+      title: '管理员已上架定制素材',
+      filename_snapshot: 'cover.png',
+      mime_type_snapshot: 'image/png',
+      file_size_snapshot: 1024,
+      business_lane: 'customization',
+      enabled: true,
+      sort_order: 1,
+      published_by: 1,
+      published_at: '2026-08-20T00:00:00Z',
+      created_at: '2026-08-20T00:00:00Z',
+      updated_at: '2026-08-20T00:00:00Z',
+    }])
+
+    const wrapper = shallowMount(DrivePage, {
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    expect(listClientMaterials).toHaveBeenCalledWith(false, expect.any(AbortSignal))
+    expect(wrapper.findComponent({ name: 'ResourceLibraryPanel' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('已上架素材')
+    const materialCard = wrapper.findComponent({ name: 'ResourceGroupMaterialCard' })
+    expect(materialCard.exists()).toBe(true)
+    expect(materialCard.props('asset')).toMatchObject({ material_id: 501, resource_group_id: 8, product_name: '管理员已上架定制素材' })
+    expect(wrapper.findAll('button').some((button) => button.text() === '资源组')).toBe(false)
+  })
 })

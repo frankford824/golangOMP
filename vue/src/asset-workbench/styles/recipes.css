@@ -7116,6 +7116,17 @@ body.aw-submission-dialog-locked {
   justify-self: start;
 }
 
+.aw-material-toolbar__client-label {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 2px;
+}
+
+.aw-material-toolbar__client-label span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
 .aw-material-toolbar--canonical {
   display: flex;
   align-items: center;
@@ -7381,6 +7392,10 @@ body.aw-submission-dialog-locked {
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   gap: var(--aw-space-4);
   min-height: 0;
+}
+
+.aw-material-drive--client {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .aw-drive__shell.has-drawer .aw-material-drive {
