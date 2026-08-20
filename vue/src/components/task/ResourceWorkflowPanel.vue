@@ -139,8 +139,8 @@
                 </div>
                 <template v-else>
                   <label class="drop-zone final-drop">
-                    <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length && entry.row.mode === 'set' ? `继续添加成品（当前 ${entry.row.finals.length} 张）` : entry.row.finals.length ? '替换单图成品' : '上传最终成品图或成品 ZIP' }}</span>
-                    <input type="file" accept="image/*,.zip,application/zip" :multiple="entry.row.mode === 'set'" :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
+                    <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length && entry.row.mode === 'set' ? `继续添加成品（当前 ${entry.row.finals.length} 个文件）` : entry.row.finals.length ? '替换单项成品' : '上传最终成品图、PDF 或成品 ZIP' }}</span>
+                    <input type="file" :accept="FINAL_UPLOAD_ACCEPT_ATTRIBUTE" :multiple="entry.row.mode === 'set'" :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
                   </label>
                   <button v-if="entry.row.finals.length" type="button" class="clear-finals" :disabled="Boolean(entry.row.uploading)" @click="clearFinals(entry.row)">清空本组成品</button>
                   <ol v-if="entry.row.finals.length" class="final-order">
@@ -246,7 +246,7 @@ import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode, type ResourceReference } from '@/services/api/resourceGroupsApi'
 import { assetsApi, type ReferenceFileRef } from '@/services/api/assetsApi'
 import { tasksApi } from '@/services/api/tasksApi'
-import { buildSourceBundleFile, expandFinalUploadFiles } from '@/domain/resource-workflow-files'
+import { buildSourceBundleFile, expandFinalUploadFiles, FINAL_UPLOAD_ACCEPT_ATTRIBUTE } from '@/domain/resource-workflow-files'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
 type UploadedFile = { id: number; assetId?: number; name: string; inherited?: boolean }
@@ -459,7 +459,7 @@ async function downloadSource(file: UploadedFile) {
     downloadingSourceID.value = null
   }
 }
-function finalRequirement(row: EditorRow) { return row.mode === 'set' ? '套装至少 2 张，可拖拽排序' : '单图恰好 1 张' }
+function finalRequirement(row: EditorRow) { return row.mode === 'set' ? '套装至少 2 个成品文件，可拖拽排序' : '单项恰好 1 个成品文件' }
 function assetVersionId(uploaded: Awaited<ReturnType<typeof uploadTaskFileViaAssetSession>>): number {
   const raw = uploaded.version?.id || uploaded.version?.version_id
   const id = Number(raw)

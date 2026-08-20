@@ -332,6 +332,29 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
+  it('accepts a PDF as the single finalized delivery', async () => {
+    mocks.upload.mockResolvedValueOnce({ version: { id: 211 } })
+    const wrapper = mountPanel(['task.audit.approve'])
+    const fileInput = wrapper.get('.final-drop input[type="file"]')
+    expect(fileInput.attributes('accept')).toContain('application/pdf')
+    expect(wrapper.get('.final-drop').text()).toContain('PDF')
+
+    const pdf = new File(['%PDF-1.7'], '审核成品.pdf', { type: 'application/pdf' })
+    Object.defineProperty(fileInput.element, 'files', { configurable: true, value: [pdf] })
+    await fileInput.trigger('change')
+    await flushPromises()
+
+    expect(mocks.upload).toHaveBeenCalledWith(
+      '41',
+      pdf,
+      expect.objectContaining({ asset_kind: 'delivery', target_sku_code: 'SKU-001', remark: '审核成品.pdf' }),
+      undefined,
+    )
+    expect(wrapper.text()).toContain('审核成品.pdf')
+    expect(wrapper.text()).not.toContain('成品只支持图片')
+    wrapper.unmount()
+  })
+
   it('allows the auditor to change one mode and apply the first mode to every SKU', async () => {
     const auditBundle = bundleWithGroups(3)
     if (auditBundle.groups[0].working_revision) auditBundle.groups[0].working_revision.mode = 'set'
@@ -497,7 +520,7 @@ describe('ResourceWorkflowPanel action contract', () => {
     await vi.waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(2))
 
     expect(mocks.upload.mock.calls.map((call) => (call[1] as File).name)).toEqual(['01-正面.jpg', '02-背面.png'])
-    expect(wrapper.text()).toContain('当前 2 张')
+    expect(wrapper.text()).toContain('当前 2 个文件')
     await button(wrapper as ReturnType<typeof mountPanel>, '确认定稿并结单').trigger('click')
     await button(wrapper as ReturnType<typeof mountPanel>, '确认通过并结单').trigger('click')
     await flushPromises()

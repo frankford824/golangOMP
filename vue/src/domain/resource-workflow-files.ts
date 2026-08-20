@@ -3,6 +3,9 @@ import JSZip from 'jszip'
 const SOURCE_BUNDLE_MAX_BYTES = 299 * 1024 * 1024
 const FIXED_ZIP_DATE = new Date('1980-01-01T00:00:00.000Z')
 const IMAGE_EXTENSIONS = new Set(['avif', 'bmp', 'gif', 'heic', 'heif', 'jpeg', 'jpg', 'png', 'svg', 'tif', 'tiff', 'webp'])
+const FINAL_DOCUMENT_EXTENSIONS = new Set(['pdf'])
+
+export const FINAL_UPLOAD_ACCEPT_ATTRIBUTE = 'image/*,.pdf,application/pdf,.zip,application/zip'
 
 function safeName(name: string, fallback: string) {
   const normalized = name
@@ -27,6 +30,11 @@ function isArchiveMetadata(path: string) {
 
 function isImageEntry(path: string) {
   return IMAGE_EXTENSIONS.has(fileExtension(path))
+}
+
+function isFinalEntry(path: string) {
+  const extension = fileExtension(path)
+  return IMAGE_EXTENSIONS.has(extension) || FINAL_DOCUMENT_EXTENSIONS.has(extension)
 }
 
 function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
@@ -100,10 +108,11 @@ export async function expandFinalUploadFiles(files: File[]): Promise<File[]> {
 
   for (const file of files) {
     if (fileExtension(file.name) !== 'zip') {
-      if (!file.type.startsWith('image/') && !isImageEntry(file.name)) {
-        throw new Error(`成品只支持图片或包含图片的 ZIP：${file.name}`)
+      const isPDF = file.type === 'application/pdf' || fileExtension(file.name) === 'pdf'
+      if (!file.type.startsWith('image/') && !isImageEntry(file.name) && !isPDF) {
+        throw new Error(`成品只支持图片、PDF 或包含图片/PDF 的 ZIP：${file.name}`)
       }
-      const name = uniqueFileName(safeName(file.name, 'final-image'), usedNames)
+      const name = uniqueFileName(safeName(file.name, 'final-file'), usedNames)
       expanded.push(name === file.name ? file : new File([file], name, { type: file.type, lastModified: file.lastModified }))
       continue
     }
@@ -115,24 +124,25 @@ export async function expandFinalUploadFiles(files: File[]): Promise<File[]> {
       throw new Error(`无法读取成品压缩包，请确认 ZIP 未加密且文件完整：${file.name}`)
     }
     const entries = Object.values(zip.files)
-      .filter((entry) => !entry.dir && !isArchiveMetadata(entry.name) && isImageEntry(entry.name))
+      .filter((entry) => !entry.dir && !isArchiveMetadata(entry.name) && isFinalEntry(entry.name))
       .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN', { numeric: true }))
     if (!entries.length) {
-      throw new Error(`成品压缩包内没有支持的图片：${file.name}`)
+      throw new Error(`成品压缩包内没有支持的图片或 PDF：${file.name}`)
     }
     for (const entry of entries) {
-      const baseName = safeName(entry.name.replace(/\\/g, '/').split('/').pop() || '', 'final-image')
+      const baseName = safeName(entry.name.replace(/\\/g, '/').split('/').pop() || '', 'final-file')
       const name = uniqueFileName(baseName, usedNames)
       const bytes = await entry.async('uint8array')
       const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-      expanded.push(new File([buffer], name, { type: imageMimeType(name), lastModified: FIXED_ZIP_DATE.getTime() }))
+      expanded.push(new File([buffer], name, { type: finalMimeType(name), lastModified: FIXED_ZIP_DATE.getTime() }))
     }
   }
   return expanded
 }
 
-function imageMimeType(name: string) {
+function finalMimeType(name: string) {
   const extension = fileExtension(name)
+  if (extension === 'pdf') return 'application/pdf'
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
   if (extension === 'svg') return 'image/svg+xml'
   if (extension === 'tif' || extension === 'tiff') return 'image/tiff'

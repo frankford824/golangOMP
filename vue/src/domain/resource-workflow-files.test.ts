@@ -40,10 +40,25 @@ describe('resource workflow file preparation', () => {
     expect(files.map((file) => file.type)).toEqual(['image/jpeg', 'image/png'])
   })
 
+  it('accepts PDF final files directly and from a mixed final ZIP', async () => {
+    const direct = new File(['%PDF-direct'], '单图成品.pdf', { type: 'application/pdf' })
+    expect(await expandFinalUploadFiles([direct])).toEqual([direct])
+
+    const zip = new JSZip()
+    zip.file('01-正面.png', 'front')
+    zip.file('02-印刷稿.pdf', '%PDF-zip')
+    zip.file('说明.txt', 'ignored')
+    const archive = new File([await zip.generateAsync({ type: 'blob' })], '混合成品.zip', { type: 'application/zip' })
+
+    const files = await expandFinalUploadFiles([archive])
+    expect(files.map((file) => file.name)).toEqual(['01-正面.png', '02-印刷稿.pdf'])
+    expect(files.map((file) => file.type)).toEqual(['image/png', 'application/pdf'])
+  })
+
   it('rejects an archive without final images', async () => {
     const zip = new JSZip()
     zip.file('README.txt', 'empty')
     const archive = new File([await zip.generateAsync({ type: 'blob' })], 'empty.zip')
-    await expect(expandFinalUploadFiles([archive])).rejects.toThrow('没有支持的图片')
+    await expect(expandFinalUploadFiles([archive])).rejects.toThrow('没有支持的图片或 PDF')
   })
 })
