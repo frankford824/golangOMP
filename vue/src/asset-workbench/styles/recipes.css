@@ -6649,6 +6649,10 @@ body.aw-submission-dialog-locked {
   white-space: nowrap;
 }
 
+.aw-upload-queue-clear {
+  margin-left: auto;
+}
+
 .aw-upload-ledger__format {
   display: grid;
   gap: 4px;

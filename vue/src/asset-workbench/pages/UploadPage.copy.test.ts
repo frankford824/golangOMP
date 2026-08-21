@@ -54,6 +54,11 @@ describe('UploadPage simple piecework copy', () => {
     await flushPromises()
 
     expect(wrapper.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 1个作品=计件数量')
+    const clearButton = wrapper.get('button[aria-label="清空待上传队列"]')
+    expect(clearButton.attributes('title')).toBe('仅移除待上传和上传失败的项目')
+    await clearButton.trigger('click')
+    expect(uploadCenter.uploadPageItems).toHaveLength(0)
+    expect(wrapper.text()).toContain('等待文件')
   })
 
   it('uses the same annotated copy for admin uploads', async () => {
@@ -75,5 +80,6 @@ describe('UploadPage simple piecework copy', () => {
     expect(dropzone.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 1个作品=计件数量')
     expect(dropzone.text()).not.toContain('上传并生成记录')
     expect(dropzone.text()).not.toContain('先选择文件，或把文件拖到上传区')
+    expect(wrapper.get('button[aria-label="清空待上传队列"]').text()).toBe('清空队列')
   })
 })

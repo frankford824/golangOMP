@@ -115,6 +115,8 @@ const canSimpleSubmit = computed(() => {
   return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading' && item.status !== 'submitting') && (queuedItems.value.length > 0 || uploadedItems.value.length > 0)
 })
 const canRetryFailedUploads = computed(() => !uploading.value && !submitting.value && canUseUploadDirectory.value && failedItems.value.length > 0)
+const clearableUploadItems = computed(() => queue.value.filter((item) => item.status === 'queued' || item.status === 'failed'))
+const canClearUploadQueue = computed(() => !uploading.value && !submitting.value && clearableUploadItems.value.length > 0)
 const totalPieceworkPages = computed(() =>
   uploadPieceworkGroups.value.reduce((sum, group) => sum + (group.isFolder ? 1 : group.items[0]?.pageCount || 1), 0),
 )
@@ -563,6 +565,18 @@ function removeItem(id: string) {
   expandedItemIds.value = next
 }
 
+function clearUploadQueue() {
+  if (!canClearUploadQueue.value) return
+  const ids = clearableUploadItems.value.map((item) => item.id)
+  uploadCenter.removeItems(ids)
+  const removed = new Set(ids)
+  expandedItemIds.value = new Set([...expandedItemIds.value].filter((id) => !removed.has(id)))
+  error.value = ''
+  notice.value = ''
+  lastUploadResult.value = null
+  lastSubmissionResult.value = null
+}
+
 async function handleUploadSpreadsheetAction(payload: WorkbenchSpreadsheetActionPayload) {
   if (payload.action.key === 'open_file_picker') {
     openFilePicker()
@@ -804,6 +818,17 @@ onActivated(() => {
         <span v-if="!isSimpleUser">{{ formatInt(totalPieceworkPages) }} 页</span>
         <button v-if="isSimpleUser" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">{{ simpleSubmitLabel }}</button>
         <button v-else type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
+        <button
+          v-if="queue.length"
+          class="aw-grid-button aw-upload-queue-clear"
+          type="button"
+          :disabled="!canClearUploadQueue"
+          aria-label="清空待上传队列"
+          title="仅移除待上传和上传失败的项目"
+          @click="clearUploadQueue"
+        >
+          清空队列
+        </button>
       </div>
       <div v-if="queue.length && isSimpleUser" class="aw-simple-upload-list">
         <article v-for="item in queue" :key="item.id" class="aw-simple-upload-item">
