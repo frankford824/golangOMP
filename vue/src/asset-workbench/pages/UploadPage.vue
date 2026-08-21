@@ -119,9 +119,9 @@ const totalPieceworkPages = computed(() =>
   uploadPieceworkGroups.value.reduce((sum, group) => sum + (group.isFolder ? 1 : group.items[0]?.pageCount || 1), 0),
 )
 const uploadUnitLabel = computed(() => pieceworkFileLabel(uploadPieceworkGroups.value.length, queue.value.length))
-const simplePieceworkConfirmation = computed(() => {
+const simplePieceworkHint = computed(() => {
   const count = uploadPieceworkGroups.value.length
-  return `${formatInt(count)} 个作品 = 计件数量`
+  return `仔细核对作品数量后，点击上传 ${formatInt(count)}个作品=计件数量`
 })
 const uploadedUnitLabel = computed(() => pieceworkFileLabel(uploadedPieceworkGroups.value.length, uploadedItems.value.length))
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
@@ -788,11 +788,7 @@ onActivated(() => {
           {{ adminUploadLabel }}
         </button>
       </div>
-      <p v-if="isSimpleUser" class="aw-dropzone__piecework-confirmation">
-        <span>仔细核对作品数量后，点击提交上传。</span>
-        <strong>{{ simplePieceworkConfirmation }}</strong>
-      </p>
-      <small v-if="!isSimpleUser" class="aw-dropzone__hint">{{ adminUploadHint }}</small>
+      <small class="aw-dropzone__hint">{{ isSimpleUser ? simplePieceworkHint : adminUploadHint }}</small>
     </div>
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>

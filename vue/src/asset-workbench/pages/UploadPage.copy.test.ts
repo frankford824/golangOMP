@@ -42,9 +42,8 @@ describe('UploadPage simple piecework copy', () => {
     const dropzoneButtons = wrapper.get('.aw-dropzone').findAll('button').map((button) => button.text().trim())
     expect(dropzoneButtons).toEqual(['文件', '文件夹', '提交上传'])
     expect(wrapper.get('.aw-dropzone > span').text()).toBe('点击提交上传会自动完成上传和提交。允许：全部格式')
-    expect(wrapper.get('.aw-dropzone__piecework-confirmation').text()).toContain('仔细核对作品数量后，点击提交上传。')
-    expect(wrapper.get('.aw-dropzone__piecework-confirmation').text()).toContain('2 个作品 = 计件数量')
-    expect(wrapper.find('.aw-dropzone__hint').exists()).toBe(false)
+    expect(wrapper.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 2个作品=计件数量')
+    expect(wrapper.find('.aw-dropzone__piecework-confirmation').exists()).toBe(false)
     expect(wrapper.get('.aw-dropzone').text()).not.toContain('选择文件')
 
     uploadCenter.clearIdle()
@@ -54,6 +53,6 @@ describe('UploadPage simple piecework copy', () => {
     ], { source: 'upload-page' })
     await flushPromises()
 
-    expect(wrapper.get('.aw-dropzone__piecework-confirmation').text()).toContain('1 个作品 = 计件数量')
+    expect(wrapper.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 1个作品=计件数量')
   })
 })
