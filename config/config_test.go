@@ -38,6 +38,18 @@ func TestLoadRejectsIncompleteAIChatAndVectorConfiguration(t *testing.T) {
 			t.Fatalf("Load() error=%v", err)
 		}
 	})
+	t.Run("chat provider protocol must be supported", func(t *testing.T) {
+		setBase(t)
+		t.Setenv("AI_CHAT_ENABLED", "true")
+		t.Setenv("AI_AGENT_ENABLED", "true")
+		t.Setenv("AI_AGENT_PROVIDER", "unsupported")
+		t.Setenv("AI_AGENT_BASE_URL", "https://provider.test/v1")
+		t.Setenv("AI_AGENT_API_KEY", "secret")
+		t.Setenv("AI_AGENT_MODEL", "model")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AI_AGENT_PROVIDER must be") {
+			t.Fatalf("Load() error=%v", err)
+		}
+	})
 	t.Run("vector worker bounds required", func(t *testing.T) {
 		setBase(t)
 		t.Setenv("AI_CHAT_ENABLED", "false")

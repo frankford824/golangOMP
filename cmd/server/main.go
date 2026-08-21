@@ -442,13 +442,19 @@ func main() {
 		task_aggregator.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
 		task_aggregator.WithReferenceFileRefEnricher(service.NewReferenceFileRefsEnricher(ossDirectSvc, nil)),
 		task_aggregator.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
-	aiChatClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
+	aiChatProviderConfig := aiagentsvc.Config{
 		Enabled: cfg.AI.Enabled && cfg.AIChat.Enabled, Provider: cfg.AI.Provider,
 		BaseURL: cfg.AI.BaseURL, APIKey: cfg.AI.APIKey, Model: cfg.AI.Model,
 		Timeout: cfg.AIChat.ProviderTimeout, MaxTokens: cfg.AI.MaxTokens,
 		RateLimitWindow: cfg.AI.RateLimitWindow, RateLimitMax: cfg.AI.RateLimitMax,
 		RateLimiter: aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
-	}, logger.Named("ai_chat_provider"))
+	}
+	var aiChatClient aiagentsvc.ChatProvider
+	if strings.EqualFold(strings.TrimSpace(cfg.AI.Provider), "openai_compatible") {
+		aiChatClient = aiagentsvc.NewOpenAICompatibleClient(aiChatProviderConfig, logger.Named("ai_chat_provider"))
+	} else {
+		aiChatClient = aiagentsvc.NewAnthropicCompatibleClient(aiChatProviderConfig, logger.Named("ai_chat_provider"))
+	}
 	embeddingClient := retrievalsvc.NewOpenAICompatibleEmbeddingClient(retrievalsvc.EmbeddingConfig{
 		Enabled: cfg.Embedding.Enabled, BaseURL: cfg.Embedding.BaseURL, APIKey: cfg.Embedding.APIKey,
 		Model: cfg.Embedding.Model, Dimensions: cfg.Embedding.Dimensions, Timeout: cfg.Embedding.Timeout,

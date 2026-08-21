@@ -176,12 +176,18 @@ func (o *ToolOrchestrator) execute(ctx context.Context, actor domain.RequestActo
 }
 
 func analysisDateRange(call AnalysisToolCall, now time.Time) (time.Time, time.Time) {
-	if call.From != "" && call.To != "" {
-		from, _ := time.Parse("2006-01-02", call.From)
-		to, _ := time.Parse("2006-01-02", call.To)
-		return from.UTC(), to.AddDate(0, 0, 1).UTC()
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		location = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
-	return now.AddDate(0, 0, -30), now.AddDate(0, 0, 1)
+	if call.From != "" && call.To != "" {
+		from, _ := time.ParseInLocation("2006-01-02", call.From, location)
+		to, _ := time.ParseInLocation("2006-01-02", call.To, location)
+		return from, to.AddDate(0, 0, 1)
+	}
+	localNow := now.In(location)
+	today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	return today.AddDate(0, 0, -29), today.AddDate(0, 0, 1)
 }
 
 func (o *ToolOrchestrator) plan(ctx context.Context, question string) (AnalysisPlan, error) {
@@ -192,6 +198,7 @@ func (o *ToolOrchestrator) plan(ctx context.Context, question string) (AnalysisP
 		Scene: "data_center_tool_plan",
 		System: `你是只读数据分析规划器。仅返回 JSON，不要解释。格式：{"tools":[{"name":"global_search","query":"..."}]}。
 最多 3 个工具。允许：global_search、task_detail、resource_group_detail、task_kpi、business_trends、experience_summary。
+任务量、设计图量、人员产能、每日趋势和完成情况必须使用 task_kpi，并尽量提供北京时间 from/to（YYYY-MM-DD）。
 禁止 SQL、写入、上传、发布或改变状态。`,
 		Messages:  []aiagent.ChatMessage{{Role: "user", Content: truncateRunes(question, 4000)}},
 		MaxTokens: 500, Temperature: 0,

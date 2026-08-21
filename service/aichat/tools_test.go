@@ -93,6 +93,16 @@ func TestValidateAnalysisPlanRejectsUnknownTooManyAndInvalidDates(t *testing.T) 
 	}
 }
 
+func TestAnalysisDateRangeUsesBeijingBusinessDays(t *testing.T) {
+	from, to := analysisDateRange(AnalysisToolCall{From: "2026-08-15", To: "2026-08-21"}, time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC))
+	if got := from.Format(time.RFC3339); got != "2026-08-15T00:00:00+08:00" {
+		t.Fatalf("from = %s", got)
+	}
+	if got := to.Format(time.RFC3339); got != "2026-08-22T00:00:00+08:00" {
+		t.Fatalf("to = %s", got)
+	}
+}
+
 func TestToolOrchestratorUsesScopedMySQLAnalysisEvidence(t *testing.T) {
 	provider := toolProviderStub{ready: true, plan: `{"tools":[{"name":"task_kpi","from":"2026-07-01","to":"2026-07-10"}]}`}
 	retriever := &evidenceRetrieverStub{}

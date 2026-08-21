@@ -2,6 +2,7 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql/driver"
 	"fmt"
 	"strings"
 	"testing"
@@ -48,12 +49,26 @@ func TestAIAnalysisEvidenceQueriesApplySameStableScope(t *testing.T) {
 		t.Fatalf("group=%+v err=%v", group, err)
 	}
 
-	mock.ExpectQuery("FROM task_event_logs tel|t.creator_id = ?|t.owner_department_id IN (?)|t.owner_team_id IN (?)").
-		WithArgs(from, to, int64(9), int64(9), int64(9), int64(9), int64(3), int64(7), 20).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "task_no", "sku", "product", "event_type", "operator", "created_at", "version"}).
-			AddRow("event-1", 11, "T-11", "SKU-11", "产品", "task.closed", "审核员", from, "2"))
+	kpiArgs := []driver.Value{
+		from, to, int64(9), int64(9), int64(9), int64(9), int64(3), int64(7),
+		from, to, int64(9), int64(9), int64(9), int64(9), int64(3), int64(7),
+	}
+	mock.ExpectQuery("WITH design_events AS|task.design_submitted|ABS(TIMESTAMPDIFF|all_tasks|t.creator_id = ?|t.owner_department_id IN (?)|t.owner_team_id IN (?)").
+		WithArgs(kpiArgs...).
+		WillReturnRows(sqlmock.NewRows([]string{"unique_tasks", "regular_tasks", "retouch_tasks", "submissions", "design_units", "exact_groups", "fallback_singles", "fallback_sets", "average_set", "minimum_images", "estimated_images", "linked_events"}).
+			AddRow(12, 10, 2, 11, 21, 8, 10, 1, 3.5, 30, 32, 11))
+	mock.ExpectQuery("WITH design_events AS|regular_daily|retouch_daily|t.creator_id = ?|t.owner_department_id IN (?)|t.owner_team_id IN (?)").
+		WithArgs(kpiArgs...).
+		WillReturnRows(sqlmock.NewRows([]string{"day", "submissions", "regular_tasks", "retouch_tasks", "tasks", "units", "minimum_images", "estimated_images"}).
+			AddRow("2026-07-01", 4, 4, 1, 5, 9, 12, 13).
+			AddRow("2026-07-02", 7, 6, 1, 7, 12, 18, 19))
+	personArgs := append(append([]driver.Value{}, kpiArgs...), driver.Value(19))
+	mock.ExpectQuery("WITH design_events AS|regular_person|retouch_person|t.creator_id = ?|t.owner_department_id IN (?)|t.owner_team_id IN (?)").
+		WithArgs(personArgs...).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "name", "department", "team", "regular_tasks", "retouch_tasks", "tasks", "submissions", "units", "minimum_images", "estimated_images"}).
+			AddRow(5, "设计甲", "视觉研创部", "一组", 8, 1, 9, 8, 15, 20, 21))
 	kpi, err := repository.ListKPIEvidence(context.Background(), access, from, to, 20)
-	if err != nil || len(kpi) != 1 || kpi[0].EntityType != "task_kpi" {
+	if err != nil || len(kpi) != 2 || kpi[0].EntityType != "task_kpi" || !strings.Contains(kpi[0].Excerpt, "约图32") || !strings.Contains(kpi[1].Excerpt, "设计甲") {
 		t.Fatalf("kpi=%+v err=%v", kpi, err)
 	}
 
@@ -92,10 +107,16 @@ func TestAIAnalysisEvidenceFailsClosedForEmptyScope(t *testing.T) {
 	defer db.Close()
 	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	to := from.AddDate(0, 0, 1)
-	mock.ExpectQuery("fail-closed").WithArgs(from, to, 10).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "task_no", "sku", "product", "event_type", "operator", "created_at", "version"}))
+	args := []driver.Value{from, to, from, to}
+	mock.ExpectQuery("fail-closed").WithArgs(args...).
+		WillReturnRows(sqlmock.NewRows([]string{"unique_tasks", "regular_tasks", "retouch_tasks", "submissions", "design_units", "exact_groups", "fallback_singles", "fallback_sets", "average_set", "minimum_images", "estimated_images", "linked_events"}).
+			AddRow(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0))
+	mock.ExpectQuery("fail-closed").WithArgs(args...).
+		WillReturnRows(sqlmock.NewRows([]string{"day", "submissions", "regular_tasks", "retouch_tasks", "tasks", "units", "minimum_images", "estimated_images"}))
+	mock.ExpectQuery("fail-closed").WithArgs(from, to, from, to, 9).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "name", "department", "team", "regular_tasks", "retouch_tasks", "tasks", "submissions", "units", "minimum_images", "estimated_images"}))
 	items, err := NewAIAnalysisRepo(New(db)).ListKPIEvidence(context.Background(), domain.ResourceGroupAccessFilter{ActorID: 9}, from, to, 10)
-	if err != nil || len(items) != 0 {
+	if err != nil || len(items) != 1 || !strings.Contains(items[0].Excerpt, "不重复任务0") {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
 }

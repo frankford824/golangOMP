@@ -581,6 +581,10 @@ func Load() (*Config, error) {
 		if len(missing) > 0 {
 			return nil, fmt.Errorf("AI_CHAT_ENABLED=true requires %s", strings.Join(missing, ", "))
 		}
+		provider := strings.ToLower(strings.TrimSpace(cfg.AI.Provider))
+		if provider != "anthropic_compatible" && provider != "openai_compatible" {
+			return nil, fmt.Errorf("AI_AGENT_PROVIDER must be anthropic_compatible or openai_compatible when AI chat is enabled")
+		}
 		if cfg.AIChat.MaxInputChars <= 0 || cfg.AIChat.MaxInputChars > 4000 || cfg.AIChat.MaxRecentTurns <= 0 || cfg.AIChat.MaxRecentTurns > 8 ||
 			cfg.AIChat.MaxContextChars <= 0 || cfg.AIChat.MaxContextChars > 12000 || cfg.AIChat.MaxEvidence <= 0 || cfg.AIChat.MaxEvidence > 20 ||
 			cfg.AIChat.MaxEvidenceChars <= 0 || cfg.AIChat.MaxEvidenceChars > 24000 || cfg.AIChat.MaxConcurrentGlobal <= 0 || cfg.AIChat.MaxConcurrentUser <= 0 ||
