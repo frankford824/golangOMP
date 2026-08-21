@@ -15339,6 +15339,62 @@ paths:
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/error-imports:
+    get:
+      summary: List quality error import batches
+      description: Lists each imported quality-error Excel batch for a settlement month with its own row counts, error count, and currently calculated deduction amount.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: business_month
+          required: true
+          schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Quality error import batches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchErrorImportBatchRow
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        import_no: { type: string }
+                        business_month: { type: string }
+                        uploaded_by: { type: integer }
+                        original_filename: { type: string }
+                        status: { type: string }
+                        total_rows: { type: integer }
+                        matched_rows: { type: integer, description: Rows that matched a payee and enabled difficulty class and will participate in quality deduction calculation. }
+                        unmatched_rows: { type: integer }
+                        ambiguous_rows: { type: integer }
+                        error_message: { type: string }
+                        error_count: { type: integer, description: Total error quantity across records in this import batch. }
+                        deduction_amount: { type: number, description: Current calculated deduction amount for matched records in this import batch. }
+                        created_at: { type: string, format: date-time }
+                        updated_at: { type: string, format: date-time }
+                  pagination:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      page: { type: integer }
+                      page_size: { type: integer }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
     post:
       summary: Import asset workbench quality error deductions
       description: Imports quality error deduction records. Deduction amount is not provided by the client; settlement preview and batch generation calculate it from the matched payee profile, difficulty class, error count, and active deduction rules. `order_no` is optional trace data for uploaded file naming and does not drive deduction matching.
@@ -15383,20 +15439,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  data: &AssetWorkbenchErrorImportBatchRow
-                    type: object
-                    properties:
-                      id: { type: integer }
-                      import_no: { type: string }
-                      business_month: { type: string }
-                      uploaded_by: { type: integer }
-                      original_filename: { type: string }
-                      status: { type: string }
-                      total_rows: { type: integer }
-                      matched_rows: { type: integer, description: Rows that matched a payee and enabled difficulty class and will participate in quality deduction calculation. }
-                      unmatched_rows: { type: integer }
-                      ambiguous_rows: { type: integer }
-                      error_message: { type: string }
+                  data: *AssetWorkbenchErrorImportBatchRow
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
@@ -15435,6 +15478,90 @@ paths:
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/error-imports/{import_id}:
+    get:
+      summary: Get one quality error import batch with row details
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: import_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Quality error import detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - *AssetWorkbenchErrorImportBatchRow
+                      - type: object
+                        properties:
+                          records:
+                            type: array
+                            items: &AssetWorkbenchErrorImportRecordRow
+                              type: object
+                              properties:
+                                id: { type: integer }
+                                import_batch_id: { type: integer }
+                                business_month: { type: string }
+                                payee_user_id: { type: integer, nullable: true }
+                                payee_name: { type: string }
+                                order_no: { type: string }
+                                difficulty_class: { type: string }
+                                occurred_date: { type: string, format: date, nullable: true }
+                                error_count: { type: integer }
+                                deduction_amount: { type: number }
+                                raw_payload_json: { type: object, additionalProperties: true }
+                                match_status: { type: string }
+                                submission_item_id: { type: integer, nullable: true }
+                                created_at: { type: string, format: date-time }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Import batch not found }
+    delete:
+      summary: Delete one quality error import batch and all its rows
+      description: Deletes the selected import batch so its deductions no longer contribute to settlement preview. Rejected while the month has a generated or confirmed settlement batch.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: import_id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Deleted quality error import batch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchErrorImportBatchRow
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Import batch not found }
+        '409': { description: Active settlement batch blocks deletion }
   /v1/asset-workbench/files/{file_id}:
     patch:
       summary: Update uploaded work file metadata

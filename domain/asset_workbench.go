@@ -148,6 +148,7 @@ const (
 	AssetWorkbenchEventSubmissionCreated           = "submission.created"
 	AssetWorkbenchEventSubmissionVoided            = "submission.voided"
 	AssetWorkbenchEventErrorImportCreated          = "error_import.created"
+	AssetWorkbenchEventErrorImportDeleted          = "error_import.deleted"
 	AssetWorkbenchEventSettlementGenerated         = "settlement.generated"
 	AssetWorkbenchEventSettlementConfirmed         = "settlement.confirmed"
 	AssetWorkbenchEventSettlementCancelled         = "settlement.cancelled"

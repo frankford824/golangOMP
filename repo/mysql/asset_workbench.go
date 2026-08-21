@@ -3037,6 +3037,39 @@ func (r *assetWorkbenchRepo) CreateErrorRecord(ctx context.Context, tx repo.Tx, 
 	return scanAssetWorkbenchErrorRecord(row)
 }
 
+func (r *assetWorkbenchRepo) ListErrorImportBatches(ctx context.Context, filter repo.AssetWorkbenchErrorImportFilter) ([]*domain.AssetWorkbenchErrorImportBatch, int64, error) {
+	where := " WHERE 1 = 1"
+	args := []interface{}{}
+	if businessMonth := strings.TrimSpace(filter.BusinessMonth); businessMonth != "" {
+		where += " AND business_month = ?"
+		args = append(args, businessMonth)
+	}
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_error_import_batches`+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench error import batches: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	listArgs := append(append([]interface{}{}, args...), pageSize, (page-1)*pageSize)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchErrorImportBatchSelect()+where+` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, listArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list asset workbench error import batches: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchErrorImportBatch{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchErrorImportBatch(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) GetErrorImportBatch(ctx context.Context, batchID int64) (*domain.AssetWorkbenchErrorImportBatch, error) {
+	return scanAssetWorkbenchErrorImportBatch(r.db.db.QueryRowContext(ctx, assetWorkbenchErrorImportBatchSelect()+` WHERE id = ?`, batchID))
+}
+
 func (r *assetWorkbenchRepo) ListErrorRecordsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchErrorRecord, error) {
 	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchErrorRecordSelect()+`
 		WHERE business_month = ?
@@ -3054,6 +3087,41 @@ func (r *assetWorkbenchRepo) ListErrorRecordsByMonth(ctx context.Context, busine
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) ListErrorRecordsByBatch(ctx context.Context, batchID int64) ([]*domain.AssetWorkbenchErrorRecord, error) {
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchErrorRecordSelect()+` WHERE import_batch_id = ? ORDER BY id ASC`, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench error records by batch: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchErrorRecord{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchErrorRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) DeleteErrorImportBatch(ctx context.Context, tx repo.Tx, batchID int64) error {
+	if _, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM asset_workbench_error_records WHERE import_batch_id = ?`, batchID); err != nil {
+		return fmt.Errorf("delete asset workbench error import records: %w", err)
+	}
+	result, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM asset_workbench_error_import_batches WHERE id = ?`, batchID)
+	if err != nil {
+		return fmt.Errorf("delete asset workbench error import batch: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("asset workbench error import batch affected rows: %w", err)
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (r *assetWorkbenchRepo) FindActiveDeductionRule(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchDeductionRule, error) {

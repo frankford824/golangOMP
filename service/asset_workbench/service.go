@@ -4546,6 +4546,175 @@ func (s *Service) ImportErrorRecordsExcel(ctx context.Context, actor domain.Requ
 	})
 }
 
+func (s *Service) ListErrorImportBatches(ctx context.Context, actor domain.RequestActor, businessMonth string, page, pageSize int) ([]*domain.AssetWorkbenchErrorImportBatch, int64, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, 0, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can list quality error imports.", nil)
+	}
+	businessMonth = strings.TrimSpace(businessMonth)
+	if businessMonth == "" {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month is required.", nil)
+	}
+	page, pageSize = normalizeDrivePage(page, pageSize)
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	items, total, err := s.repo.ListErrorImportBatches(ctx, repo.AssetWorkbenchErrorImportFilter{BusinessMonth: businessMonth, Page: page, PageSize: pageSize})
+	if err != nil {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list quality error imports.", err.Error())
+	}
+	records, err := s.repo.ListErrorRecordsByMonth(ctx, businessMonth)
+	if err != nil {
+		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list quality error import records.", err.Error())
+	}
+	if appErr := s.enrichErrorImportBatches(ctx, items, records, false); appErr != nil {
+		return nil, 0, appErr
+	}
+	return items, total, nil
+}
+
+func (s *Service) GetErrorImportBatchDetail(ctx context.Context, actor domain.RequestActor, batchID int64) (*domain.AssetWorkbenchErrorImportBatch, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can view quality error import details.", nil)
+	}
+	batch, err := s.repo.GetErrorImportBatch(ctx, batchID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Quality error import was not found.", nil)
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality error import.", err.Error())
+	}
+	records, err := s.repo.ListErrorRecordsByBatch(ctx, batchID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality error import records.", err.Error())
+	}
+	if appErr := s.enrichErrorImportBatches(ctx, []*domain.AssetWorkbenchErrorImportBatch{batch}, records, true); appErr != nil {
+		return nil, appErr
+	}
+	return batch, nil
+}
+
+func (s *Service) enrichErrorImportBatches(ctx context.Context, batches []*domain.AssetWorkbenchErrorImportBatch, records []*domain.AssetWorkbenchErrorRecord, includeRecords bool) *domain.AppError {
+	batchByID := make(map[int64]*domain.AssetWorkbenchErrorImportBatch, len(batches))
+	for _, batch := range batches {
+		if batch == nil {
+			continue
+		}
+		batch.ErrorCount = 0
+		batch.DeductionAmount = 0
+		batch.Records = nil
+		batchByID[batch.ID] = batch
+	}
+	profiles := map[int64]*domain.AssetWorkbenchProfile{}
+	deductionCache := map[string]deductionRuleCacheEntry{}
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		batch := batchByID[record.ImportBatchID]
+		if batch == nil {
+			continue
+		}
+		batch.ErrorCount += record.ErrorCount
+		if record.PayeeUserID != nil {
+			profile, appErr := s.settlementReportProfile(ctx, *record.PayeeUserID, profiles)
+			if appErr != nil {
+				return appErr
+			}
+			record.PayeeName = errorImportRecordPayeeName(record, profile)
+			if record.MatchStatus == domain.AssetWorkbenchErrorMatchStatusMatched {
+				amount, _, appErr := s.calculateQualityErrorDeductionCached(ctx, batch.BusinessMonth, record, profile, deductionCache)
+				if appErr != nil {
+					return appErr
+				}
+				record.DeductionAmount = amount
+				batch.DeductionAmount += amount
+			}
+		} else {
+			record.PayeeName = errorImportRecordPayeeName(record, nil)
+		}
+		if includeRecords {
+			batch.Records = append(batch.Records, record)
+		}
+	}
+	return nil
+}
+
+func errorImportRecordPayeeName(record *domain.AssetWorkbenchErrorRecord, profile *domain.AssetWorkbenchProfile) string {
+	if profile != nil && strings.TrimSpace(profile.RealName) != "" {
+		return strings.TrimSpace(profile.RealName)
+	}
+	var payload map[string]interface{}
+	if record != nil && len(record.RawPayload) > 0 && json.Unmarshal(record.RawPayload, &payload) == nil {
+		if value := strings.TrimSpace(fmt.Sprint(payload["payee_name"])); value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	if record != nil && record.PayeeUserID != nil {
+		return fmt.Sprintf("用户 %d", *record.PayeeUserID)
+	}
+	return "未匹配"
+}
+
+func (s *Service) DeleteErrorImportBatch(ctx context.Context, actor domain.RequestActor, batchID int64, reason string) (*domain.AssetWorkbenchErrorImportBatch, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can delete quality error imports.", nil)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reason is required.", nil)
+	}
+	batch, err := s.repo.GetErrorImportBatch(ctx, batchID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Quality error import was not found.", nil)
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality error import.", err.Error())
+	}
+	for _, status := range []string{domain.AssetWorkbenchBatchStatusGenerated, domain.AssetWorkbenchBatchStatusConfirmed} {
+		_, total, err := s.repo.ListSettlementBatches(ctx, repo.AssetWorkbenchSettlementBatchFilter{BusinessMonth: batch.BusinessMonth, Status: status, Page: 1, PageSize: 1})
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to check settlement batch state.", err.Error())
+		}
+		if total > 0 {
+			return nil, domain.NewAppError(domain.ErrCodeConflict, "Cancel the active settlement batch before deleting a quality error import.", map[string]interface{}{
+				"business_month": batch.BusinessMonth,
+				"batch_status":   status,
+			})
+		}
+	}
+	records, err := s.repo.ListErrorRecordsByBatch(ctx, batchID)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality error import records.", err.Error())
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.repo.DeleteErrorImportBatch(ctx, tx, batchID); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventErrorImportDeleted, domain.AssetWorkbenchEntityErrorImport, &batch.ID, batch, map[string]interface{}{
+			"deleted_record_count": len(records),
+		}, reason)
+	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Quality error import was not found.", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to delete quality error import.", err.Error())
+	}
+	batch.Records = records
+	return batch, nil
+}
+
 func (s *Service) MySettlement(ctx context.Context, actor domain.RequestActor) (*MySettlementResponse, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err

@@ -400,6 +400,12 @@ type AssetWorkbenchSettlementBatchFilter struct {
 	PageSize      int
 }
 
+type AssetWorkbenchErrorImportFilter struct {
+	BusinessMonth string
+	Page          int
+	PageSize      int
+}
+
 type AssetWorkbenchSettlementSupplementFilter struct {
 	PayeeUserID        *int64
 	BusinessMonth      string
@@ -582,7 +588,11 @@ type AssetWorkbenchRepo interface {
 
 	CreateErrorImportBatch(ctx context.Context, tx Tx, batch *domain.AssetWorkbenchErrorImportBatch) (*domain.AssetWorkbenchErrorImportBatch, error)
 	CreateErrorRecord(ctx context.Context, tx Tx, record *domain.AssetWorkbenchErrorRecord) (*domain.AssetWorkbenchErrorRecord, error)
+	ListErrorImportBatches(ctx context.Context, filter AssetWorkbenchErrorImportFilter) ([]*domain.AssetWorkbenchErrorImportBatch, int64, error)
+	GetErrorImportBatch(ctx context.Context, batchID int64) (*domain.AssetWorkbenchErrorImportBatch, error)
 	ListErrorRecordsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchErrorRecord, error)
+	ListErrorRecordsByBatch(ctx context.Context, batchID int64) ([]*domain.AssetWorkbenchErrorRecord, error)
+	DeleteErrorImportBatch(ctx context.Context, tx Tx, batchID int64) error
 	FindActiveDeductionRule(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchDeductionRule, error)
 
 	LockSettleableItems(ctx context.Context, tx Tx, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)

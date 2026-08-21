@@ -509,7 +509,29 @@ export interface ErrorImportBatchRow {
   matched_rows: number
   unmatched_rows: number
   ambiguous_rows: number
+  error_count: number
+  deduction_amount: number
   error_message?: string
+  created_at: string
+  updated_at?: string
+  records?: ErrorImportRecordRow[]
+}
+
+export interface ErrorImportRecordRow {
+  id: number
+  import_batch_id: number
+  business_month: string
+  payee_user_id?: number
+  payee_name?: string
+  order_no: string
+  difficulty_class: string
+  occurred_date?: string
+  error_count: number
+  deduction_amount: number
+  raw_payload_json?: Record<string, unknown>
+  match_status: string
+  submission_item_id?: number
+  created_at: string
 }
 
 export interface AssetWorkbenchEventRow {
@@ -1656,6 +1678,24 @@ export const assetWorkbenchApi = {
     const res = await http.post<ApiEnvelope<ErrorImportBatchRow>>('/v1/asset-workbench/error-imports/excel', form, {
       signal,
       headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return unwrap(res.data)
+  },
+
+  async listErrorImports(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<ErrorImportBatchRow>> {
+    const res = await http.get<ApiEnvelope<ErrorImportBatchRow[]>>('/v1/asset-workbench/error-imports', { params, signal })
+    return unwrapPaginated(res.data)
+  },
+
+  async getErrorImportDetail(importId: number, signal?: AbortSignal): Promise<ErrorImportBatchRow> {
+    const res = await http.get<ApiEnvelope<ErrorImportBatchRow>>(`/v1/asset-workbench/error-imports/${importId}`, { signal })
+    return unwrap(res.data)
+  },
+
+  async deleteErrorImport(importId: number, reason: string, signal?: AbortSignal): Promise<ErrorImportBatchRow> {
+    const res = await http.delete<ApiEnvelope<ErrorImportBatchRow>>(`/v1/asset-workbench/error-imports/${importId}`, {
+      data: { reason },
+      signal,
     })
     return unwrap(res.data)
   },

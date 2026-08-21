@@ -1485,6 +1485,72 @@ func (h *AssetWorkbenchHandler) ImportErrorRecordsExcel(c *gin.Context) {
 	respondCreated(c, result)
 }
 
+func (h *AssetWorkbenchHandler) ListErrorImports(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 20
+	}
+	items, total, appErr := h.svc.ListErrorImportBatches(c.Request.Context(), actor, c.Query("business_month"), page, pageSize)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) GetErrorImportDetail(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	batchID, err := strconv.ParseInt(c.Param("import_id"), 10, 64)
+	if err != nil || batchID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid quality error import id.", nil))
+		return
+	}
+	result, appErr := h.svc.GetErrorImportBatchDetail(c.Request.Context(), actor, batchID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) DeleteErrorImport(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	batchID, err := strconv.ParseInt(c.Param("import_id"), 10, 64)
+	if err != nil || batchID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid quality error import id.", nil))
+		return
+	}
+	req := struct {
+		Reason string `json:"reason"`
+	}{Reason: strings.TrimSpace(c.Query("reason"))}
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+			return
+		}
+	}
+	result, appErr := h.svc.DeleteErrorImportBatch(c.Request.Context(), actor, batchID, req.Reason)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) MySettlement(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

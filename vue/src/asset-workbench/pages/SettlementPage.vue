@@ -5,6 +5,8 @@ import { Download, Table2 } from 'lucide-vue-next'
 import {
   assetWorkbenchApi,
   type DifficultyClassRow,
+  type ErrorImportBatchRow,
+  type ErrorImportRecordRow,
   type SettlementBatchDetail,
   type SettlementBatchRow,
   type SettlementPayrollRow,
@@ -66,6 +68,8 @@ type BatchItemGridRow = {
 }
 type PermissionGridRow = SupplementPermissionRow & { status_label: string; reason_label: string }
 type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string; supplement_date_label: string; action: string }
+type ErrorImportGridRow = ErrorImportBatchRow & { created_at_label: string; status_label: string; action: string }
+type ErrorImportRecordGridRow = ErrorImportRecordRow & { payee_name_label: string; match_status_label: string; occurred_date_label: string; issue_label: string }
 type SettlementSectionKey = 'preview' | 'batches' | 'supplements' | 'adjustments'
 
 const session = useAssetWorkbenchSessionStore()
@@ -77,6 +81,7 @@ const preview = ref<SettlementPreview | null>(null)
 const batches = ref<SettlementBatchRow[]>([])
 const supplements = ref<SettlementSupplementRow[]>([])
 const supplementPermissions = ref<SupplementPermissionRow[]>([])
+const errorImports = ref<ErrorImportBatchRow[]>([])
 const difficultyRows = ref<DifficultyClassRow[]>([])
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
 const eligibleSupplementMonths = ref<string[]>([])
@@ -87,11 +92,16 @@ const selectedBatch = ref<SettlementBatchDetail | null>(null)
 const pendingCancelBatch = ref<SettlementBatchRow | null>(null)
 const pendingReverseBatch = ref<SettlementBatchRow | null>(null)
 const pendingDeleteSupplement = ref<SettlementSupplementRow | null>(null)
+const selectedErrorImport = ref<ErrorImportBatchRow | null>(null)
+const pendingDeleteErrorImport = ref<ErrorImportBatchRow | null>(null)
 const cancelReason = ref('')
 const reverseReason = ref('')
 const reverseExpectedBatchNo = ref('')
 const reverseConfirmedUnpaid = ref(false)
 const supplementDeleteReason = ref('')
+const errorImportDeleteReason = ref('')
+const errorImportDetailLoading = ref(false)
+const errorImportDeleting = ref(false)
 const exporting = ref(false)
 const generatingBatch = ref(false)
 const confirmingBatchId = ref<number | null>(null)
@@ -123,13 +133,14 @@ const supplementUploading = ref(false)
 const supplementUploadProgress = ref(0)
 const settlementRequest = usePageRequest(
   async () => {
-    const [previewResult, batchResult, supplementResult, permissionResult, difficultyResult, uploadDirectoryResult] = await Promise.all([
+    const [previewResult, batchResult, supplementResult, permissionResult, difficultyResult, uploadDirectoryResult, errorImportResult] = await Promise.all([
       assetWorkbenchApi.previewSettlement(month.value),
       assetWorkbenchApi.listSettlementBatches({ business_month: month.value, page: 1, page_size: 20 }),
       assetWorkbenchApi.listSettlementSupplements(buildSupplementListParams()),
       assetWorkbenchApi.listSupplementPermissions({ business_month: month.value, page: 1, page_size: 50 }),
       assetWorkbenchApi.listDifficultyClasses(),
       assetWorkbenchApi.listUploadDirectories(),
+      assetWorkbenchApi.listErrorImports({ business_month: month.value, page: 1, page_size: 100 }),
     ])
     return {
       preview: previewResult,
@@ -139,6 +150,7 @@ const settlementRequest = usePageRequest(
       supplementPermissions: permissionResult.items,
       difficulties: difficultyResult,
       uploadDirectories: uploadDirectoryResult,
+      errorImports: errorImportResult.items,
     }
   },
   null,
@@ -175,7 +187,7 @@ const adjustmentMode = computed({
   },
 })
 const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'amount'])
-const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity'])
+const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity', 'total_rows', 'matched_rows', 'unmatched_rows', 'ambiguous_rows'])
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const selectedSupplementUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === supplementUploadDirectoryId.value) ?? null)
 
@@ -214,6 +226,19 @@ const supplementRowsWithLabels = computed<SupplementGridRow[]>(() =>
 )
 const filteredSupplementRows = computed(() => supplementRowsWithLabels.value)
 const supplementGridRows = computed(() => filteredSupplementRows.value as unknown as Record<string, unknown>[])
+const errorImportGridRows = computed(() => errorImports.value.map<ErrorImportGridRow>((row) => ({
+  ...row,
+  created_at_label: formatDateTime(row.created_at),
+  status_label: row.status === 'completed' ? '已导入' : row.status || '—',
+  action: 'actions',
+})) as unknown as Record<string, unknown>[])
+const errorImportRecordGridRows = computed(() => (selectedErrorImport.value?.records ?? []).map<ErrorImportRecordGridRow>((row) => ({
+  ...row,
+  payee_name_label: row.payee_name || (row.payee_user_id ? `用户 ${row.payee_user_id}` : '未匹配'),
+  match_status_label: errorImportMatchStatusLabel(row.match_status),
+  occurred_date_label: row.occurred_date || '—',
+  issue_label: errorImportIssueLabel(row),
+})) as unknown as Record<string, unknown>[])
 const supplementCanPrev = computed(() => supplementPage.value > 1)
 const supplementCanNext = computed(() => supplementPage.value * supplementPageSize.value < supplementTotal.value)
 const manualSupplementDuplicateWarning = computed(() => {
@@ -312,12 +337,34 @@ const supplementGridColumns = computed<GridColumn[]>(() => [
   { key: 'gross_amount', label: '补录金额', width: 112, align: 'right' },
   { key: 'action', label: '动作', width: 120, align: 'center' },
 ])
+const errorImportGridColumns = computed<GridColumn[]>(() => [
+  { key: 'original_filename', label: '质检 Excel', width: 220 },
+  { key: 'created_at_label', label: '导入时间', width: 150 },
+  { key: 'status_label', label: '状态', width: 92 },
+  { key: 'total_rows', label: '总行数', width: 84, align: 'right' },
+  { key: 'matched_rows', label: '已匹配', width: 84, align: 'right' },
+  { key: 'unmatched_rows', label: '未匹配', width: 84, align: 'right' },
+  { key: 'ambiguous_rows', label: '多匹配', width: 84, align: 'right' },
+  { key: 'error_count', label: '出错数', width: 84, align: 'right' },
+  { key: 'deduction_amount', label: '扣款金额', width: 108, align: 'right' },
+  { key: 'action', label: '操作', width: 150, align: 'center' },
+])
+const errorImportRecordGridColumns = computed<GridColumn[]>(() => [
+  { key: 'payee_name_label', label: '人员', width: 120 },
+  { key: 'order_no', label: '作品/订单', width: 180 },
+  { key: 'difficulty_class', label: '难度', width: 76 },
+  { key: 'occurred_date_label', label: '发生日期', width: 110 },
+  { key: 'error_count', label: '出错数', width: 84, align: 'right' },
+  { key: 'deduction_amount', label: '扣款金额', width: 108, align: 'right' },
+  { key: 'match_status_label', label: '匹配状态', width: 100 },
+  { key: 'issue_label', label: '质检明细', width: 240 },
+])
 const settlementSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
   id: 'asset-settlement-spreadsheet',
-  revision: `${month.value}:${payrollRows.value.length}:${batches.value.length}:${supplements.value.length}:${supplementPermissions.value.length}`,
+  revision: `${month.value}:${payrollRows.value.length}:${batches.value.length}:${supplements.value.length}:${supplementPermissions.value.length}:${errorImports.value.length}`,
   mode: 'settlement',
   title: `${month.value} 结算表格工作台`,
-  description: '用于集中核对工资条、批次和补录记录。这里不替代批次确认、删除、调整等原页面动作。',
+  description: '用于集中核对工资条、每次质检导入、批次和补录记录。这里不替代批次确认、删除、调整等原页面动作。',
   readonly: true,
   actions: [
     { key: 'refresh_settlement', label: '刷新预览', tone: 'neutral' },
@@ -334,6 +381,15 @@ const settlementSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => (
       freezeHeader: true,
       columns: toSpreadsheetColumns(payrollGridColumns.value),
       rows: payrollGridRows.value,
+    },
+    {
+      id: 'error-imports',
+      name: '质检导入',
+      rowKey: 'id',
+      readonly: true,
+      freezeHeader: true,
+      columns: toSpreadsheetColumns(errorImportGridColumns.value.filter((column) => column.key !== 'action')),
+      rows: errorImportGridRows.value,
     },
     {
       id: 'batches',
@@ -436,6 +492,10 @@ function gridRowAsBatchItem(row: Record<string, unknown>): BatchItemGridRow {
   return row as unknown as BatchItemGridRow
 }
 
+function gridRowAsErrorImport(row: Record<string, unknown>): ErrorImportBatchRow {
+  return row as unknown as ErrorImportBatchRow
+}
+
 function isMoneyColumn(key: string) {
   return moneyColumns.has(key)
 }
@@ -461,6 +521,28 @@ function businessMonthFromDate(value: string) {
 
 function supplementDateOf(row: SettlementSupplementRow) {
   return String(row.supplement_date || row.duplicate_hint_json?.supplement_date || '')
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return '—'
+  return value.replace('T', ' ').replace(/Z$/, '').slice(0, 16)
+}
+
+function errorImportMatchStatusLabel(status: string) {
+  if (status === 'matched') return '已匹配'
+  if (status === 'ambiguous') return '多匹配'
+  if (status === 'unmatched') return '未匹配'
+  return status || '—'
+}
+
+function errorImportIssueLabel(row: ErrorImportRecordRow) {
+  const payload = row.raw_payload_json ?? {}
+  const candidates = ['问题描述', '错误描述', '质检问题', '备注', 'error_reason', 'reason']
+  for (const key of candidates) {
+    const value = payload[key]
+    if (value !== undefined && value !== null && String(value).trim()) return String(value)
+  }
+  return '—'
 }
 
 function settlementActionError(err: unknown, fallback: string) {
@@ -518,6 +600,7 @@ async function loadSettlement(options: { keepNotice?: boolean } = {}) {
   supplements.value = data.supplements
   supplementTotal.value = data.supplementTotal
   supplementPermissions.value = data.supplementPermissions
+  errorImports.value = data.errorImports
   difficultyRows.value = data.difficulties
   uploadDirectories.value = data.uploadDirectories
   if (!supplementUploadDirectoryId.value && data.uploadDirectories[0]) {
@@ -527,6 +610,10 @@ async function loadSettlement(options: { keepNotice?: boolean } = {}) {
     supplementForm.value.difficulty_class = difficultyOptions.value[0] || ''
   }
   selectedBatch.value = null
+  if (selectedErrorImport.value) {
+    const current = (data.errorImports as ErrorImportBatchRow[]).find((item) => item.id === selectedErrorImport.value?.id)
+    if (!current) selectedErrorImport.value = null
+  }
 }
 
 async function generateBatch() {
@@ -789,6 +876,49 @@ async function importErrorReviewFiles(files: File[]) {
   }
   notice.value = `质检出错 Excel 已导入：匹配 ${formatInt(matched)} 行，未匹配 ${formatInt(unmatched)} 行，多匹配 ${formatInt(ambiguous)} 行`
   await loadSettlement({ keepNotice: true })
+}
+
+async function openErrorImportDetail(row: ErrorImportBatchRow) {
+  if (errorImportDetailLoading.value) return
+  error.value = ''
+  errorImportDetailLoading.value = true
+  try {
+    selectedErrorImport.value = await assetWorkbenchApi.getErrorImportDetail(row.id)
+  } catch (err) {
+    error.value = settlementActionError(err, '质检导入明细加载失败')
+  } finally {
+    errorImportDetailLoading.value = false
+  }
+}
+
+function startDeleteErrorImport(row: ErrorImportBatchRow) {
+  pendingDeleteErrorImport.value = row
+  errorImportDeleteReason.value = ''
+}
+
+async function deleteErrorImport() {
+  const row = pendingDeleteErrorImport.value
+  if (!row || errorImportDeleting.value) return
+  const reason = errorImportDeleteReason.value.trim()
+  if (!reason) {
+    error.value = '请填写删除质检导入的原因'
+    return
+  }
+  error.value = ''
+  notice.value = ''
+  errorImportDeleting.value = true
+  try {
+    await assetWorkbenchApi.deleteErrorImport(row.id, reason)
+    notice.value = `已删除质检导入：${row.original_filename}；本月工资预览已重新计算`
+    pendingDeleteErrorImport.value = null
+    errorImportDeleteReason.value = ''
+    if (selectedErrorImport.value?.id === row.id) selectedErrorImport.value = null
+    await loadSettlement({ keepNotice: true })
+  } catch (err) {
+    error.value = settlementActionError(err, '删除质检导入失败；若本月已有结算批次，请先取消或撤销该批次')
+  } finally {
+    errorImportDeleting.value = false
+  }
 }
 
 function cancelImportReview(options: { keepNotice?: boolean } = {}) {
@@ -1219,6 +1349,90 @@ onMounted(() => {
                 <p>生成预览后会在这里显示工资条明细。</p>
               </div>
             </AsyncBoundary>
+          </div>
+
+          <div class="aw-panel">
+            <div class="aw-panel__head">
+              <div>
+                <h3>质检导入记录</h3>
+                <p class="aw-copy">每份 Excel 单独列示扣款；工资预览中的“质检扣款”是下列有效导入的合计。</p>
+              </div>
+              <span class="aw-chip aw-chip--neutral">{{ formatInt(errorImports.length) }} 份</span>
+            </div>
+            <WorkbenchDataGrid
+              v-if="errorImports.length"
+              :columns="errorImportGridColumns"
+              :rows="errorImportGridRows"
+              row-key="id"
+              storage-key="settlement-error-imports"
+              :height="260"
+              :row-height="34"
+            >
+              <template #cell="{ row, column, value }">
+                <div v-if="column.key === 'action'" class="aw-inline-actions">
+                  <button type="button" :disabled="errorImportDetailLoading" @click="openErrorImportDetail(gridRowAsErrorImport(row))">明细</button>
+                  <button type="button" @click="startDeleteErrorImport(gridRowAsErrorImport(row))">删除</button>
+                </div>
+                <span v-else-if="column.key === 'status_label'" class="aw-chip aw-chip--success">{{ value }}</span>
+                <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <div v-else class="aw-empty-state">
+              <h3>本月还没有质检导入</h3>
+              <p>导入质检 Excel 后，每次导入会在这里独立显示，不再只能看到累计总额。</p>
+            </div>
+          </div>
+
+          <div v-if="selectedErrorImport" class="aw-panel" role="dialog" aria-label="质检导入明细">
+            <div class="aw-panel__head">
+              <div>
+                <p class="aw-eyebrow">质检 Excel 明细</p>
+                <h3>{{ selectedErrorImport.original_filename }}</h3>
+                <p class="aw-copy">
+                  {{ formatDateTime(selectedErrorImport.created_at) }} · {{ formatInt(selectedErrorImport.error_count) }} 个出错 · 扣款 {{ formatMoney(selectedErrorImport.deduction_amount) }}
+                </p>
+              </div>
+              <button class="aw-secondary-button" type="button" @click="selectedErrorImport = null">关闭</button>
+            </div>
+            <WorkbenchDataGrid
+              v-if="errorImportRecordGridRows.length"
+              :columns="errorImportRecordGridColumns"
+              :rows="errorImportRecordGridRows"
+              row-key="id"
+              storage-key="settlement-error-import-records"
+              :height="320"
+              :row-height="34"
+            >
+              <template #cell="{ column, value }">
+                <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <p v-else class="aw-copy">这份质检表没有可显示的明细行。</p>
+          </div>
+
+          <div v-if="pendingDeleteErrorImport" class="aw-panel" role="dialog" aria-label="删除质检导入">
+            <div class="aw-panel__head">
+              <div>
+                <h3>删除质检导入</h3>
+                <p class="aw-copy">{{ pendingDeleteErrorImport.original_filename }} · 扣款 {{ formatMoney(pendingDeleteErrorImport.deduction_amount) }}</p>
+              </div>
+              <span class="aw-chip aw-chip--warning">会重新计算工资预览</span>
+            </div>
+            <p class="aw-inline-alert aw-inline-alert--warning">删除会移除这份 Excel 产生的全部质检扣款记录。若本月已有待确认或已确认结算批次，必须先取消或撤销批次。</p>
+            <label class="aw-field">
+              <span>删除原因</span>
+              <input v-model="errorImportDeleteReason" required placeholder="填写为何撤销这次质检导入" />
+            </label>
+            <div class="aw-inline-actions">
+              <button class="aw-primary-button" type="button" :disabled="errorImportDeleting" @click="deleteErrorImport">
+                {{ errorImportDeleting ? '删除中…' : '确认删除' }}
+              </button>
+              <button class="aw-secondary-button" type="button" :disabled="errorImportDeleting" @click="pendingDeleteErrorImport = null">取消</button>
+            </div>
           </div>
         </section>
 

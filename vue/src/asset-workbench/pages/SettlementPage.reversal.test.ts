@@ -23,6 +23,7 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
       listSupplementPermissions: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 }),
       listDifficultyClasses: vi.fn().mockResolvedValue([]),
       listUploadDirectories: vi.fn().mockResolvedValue([]),
+      listErrorImports: vi.fn().mockResolvedValue({ items: [], total: 0 }),
       reverseSettlementBatchConfirmation,
     },
   }

@@ -153,12 +153,16 @@ func (r *settlementReportRepo) ListDifficultyClasses(context.Context, repo.Asset
 
 type errorImportRepo struct {
 	repo.AssetWorkbenchRepo
-	items        []*domain.AssetWorkbenchSubmissionItem
-	profiles     []*domain.AssetWorkbenchProfile
-	difficulties []*domain.AssetWorkbenchDifficultyClass
-	batch        *domain.AssetWorkbenchErrorImportBatch
-	records      []*domain.AssetWorkbenchErrorRecord
-	events       []*domain.AssetWorkbenchEvent
+	items             []*domain.AssetWorkbenchSubmissionItem
+	profiles          []*domain.AssetWorkbenchProfile
+	difficulties      []*domain.AssetWorkbenchDifficultyClass
+	batch             *domain.AssetWorkbenchErrorImportBatch
+	batches           []*domain.AssetWorkbenchErrorImportBatch
+	records           []*domain.AssetWorkbenchErrorRecord
+	rule              *domain.AssetWorkbenchDeductionRule
+	settlementBatches []*domain.AssetWorkbenchSettlementBatch
+	deletedBatchID    int64
+	events            []*domain.AssetWorkbenchEvent
 }
 
 func (r *errorImportRepo) ListSubmissionItemsByMonth(context.Context, string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
@@ -212,6 +216,72 @@ func (r *errorImportRepo) CreateErrorRecord(_ context.Context, _ repo.Tx, record
 	copyRecord.ID = int64(len(r.records) + 1)
 	r.records = append(r.records, &copyRecord)
 	return &copyRecord, nil
+}
+
+func (r *errorImportRepo) ListErrorImportBatches(_ context.Context, filter repo.AssetWorkbenchErrorImportFilter) ([]*domain.AssetWorkbenchErrorImportBatch, int64, error) {
+	items := []*domain.AssetWorkbenchErrorImportBatch{}
+	for _, item := range r.batches {
+		if item != nil && (filter.BusinessMonth == "" || item.BusinessMonth == filter.BusinessMonth) {
+			copyItem := *item
+			items = append(items, &copyItem)
+		}
+	}
+	return items, int64(len(items)), nil
+}
+
+func (r *errorImportRepo) GetErrorImportBatch(_ context.Context, batchID int64) (*domain.AssetWorkbenchErrorImportBatch, error) {
+	for _, item := range r.batches {
+		if item != nil && item.ID == batchID {
+			copyItem := *item
+			return &copyItem, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *errorImportRepo) ListErrorRecordsByMonth(_ context.Context, businessMonth string) ([]*domain.AssetWorkbenchErrorRecord, error) {
+	items := []*domain.AssetWorkbenchErrorRecord{}
+	for _, item := range r.records {
+		if item != nil && item.BusinessMonth == businessMonth {
+			copyItem := *item
+			items = append(items, &copyItem)
+		}
+	}
+	return items, nil
+}
+
+func (r *errorImportRepo) ListErrorRecordsByBatch(_ context.Context, batchID int64) ([]*domain.AssetWorkbenchErrorRecord, error) {
+	items := []*domain.AssetWorkbenchErrorRecord{}
+	for _, item := range r.records {
+		if item != nil && item.ImportBatchID == batchID {
+			copyItem := *item
+			items = append(items, &copyItem)
+		}
+	}
+	return items, nil
+}
+
+func (r *errorImportRepo) DeleteErrorImportBatch(_ context.Context, _ repo.Tx, batchID int64) error {
+	r.deletedBatchID = batchID
+	return nil
+}
+
+func (r *errorImportRepo) FindActiveDeductionRule(context.Context, string, string, string, time.Time) (*domain.AssetWorkbenchDeductionRule, error) {
+	if r.rule == nil {
+		return nil, sql.ErrNoRows
+	}
+	return r.rule, nil
+}
+
+func (r *errorImportRepo) ListSettlementBatches(_ context.Context, filter repo.AssetWorkbenchSettlementBatchFilter) ([]*domain.AssetWorkbenchSettlementBatch, int64, error) {
+	items := []*domain.AssetWorkbenchSettlementBatch{}
+	for _, item := range r.settlementBatches {
+		if item == nil || filter.BusinessMonth != "" && item.BusinessMonth != filter.BusinessMonth || filter.Status != "" && item.Status != filter.Status {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items, int64(len(items)), nil
 }
 
 func (r *errorImportRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
@@ -2831,6 +2901,60 @@ func TestImportErrorRecordsExcelMatchesQualityTemplateByPayeeAndDifficulty(t *te
 	}
 	if record.OccurredDate == nil || record.OccurredDate.Format("2006-01-02") != "2026-07-01" {
 		t.Fatalf("occurred date = %v, want 2026-07-01", record.OccurredDate)
+	}
+}
+
+func TestQualityErrorImportHistoryDetailAndDelete(t *testing.T) {
+	payeeID := int64(100)
+	batch := &domain.AssetWorkbenchErrorImportBatch{ID: 9001, ImportNo: "AWE-9001", BusinessMonth: "2026-08", UploadedBy: 99, OriginalFilename: "质检一.xlsx", Status: "imported", TotalRows: 1, MatchedRows: 1}
+	workbenchRepo := &errorImportRepo{
+		batches:  []*domain.AssetWorkbenchErrorImportBatch{batch},
+		records:  []*domain.AssetWorkbenchErrorRecord{{ID: 8001, ImportBatchID: 9001, BusinessMonth: "2026-08", PayeeUserID: &payeeID, DifficultyClass: "A", ErrorCount: 2, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched}},
+		profiles: []*domain.AssetWorkbenchProfile{{UserID: payeeID, RealName: "张三", WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "J1"}},
+		rule:     &domain.AssetWorkbenchDeductionRule{ID: 9, WorkerType: domain.AssetWorkbenchWorkerTypeAll, JobGrade: domain.AssetWorkbenchWorkerTypeAll, DifficultyClass: "A", DeductionAmount: 10, EffectiveFrom: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	items, total, appErr := svc.ListErrorImportBatches(context.Background(), actor, "2026-08", 1, 20)
+	if appErr != nil || total != 1 || len(items) != 1 {
+		t.Fatalf("ListErrorImportBatches() items=%+v total=%d err=%+v", items, total, appErr)
+	}
+	if items[0].ErrorCount != 2 || items[0].DeductionAmount != 20 {
+		t.Fatalf("batch summary = %+v, want 2 errors and 20 deduction", items[0])
+	}
+
+	detail, appErr := svc.GetErrorImportBatchDetail(context.Background(), actor, 9001)
+	if appErr != nil || len(detail.Records) != 1 {
+		t.Fatalf("GetErrorImportBatchDetail() detail=%+v err=%+v", detail, appErr)
+	}
+	if detail.Records[0].PayeeName != "张三" || detail.Records[0].DeductionAmount != 20 {
+		t.Fatalf("detail record = %+v", detail.Records[0])
+	}
+
+	deleted, appErr := svc.DeleteErrorImportBatch(context.Background(), actor, 9001, "重复导入")
+	if appErr != nil || deleted.ID != 9001 || workbenchRepo.deletedBatchID != 9001 {
+		t.Fatalf("DeleteErrorImportBatch() deleted=%+v id=%d err=%+v", deleted, workbenchRepo.deletedBatchID, appErr)
+	}
+	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventErrorImportDeleted {
+		t.Fatalf("delete events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestDeleteQualityErrorImportBlockedByGeneratedSettlementBatch(t *testing.T) {
+	workbenchRepo := &errorImportRepo{
+		batches:           []*domain.AssetWorkbenchErrorImportBatch{{ID: 9001, BusinessMonth: "2026-08"}},
+		settlementBatches: []*domain.AssetWorkbenchSettlementBatch{{ID: 7001, BusinessMonth: "2026-08", Status: domain.AssetWorkbenchBatchStatusGenerated}},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	_, appErr := svc.DeleteErrorImportBatch(context.Background(), actor, 9001, "重复导入")
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("DeleteErrorImportBatch() err=%+v, want conflict", appErr)
+	}
+	if workbenchRepo.deletedBatchID != 0 {
+		t.Fatalf("generated settlement batch must block deletion, deleted=%d", workbenchRepo.deletedBatchID)
 	}
 }
 

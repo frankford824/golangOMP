@@ -6,19 +6,22 @@ import (
 )
 
 type AssetWorkbenchErrorImportBatch struct {
-	ID               int64     `json:"id" db:"id"`
-	ImportNo         string    `json:"import_no" db:"import_no"`
-	BusinessMonth    string    `json:"business_month" db:"business_month"`
-	UploadedBy       int64     `json:"uploaded_by" db:"uploaded_by"`
-	OriginalFilename string    `json:"original_filename" db:"original_filename"`
-	Status           string    `json:"status" db:"status"`
-	TotalRows        int       `json:"total_rows" db:"total_rows"`
-	MatchedRows      int       `json:"matched_rows" db:"matched_rows"`
-	UnmatchedRows    int       `json:"unmatched_rows" db:"unmatched_rows"`
-	AmbiguousRows    int       `json:"ambiguous_rows" db:"ambiguous_rows"`
-	ErrorMessage     string    `json:"error_message" db:"error_message"`
-	CreatedAt        time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
+	ID               int64                        `json:"id" db:"id"`
+	ImportNo         string                       `json:"import_no" db:"import_no"`
+	BusinessMonth    string                       `json:"business_month" db:"business_month"`
+	UploadedBy       int64                        `json:"uploaded_by" db:"uploaded_by"`
+	OriginalFilename string                       `json:"original_filename" db:"original_filename"`
+	Status           string                       `json:"status" db:"status"`
+	TotalRows        int                          `json:"total_rows" db:"total_rows"`
+	MatchedRows      int                          `json:"matched_rows" db:"matched_rows"`
+	UnmatchedRows    int                          `json:"unmatched_rows" db:"unmatched_rows"`
+	AmbiguousRows    int                          `json:"ambiguous_rows" db:"ambiguous_rows"`
+	ErrorMessage     string                       `json:"error_message" db:"error_message"`
+	CreatedAt        time.Time                    `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time                    `json:"updated_at" db:"updated_at"`
+	ErrorCount       int                          `json:"error_count" db:"-"`
+	DeductionAmount  float64                      `json:"deduction_amount" db:"-"`
+	Records          []*AssetWorkbenchErrorRecord `json:"records,omitempty" db:"-"`
 }
 
 type AssetWorkbenchErrorRecord struct {
@@ -35,6 +38,8 @@ type AssetWorkbenchErrorRecord struct {
 	SubmissionItemID *int64          `json:"submission_item_id,omitempty" db:"submission_item_id"`
 	CreatedAt        time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at" db:"updated_at"`
+	PayeeName        string          `json:"payee_name,omitempty" db:"-"`
+	DeductionAmount  float64         `json:"deduction_amount" db:"-"`
 }
 
 type AssetWorkbenchSettlementItem struct {
