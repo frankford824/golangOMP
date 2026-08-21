@@ -9,10 +9,21 @@ vi.mock('@/services/api/tasksApi', () => ({
   },
 }))
 
+vi.mock('@/domain/asset-access', () => ({
+  fetchAssetPreviewMeta: vi.fn(async () => null),
+}))
+
+vi.mock('@/domain/asset-preview-image', () => ({
+  materializePreviewImageUrl: vi.fn(async (src: string) => ({ displaySrc: src })),
+  normalizePreviewAssetId: vi.fn((value: unknown) => String(value ?? '')),
+  revokeMaterializedPreviewImage: vi.fn(),
+}))
+
 import TaskSkuItemEditor from './TaskSkuItemEditor.vue'
+import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
 
 describe('TaskSkuItemEditor', () => {
-  it('keeps batch reference images visibly paired with their SKU rows', () => {
+  it('keeps batch reference images paired with their SKU rows and opens the original in the lightbox', async () => {
     const wrapper = mount(TaskSkuItemEditor, {
       props: {
         taskId: 2915,
@@ -44,6 +55,7 @@ describe('TaskSkuItemEditor', () => {
           },
         ],
       },
+      global: { stubs: { Teleport: true } },
     })
 
     const rows = wrapper.findAll('.sku-editor-row')
@@ -54,6 +66,18 @@ describe('TaskSkuItemEditor', () => {
     expect(rows[1].text()).toContain('DZK000218')
     expect(rows[1].text()).toContain('50x70-reference.jpg')
     expect(rows[1].find('img').attributes('src')).toBe('/v1/assets/files/ref-b')
+
+    expect(rows[0].find('a').exists()).toBe(false)
+    await rows[0].get('[aria-label="放大参考图 60x90-reference.png"]').trigger('click')
+    const lightbox = wrapper.findComponent(ImagePreviewLightbox)
+    expect(lightbox.props('modelValue')).toBe(true)
+    expect(lightbox.props('items')).toEqual([
+      expect.objectContaining({
+        src: '/v1/assets/download/ref-a',
+        fallbackSrc: '/v1/assets/preview/ref-a',
+        preferredFilename: '60x90-reference.png',
+      }),
+    ])
   })
 
   it('lets a task creator save business fields without treating an unchanged visible cost as an override', async () => {

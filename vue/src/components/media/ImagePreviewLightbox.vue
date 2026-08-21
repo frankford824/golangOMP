@@ -59,6 +59,17 @@
           </button>
           <button
             type="button"
+            class="image-preview-action image-preview-action--wide"
+            :class="{ 'image-preview-action--active': actualPixels }"
+            title="按原图实际像素显示"
+            aria-label="实际像素 100%"
+            :disabled="!naturalWidth || !naturalHeight"
+            @click="showActualPixels"
+          >
+            1:1
+          </button>
+          <button
+            type="button"
             class="image-preview-action"
             title="放大"
             aria-label="放大预览"
@@ -75,6 +86,17 @@
             @click="resetZoom"
           >
             <RotateCcw :size="16" />
+          </button>
+          <button
+            type="button"
+            class="image-preview-action"
+            :class="{ 'image-preview-action--active': copyState === 'copied' }"
+            :title="copyState === 'copied' ? '已复制，可粘贴到 Photoshop' : '复制图片'"
+            aria-label="复制当前图片"
+            :disabled="copying || !activeDisplaySrc"
+            @click="copyActiveImage"
+          >
+            <Copy :size="16" />
           </button>
           <button
             type="button"
@@ -132,7 +154,9 @@
         <ChevronRight :size="24" />
       </button>
       <div
+        ref="stageRef"
         class="image-preview-stage"
+        :class="{ 'image-preview-stage--actual': actualPixels }"
         @click.self="close"
         @pointerdown="onStagePointerDown"
         @pointerup="onStagePointerUp"
@@ -153,20 +177,24 @@
           :alt="activeItem.alt || activeTitle"
           class="image-preview-img"
           :style="imageStyle"
-          draggable="false"
+          :title="copyState === 'error' ? '复制失败，请右键复制图像' : '可右键复制图像，或使用顶部复制按钮'"
           @click.stop
           @dblclick.stop="toggleZoom"
+          @load="onImageLoad"
         />
+        <div v-if="copyState === 'copied'" class="image-preview-copy-status" role="status">已复制原图，可直接粘贴到 Photoshop</div>
+        <div v-else-if="copyState === 'error'" class="image-preview-copy-status image-preview-copy-status--error" role="alert">复制失败，请右键图片选择“复制图像”</div>
       </div>
     </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   ExternalLink,
   Minus,
@@ -209,10 +237,16 @@ const emit = defineEmits<{
 
 const activeIndex = ref(0)
 const zoom = ref(1)
+const actualPixels = ref(false)
+const naturalWidth = ref(0)
+const naturalHeight = ref(0)
 const activeDisplaySrc = ref('')
 const activePhase = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const activeError = ref('预览加载失败')
 const downloading = ref(false)
+const copying = ref(false)
+const copyState = ref<'idle' | 'copied' | 'error'>('idle')
+const stageRef = ref<HTMLElement | null>(null)
 const pointerStart = ref<{ id: number; x: number; y: number; t: number } | null>(null)
 const pinchStart = ref<{ distance: number; zoom: number } | null>(null)
 
@@ -243,9 +277,12 @@ const activeOpenHref = computed(() => {
   if (!item) return ''
   return item.downloadUrl || item.fallbackSrc || item.resolvedPreviewUrl || item.src
 })
-const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
+const zoomLabel = computed(() => actualPixels.value ? `实际 ${Math.round(zoom.value * 100)}%` : `${Math.round(zoom.value * 100)}%`)
 const imageStyle = computed(() => ({
   transform: `scale(${zoom.value})`,
+  ...(actualPixels.value && naturalWidth.value && naturalHeight.value
+    ? { width: `${naturalWidth.value}px`, height: `${naturalHeight.value}px`, maxWidth: 'none', maxHeight: 'none' }
+    : {}),
 }))
 const canStepPrev = computed(() => activeIndex.value > 0)
 const canStepNext = computed(() => activeIndex.value < displayItems.value.length - 1)
@@ -292,6 +329,7 @@ function setActiveImage(image: MaterializedPreviewImage) {
   activeMaterializedImage = image
   activeDisplaySrc.value = image.displaySrc
   activePhase.value = 'ready'
+  copyState.value = 'idle'
 }
 
 function uniqueNonEmpty(values: Array<string | undefined>): string[] {
@@ -329,6 +367,10 @@ async function loadActiveItem() {
   const my = ++loadSeq
   clearActiveMaterializedImage()
   activeDisplaySrc.value = ''
+  naturalWidth.value = 0
+  naturalHeight.value = 0
+  actualPixels.value = false
+  copyState.value = 'idle'
   if (!props.modelValue || !item) {
     activePhase.value = 'idle'
     return
@@ -364,10 +406,65 @@ function zoomBy(delta: number) {
 
 function resetZoom() {
   zoom.value = 1
+  actualPixels.value = false
 }
 
 function toggleZoom() {
-  zoom.value = zoom.value > 1 ? 1 : 2
+  if (actualPixels.value || zoom.value > 1) resetZoom()
+  else showActualPixels()
+}
+
+function onImageLoad(event: Event) {
+  const image = event.currentTarget as HTMLImageElement
+  naturalWidth.value = image.naturalWidth
+  naturalHeight.value = image.naturalHeight
+}
+
+function showActualPixels() {
+  if (!naturalWidth.value || !naturalHeight.value) return
+  actualPixels.value = true
+  zoom.value = 1
+  void nextTick(() => {
+    if (!stageRef.value) return
+    stageRef.value.scrollLeft = 0
+    stageRef.value.scrollTop = 0
+  })
+}
+
+async function imageBlobAsPNG(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob
+  const bitmap = await createImageBitmap(blob)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('canvas_context_unavailable')
+    context.drawImage(bitmap, 0, 0)
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((value) => value ? resolve(value) : reject(new Error('image_copy_conversion_failed')), 'image/png')
+    })
+  } finally {
+    bitmap.close()
+  }
+}
+
+async function copyActiveImage() {
+  if (!activeDisplaySrc.value || copying.value) return
+  copying.value = true
+  copyState.value = 'idle'
+  try {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') throw new Error('clipboard_image_unsupported')
+    const response = await fetch(activeDisplaySrc.value)
+    if (!response.ok) throw new Error(`copy_image_http_${response.status}`)
+    const png = await imageBlobAsPNG(await response.blob())
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+    copyState.value = 'copied'
+  } catch {
+    copyState.value = 'error'
+  } finally {
+    copying.value = false
+  }
 }
 
 function handleWheel(event: WheelEvent) {
@@ -609,6 +706,11 @@ onBeforeUnmount(() => {
   transform: translateY(-1px);
 }
 
+.image-preview-action--active {
+  border-color: rgb(var(--yb-success-border));
+  background: rgb(var(--yb-success-strong) / 0.9);
+}
+
 .image-preview-action:disabled,
 .image-preview-action--disabled,
 .image-preview-nav:disabled {
@@ -646,6 +748,11 @@ onBeforeUnmount(() => {
   touch-action: pan-x pan-y pinch-zoom;
 }
 
+.image-preview-stage--actual {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
 .image-preview-img {
   display: block;
   max-width: min(96vw, 87.5rem);
@@ -657,6 +764,24 @@ onBeforeUnmount(() => {
   transform-origin: center center;
   transition: transform 0.15s ease;
   user-select: none;
+}
+
+.image-preview-copy-status {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 2;
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  background: rgb(var(--yb-success-strong) / 0.94);
+  color: rgb(var(--yb-text-inverse));
+  font-size: 0.78rem;
+  font-weight: 700;
+  box-shadow: 0 0.75rem 2rem rgb(var(--yb-black) / 0.28);
+}
+
+.image-preview-copy-status--error {
+  background: rgb(var(--yb-danger-overlay) / 0.95);
 }
 
 .image-preview-state {

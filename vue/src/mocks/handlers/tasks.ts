@@ -432,6 +432,20 @@ export const tasksHandler: MockHandler = (request) => {
             download_url: MOCK_REFERENCE_PREVIEW,
           },
         ],
+        sku_items: [{
+          id: Number(taskId) * 10 + 1,
+          sequence_no: 1,
+          sku_code: `SKU-MOCK-${taskId}`,
+          product_name_snapshot: storedTask.title,
+          design_requirement: '按参考图制作',
+          reference_file_refs: [{
+            ref_id: `sku-reference-${taskId}`,
+            filename: 'SKU对应参考图.png',
+            mime_type: 'image/png',
+            preview_url: MOCK_REFERENCE_PREVIEW,
+            download_url: MOCK_REFERENCE_PREVIEW,
+          }],
+        }],
         modules,
       },
     }

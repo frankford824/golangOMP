@@ -15,17 +15,28 @@
           <span>{{ itemReferences(item).length }} 个 · 仅属于当前 SKU</span>
         </div>
         <div class="reference-list">
-          <a
-            v-for="reference in itemReferences(item)"
-            :key="reference.key"
-            :href="reference.downloadUrl || reference.previewUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <img v-if="reference.previewUrl && reference.isImage" :src="reference.previewUrl" :alt="reference.fileName" />
-            <span v-else class="reference-file-mark">文件</span>
-            <span>{{ reference.fileName }}</span>
-          </a>
+          <template v-for="(reference, referenceIndex) in itemReferences(item)" :key="reference.key">
+            <button
+              v-if="reference.previewUrl && reference.isImage"
+              type="button"
+              class="reference-preview-trigger"
+              :aria-label="`放大参考图 ${reference.fileName}`"
+              title="点击放大原图"
+              @click="openReferencePreview(item, referenceIndex)"
+            >
+              <img :src="reference.previewUrl" :alt="reference.fileName" />
+              <span>{{ reference.fileName }}</span>
+            </button>
+            <a
+              v-else
+              :href="reference.downloadUrl || reference.previewUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span class="reference-file-mark">文件</span>
+              <span>{{ reference.fileName }}</span>
+            </a>
+          </template>
         </div>
       </section>
 
@@ -47,12 +58,21 @@
         </div>
       </form>
     </article>
+    <ImagePreviewLightbox
+      v-model="referencePreviewOpen"
+      :items="referencePreviewItems"
+      :initial-index="referencePreviewIndex"
+      aria-label="SKU 对应参考图预览"
+      fallback-title="对应参考图"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { tasksApi } from '@/services/api/tasksApi'
+import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
+import type { ImagePreviewLightboxItem } from '@/components/media/imagePreviewLightbox'
 
 interface SKUItem extends Record<string, unknown> {
   id?: number | string
@@ -74,6 +94,7 @@ interface SKUReference {
   previewUrl: string
   downloadUrl: string
   isImage: boolean
+  assetId?: string
 }
 
 interface SKUDraft {
@@ -96,6 +117,9 @@ const drafts = ref<Record<string, SKUDraft>>({})
 const saving = ref<Record<string, boolean>>({})
 const messages = ref<Record<string, string>>({})
 const failures = ref<Record<string, boolean>>({})
+const referencePreviewOpen = ref(false)
+const referencePreviewIndex = ref(0)
+const referencePreviewItems = ref<ImagePreviewLightboxItem[]>([])
 
 function displayText(value: unknown) {
   return value == null ? '' : String(value)
@@ -125,14 +149,35 @@ function itemReferences(item: SKUItem): SKUReference[] {
     const previewUrl = displayText(reference.preview_url || reference.url || reference.download_url).trim()
     const downloadUrl = displayText(reference.download_url || reference.url || reference.preview_url).trim()
     const mimeType = displayText(reference.mime_type).trim().toLowerCase()
+    const rawAssetId = displayText(reference.task_asset_id || reference.formal_task_asset_id || reference.asset_id).trim()
     return [{
       key: displayText(reference.ref_id || reference.asset_id || reference.upload_request_id).trim() || `${itemKey(item)}-${index}`,
       fileName,
       previewUrl,
       downloadUrl,
       isImage: mimeType.startsWith('image/') || /\.(?:avif|gif|jpe?g|png|webp)$/i.test(fileName),
+      assetId: /^\d+$/.test(rawAssetId) ? rawAssetId : undefined,
     }]
   })
+}
+
+function openReferencePreview(item: SKUItem, selectedIndex: number) {
+  const references = itemReferences(item)
+  const selected = references[selectedIndex]
+  const images = references.filter((reference) => reference.isImage && reference.previewUrl)
+  const index = images.findIndex((reference) => reference.key === selected?.key)
+  if (index < 0) return
+  referencePreviewItems.value = images.map((reference) => ({
+    src: reference.downloadUrl || reference.previewUrl,
+    fallbackSrc: reference.previewUrl,
+    fallbackAssetId: reference.assetId,
+    title: reference.fileName,
+    alt: reference.fileName,
+    downloadUrl: reference.downloadUrl || reference.previewUrl,
+    preferredFilename: reference.fileName,
+  }))
+  referencePreviewIndex.value = index
+  referencePreviewOpen.value = true
 }
 
 function variant(item: SKUItem): Record<string, unknown> {
@@ -263,4 +308,5 @@ async function save(item: SKUItem) {
 
 <style scoped>
 .sku-editor{display:grid;gap:12px;margin-top:10px}.sku-editor-row{overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:13px;background:rgb(var(--yb-surface))}.sku-editor-row>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.sku-editor-row header div{min-width:0;display:grid;gap:3px}.sku-editor-row header strong{color:rgb(var(--yb-brand));font:800 12px var(--yb-font-data)}.sku-editor-row header span:not(.edit-state){overflow:hidden;color:rgb(var(--yb-text-muted));font-size:12px;text-overflow:ellipsis;white-space:nowrap}.edit-state{flex:0 0 auto;padding:3px 8px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-size:10px;font-weight:750}.sku-reference-strip{display:grid;gap:9px;padding:11px 14px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-brand-soft)/.28)}.reference-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.reference-heading strong{color:rgb(var(--yb-text));font-size:12px}.reference-heading span{color:rgb(var(--yb-text-muted));font-size:11px}.reference-list{display:flex;flex-wrap:wrap;gap:8px}.reference-list a{display:flex;max-width:280px;align-items:center;gap:8px;padding:6px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-body));font-size:11px;text-decoration:none}.reference-list a>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-list img,.reference-file-mark{width:34px;height:34px;flex:0 0 34px;border-radius:7px;object-fit:cover}.reference-file-mark{display:grid;place-items:center;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text-muted));font-size:9px;font-weight:800}.sku-editor-row form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}.sku-editor-row label{min-width:0;display:grid;gap:5px;color:rgb(var(--yb-text-muted));font-size:11px;font-weight:700}.sku-editor-row label.wide{grid-column:span 2}.sku-editor-row input,.sku-editor-row textarea{width:100%;min-height:36px;padding:8px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font:500 12px var(--yb-font-sans);box-sizing:border-box}.sku-editor-row textarea{resize:vertical}.sku-editor-row input:disabled,.sku-editor-row textarea:disabled{background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text-muted))}.row-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:12px}.row-actions p{margin:0;color:rgb(var(--yb-success-strong));font-size:11px}.row-actions p.error{color:rgb(var(--yb-danger-text))}.row-actions button{min-height:36px;padding:0 13px;border:0;border-radius:9px;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));font-size:12px;font-weight:750;cursor:pointer}.row-actions button:disabled{opacity:.55;cursor:wait}@media(max-width:900px){.sku-editor-row form{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.reference-heading{align-items:flex-start;flex-direction:column}.reference-list a{max-width:100%}.sku-editor-row form{grid-template-columns:1fr}.sku-editor-row label.wide{grid-column:auto}}
+.reference-list button{display:flex;max-width:280px;align-items:center;gap:8px;padding:6px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-body));font:inherit;font-size:11px;text-align:left;cursor:zoom-in}.reference-list button>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:560px){.reference-list button{max-width:100%}}
 </style>
