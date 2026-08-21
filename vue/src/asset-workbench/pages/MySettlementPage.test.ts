@@ -135,13 +135,27 @@ describe('MySettlementPage supplement deletion', () => {
     Object.defineProperty(second, 'webkitRelativePath', { configurable: true, value: '补录文件夹/子目录/b.jpg' })
     Object.defineProperty(archive, 'webkitRelativePath', { configurable: true, value: '补录文件夹/old.rar' })
     const folderInput = wrapper.get('input[aria-label="选择补录文件夹"]')
-    Object.defineProperty(folderInput.element, 'files', { configurable: true, value: [first, second, archive] })
+    Object.defineProperty(folderInput.element, 'files', { configurable: true, value: [first, second] })
     await folderInput.trigger('change')
 
     expect(folderInput.attributes()).toHaveProperty('webkitdirectory')
-    expect(wrapper.text()).toContain('已读取 3 个文件，归为 1 个补录作品')
+    expect(wrapper.text()).toContain('待上传队列共 2 个文件，归为 1 个补录作品')
     expect(wrapper.text()).toContain('上传 1 个补录作品')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    Object.defineProperty(folderInput.element, 'files', { configurable: true, value: [archive] })
+    await folderInput.trigger('change')
+    expect(wrapper.get('[aria-label="补录待上传队列"]').text()).toContain('3 个文件 · 1 个补录作品')
+
+    Object.defineProperty(folderInput.element, 'files', { configurable: true, value: [first] })
+    await folderInput.trigger('change')
+    expect(wrapper.text()).toContain('本次新增 0 个文件')
+    expect(wrapper.text()).toContain('跳过 1 个队列内重复文件')
+    expect(wrapper.get('[aria-label="补录待上传队列"]').text()).toContain('3 个文件 · 1 个补录作品')
+
+    await wrapper.get('button[aria-label="移除待上传文件 补录文件夹/子目录/b.jpg"]').trigger('click')
+    expect(wrapper.get('[aria-label="补录待上传队列"]').text()).toContain('2 个文件 · 1 个补录作品')
+    expect(wrapper.text()).not.toContain('补录文件夹/子目录/b.jpg')
 
     await wrapper.findAll('button').find((button) => button.text().includes('上传 1 个补录作品'))!.trigger('click')
     await flushPromises()
@@ -150,18 +164,15 @@ describe('MySettlementPage supplement deletion', () => {
       uploadDirectoryId: 8,
       relativePath: '补录文件夹/a.png',
     }))
-    expect(mocks.uploadWorkbenchFile).toHaveBeenNthCalledWith(2, second, expect.objectContaining({
-      uploadDirectoryId: 8,
-      relativePath: '补录文件夹/子目录/b.jpg',
-    }))
-    expect(mocks.uploadWorkbenchFile).toHaveBeenNthCalledWith(3, archive, expect.objectContaining({
+    expect(mocks.uploadWorkbenchFile).toHaveBeenNthCalledWith(2, archive, expect.objectContaining({
       uploadDirectoryId: 8,
       relativePath: '补录文件夹/old.rar',
     }))
     expect(mocks.createSettlementSupplement).toHaveBeenCalledTimes(1)
     expect(mocks.createSettlementSupplement).toHaveBeenCalledWith(expect.objectContaining({
       order_no: '补录文件夹',
-      upload_session_ids: ['folder-session', 'folder-session', 'folder-session'],
+      upload_session_ids: ['folder-session', 'folder-session'],
     }))
+    expect(wrapper.find('[aria-label="补录待上传队列"]').exists()).toBe(false)
   })
 })

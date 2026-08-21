@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Eye, FolderOpen, Gift, Images, RefreshCw, Trash2, Upload, WalletCards } from 'lucide-vue-next'
+import { Eye, FolderOpen, Gift, Images, RefreshCw, Trash2, Upload, WalletCards, X } from 'lucide-vue-next'
 
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { buildSelfSupplementPayload, duplicateSupplementFileNames, filterSupplementUploadFiles } from '@aw/features/supplement/supplementUpload'
@@ -104,14 +104,30 @@ function todayDate() {
   return local.toISOString().slice(0, 10)
 }
 
+function supplementQueueFileKey(file: File) {
+  return `${driveUploadRelativePath(file).toLocaleLowerCase('zh-CN')}::${file.size}::${file.lastModified}`
+}
+
 function applySupplementFiles(files: File[] | FileList | null | undefined) {
   const candidates = Array.from(files ?? [])
   const safeFiles = candidates.filter((file) => isSafeDriveUploadPath(driveUploadRelativePath(file)))
   const selection = filterSupplementUploadFiles(safeFiles, selectedDirectory.value?.allowed_file_types ?? [])
   const ignored = selection.ignored + candidates.length - safeFiles.length
-  selectedFiles.value = selection.files
+  const queuedKeys = new Set(selectedFiles.value.map(supplementQueueFileKey))
+  const additions: File[] = []
+  let repeated = 0
+  for (const file of selection.files) {
+    const key = supplementQueueFileKey(file)
+    if (queuedKeys.has(key)) {
+      repeated += 1
+      continue
+    }
+    queuedKeys.add(key)
+    additions.push(file)
+  }
+  selectedFiles.value = [...selectedFiles.value, ...additions]
   fileSelectionNotice.value = selectedFiles.value.length
-    ? `已读取 ${formatInt(selectedFiles.value.length)} 个文件，归为 ${formatInt(selectedSupplementGroups.value.length)} 个补录作品${ignored ? `；忽略 ${formatInt(ignored)} 个空文件、隐藏路径或不符合目录格式限制的文件` : ''}`
+    ? `本次新增 ${formatInt(additions.length)} 个文件；待上传队列共 ${formatInt(selectedFiles.value.length)} 个文件，归为 ${formatInt(selectedSupplementGroups.value.length)} 个补录作品${repeated ? `；跳过 ${formatInt(repeated)} 个队列内重复文件` : ''}${ignored ? `；忽略 ${formatInt(ignored)} 个空文件、隐藏路径或不符合目录格式限制的文件` : ''}`
     : ''
   uploadError.value = selectedFiles.value.length
     ? ''
@@ -130,6 +146,7 @@ function supplementGroupName(group: { isFolder: boolean; items: Array<{ file: Fi
 function selectSupplementFiles(event: Event) {
   const input = event.target as HTMLInputElement | null
   applySupplementFiles(input?.files)
+  if (input) input.value = ''
 }
 
 async function dropSupplementFiles(event: DragEvent) {
@@ -137,10 +154,24 @@ async function dropSupplementFiles(event: DragEvent) {
   try {
     applySupplementFiles(await filesFromDriveDrop(event.dataTransfer))
   } catch (err) {
-    selectedFiles.value = []
-    fileSelectionNotice.value = ''
     uploadError.value = resolveApiUserMessage(err, { fallback: '读取文件夹失败，请改用“选择文件夹”' })
   }
+}
+
+function removeSupplementQueueFile(file: File) {
+  selectedFiles.value = selectedFiles.value.filter((item) => item !== file)
+  fileSelectionNotice.value = selectedFiles.value.length
+    ? `待上传队列共 ${formatInt(selectedFiles.value.length)} 个文件，归为 ${formatInt(selectedSupplementGroups.value.length)} 个补录作品`
+    : ''
+  uploadError.value = ''
+}
+
+function clearSupplementQueue() {
+  selectedFiles.value = []
+  fileSelectionNotice.value = ''
+  uploadError.value = ''
+  if (fileInput.value) fileInput.value.value = ''
+  if (folderInput.value) folderInput.value.value = ''
 }
 
 async function uploadSupplements() {
@@ -432,6 +463,31 @@ onMounted(() => {
           <input ref="folderInput" class="aw-visually-hidden" type="file" :accept="supplementAcceptString" multiple webkitdirectory directory aria-label="选择补录文件夹" @change="selectSupplementFiles" />
           <span v-if="fileSelectionNotice" class="aw-supplement-file-picker__notice">{{ fileSelectionNotice }}</span>
         </div>
+        <section v-if="selectedSupplementGroups.length" class="aw-form-grid__full aw-supplement-upload-queue" aria-label="补录待上传队列">
+          <header class="aw-supplement-upload-queue__header">
+            <div>
+              <strong>待上传队列</strong>
+              <span>{{ formatInt(selectedFiles.length) }} 个文件 · {{ formatInt(selectedSupplementGroups.length) }} 个补录作品</span>
+            </div>
+            <button class="aw-grid-button" type="button" :disabled="uploading" @click="clearSupplementQueue">清空队列</button>
+          </header>
+          <div class="aw-supplement-upload-queue__groups">
+            <article v-for="(group, groupIndex) in selectedSupplementGroups" :key="`${supplementGroupName(group)}-${groupIndex}`" class="aw-supplement-upload-queue__group">
+              <div class="aw-supplement-upload-queue__group-head">
+                <strong :title="supplementGroupName(group)">{{ supplementGroupName(group) }}</strong>
+                <span>{{ group.isFolder ? '文件夹作品' : '单文件作品' }} · {{ formatInt(group.items.length) }} 个文件</span>
+              </div>
+              <ul>
+                <li v-for="item in group.items" :key="supplementQueueFileKey(item.file)">
+                  <span :title="item.relativePath">{{ item.relativePath }}</span>
+                  <button type="button" :disabled="uploading" :aria-label="`移除待上传文件 ${item.relativePath}`" @click="removeSupplementQueueFile(item.file)">
+                    <X :size="14" aria-hidden="true" />
+                  </button>
+                </li>
+              </ul>
+            </article>
+          </div>
+        </section>
       </div>
       <p v-else class="aw-inline-alert aw-inline-alert--info">当前自然月没有补录权限；请先联系管理员申请，管理员可随时开放或关闭。</p>
 
@@ -443,7 +499,7 @@ onMounted(() => {
         <span v-if="selectedDirectory" class="aw-copy">按 {{ selectedDirectory.difficulty_class }} 类自动计价</span>
       </div>
       <p v-if="duplicateFilenames.length" class="aw-inline-alert aw-inline-alert--warning" role="alert">
-        同名提醒：{{ duplicateFilenames.join('、') }} 已存在或本次重复选择，请确认后再上传。
+        同名提醒：{{ duplicateFilenames.join('、') }} 已存在补录记录，请确认后再上传。
       </p>
       <p v-if="uploadError" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ uploadError }}</p>
       <p v-if="uploadNotice" class="aw-inline-alert">{{ uploadNotice }}</p>

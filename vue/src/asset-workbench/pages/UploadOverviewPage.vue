@@ -274,10 +274,6 @@ function fileOperationLabel(file: DriveFileRow) {
   return '正常上传'
 }
 
-function isSupplementOperation(file: DriveFileRow) {
-  return fileOperationLabel(file) !== '正常上传'
-}
-
 function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
   const rows: Array<[string, string]> = [
     ['上传人', fileOwnerLabel(file)],
@@ -920,6 +916,7 @@ onBeforeUnmount(() => {
             <col class="aw-upload-ledger__col-check" />
             <col class="aw-upload-ledger__col-thumb" />
             <col class="aw-upload-ledger__col-owner" />
+            <col class="aw-upload-ledger__col-source" />
             <col class="aw-upload-ledger__col-date" />
             <col class="aw-upload-ledger__col-dir" />
             <col class="aw-upload-ledger__col-name" />
@@ -942,6 +939,7 @@ onBeforeUnmount(() => {
                   <component :is="sortIcon('owner')" v-if="sortIcon('owner')" :size="13" />
                 </button>
               </th>
+              <th>操作来源</th>
               <th>
                 <button type="button" @click="setSort('created_at')">
                   创建时间
@@ -978,11 +976,11 @@ onBeforeUnmount(() => {
               <tr v-for="i in skeletonRowCount" :key="`skeleton-${i}`" class="aw-upload-ledger__row-skeleton" aria-hidden="true">
                 <td class="aw-upload-ledger__check"><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--dot" /></td>
                 <td><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--thumb" /></td>
-                <td colspan="10"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
+                <td colspan="11"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
               </tr>
             </template>
             <tr v-else-if="files.length === 0">
-              <td colspan="12">
+              <td colspan="13">
                 <div class="aw-upload-ledger__empty">
                   <Inbox :size="30" aria-hidden="true" />
                   <strong>没有匹配的上传记录</strong>
@@ -1017,7 +1015,9 @@ onBeforeUnmount(() => {
                 <td class="aw-upload-ledger__owner">
                   <strong :title="fileOwnerLabel(file)">{{ fileOwnerLabel(file) }}</strong>
                   <small v-if="fileOwnerSecondary(file)" :title="fileOwnerSecondary(file)">{{ fileOwnerSecondary(file) }}</small>
-                  <span v-if="isSupplementOperation(file)" class="aw-chip aw-upload-ledger__source" :class="file.operation_source === 'client_supplement' ? 'aw-chip--info' : 'aw-chip--neutral'">
+                </td>
+                <td class="aw-upload-ledger__source-cell">
+                  <span class="aw-chip aw-upload-ledger__source" :class="fileOperationLabel(file) === '正常上传' ? 'aw-chip--neutral' : 'aw-chip--info'" :title="fileOperationLabel(file)">
                     {{ fileOperationLabel(file) }}
                   </span>
                 </td>

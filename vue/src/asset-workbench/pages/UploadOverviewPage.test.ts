@@ -82,7 +82,10 @@ describe('UploadOverviewPage operation source', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('.aw-upload-ledger__source').text()).toBe('客户端补录')
+    const headers = wrapper.findAll('thead th').map((header) => header.text().trim())
+    expect(headers.slice(2, 5)).toEqual(['创建人', '操作来源', '创建时间'])
+    expect(wrapper.get('.aw-upload-ledger__owner').text()).not.toContain('客户端补录')
+    expect(wrapper.get('.aw-upload-ledger__source-cell').text()).toBe('客户端补录')
 
     await wrapper.get('tbody tr').trigger('click')
     expect(wrapper.get('.aw-upload-ledger__detail dl').text()).toContain('操作来源客户端补录')
@@ -127,6 +130,6 @@ describe('UploadOverviewPage operation source', () => {
     await flushPromises()
 
     expect(mocks.listSettlementSupplements).toHaveBeenCalledWith({ business_month: '2026-08', page: 1, page_size: 100 }, expect.any(AbortSignal))
-    expect(wrapper.get('.aw-upload-ledger__source').text()).toBe('补录')
+    expect(wrapper.get('.aw-upload-ledger__source-cell').text()).toBe('补录')
   })
 })
