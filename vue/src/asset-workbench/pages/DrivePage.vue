@@ -1235,7 +1235,14 @@ function isOperationalSearchHit(row: OverviewSearchRow): boolean {
 
 function includeUnifiedSearchHit(row: OverviewSearchRow): boolean {
   if (!isOperationalSearchHit(row)) return true
-  return clientPublishedView.value && row.source === 'client_material'
+  if (clientPublishedView.value) return row.source === 'client_material'
+  if (row.source !== 'system_asset') return false
+  const resourceID = row.locate?.resource_id
+    || row.locate?.source_ref
+    || stringFromMeta(row, 'resource_id')
+    || stringFromMeta(row, 'source_ref')
+    || row.primary_code
+  return normalizeMaterialSourceType(row.locate?.source_type || stringFromMeta(row, 'source_type'), resourceID) === 'external'
 }
 
 function searchHitMaterial(row: OverviewSearchRow): SystemAssetRow {
@@ -1759,11 +1766,11 @@ async function runUnifiedSearch() {
   }
   if (searchScope.value === 'operational') {
     activeMode.value = 'operational'
-    operationalViewMode.value = clientPublishedView.value ? 'paths' : 'resources'
+    operationalViewMode.value = 'paths'
     materialQuery.value = q
     resetSearchState(true)
-    if (clientPublishedView.value) void loadMaterials(q)
-    notice.value = `已在${clientPublishedView.value ? '已上架素材' : '主工程资源库'}中检索：${q}`
+    void loadMaterials(q)
+    notice.value = `已在${clientPublishedView.value ? '已上架素材' : '运营素材'}中检索：${q}`
     return
   }
   const requestID = ++searchRequestSeq
@@ -1872,11 +1879,11 @@ function scheduleUnifiedSearch() {
 async function locateSearchRow(row: OverviewSearchRow) {
   if (row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material') {
     activeMode.value = 'operational'
-    operationalViewMode.value = clientPublishedView.value ? 'paths' : 'resources'
+    operationalViewMode.value = 'paths'
     materialQuery.value = row.secondary_code || row.primary_code || row.title || ''
     searchActive.value = false
-    if (clientPublishedView.value) void loadMaterials(materialQuery.value)
-    const libraryLabel = clientPublishedView.value ? '已上架素材' : '主工程资源库'
+    void loadMaterials(materialQuery.value)
+    const libraryLabel = clientPublishedView.value ? '已上架素材' : '运营素材'
     notice.value = materialQuery.value ? `已在${libraryLabel}中检索：${materialQuery.value}` : `已打开${libraryLabel}`
     return
   }

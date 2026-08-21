@@ -7,6 +7,7 @@ const browseMaterials = vi.hoisted(() => vi.fn())
 const listClientMaterials = vi.hoisted(() => vi.fn())
 const batchUpdateClientMaterials = vi.hoisted(() => vi.fn())
 const overviewSearch = vi.hoisted(() => vi.fn())
+const systemSearch = vi.hoisted(() => vi.fn())
 const previewClientMaterial = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-router', async (loadOriginal) => {
@@ -34,6 +35,7 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
       browseMaterials,
       batchUpdateClientMaterials,
       overviewSearch,
+      systemSearch,
       previewClientMaterial,
     },
   }
@@ -57,6 +59,7 @@ describe('DrivePage operational browsing', () => {
       requested: 1, created: 1, updated: 0, removed: 0, skipped: 0, failed: 0, items: [], failures: [], async_required: false,
     })
     overviewSearch.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 60 })
+    systemSearch.mockResolvedValue({ items: [], total: 0, page: 1, size: 100 })
     previewClientMaterial.mockResolvedValue({ download_mode: 'direct', download_url: 'https://preview.test/client.png', filename: 'client.png', mime_type: 'image/png' })
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -263,5 +266,91 @@ describe('DrivePage operational browsing', () => {
     expect(wrapper.text()).toContain('DZK000394 已上架素材')
     expect(wrapper.text()).not.toContain('未发布主工程素材')
     expect(wrapper.text()).toContain('共 1 条')
+  })
+
+  it('keeps external operational hits in admin all-scope search without exposing raw system task assets', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 1, display_name: 'admin' },
+      is_admin: true,
+      capabilities: ['asset.workbench.manage', 'asset.workbench.material.download', 'asset.publish'],
+    } as never)
+    overviewSearch.mockResolvedValue({
+      items: [
+        {
+          source: 'system_asset', scope: 'operational', source_label: '外部资源', id: 18303241,
+          title: 'HSC11066 定制KT板.psd', primary_code: 'ext-18303241', status: 'indexed',
+          created_at: '2026-07-13T00:00:00Z', updated_at: '2026-08-21T00:00:00Z', route_path: '/drive?scope=operational&asset_id=18303241',
+          meta_json: { source_type: 'external', resource_id: 'ext-18303241', file_name: 'HSC11066 定制KT板.psd', mime_type: 'image/vnd.adobe.photoshop' },
+        },
+        {
+          source: 'system_asset', scope: 'operational', source_label: '系统资源', id: 9001,
+          title: '主工程原始任务素材', primary_code: '9001', status: 'active',
+          created_at: '2026-08-20T00:00:00Z', updated_at: '2026-08-20T00:00:00Z', route_path: '/drive?scope=operational&asset_id=9001',
+          meta_json: { source_type: 'system', resource_id: '9001' },
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 60,
+    })
+    const wrapper = shallowMount(DrivePage, {
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('HSC11066')
+    await wrapper.get('form.aw-drive__search--global').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('HSC11066 定制KT板.psd')
+    expect(wrapper.text()).not.toContain('主工程原始任务素材')
+    expect(wrapper.text()).toContain('共 1 条')
+  })
+
+  it('routes admin operational search to the unified path catalog', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 1, display_name: 'admin' },
+      is_admin: true,
+      capabilities: ['asset.workbench.manage', 'asset.workbench.material.download', 'asset.publish'],
+    } as never)
+    systemSearch.mockResolvedValue({
+      items: [{
+        id: 18303241,
+        resource_id: 'ext-18303241',
+        source_type: 'external',
+        source_label: '外部资源',
+        file_name: 'HSC11066 定制KT板.psd',
+        original_filename: 'HSC11066 定制KT板.psd',
+        mime_type: 'image/vnd.adobe.photoshop',
+        origin_path: '/quark/kt板/HSC11066 定制KT板.psd',
+      }],
+      total: 1,
+      page: 1,
+      size: 100,
+    })
+    const wrapper = shallowMount(DrivePage, {
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('select[aria-label="搜索范围"]').setValue('operational')
+    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('HSC11066')
+    await wrapper.get('form.aw-drive__search--global').trigger('submit')
+    await flushPromises()
+
+    expect(systemSearch).toHaveBeenCalledWith(expect.objectContaining({ q: 'HSC11066', source: 'all' }), expect.any(AbortSignal))
+    expect(wrapper.findComponent({ name: 'ResourceLibraryPanel' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('HSC11066 定制KT板.psd')
+    expect(wrapper.text()).toContain('已在运营素材中检索：HSC11066')
   })
 })
