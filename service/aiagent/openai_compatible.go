@@ -54,11 +54,12 @@ type openAIChatMessage struct {
 }
 
 type openAIChatRequest struct {
-	Model       string              `json:"model"`
-	Messages    []openAIChatMessage `json:"messages"`
-	MaxTokens   int                 `json:"max_tokens,omitempty"`
-	Temperature float64             `json:"temperature,omitempty"`
-	Stream      bool                `json:"stream"`
+	Model          string              `json:"model"`
+	Messages       []openAIChatMessage `json:"messages"`
+	MaxTokens      int                 `json:"max_tokens,omitempty"`
+	Temperature    float64             `json:"temperature,omitempty"`
+	Stream         bool                `json:"stream"`
+	EnableThinking *bool               `json:"enable_thinking,omitempty"`
 }
 
 type openAIChatResponse struct {
@@ -212,7 +213,12 @@ func (c *OpenAICompatibleClient) requestBody(request ChatRequest, stream bool) o
 		}
 		messages = append(messages, openAIChatMessage{Role: role, Content: message.Content})
 	}
-	return openAIChatRequest{Model: c.cfg.Model, Messages: messages, MaxTokens: maxTokens, Temperature: request.Temperature, Stream: stream}
+	body := openAIChatRequest{Model: c.cfg.Model, Messages: messages, MaxTokens: maxTokens, Temperature: request.Temperature, Stream: stream}
+	if c.cfg.DisableThinking {
+		disabled := false
+		body.EnableThinking = &disabled
+	}
+	return body
 }
 
 func (c *OpenAICompatibleClient) do(ctx context.Context, raw []byte, accept string) ([]byte, error) {

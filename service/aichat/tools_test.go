@@ -94,12 +94,16 @@ func TestValidateAnalysisPlanRejectsUnknownTooManyAndInvalidDates(t *testing.T) 
 }
 
 func TestAnalysisDateRangeUsesBeijingBusinessDays(t *testing.T) {
-	from, to := analysisDateRange(AnalysisToolCall{From: "2026-08-15", To: "2026-08-21"}, time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC))
+	from, to := analysisDateRange(AnalysisToolCall{From: "2026-08-15", To: "2026-08-21"}, "", time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC))
 	if got := from.Format(time.RFC3339); got != "2026-08-15T00:00:00+08:00" {
 		t.Fatalf("from = %s", got)
 	}
 	if got := to.Format(time.RFC3339); got != "2026-08-22T00:00:00+08:00" {
 		t.Fatalf("to = %s", got)
+	}
+	from, to = analysisDateRange(AnalysisToolCall{}, "统计最近7天每天的设计产能", time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC))
+	if from.Format("2006-01-02") != "2026-08-15" || to.Format("2006-01-02") != "2026-08-22" {
+		t.Fatalf("relative range = %s..%s", from, to)
 	}
 }
 

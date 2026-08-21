@@ -24,6 +24,7 @@ type Config struct {
 	BaseURL         string
 	APIKey          string
 	Model           string
+	DisableThinking bool
 	Timeout         time.Duration
 	MaxTokens       int
 	RateLimitWindow time.Duration

@@ -73,6 +73,7 @@ type AIConfig struct {
 	BaseURL         string
 	APIKey          string
 	Model           string
+	DisableThinking bool
 	Timeout         time.Duration
 	MaxTokens       int
 	RateLimitWindow time.Duration
@@ -456,6 +457,7 @@ func Load() (*Config, error) {
 			BaseURL:         getEnv("AI_AGENT_BASE_URL", ""),
 			APIKey:          getEnv("AI_AGENT_API_KEY", ""),
 			Model:           getEnv("AI_AGENT_MODEL", ""),
+			DisableThinking: mustParseBool(getEnv("AI_AGENT_DISABLE_THINKING", "false")),
 			Timeout:         mustParseDuration(getEnv("AI_AGENT_TIMEOUT", "30s")),
 			MaxTokens:       mustParseInt(getEnv("AI_AGENT_MAX_TOKENS", "900")),
 			RateLimitWindow: mustParseDuration(getEnv("AI_AGENT_RATE_LIMIT_WINDOW", "5h")),

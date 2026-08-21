@@ -19,7 +19,7 @@ func TestOpenAICompatibleClientCompleteText(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Model != "test-model" || len(body.Messages) != 2 || body.Messages[0].Role != "system" || body.Stream {
+		if body.Model != "test-model" || len(body.Messages) != 2 || body.Messages[0].Role != "system" || body.Stream || body.EnableThinking == nil || *body.EnableThinking {
 			t.Fatalf("body = %+v", body)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -27,7 +27,7 @@ func TestOpenAICompatibleClientCompleteText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenAICompatibleClient(Config{Enabled: true, Provider: "openai_compatible", BaseURL: server.URL + "/v1", APIKey: "test-key", Model: "test-model", HTTP: server.Client()}, nil)
+	client := NewOpenAICompatibleClient(Config{Enabled: true, Provider: "openai_compatible", BaseURL: server.URL + "/v1", APIKey: "test-key", Model: "test-model", DisableThinking: true, HTTP: server.Client()}, nil)
 	text, result, err := client.CompleteText(context.Background(), ChatRequest{Scene: "plan", System: "system", Messages: []ChatMessage{{Role: "user", Content: "question"}}, MaxTokens: 500})
 	if err != nil || text != `{"tools":[]}` || result.Model != "served-model" || result.InputTokens != 12 || result.OutputTokens != 5 {
 		t.Fatalf("text=%q result=%+v err=%v", text, result, err)

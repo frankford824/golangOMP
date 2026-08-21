@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -155,7 +156,7 @@ func (o *ToolOrchestrator) execute(ctx context.Context, actor domain.RequestActo
 		if !domain.ActorHasPermission(actor, domain.PermissionTaskView) {
 			return []domain.AIRetrievalHit{}, domain.AIRetrievalMeta{Mode: "exact", Reason: "task_scope_denied"}, nil
 		}
-		from, to := analysisDateRange(call, time.Now().UTC())
+		from, to := analysisDateRange(call, query, time.Now().UTC())
 		var hits []domain.AIRetrievalHit
 		var err error
 		switch call.Name {
@@ -175,7 +176,9 @@ func (o *ToolOrchestrator) execute(ctx context.Context, actor domain.RequestActo
 	return hits, meta, err
 }
 
-func analysisDateRange(call AnalysisToolCall, now time.Time) (time.Time, time.Time) {
+var relativeAnalysisDaysPattern = regexp.MustCompile(`(?i)(?:最近|过去|近|last)\s*(\d{1,3})\s*(?:天|days?)`)
+
+func analysisDateRange(call AnalysisToolCall, question string, now time.Time) (time.Time, time.Time) {
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		location = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -187,6 +190,11 @@ func analysisDateRange(call AnalysisToolCall, now time.Time) (time.Time, time.Ti
 	}
 	localNow := now.In(location)
 	today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	if match := relativeAnalysisDaysPattern.FindStringSubmatch(strings.TrimSpace(question)); len(match) == 2 {
+		if days, parseErr := strconv.Atoi(match[1]); parseErr == nil && days >= 1 && days <= 366 {
+			return today.AddDate(0, 0, -days+1), today.AddDate(0, 0, 1)
+		}
+	}
 	return today.AddDate(0, 0, -29), today.AddDate(0, 0, 1)
 }
 
@@ -198,7 +206,7 @@ func (o *ToolOrchestrator) plan(ctx context.Context, question string) (AnalysisP
 		Scene: "data_center_tool_plan",
 		System: `你是只读数据分析规划器。仅返回 JSON，不要解释。格式：{"tools":[{"name":"global_search","query":"..."}]}。
 最多 3 个工具。允许：global_search、task_detail、resource_group_detail、task_kpi、business_trends、experience_summary。
-任务量、设计图量、人员产能、每日趋势和完成情况必须使用 task_kpi，并尽量提供北京时间 from/to（YYYY-MM-DD）。
+任务量、设计图量、人员产能、每日趋势和完成情况必须使用 task_kpi。日期范围必须写在工具对象的 from/to 字段（YYYY-MM-DD），不得写进 query 文本。
 禁止 SQL、写入、上传、发布或改变状态。`,
 		Messages:  []aiagent.ChatMessage{{Role: "user", Content: truncateRunes(question, 4000)}},
 		MaxTokens: 500, Temperature: 0,

@@ -445,7 +445,8 @@ func main() {
 	aiChatProviderConfig := aiagentsvc.Config{
 		Enabled: cfg.AI.Enabled && cfg.AIChat.Enabled, Provider: cfg.AI.Provider,
 		BaseURL: cfg.AI.BaseURL, APIKey: cfg.AI.APIKey, Model: cfg.AI.Model,
-		Timeout: cfg.AIChat.ProviderTimeout, MaxTokens: cfg.AI.MaxTokens,
+		DisableThinking: cfg.AI.DisableThinking,
+		Timeout:         cfg.AIChat.ProviderTimeout, MaxTokens: cfg.AI.MaxTokens,
 		RateLimitWindow: cfg.AI.RateLimitWindow, RateLimitMax: cfg.AI.RateLimitMax,
 		RateLimiter: aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
 	}
