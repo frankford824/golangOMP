@@ -58,13 +58,14 @@ func NewToolOrchestrator(provider aiagent.ChatProvider, retriever EvidenceRetrie
 	return o
 }
 
-func (o *ToolOrchestrator) Gather(ctx context.Context, actor domain.RequestActor, question string, limit int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error) {
+func (o *ToolOrchestrator) Gather(ctx context.Context, actor domain.RequestActor, question string, history []domain.AIMessage, limit int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error) {
 	if o == nil || o.retriever == nil {
 		return nil, domain.AIRetrievalMeta{}, fmt.Errorf("analysis retrieval is unavailable")
 	}
-	plan, err := o.plan(ctx, question)
+	planningQuestion := buildAnalysisPlanningQuestion(question, history, 8, 4000)
+	plan, err := o.plan(ctx, planningQuestion)
 	if err != nil || len(plan.Tools) == 0 {
-		hits, meta, searchErr := o.retriever.Search(ctx, actor, question, limit)
+		hits, meta, searchErr := o.retriever.Search(ctx, actor, planningQuestion, limit)
 		if searchErr == nil {
 			meta.Reason = "planner_fallback"
 		}
@@ -85,9 +86,9 @@ func (o *ToolOrchestrator) Gather(ctx context.Context, actor domain.RequestActor
 			call := plan.Tools[index]
 			query := strings.TrimSpace(call.Query)
 			if query == "" {
-				query = question
+				query = planningQuestion
 			}
-			hits, meta, searchErr := o.execute(ctx, actor, call, query, question, max(limit, 20))
+			hits, meta, searchErr := o.execute(ctx, actor, call, query, planningQuestion, max(limit, 20))
 			results[index] = result{hits: hits, meta: meta, err: searchErr}
 		}()
 	}
@@ -111,7 +112,7 @@ func (o *ToolOrchestrator) Gather(ctx context.Context, actor domain.RequestActor
 		}
 	}
 	if succeeded == 0 {
-		hits, fallbackMeta, fallbackErr := o.retriever.Search(ctx, actor, question, limit)
+		hits, fallbackMeta, fallbackErr := o.retriever.Search(ctx, actor, planningQuestion, limit)
 		if fallbackErr != nil {
 			return nil, meta, fallbackErr
 		}
@@ -135,7 +136,7 @@ func (o *ToolOrchestrator) execute(ctx context.Context, actor domain.RequestActo
 		if o.registry == nil {
 			return nil, domain.AIRetrievalMeta{}, fmt.Errorf("analytics tool registry is unavailable")
 		}
-		arguments := analyticsToolArguments(call)
+		arguments := analyticsToolArguments(call, originalQuestion)
 		output, appErr := o.registry.Call(ctx, actor, call.Name, arguments)
 		if appErr != nil {
 			return nil, domain.AIRetrievalMeta{}, fmt.Errorf("analytics tool %s: %s", call.Name, appErr.Message)
@@ -348,7 +349,7 @@ func isUnifiedAnalyticsTool(name string) bool {
 	}
 }
 
-func analyticsToolArguments(call AnalysisToolCall) map[string]interface{} {
+func analyticsToolArguments(call AnalysisToolCall, question string) map[string]interface{} {
 	arguments := make(map[string]interface{}, len(call.Arguments)+8)
 	for key, value := range call.Arguments {
 		arguments[key] = value
@@ -377,7 +378,47 @@ func analyticsToolArguments(call AnalysisToolCall) map[string]interface{} {
 	if _, ok := arguments["limit"]; !ok && call.Limit > 0 {
 		arguments["limit"] = call.Limit
 	}
+	// The user's relative date expression is authoritative. This also carries
+	// an earlier turn such as "最近七天" into a short follow-up like "具体人员".
+	if match := relativeAnalysisDaysPattern.FindStringSubmatch(strings.TrimSpace(question)); len(match) == 2 {
+		if days := parseRelativeAnalysisDays(match[1]); days >= 1 && days <= 366 {
+			arguments["days"] = days
+		}
+	}
+	arguments["_question"] = truncateRunes(strings.TrimSpace(question), 4000)
 	return arguments
+}
+
+func buildAnalysisPlanningQuestion(current string, history []domain.AIMessage, maxUserTurns, maxChars int) string {
+	current = strings.TrimSpace(current)
+	if maxUserTurns <= 0 {
+		maxUserTurns = 8
+	}
+	userTurns := make([]string, 0, maxUserTurns)
+	for index := len(history) - 1; index >= 0 && len(userTurns) < maxUserTurns; index-- {
+		message := history[index]
+		content := strings.TrimSpace(message.Content)
+		if message.Role != domain.AIMessageRoleUser || content == "" || content == current {
+			continue
+		}
+		userTurns = append(userTurns, content)
+	}
+	for left, right := 0, len(userTurns)-1; left < right; left, right = left+1, right-1 {
+		userTurns[left], userTurns[right] = userTurns[right], userTurns[left]
+	}
+	if len(userTurns) == 0 {
+		return truncateRunes(current, maxChars)
+	}
+	var builder strings.Builder
+	builder.WriteString("对话中的用户查询上下文（旧到新，仅用于补全当前只读查询）：\n")
+	for _, turn := range userTurns {
+		builder.WriteString("- ")
+		builder.WriteString(turn)
+		builder.WriteByte('\n')
+	}
+	builder.WriteString("当前问题：")
+	builder.WriteString(current)
+	return truncateRunes(builder.String(), maxChars)
 }
 
 func filterToolHits(tool, entityID string, hits []domain.AIRetrievalHit) []domain.AIRetrievalHit {

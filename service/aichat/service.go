@@ -33,7 +33,7 @@ type EvidenceRetriever interface {
 }
 
 type AnalysisOrchestrator interface {
-	Gather(ctx context.Context, actor domain.RequestActor, question string, limit int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error)
+	Gather(ctx context.Context, actor domain.RequestActor, question string, history []domain.AIMessage, limit int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error)
 }
 
 type Config struct {
@@ -299,11 +299,15 @@ func (s *Service) StreamMessage(ctx context.Context, actor domain.RequestActor, 
 	if s.retriever == nil {
 		return s.failStream(assistantMessage, "retrieval_unavailable", errors.New("retrieval service is unavailable"), emit)
 	}
+	history, historyErr := s.repo.ListMessages(ctx, conversation.ID, 200)
+	if historyErr != nil {
+		return s.failStream(assistantMessage, "history_load_failed", historyErr, emit)
+	}
 	var hits []domain.AIRetrievalHit
 	var retrievalMeta domain.AIRetrievalMeta
 	var retrievalErr error
 	if s.analysis != nil {
-		hits, retrievalMeta, retrievalErr = s.analysis.Gather(ctx, actor, content, s.config.MaxEvidence)
+		hits, retrievalMeta, retrievalErr = s.analysis.Gather(ctx, actor, content, history, s.config.MaxEvidence)
 	} else {
 		hits, retrievalMeta, retrievalErr = s.retriever.Search(ctx, actor, content, s.config.MaxEvidence)
 	}
@@ -319,10 +323,6 @@ func (s *Service) StreamMessage(ctx context.Context, actor domain.RequestActor, 
 	}
 	if err := emit(domain.AISSEEvent{Type: "status", Data: map[string]any{"stage": "generating", "label": "正在整理分析结论"}}); err != nil {
 		return s.cancelStream(assistantMessage, "client_disconnected", "", emit)
-	}
-	history, historyErr := s.repo.ListMessages(ctx, conversation.ID, 200)
-	if historyErr != nil {
-		return s.failStream(assistantMessage, "history_load_failed", historyErr, emit)
 	}
 	requestMessages := buildProviderMessages(history, userMessage.ID, assistantMessage.ID, s.config.MaxRecentTurns, s.config.MaxContextChars)
 	systemPrompt := buildSystemPrompt(sources)

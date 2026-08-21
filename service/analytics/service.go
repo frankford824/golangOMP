@@ -115,6 +115,10 @@ func (s *Service) queryMetric(ctx context.Context, actor domain.RequestActor, to
 	groupBy := argumentString(arguments, "group_by")
 	if tool == "query_timeseries" {
 		groupBy = "day"
+	} else if inferred := inferAnalyticsGroupBy(argumentString(arguments, "_question")); inferred != "" && analyticsGroupIsAllowed(definition.AllowedGroupBys, inferred) {
+		// Explicit wording from the user wins over a planner-selected dimension.
+		// This is semantic validation, not a per-question metric implementation.
+		groupBy = inferred
 	}
 	if groupBy == "" {
 		groupBy = "day"
@@ -147,6 +151,43 @@ func (s *Service) queryMetric(ctx context.Context, actor domain.RequestActor, to
 	output := structuredOutput(result)
 	output.Hits = hits
 	return output, nil
+}
+
+func inferAnalyticsGroupBy(question string) string {
+	question = strings.ToLower(strings.TrimSpace(question))
+	if question == "" {
+		return ""
+	}
+	groups := []struct {
+		name     string
+		keywords []string
+	}{
+		{name: "person", keywords: []string{"设计师", "人员", "姓名", "员工", "谁", "个人"}},
+		{name: "department", keywords: []string{"部门"}},
+		{name: "team", keywords: []string{"团队", "小组", "组别"}},
+		{name: "task_type", keywords: []string{"任务类型", "任务类别", "类型分布"}},
+		{name: "day", keywords: []string{"每天", "每日", "按天", "逐日", "日趋势", "时间趋势"}},
+		{name: "page", keywords: []string{"页面"}},
+		{name: "route", keywords: []string{"接口", "路径", "api"}},
+		{name: "outcome", keywords: []string{"结果分布", "成功失败", "成功率", "失败率"}},
+	}
+	for _, group := range groups {
+		for _, keyword := range group.keywords {
+			if strings.Contains(question, keyword) {
+				return group.name
+			}
+		}
+	}
+	return ""
+}
+
+func analyticsGroupIsAllowed(allowed []string, candidate string) bool {
+	for _, value := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) traceEntity(ctx context.Context, actor domain.RequestActor, arguments map[string]interface{}) (*ToolOutput, *domain.AppError) {

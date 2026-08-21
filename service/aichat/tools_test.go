@@ -3,6 +3,7 @@ package aichat
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,16 @@ type unifiedAnalyticsRepoStub struct{}
 func (unifiedAnalyticsRepoStub) QueryMetric(context.Context, domain.ResourceGroupAccessFilter, domain.AnalyticsMetricDefinition, domain.AnalyticsMetricQuery) (*domain.AnalyticsMetricResult, error) {
 	return &domain.AnalyticsMetricResult{MetricID: "page_views", MetricName: "页面访问", Rows: []domain.AnalyticsMetricRow{{Key: "数据中心", Label: "数据中心", EventCount: 8}}}, nil
 }
+
+type recordingUnifiedAnalyticsRepoStub struct{ query domain.AnalyticsMetricQuery }
+
+func (s *recordingUnifiedAnalyticsRepoStub) QueryMetric(_ context.Context, _ domain.ResourceGroupAccessFilter, definition domain.AnalyticsMetricDefinition, query domain.AnalyticsMetricQuery) (*domain.AnalyticsMetricResult, error) {
+	s.query = query
+	return &domain.AnalyticsMetricResult{MetricID: definition.ID, MetricName: definition.Name, From: query.From, To: query.To, GroupBy: query.GroupBy, Rows: []domain.AnalyticsMetricRow{{Key: "9", Label: "王亚琳", EventCount: 3, TaskCount: 3, ActorCount: 1}}}, nil
+}
+func (*recordingUnifiedAnalyticsRepoStub) TraceEntity(context.Context, domain.ResourceGroupAccessFilter, domain.AnalyticsTraceQuery) ([]domain.AIRetrievalHit, error) {
+	return nil, nil
+}
 func (unifiedAnalyticsRepoStub) TraceEntity(context.Context, domain.ResourceGroupAccessFilter, domain.AnalyticsTraceQuery) ([]domain.AIRetrievalHit, error) {
 	return []domain.AIRetrievalHit{}, nil
 }
@@ -25,6 +36,20 @@ type toolProviderStub struct {
 	ready bool
 	plan  string
 	err   error
+}
+
+type capturingToolProviderStub struct {
+	plan    string
+	request aiagent.ChatRequest
+}
+
+func (*capturingToolProviderStub) Ready() bool { return true }
+func (s *capturingToolProviderStub) CompleteText(_ context.Context, request aiagent.ChatRequest) (string, aiagent.ChatStreamResult, error) {
+	s.request = request
+	return s.plan, aiagent.ChatStreamResult{}, nil
+}
+func (*capturingToolProviderStub) Stream(context.Context, aiagent.ChatRequest, func(string) error) (aiagent.ChatStreamResult, error) {
+	return aiagent.ChatStreamResult{}, nil
 }
 
 func (s toolProviderStub) Ready() bool { return s.ready }
@@ -138,7 +163,7 @@ func TestToolOrchestratorUsesScopedMySQLAnalysisEvidence(t *testing.T) {
 	retriever := &evidenceRetrieverStub{}
 	analytics := &analysisRepoStub{kpi: []domain.AIRetrievalHit{{DocumentID: "kpi:1", EntityType: "task_kpi", Score: 1}}}
 	actor := actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView)
-	hits, meta, err := NewToolOrchestrator(provider, retriever, analytics).Gather(context.Background(), actor, "最近任务完成情况", 20)
+	hits, meta, err := NewToolOrchestrator(provider, retriever, analytics).Gather(context.Background(), actor, "最近任务完成情况", nil, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,9 +181,37 @@ func TestToolOrchestratorUsesUnifiedAnalyticsRegistry(t *testing.T) {
 	legacy := &analysisRepoStub{}
 	orchestrator := NewToolOrchestrator(provider, retriever, legacy)
 	orchestrator.SetAnalyticsTools(analyticssvc.NewService(unifiedAnalyticsRepoStub{}, legacy))
-	hits, _, err := orchestrator.Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "最近七天页面访问分布", 20)
+	hits, _, err := orchestrator.Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "最近七天页面访问分布", nil, 20)
 	if err != nil || len(hits) != 1 || hits[0].EntityType != "analytics_metric" || retriever.calls != 0 {
 		t.Fatalf("hits=%+v retrieval_calls=%d err=%v", hits, retriever.calls, err)
+	}
+}
+
+func TestToolOrchestratorCarriesConversationContextAndCorrectsPersonDimension(t *testing.T) {
+	provider := &capturingToolProviderStub{plan: `{"tools":[{"name":"query_distribution","arguments":{"metric_id":"task_design_submitted","group_by":"task_type","from":"2025-04-02","to":"2025-04-08"}}]}`}
+	repository := &recordingUnifiedAnalyticsRepoStub{}
+	orchestrator := NewToolOrchestrator(provider, &evidenceRetrieverStub{}, &analysisRepoStub{})
+	orchestrator.SetAnalyticsTools(analyticssvc.NewService(repository, &analysisRepoStub{}))
+	history := []domain.AIMessage{
+		{Role: domain.AIMessageRoleUser, Content: "最近七天的设计师提交任务分布"},
+		{Role: domain.AIMessageRoleAssistant, Content: "已有汇总，但未列姓名"},
+		{Role: domain.AIMessageRoleUser, Content: "具体人员"},
+	}
+	hits, _, err := orchestrator.Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "姓名：王亚琳", history, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.request.Messages) != 1 || !strings.Contains(provider.request.Messages[0].Content, "最近七天的设计师提交任务分布") || !strings.Contains(provider.request.Messages[0].Content, "姓名：王亚琳") {
+		t.Fatalf("planner request lost conversation context: %+v", provider.request.Messages)
+	}
+	if repository.query.GroupBy != "person" {
+		t.Fatalf("group_by=%q want person", repository.query.GroupBy)
+	}
+	if got := repository.query.From.Format("2006-01-02"); got == "2025-04-02" {
+		t.Fatalf("stale planner date was accepted: %+v", repository.query)
+	}
+	if len(hits) != 1 || !strings.Contains(hits[0].Title, "王亚琳") {
+		t.Fatalf("hits=%+v", hits)
 	}
 }
 
@@ -170,7 +223,7 @@ func TestToolOrchestratorLoadsEntityDetailThroughExactScopedTool(t *testing.T) {
 		group: []domain.AIRetrievalHit{{DocumentID: "task_resource_group:81", EntityType: "task_resource_group", Score: 1}},
 	}
 	actor := actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView, domain.PermissionAssetView)
-	hits, _, err := NewToolOrchestrator(provider, retriever, analytics).Gather(context.Background(), actor, "查看任务和资源组", 20)
+	hits, _, err := NewToolOrchestrator(provider, retriever, analytics).Gather(context.Background(), actor, "查看任务和资源组", nil, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +235,7 @@ func TestToolOrchestratorLoadsEntityDetailThroughExactScopedTool(t *testing.T) {
 func TestToolOrchestratorFailsClosedWithoutTaskView(t *testing.T) {
 	provider := toolProviderStub{ready: true, plan: `{"tools":[{"name":"task_kpi"}]}`}
 	analytics := &analysisRepoStub{kpi: []domain.AIRetrievalHit{{DocumentID: "must-not-leak"}}}
-	hits, meta, err := NewToolOrchestrator(provider, &evidenceRetrieverStub{}, analytics).Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView), "KPI", 20)
+	hits, meta, err := NewToolOrchestrator(provider, &evidenceRetrieverStub{}, analytics).Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView), "KPI", nil, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +247,7 @@ func TestToolOrchestratorFailsClosedWithoutTaskView(t *testing.T) {
 func TestToolOrchestratorPlannerFailureFallsBackToSharedRetrieval(t *testing.T) {
 	retriever := &evidenceRetrieverStub{hits: []domain.AIRetrievalHit{{DocumentID: "task:1"}}}
 	o := NewToolOrchestrator(toolProviderStub{ready: true, err: errors.New("provider down")}, retriever)
-	hits, meta, err := o.Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "查任务", 20)
+	hits, meta, err := o.Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "查任务", nil, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +260,7 @@ func TestToolOrchestratorRuntimeFailureFallsBackToSharedRetrieval(t *testing.T) 
 	retriever := &evidenceRetrieverStub{hits: []domain.AIRetrievalHit{{DocumentID: "task:fallback"}}}
 	analytics := &analysisRepoStub{err: errors.New("analytics unavailable")}
 	provider := toolProviderStub{ready: true, plan: `{"tools":[{"name":"task_kpi"},{"name":"business_trends"}]}`}
-	hits, meta, err := NewToolOrchestrator(provider, retriever, analytics).Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "经营情况", 20)
+	hits, meta, err := NewToolOrchestrator(provider, retriever, analytics).Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "经营情况", nil, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

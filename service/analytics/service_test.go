@@ -56,6 +56,18 @@ func TestAnalyticsServiceCatalogAndGenericQuery(t *testing.T) {
 	}
 }
 
+func TestAnalyticsServiceUsesExplicitQuestionDimension(t *testing.T) {
+	repository := &analyticsRepoStub{result: &domain.AnalyticsMetricResult{MetricID: "task_design_submitted", MetricName: "设计提交"}}
+	service := NewService(repository, &legacyAnalyticsStub{})
+	_, appErr := service.Call(context.Background(), analyticsActor(), "query_distribution", map[string]interface{}{
+		"metric_id": "task_design_submitted", "group_by": "task_type", "days": 7,
+		"_question": "最近七天的设计师提交任务分布，具体人员姓名",
+	})
+	if appErr != nil || repository.query.GroupBy != "person" {
+		t.Fatalf("query=%+v err=%+v", repository.query, appErr)
+	}
+}
+
 func TestAnalyticsServiceDerivedMetricUsesCompatibilityExecutor(t *testing.T) {
 	legacy := &legacyAnalyticsStub{hits: []domain.AIRetrievalHit{{DocumentID: "kpi:summary", EntityType: "task_kpi", Score: 1}}}
 	service := NewService(&analyticsRepoStub{}, legacy)
