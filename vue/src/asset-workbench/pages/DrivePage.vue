@@ -471,7 +471,9 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
           { key: 'refresh_drive', label: '刷新', tone: 'neutral', disabled: filesLoading.value },
           { key: 'select_all_files', label: activeMode.value === 'uploads' ? '全选当前页' : '全选当前文件', tone: 'neutral', disabled: activeMode.value !== 'uploads' && !selectedDir.value || files.value.length === 0 },
           { key: 'download_selected', label: '下载所选', tone: 'success', disabled: selectedFileActionIds.value.length === 0 },
-          { key: 'open_drive_upload', label: '上传到此处', tone: 'success', disabled: activeMode.value === 'uploads' || !selectedDir.value },
+          ...(canManageDrive.value
+            ? [{ key: 'open_drive_upload', label: '上传到此处', tone: 'success' as const, disabled: activeMode.value === 'uploads' || !selectedDir.value }]
+            : []),
         ],
         sheets: [
           {
@@ -1999,7 +2001,7 @@ async function downloadSelectedFiles() {
 }
 
 function openUpload(files: File[] = []) {
-  if (!selectedDir.value) return
+  if (!canManageDrive.value || !selectedDir.value) return
   uploadInitialFiles.value = files
   uploadDialogKey.value += 1
   uploadOpen.value = true
@@ -2032,12 +2034,14 @@ function filesFromDrop(event: DragEvent) {
 }
 
 function dropOnDirectory(event: DragEvent, dir: DriveDirectoryRow) {
+  if (!canManageDrive.value) return
   const dropped = filesFromDrop(event)
   if (!dropped.length) return
   void selectDir(dir, true).then(() => openUpload(dropped))
 }
 
 function dropOnCurrentDirectory(event: DragEvent) {
+  if (!canManageDrive.value) return
   const dropped = filesFromDrop(event)
   if (!dropped.length || !selectedDir.value) return
   openUpload(dropped)
@@ -3503,6 +3507,7 @@ onBeforeUnmount(() => {
                 {{ driveSpreadsheetOpen ? '收起清单模式' : '清单模式' }}
               </button>
               <button
+                v-if="canManageDrive"
                 class="aw-primary-button"
                 type="button"
                 :disabled="!selectedDir"
