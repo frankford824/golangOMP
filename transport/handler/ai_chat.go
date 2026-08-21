@@ -12,18 +12,24 @@ import (
 
 	"workflow/domain"
 	"workflow/service/aichat"
+	analyticssvc "workflow/service/analytics"
 )
 
 type AIChatHandler struct {
 	service   *aichat.Service
+	analytics *analyticssvc.Service
 	heartbeat time.Duration
 }
 
-func NewAIChatHandler(service *aichat.Service, heartbeat time.Duration) *AIChatHandler {
+func NewAIChatHandler(service *aichat.Service, heartbeat time.Duration, analyticsServices ...*analyticssvc.Service) *AIChatHandler {
 	if heartbeat <= 0 {
 		heartbeat = 15 * time.Second
 	}
-	return &AIChatHandler{service: service, heartbeat: heartbeat}
+	var analytics *analyticssvc.Service
+	if len(analyticsServices) > 0 {
+		analytics = analyticsServices[0]
+	}
+	return &AIChatHandler{service: service, analytics: analytics, heartbeat: heartbeat}
 }
 
 func (h *AIChatHandler) Config(c *gin.Context) {

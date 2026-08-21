@@ -115,6 +115,10 @@ func NewRouter(
 		aiChatGroup.POST("/conversations/:conversation_id/messages:stream", capabilityAccess(aiChatGroup, http.MethodPost, "/conversations/:conversation_id/messages:stream", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.StreamMessage)
 		aiChatGroup.GET("/admin/conversations", capabilityAccess(aiChatGroup, http.MethodGet, "/admin/conversations", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.AdminListConversations)
 		aiChatGroup.GET("/admin/conversations/:conversation_id", capabilityAccess(aiChatGroup, http.MethodGet, "/admin/conversations/:conversation_id", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.AdminGetConversation)
+
+		analyticsGroup := v1.Group("/analytics")
+		analyticsGroup.GET("/mcp", capabilityAccess(analyticsGroup, http.MethodGet, "/mcp", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.AnalyticsMCPGet)
+		analyticsGroup.POST("/mcp", capabilityAccess(analyticsGroup, http.MethodPost, "/mcp", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.AnalyticsMCPPost)
 	}
 
 	if accessPolicyH != nil {

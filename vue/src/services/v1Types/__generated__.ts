@@ -7962,6 +7962,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/analytics/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reject unsupported long-lived Analytics MCP GET streams
+         * @description The current Analytics MCP transport is stateless POST-only; GET returns 405 as permitted by Streamable HTTP when no server message stream is offered.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["V8Forbidden"];
+                /** @description SSE listener is not offered */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Call the read-only Analytics MCP server
+         * @description Authenticated Streamable HTTP JSON-RPC endpoint using MCP protocol 2025-11-25.
+         *     Supports initialize, ping, tools/list and tools/call. The deterministic tool registry exposes
+         *     list_metrics, describe_metric, query_metric, query_timeseries, query_distribution and trace_entity.
+         *     Tool arguments never accept SQL. Every query applies the caller's current report/task permissions,
+         *     stable organization scope, Beijing date bounds, row limits and normal workflow trace audit logging.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "MCP-Protocol-Version"?: "2025-11-25";
+                    "Mcp-Session-Id"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id?: string | number;
+                        /** @enum {string} */
+                        method: "initialize" | "ping" | "tools/list" | "tools/call" | "notifications/initialized";
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description JSON-RPC response. Tool execution errors are returned in the MCP result with isError=true. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+                /** @description Notification accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid JSON-RPC request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                403: components["responses"]["V8Forbidden"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ai/chat/config": {
         parameters: {
             query?: never;
@@ -12836,6 +12948,11 @@ export interface paths {
                                 page_count?: number;
                                 gross_amount?: number;
                                 business_month?: string;
+                                /**
+                                 * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
+                                 * @enum {string}
+                                 */
+                                operation_source?: "normal_upload" | "client_supplement" | "admin_supplement";
                                 /** Format: date-time */
                                 created_at?: string;
                                 /** @description Present on locate responses; page number under the current directory upload-time ordering. */
@@ -12948,6 +13065,11 @@ export interface paths {
                                     page_count?: number;
                                     gross_amount?: number;
                                     business_month?: string;
+                                    /**
+                                     * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
+                                     * @enum {string}
+                                     */
+                                    operation_source?: "normal_upload" | "client_supplement" | "admin_supplement";
                                     /** Format: date-time */
                                     created_at?: string;
                                     /** @description Present on locate responses; page number under the current directory upload-time ordering. */
@@ -13047,6 +13169,11 @@ export interface paths {
                                 page_count?: number;
                                 gross_amount?: number;
                                 business_month?: string;
+                                /**
+                                 * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
+                                 * @enum {string}
+                                 */
+                                operation_source?: "normal_upload" | "client_supplement" | "admin_supplement";
                                 /** Format: date-time */
                                 created_at?: string;
                                 /** @description Present on locate responses; page number under the current directory upload-time ordering. */
@@ -13144,6 +13271,11 @@ export interface paths {
                                 page_count?: number;
                                 gross_amount?: number;
                                 business_month?: string;
+                                /**
+                                 * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
+                                 * @enum {string}
+                                 */
+                                operation_source?: "normal_upload" | "client_supplement" | "admin_supplement";
                                 /** Format: date-time */
                                 created_at?: string;
                                 /** @description Present on locate responses; page number under the current directory upload-time ordering. */
@@ -13733,7 +13865,83 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List quality error import batches
+         * @description Lists each imported quality-error Excel batch for a settlement month with its own row counts, error count, and currently calculated deduction amount.
+         */
+        get: {
+            parameters: {
+                query: {
+                    business_month: string;
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Quality error import batches */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                id?: number;
+                                import_no?: string;
+                                business_month?: string;
+                                uploaded_by?: number;
+                                original_filename?: string;
+                                status?: string;
+                                total_rows?: number;
+                                /** @description Rows that matched a payee and enabled difficulty class and will participate in quality deduction calculation. */
+                                matched_rows?: number;
+                                unmatched_rows?: number;
+                                ambiguous_rows?: number;
+                                error_message?: string;
+                                /** @description Total error quantity across records in this import batch. */
+                                error_count?: number;
+                                /** @description Current calculated deduction amount for matched records in this import batch. */
+                                deduction_amount?: number;
+                                /** Format: date-time */
+                                created_at?: string;
+                                /** Format: date-time */
+                                updated_at?: string;
+                            }[];
+                            pagination?: {
+                                total?: number;
+                                page?: number;
+                                page_size?: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         put?: never;
         /**
          * Import asset workbench quality error deductions
@@ -13793,6 +14001,14 @@ export interface paths {
                                 unmatched_rows?: number;
                                 ambiguous_rows?: number;
                                 error_message?: string;
+                                /** @description Total error quantity across records in this import batch. */
+                                error_count?: number;
+                                /** @description Current calculated deduction amount for matched records in this import batch. */
+                                deduction_amount?: number;
+                                /** Format: date-time */
+                                created_at?: string;
+                                /** Format: date-time */
+                                updated_at?: string;
                             };
                         };
                     };
@@ -13876,6 +14092,14 @@ export interface paths {
                                 unmatched_rows?: number;
                                 ambiguous_rows?: number;
                                 error_message?: string;
+                                /** @description Total error quantity across records in this import batch. */
+                                error_count?: number;
+                                /** @description Current calculated deduction amount for matched records in this import batch. */
+                                deduction_amount?: number;
+                                /** Format: date-time */
+                                created_at?: string;
+                                /** Format: date-time */
+                                updated_at?: string;
                             };
                         };
                     };
@@ -13904,6 +14128,198 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/error-imports/{import_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one quality error import batch with row details */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    import_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Quality error import detail */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                id?: number;
+                                import_no?: string;
+                                business_month?: string;
+                                uploaded_by?: number;
+                                original_filename?: string;
+                                status?: string;
+                                total_rows?: number;
+                                /** @description Rows that matched a payee and enabled difficulty class and will participate in quality deduction calculation. */
+                                matched_rows?: number;
+                                unmatched_rows?: number;
+                                ambiguous_rows?: number;
+                                error_message?: string;
+                                /** @description Total error quantity across records in this import batch. */
+                                error_count?: number;
+                                /** @description Current calculated deduction amount for matched records in this import batch. */
+                                deduction_amount?: number;
+                                /** Format: date-time */
+                                created_at?: string;
+                                /** Format: date-time */
+                                updated_at?: string;
+                            } & {
+                                records?: {
+                                    id?: number;
+                                    import_batch_id?: number;
+                                    business_month?: string;
+                                    payee_user_id?: number | null;
+                                    payee_name?: string;
+                                    order_no?: string;
+                                    difficulty_class?: string;
+                                    /** Format: date */
+                                    occurred_date?: string | null;
+                                    error_count?: number;
+                                    deduction_amount?: number;
+                                    raw_payload_json?: {
+                                        [key: string]: unknown;
+                                    };
+                                    match_status?: string;
+                                    submission_item_id?: number | null;
+                                    /** Format: date-time */
+                                    created_at?: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Import batch not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete one quality error import batch and all its rows
+         * @description Deletes the selected import batch so its deductions no longer contribute to settlement preview. Rejected while the month has a generated or confirmed settlement batch.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    import_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Deleted quality error import batch */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                id?: number;
+                                import_no?: string;
+                                business_month?: string;
+                                uploaded_by?: number;
+                                original_filename?: string;
+                                status?: string;
+                                total_rows?: number;
+                                /** @description Rows that matched a payee and enabled difficulty class and will participate in quality deduction calculation. */
+                                matched_rows?: number;
+                                unmatched_rows?: number;
+                                ambiguous_rows?: number;
+                                error_message?: string;
+                                /** @description Total error quantity across records in this import batch. */
+                                error_count?: number;
+                                /** @description Current calculated deduction amount for matched records in this import batch. */
+                                deduction_amount?: number;
+                                /** Format: date-time */
+                                created_at?: string;
+                                /** Format: date-time */
+                                updated_at?: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Import batch not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Active settlement batch blocks deletion */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;

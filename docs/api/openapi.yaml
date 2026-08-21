@@ -12136,6 +12136,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/analytics/mcp:
+    get:
+      summary: Reject unsupported long-lived Analytics MCP GET streams
+      description: The current Analytics MCP transport is stateless POST-only; GET returns 405 as permitted by Streamable HTTP when no server message stream is offered.
+      tags: [DataCenter, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      responses:
+        '405': { description: SSE listener is not offered }
+        '401': { description: Unauthenticated }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+    post:
+      summary: Call the read-only Analytics MCP server
+      description: |
+        Authenticated Streamable HTTP JSON-RPC endpoint using MCP protocol 2025-11-25.
+        Supports initialize, ping, tools/list and tools/call. The deterministic tool registry exposes
+        list_metrics, describe_metric, query_metric, query_timeseries, query_distribution and trace_entity.
+        Tool arguments never accept SQL. Every query applies the caller's current report/task permissions,
+        stable organization scope, Beijing date bounds, row limits and normal workflow trace audit logging.
+      tags: [DataCenter, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      parameters:
+        - in: header
+          name: MCP-Protocol-Version
+          required: false
+          schema: { type: string, enum: ['2025-11-25'] }
+        - in: header
+          name: Mcp-Session-Id
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jsonrpc, method]
+              properties:
+                jsonrpc: { type: string, enum: ['2.0'] }
+                id: { oneOf: [{ type: string }, { type: integer }] }
+                method: { type: string, enum: [initialize, ping, tools/list, tools/call, notifications/initialized] }
+                params: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: JSON-RPC response. Tool execution errors are returned in the MCP result with isError=true.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '202': { description: Notification accepted }
+        '400': { description: Invalid JSON-RPC request }
+        '401': { description: Unauthenticated }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
   /v1/ai/chat/config:
     get:
       operationId: getAIChatConfig

@@ -24,6 +24,7 @@ import (
 	"workflow/service"
 	aiagentsvc "workflow/service/aiagent"
 	aichatsvc "workflow/service/aichat"
+	analyticssvc "workflow/service/analytics"
 	assetcenter "workflow/service/asset_center"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	"workflow/service/asset_lifecycle/scheduler"
@@ -139,6 +140,7 @@ func main() {
 	aiChatRepo := mysqlrepo.NewAIChatRepo(mdb)
 	aiRetrievalRepo := mysqlrepo.NewAIRetrievalRepo(mdb)
 	aiAnalysisRepo := mysqlrepo.NewAIAnalysisRepo(mdb)
+	analyticsRepo := mysqlrepo.NewAnalyticsRepo(mdb)
 	taskOperationalDashboardRepo := mysqlrepo.NewTaskOperationalDashboardRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
 	assetWorkbenchRepo := mysqlrepo.NewAssetWorkbenchRepo(mdb)
@@ -474,7 +476,10 @@ func main() {
 			MaxEvidence: cfg.AIChat.MaxEvidence, MaxEvidenceChars: cfg.AIChat.MaxEvidenceChars,
 			MaxConcurrentUser: cfg.AIChat.MaxConcurrentUser,
 		}, logger.Named("ai_chat"))
-	aiChatService.SetAnalysisOrchestrator(aichatsvc.NewToolOrchestrator(aiChatClient, retrievalService, aiAnalysisRepo))
+	analyticsService := analyticssvc.NewService(analyticsRepo, aiAnalysisRepo)
+	analysisOrchestrator := aichatsvc.NewToolOrchestrator(aiChatClient, retrievalService, aiAnalysisRepo)
+	analysisOrchestrator.SetAnalyticsTools(analyticsService)
+	aiChatService.SetAnalysisOrchestrator(analysisOrchestrator)
 	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo,
 		service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc),
 		service.WithTaskResourceWorkflowSKUProfiles(productManagementSvc),
@@ -564,7 +569,7 @@ func main() {
 	erpProductH := handler.NewERPProductHandler(erpProductSvc)
 	designSourceH := handler.NewDesignSourceHandler(designSourceSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
-	aiChatH := handler.NewAIChatHandler(aiChatService, cfg.AIChat.HeartbeatInterval)
+	aiChatH := handler.NewAIChatHandler(aiChatService, cfg.AIChat.HeartbeatInterval, analyticsService)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────

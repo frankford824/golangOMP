@@ -1,10 +1,10 @@
-# V1 API 速查表(259 path · 一行一条)
+# V1 API 速查表(260 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 259 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 260 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -121,6 +121,7 @@
 | POST | `/v1/tasks/{id}/cancel` | Cancel a task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/excel-assist/template.xlsx` | Download single-task Excel assist template | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/excel-assist/parse-excel` | Parse a single-task Excel assist file | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/analytics/mcp` | Reject unsupported long-lived Analytics MCP GET streams；Call the read-only Analytics MCP server | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/ai/chat/config` | Get the current data-assistant capability contract | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/ai/chat/conversations` | List the caller's active conversations；Create an owner-scoped conversation retained for 90 days | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, DELETE | `/v1/ai/chat/conversations/{conversation_id}` | Read one owner-scoped conversation and its evidence citations；Hide a conversation immediately and hard-delete its body within 24 hours | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

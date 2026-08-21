@@ -9,7 +9,17 @@ import (
 
 	"workflow/domain"
 	"workflow/service/aiagent"
+	analyticssvc "workflow/service/analytics"
 )
+
+type unifiedAnalyticsRepoStub struct{}
+
+func (unifiedAnalyticsRepoStub) QueryMetric(context.Context, domain.ResourceGroupAccessFilter, domain.AnalyticsMetricDefinition, domain.AnalyticsMetricQuery) (*domain.AnalyticsMetricResult, error) {
+	return &domain.AnalyticsMetricResult{MetricID: "page_views", MetricName: "页面访问", Rows: []domain.AnalyticsMetricRow{{Key: "数据中心", Label: "数据中心", EventCount: 8}}}, nil
+}
+func (unifiedAnalyticsRepoStub) TraceEntity(context.Context, domain.ResourceGroupAccessFilter, domain.AnalyticsTraceQuery) ([]domain.AIRetrievalHit, error) {
+	return []domain.AIRetrievalHit{}, nil
+}
 
 type toolProviderStub struct {
 	ready bool
@@ -105,6 +115,22 @@ func TestAnalysisDateRangeUsesBeijingBusinessDays(t *testing.T) {
 	if from.Format("2006-01-02") != "2026-08-15" || to.Format("2006-01-02") != "2026-08-22" {
 		t.Fatalf("relative range = %s..%s", from, to)
 	}
+	from, to = analysisDateRange(
+		AnalysisToolCall{From: "2025-04-02", To: "2025-04-08"},
+		"最近七天的设计师提交任务分布",
+		time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC),
+	)
+	if from.Format("2006-01-02") != "2026-08-15" || to.Format("2006-01-02") != "2026-08-22" {
+		t.Fatalf("hallucinated absolute range overrode Chinese relative range: %s..%s", from, to)
+	}
+}
+
+func TestParseRelativeAnalysisDays(t *testing.T) {
+	for input, want := range map[string]int{"7": 7, "七": 7, "两": 2, "十四": 14, "三十": 30, "一百二十": 120, "三百六十六": 366} {
+		if got := parseRelativeAnalysisDays(input); got != want {
+			t.Fatalf("parseRelativeAnalysisDays(%q)=%d want=%d", input, got, want)
+		}
+	}
 }
 
 func TestToolOrchestratorUsesScopedMySQLAnalysisEvidence(t *testing.T) {
@@ -121,6 +147,18 @@ func TestToolOrchestratorUsesScopedMySQLAnalysisEvidence(t *testing.T) {
 	}
 	if !analytics.lastAccess.Global || meta.Mode != "hybrid" {
 		t.Fatalf("access=%+v meta=%+v", analytics.lastAccess, meta)
+	}
+}
+
+func TestToolOrchestratorUsesUnifiedAnalyticsRegistry(t *testing.T) {
+	provider := toolProviderStub{ready: true, plan: `{"tools":[{"name":"query_distribution","arguments":{"metric_id":"page_views","group_by":"page","days":7}}]}`}
+	retriever := &evidenceRetrieverStub{}
+	legacy := &analysisRepoStub{}
+	orchestrator := NewToolOrchestrator(provider, retriever, legacy)
+	orchestrator.SetAnalyticsTools(analyticssvc.NewService(unifiedAnalyticsRepoStub{}, legacy))
+	hits, _, err := orchestrator.Gather(context.Background(), actorWithGlobalPermission(9, domain.PermissionReportView, domain.PermissionTaskView), "最近七天页面访问分布", 20)
+	if err != nil || len(hits) != 1 || hits[0].EntityType != "analytics_metric" || retriever.calls != 0 {
+		t.Fatalf("hits=%+v retrieval_calls=%d err=%v", hits, retriever.calls, err)
 	}
 }
 
