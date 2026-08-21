@@ -121,7 +121,7 @@ const totalPieceworkPages = computed(() =>
 const uploadUnitLabel = computed(() => pieceworkFileLabel(uploadPieceworkGroups.value.length, queue.value.length))
 const simplePieceworkConfirmation = computed(() => {
   const count = uploadPieceworkGroups.value.length
-  return `${formatInt(count)} 个作品 = ${formatInt(count)} 个计件数量`
+  return `${formatInt(count)} 个作品 = 计件数量`
 })
 const uploadedUnitLabel = computed(() => pieceworkFileLabel(uploadedPieceworkGroups.value.length, uploadedItems.value.length))
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
@@ -777,7 +777,7 @@ onActivated(() => {
     >
       <FileUp :size="30" aria-hidden="true" />
       <strong>{{ queue.length ? '继续拖拽文件或文件夹到这里' : '拖拽文件或文件夹到这里' }}</strong>
-      <span>{{ isSimpleUser ? '拖入文件或文件夹后，点击提交上传会自动完成上传和提交。' : '拖入文件或文件夹后，点击一次即可上传并生成提交记录。' }}允许：{{ selectedAllowedLabel }}</span>
+      <span>{{ isSimpleUser ? '点击提交上传会自动完成上传和提交。' : '拖入文件或文件夹后，点击一次即可上传并生成提交记录。' }}允许：{{ selectedAllowedLabel }}</span>
       <div class="aw-dropzone__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">文件</button>
         <button class="aw-secondary-button" type="button" @click="openFolderPicker">文件夹</button>
@@ -789,10 +789,10 @@ onActivated(() => {
         </button>
       </div>
       <p v-if="isSimpleUser" class="aw-dropzone__piecework-confirmation">
-        <span>仔细核对作品数量后，点击「提交上传」。</span>
+        <span>仔细核对作品数量后，点击提交上传。</span>
         <strong>{{ simplePieceworkConfirmation }}</strong>
       </p>
-      <small class="aw-dropzone__hint">{{ isSimpleUser ? simpleSubmitHint : adminUploadHint }}</small>
+      <small v-if="!isSimpleUser" class="aw-dropzone__hint">{{ adminUploadHint }}</small>
     </div>
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
