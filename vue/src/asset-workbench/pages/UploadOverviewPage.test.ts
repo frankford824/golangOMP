@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   driveDirectories: vi.fn(),
   driveFiles: vi.fn(),
+  listSettlementSupplements: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -13,7 +14,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@aw/app/session.store', () => ({
-  useAssetWorkbenchSessionStore: () => ({ bootstrap: { capabilities: ['asset.workbench.manage'] } }),
+  useAssetWorkbenchSessionStore: () => ({ bootstrap: { capabilities: ['asset.workbench.manage', 'asset.workbench.settlement'] } }),
 }))
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
@@ -39,8 +40,13 @@ vi.mock('@aw/shared/preview/WorkbenchPreviewDialog.vue', () => ({
 import UploadOverviewPage from './UploadOverviewPage.vue'
 
 describe('UploadOverviewPage operation source', () => {
-  it('marks client supplement files in the admin upload ledger and detail panel', async () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
     mocks.driveDirectories.mockResolvedValue([])
+    mocks.listSettlementSupplements.mockResolvedValue({ items: [], total: 0, page: 1, size: 100 })
+  })
+
+  it('marks client supplement files in the admin upload ledger and detail panel', async () => {
     mocks.driveFiles.mockResolvedValue({
       items: [{
         id: 301,
@@ -80,5 +86,47 @@ describe('UploadOverviewPage operation source', () => {
 
     await wrapper.get('tbody tr').trigger('click')
     expect(wrapper.get('.aw-upload-ledger__detail dl').text()).toContain('操作来源客户端补录')
+  })
+
+  it('falls back to supplement records when the deployed drive API has no operation source', async () => {
+    mocks.driveFiles.mockResolvedValue({
+      items: [{
+        id: 302,
+        submission_id: 202,
+        submission_item_id: 102,
+        submission_no: 'AWS20260821090900',
+        owner_user_id: 9,
+        owner_name: '张三',
+        upload_directory_name: 'B类',
+        order_no: '补录压缩包',
+        original_filename: '补录压缩包.zip',
+        file_type: 'zip',
+        mime_type: 'application/zip',
+        file_size: 901120,
+        preview_status: 'ready',
+        pricing_status: 'priced',
+        page_count: 1,
+        gross_amount: 0.63,
+        business_month: '2026-08',
+        created_at: '2026-08-21T01:09:00Z',
+      }],
+      total: 1,
+      page: 1,
+      size: 50,
+    })
+    mocks.listSettlementSupplements.mockResolvedValue({
+      items: [{ submission_item_id: 102 }],
+      total: 1,
+      page: 1,
+      size: 100,
+    })
+
+    const wrapper = mount(UploadOverviewPage, {
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    expect(mocks.listSettlementSupplements).toHaveBeenCalledWith({ business_month: '2026-08', page: 1, page_size: 100 }, expect.any(AbortSignal))
+    expect(wrapper.get('.aw-upload-ledger__source').text()).toBe('补录')
   })
 })

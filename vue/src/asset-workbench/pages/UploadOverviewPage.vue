@@ -33,6 +33,7 @@ const route = useRoute()
 const { queueDriveFile } = useGlobalDownload()
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
+const canViewSupplementLedger = computed(() => capabilities.value.has('asset.workbench.settlement'))
 const supplementRecordPath = computed(() => capabilities.value.has('asset.workbench.settlement') ? '/supplements' : '/my-settlement')
 
 const pageSize = 50
@@ -41,6 +42,7 @@ const skeletonRowCount = 8
 
 const directories = ref<DriveDirectoryRow[]>([])
 const files = ref<DriveFileRow[]>([])
+const supplementItemIds = ref<Set<number>>(new Set())
 const selectedFile = ref<DriveFileRow | null>(null)
 const selectedIds = ref<Set<number>>(new Set())
 const loading = ref(false)
@@ -268,11 +270,12 @@ function statusToneClass(value?: string) {
 function fileOperationLabel(file: DriveFileRow) {
   if (file.operation_source === 'client_supplement') return '客户端补录'
   if (file.operation_source === 'admin_supplement') return '管理员补录'
+  if (supplementItemIds.value.has(file.submission_item_id)) return '补录'
   return '正常上传'
 }
 
 function isSupplementOperation(file: DriveFileRow) {
-  return file.operation_source === 'client_supplement' || file.operation_source === 'admin_supplement'
+  return fileOperationLabel(file) !== '正常上传'
 }
 
 function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
@@ -379,6 +382,32 @@ async function loadDirectories() {
   directories.value = await assetWorkbenchApi.driveDirectories()
 }
 
+async function hydrateSupplementSources(rows: DriveFileRow[], signal?: AbortSignal) {
+  if (!canViewSupplementLedger.value) return
+  const unresolved = new Set(rows
+    .filter((file) => !file.operation_source && file.submission_item_id > 0 && !supplementItemIds.value.has(file.submission_item_id))
+    .map((file) => file.submission_item_id))
+  if (!unresolved.size) return
+  const months = [...new Set(rows.filter((file) => unresolved.has(file.submission_item_id)).map((file) => file.business_month).filter(Boolean))]
+  const matched = new Set(supplementItemIds.value)
+  try {
+    for (const businessMonth of months) {
+      let nextPage = 1
+      for (;;) {
+        const result = await assetWorkbenchApi.listSettlementSupplements({ business_month: businessMonth, page: nextPage, page_size: 100 }, signal)
+        for (const supplement of result.items) {
+          if (supplement.submission_item_id && unresolved.has(supplement.submission_item_id)) matched.add(supplement.submission_item_id)
+        }
+        if (result.items.length === 0 || nextPage * 100 >= result.total) break
+        nextPage += 1
+      }
+    }
+    supplementItemIds.value = matched
+  } catch (err) {
+    if ((err as DOMException)?.name === 'AbortError') throw err
+  }
+}
+
 async function loadFiles(nextPage = page.value) {
   const requestID = ++requestSeq
   listAbortController?.abort()
@@ -402,6 +431,8 @@ async function loadFiles(nextPage = page.value) {
     )
     if (requestID !== requestSeq) return
     files.value = result.items
+    await hydrateSupplementSources(result.items, listAbortController.signal)
+    if (requestID !== requestSeq) return
     total.value = result.total
     page.value = nextPage
     if (selectedFile.value) {
@@ -750,6 +781,7 @@ async function exportCurrentFilter() {
       if (rows.length >= result.total || rows.length >= exportLimit || result.items.length === 0) break
       nextPage += 1
     }
+    await hydrateSupplementSources(rows)
     const header = ['创建人', '操作来源', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小', '计价说明']
     const exportPieceworkLookup = buildPieceworkDisplayByFileID(rows)
     const csv = [header, ...rows.map((file) => fileToExportRow(file, exportPieceworkLookup))].map((row) => row.map(csvEscape).join(',')).join('\n')
