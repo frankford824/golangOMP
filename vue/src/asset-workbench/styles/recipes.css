@@ -10260,17 +10260,19 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-supplement-upload-queue__header > div,
-.aw-supplement-upload-queue__group-head {
+.aw-supplement-upload-queue__group-head,
+.aw-supplement-upload-queue__group-head > div {
   min-width: 0;
 }
 
-.aw-supplement-upload-queue__header > div {
+.aw-supplement-upload-queue__header > div,
+.aw-supplement-upload-queue__group-head > div {
   display: grid;
   gap: var(--aw-space-1);
 }
 
 .aw-supplement-upload-queue__header span,
-.aw-supplement-upload-queue__group-head span {
+.aw-supplement-upload-queue__group-head > div > span {
   color: var(--aw-ink-muted);
   font-size: var(--aw-font-size-xs);
 }
@@ -10313,7 +10315,7 @@ body.aw-submission-dialog-locked {
   font-size: var(--aw-font-size-sm);
 }
 
-.aw-supplement-upload-queue__group li button {
+.aw-supplement-upload-queue__group-head button {
   display: inline-grid;
   flex: 0 0 auto;
   width: 30px;
@@ -10326,7 +10328,7 @@ body.aw-submission-dialog-locked {
   cursor: pointer;
 }
 
-.aw-supplement-upload-queue__group li button:hover:not(:disabled) {
+.aw-supplement-upload-queue__group-head button:hover:not(:disabled) {
   border-color: var(--aw-danger);
   color: var(--aw-danger);
 }

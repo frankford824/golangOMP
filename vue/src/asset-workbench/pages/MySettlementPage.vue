@@ -158,8 +158,9 @@ async function dropSupplementFiles(event: DragEvent) {
   }
 }
 
-function removeSupplementQueueFile(file: File) {
-  selectedFiles.value = selectedFiles.value.filter((item) => item !== file)
+function removeSupplementQueueGroup(group: { items: Array<{ file: File }> }) {
+  const groupFiles = new Set(group.items.map((item) => item.file))
+  selectedFiles.value = selectedFiles.value.filter((item) => !groupFiles.has(item))
   fileSelectionNotice.value = selectedFiles.value.length
     ? `待上传队列共 ${formatInt(selectedFiles.value.length)} 个文件，归为 ${formatInt(selectedSupplementGroups.value.length)} 个补录作品`
     : ''
@@ -474,15 +475,22 @@ onMounted(() => {
           <div class="aw-supplement-upload-queue__groups">
             <article v-for="(group, groupIndex) in selectedSupplementGroups" :key="`${supplementGroupName(group)}-${groupIndex}`" class="aw-supplement-upload-queue__group">
               <div class="aw-supplement-upload-queue__group-head">
-                <strong :title="supplementGroupName(group)">{{ supplementGroupName(group) }}</strong>
-                <span>{{ group.isFolder ? '文件夹作品' : '单文件作品' }} · {{ formatInt(group.items.length) }} 个文件</span>
+                <div>
+                  <strong :title="supplementGroupName(group)">{{ supplementGroupName(group) }}</strong>
+                  <span>{{ group.isFolder ? '文件夹作品' : '单文件作品' }} · {{ formatInt(group.items.length) }} 个文件</span>
+                </div>
+                <button
+                  type="button"
+                  :disabled="uploading"
+                  :aria-label="`${group.isFolder ? '移除待上传文件夹' : '移除待上传文件'} ${supplementGroupName(group)}`"
+                  @click="removeSupplementQueueGroup(group)"
+                >
+                  <X :size="14" aria-hidden="true" />
+                </button>
               </div>
               <ul>
                 <li v-for="item in group.items" :key="supplementQueueFileKey(item.file)">
                   <span :title="item.relativePath">{{ item.relativePath }}</span>
-                  <button type="button" :disabled="uploading" :aria-label="`移除待上传文件 ${item.relativePath}`" @click="removeSupplementQueueFile(item.file)">
-                    <X :size="14" aria-hidden="true" />
-                  </button>
                 </li>
               </ul>
             </article>
