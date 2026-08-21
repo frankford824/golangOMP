@@ -119,11 +119,10 @@ const totalPieceworkPages = computed(() =>
   uploadPieceworkGroups.value.reduce((sum, group) => sum + (group.isFolder ? 1 : group.items[0]?.pageCount || 1), 0),
 )
 const uploadUnitLabel = computed(() => pieceworkFileLabel(uploadPieceworkGroups.value.length, queue.value.length))
-const simplePieceworkHint = computed(() => {
+const pieceworkSubmitHint = computed(() => {
   const count = uploadPieceworkGroups.value.length
   return `仔细核对作品数量后，点击上传 ${formatInt(count)}个作品=计件数量`
 })
-const uploadedUnitLabel = computed(() => pieceworkFileLabel(uploadedPieceworkGroups.value.length, uploadedItems.value.length))
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const selectedAllowedFileTypes = computed(() => normalizedAllowedFileTypes(selectedUploadDirectory.value?.allowed_file_types ?? []))
 const selectedAllowedLabel = computed(() => (selectedAllowedFileTypes.value.length ? selectedAllowedFileTypes.value.join('、') : '全部格式'))
@@ -156,29 +155,10 @@ const simpleSubmitLabel = computed(() => {
   if (submitting.value) return '正在提交'
   return '提交上传'
 })
-const simpleSubmitHint = computed(() => {
-  if (contextLoading.value) return '正在加载上传目录'
-  if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
-  if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
-  if (failedItems.value.length && !queuedItems.value.length && !uploadedItems.value.length) return '失败文件不会自动重传，请点击“重试失败文件”'
-  if (failedItems.value.length && queuedItems.value.length) return `将只上传新文件 ${formatInt(queuedItems.value.length)} 个，失败文件需单独重试`
-  if (queue.value.some((item) => item.status === 'uploaded')) return `将提交 ${uploadedUnitLabel.value}`
-  return `将上传并提交 ${uploadUnitLabel.value}`
-})
 const adminUploadLabel = computed(() => {
   if (uploading.value) return '正在上传'
-  if (submitting.value) return '正在生成记录'
-  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `生成提交记录 ${uploadedPieceworkGroups.value.length} 个`
-  if (queuedItems.value.length > 0) return `上传新文件 ${queuedItems.value.length} 个并生成记录`
-  return '上传并生成记录'
-})
-const adminUploadHint = computed(() => {
-  if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
-  if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
-  if (failedItems.value.length && !queuedItems.value.length && !uploadedItems.value.length) return '失败文件不会自动重传，请点击“重试失败文件”'
-  if (failedItems.value.length && queuedItems.value.length) return `将只上传新文件 ${formatInt(queuedItems.value.length)} 个，失败文件需单独重试`
-  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `将为 ${uploadedUnitLabel.value} 生成提交记录，生成后进入上传记录`
-  return `将上传并生成 ${uploadUnitLabel.value} 的提交记录`
+  if (submitting.value) return '正在提交'
+  return '提交上传'
 })
 const uploadContinuityHint = computed(() => {
   if (uploading.value) return '正在上传。你可以切到看收入或网盘，回到本页仍能看到进度。请不要关闭浏览器窗口。'
@@ -708,7 +688,7 @@ onActivated(() => {
             <FileUp :size="16" aria-hidden="true" />
             {{ adminUploadLabel }}
           </button>
-          <small>{{ isSimpleUser ? simpleSubmitHint : adminUploadHint }}</small>
+          <small>{{ pieceworkSubmitHint }}</small>
         </span>
       </div>
     </div>
@@ -777,7 +757,7 @@ onActivated(() => {
     >
       <FileUp :size="30" aria-hidden="true" />
       <strong>{{ queue.length ? '继续拖拽文件或文件夹到这里' : '拖拽文件或文件夹到这里' }}</strong>
-      <span>{{ isSimpleUser ? '点击提交上传会自动完成上传和提交。' : '拖入文件或文件夹后，点击一次即可上传并生成提交记录。' }}允许：{{ selectedAllowedLabel }}</span>
+      <span>点击提交上传会自动完成上传和提交。允许：{{ selectedAllowedLabel }}</span>
       <div class="aw-dropzone__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">文件</button>
         <button class="aw-secondary-button" type="button" @click="openFolderPicker">文件夹</button>
@@ -788,7 +768,7 @@ onActivated(() => {
           {{ adminUploadLabel }}
         </button>
       </div>
-      <small class="aw-dropzone__hint">{{ isSimpleUser ? simplePieceworkHint : adminUploadHint }}</small>
+      <small class="aw-dropzone__hint">{{ pieceworkSubmitHint }}</small>
     </div>
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>

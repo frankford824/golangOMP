@@ -36,7 +36,7 @@ describe('UploadPage simple piecework copy', () => {
       new File(['a'], 'a.png', { type: 'image/png' }),
       new File(['b'], 'b.png', { type: 'image/png' }),
     ], { source: 'upload-page' })
-    const wrapper = mount(UploadPage, { global: { plugins: [pinia] } })
+    const wrapper = mount(UploadPage, { global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
     await flushPromises()
 
     const dropzoneButtons = wrapper.get('.aw-dropzone').findAll('button').map((button) => button.text().trim())
@@ -54,5 +54,26 @@ describe('UploadPage simple piecework copy', () => {
     await flushPromises()
 
     expect(wrapper.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 1个作品=计件数量')
+  })
+
+  it('uses the same annotated copy for admin uploads', async () => {
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 1, display_name: 'admin' },
+      is_admin: true,
+      capabilities: ['asset.workbench.submit', 'asset.workbench.manage'],
+    } as never)
+    useUploadCenterStore().addItems([
+      new File(['archive'], 'work.zip', { type: 'application/zip' }),
+    ], { source: 'upload-page' })
+
+    const wrapper = mount(UploadPage, { global: { plugins: [pinia], stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises()
+
+    const dropzone = wrapper.get('.aw-dropzone')
+    expect(dropzone.findAll('button').map((button) => button.text().trim())).toEqual(['文件', '文件夹', '提交上传'])
+    expect(dropzone.get(':scope > span').text()).toBe('点击提交上传会自动完成上传和提交。允许：全部格式')
+    expect(dropzone.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 1个作品=计件数量')
+    expect(dropzone.text()).not.toContain('上传并生成记录')
+    expect(dropzone.text()).not.toContain('先选择文件，或把文件拖到上传区')
   })
 })
