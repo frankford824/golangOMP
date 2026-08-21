@@ -14,7 +14,7 @@ const batchOne = {
   business_month: '2026-08',
   uploaded_by: 1,
   original_filename: '质检第一批.xlsx',
-  status: 'completed',
+  status: 'imported',
   total_rows: 2,
   matched_rows: 2,
   unmatched_rows: 0,
@@ -133,6 +133,7 @@ describe('SettlementPage quality error import history', () => {
 
     expect(wrapper.text()).toContain('质检第一批.xlsx')
     expect(wrapper.text()).toContain('质检第二批.xlsx')
+    expect(wrapper.text()).toContain('已导入')
     expect(wrapper.text()).toContain('¥15.00')
     expect(wrapper.text()).toContain('¥11.00')
 

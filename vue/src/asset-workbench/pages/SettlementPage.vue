@@ -229,14 +229,14 @@ const supplementGridRows = computed(() => filteredSupplementRows.value as unknow
 const errorImportGridRows = computed(() => errorImports.value.map<ErrorImportGridRow>((row) => ({
   ...row,
   created_at_label: formatDateTime(row.created_at),
-  status_label: row.status === 'completed' ? '已导入' : row.status || '—',
+  status_label: ['completed', 'imported'].includes(row.status) ? '已导入' : row.status || '—',
   action: 'actions',
 })) as unknown as Record<string, unknown>[])
 const errorImportRecordGridRows = computed(() => (selectedErrorImport.value?.records ?? []).map<ErrorImportRecordGridRow>((row) => ({
   ...row,
   payee_name_label: row.payee_name || (row.payee_user_id ? `用户 ${row.payee_user_id}` : '未匹配'),
   match_status_label: errorImportMatchStatusLabel(row.match_status),
-  occurred_date_label: row.occurred_date || '—',
+  occurred_date_label: row.occurred_date?.slice(0, 10) || '—',
   issue_label: errorImportIssueLabel(row),
 })) as unknown as Record<string, unknown>[])
 const supplementCanPrev = computed(() => supplementPage.value > 1)
