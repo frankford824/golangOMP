@@ -50,6 +50,10 @@ function directorySegments(file: FolderFile): string[] {
   return segments.slice(0, -1).map(normalize)
 }
 
+function parentDirectoryKey(file: FolderFile): string {
+  return directorySegments(file).join('/')
+}
+
 function requirementDirectoryTokens(target: RetouchFolderUploadTarget): string[] {
   const order = String(target.order)
   const paddedOrder = order.padStart(2, '0')
@@ -98,12 +102,26 @@ function matchBySourceName(file: FolderFile, targets: RetouchFolderUploadTarget[
   return targets.filter((target) => (target.sourceFileNames || []).some((name) => sourceStemMatches(outputStem, name)))
 }
 
+function matchBySequenceFilename(file: FolderFile, targets: RetouchFolderUploadTarget[]): RetouchFolderUploadTarget[] {
+  const match = extensionless(file.name).match(/^(?:需求|requirement|req)?[-_ ]*0*(\d+)$/)
+  if (!match) return []
+  const sequence = Number.parseInt(match[1], 10)
+  if (!Number.isSafeInteger(sequence) || sequence <= 0) return []
+  let offset = 0
+  for (const target of [...targets].sort((left, right) => left.order - right.order)) {
+    const sourceCount = Math.max(1, (target.sourceFileNames || []).filter((name) => name.trim()).length)
+    if (sequence > offset && sequence <= offset + sourceCount) return [target]
+    offset += sourceCount
+  }
+  return []
+}
+
 function uniqueTargets(targets: RetouchFolderUploadTarget[]): RetouchFolderUploadTarget[] {
   return [...new Map(targets.map((target) => [target.groupId, target])).values()]
 }
 
 function resolveTarget(file: FolderFile, targets: RetouchFolderUploadTarget[]): RetouchFolderUploadTarget[] {
-  for (const matches of [matchByDirectory(file, targets), matchBySKU(file, targets), matchBySourceName(file, targets)]) {
+  for (const matches of [matchByDirectory(file, targets), matchBySKU(file, targets), matchBySourceName(file, targets), matchBySequenceFilename(file, targets)]) {
     const unique = uniqueTargets(matches)
     if (unique.length) return unique
   }
@@ -120,6 +138,13 @@ export function buildRetouchFolderUploadPlan(
   const unsupportedFiles: string[] = []
   let ignoredMetadataCount = 0
 
+  const candidates: Array<{
+    file: FolderFile
+    path: string
+    directory: string
+    matches: RetouchFolderUploadTarget[]
+  }> = []
+
   for (const rawFile of files) {
     const file = rawFile as FolderFile
     if (isMetadataFile(file)) {
@@ -130,17 +155,46 @@ export function buildRetouchFolderUploadPlan(
       unsupportedFiles.push(relativePath(file))
       continue
     }
-    const matches = resolveTarget(file, targets)
+    candidates.push({
+      file,
+      path: relativePath(file),
+      directory: parentDirectoryKey(file),
+      matches: resolveTarget(file, targets),
+    })
+  }
+
+  // If at least one sibling identifies exactly one requirement, use that
+  // requirement for otherwise-unmatched renamed siblings. A folder that points
+  // at multiple requirements still fails closed.
+  const directoryTargets = new Map<string, Set<number>>()
+  for (const candidate of candidates) {
+    if (candidate.matches.length !== 1) continue
+    const ids = directoryTargets.get(candidate.directory) || new Set<number>()
+    ids.add(candidate.matches[0].groupId)
+    directoryTargets.set(candidate.directory, ids)
+  }
+
+  for (const candidate of candidates) {
+    let matches = candidate.matches
+    if (matches.length !== 1) {
+      const siblingTargets = [...(directoryTargets.get(candidate.directory) || [])]
+      if (siblingTargets.length === 1) {
+        const siblingTarget = targets.find((target) => target.groupId === siblingTargets[0])
+        if (siblingTarget && (matches.length === 0 || matches.some((target) => target.groupId === siblingTarget.groupId))) {
+          matches = [siblingTarget]
+        }
+      }
+    }
     if (!matches.length) {
-      unmatchedFiles.push(relativePath(file))
+      unmatchedFiles.push(candidate.path)
       continue
     }
     if (matches.length > 1) {
-      ambiguousFiles.push(`${relativePath(file)} → ${matches.map((target) => `需求${target.order}`).join('、')}`)
+      ambiguousFiles.push(`${candidate.path} → ${matches.map((target) => `需求${target.order}`).join('、')}`)
       continue
     }
     const target = matches[0]
-    grouped.set(target.groupId, [...(grouped.get(target.groupId) || []), file])
+    grouped.set(target.groupId, [...(grouped.get(target.groupId) || []), candidate.file])
   }
 
   return {
@@ -160,6 +214,6 @@ export function retouchFolderUploadPlanError(plan: RetouchFolderUploadPlan): str
   if (plan.unsupportedFiles.length) parts.push(`不支持的文件：${plan.unsupportedFiles.slice(0, 3).join('、')}`)
   if (plan.unmatchedFiles.length) parts.push(`无法匹配需求：${plan.unmatchedFiles.slice(0, 3).join('、')}`)
   if (plan.ambiguousFiles.length) parts.push(`匹配不唯一：${plan.ambiguousFiles.slice(0, 3).join('、')}`)
-  if (plan.missingTargets.length) parts.push(`缺少成品：${plan.missingTargets.slice(0, 5).map((target) => `需求${target.order}`).join('、')}`)
+  if (!plan.items.length && !parts.length) parts.push('未识别到可上传的需求成品')
   return parts.join('；')
 }

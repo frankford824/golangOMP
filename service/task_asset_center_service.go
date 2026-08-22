@@ -2278,6 +2278,25 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetT
 		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject) {
 		return nil
 	}
+	// asset.manage is the explicit administrative override. A scoped design
+	// capability alone never permits one designer to stage files on another
+	// designer's active task.
+	if domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, subject) {
+		return nil
+	}
+	if !assetType.IsReference() &&
+		(task.TaskStatus == domain.TaskStatusPendingAssign || task.TaskStatus == domain.TaskStatusAssigned || task.TaskStatus == domain.TaskStatusInProgress) &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskDesignSubmit, subject) {
+		if taskAssetActorIsCurrentHandler(actor.ID, task) {
+			return nil
+		}
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "only the current task handler can upload design resources", map[string]interface{}{
+			"deny_code":          "task_asset_requires_current_handler",
+			"task_id":            task.ID,
+			"current_handler_id": task.CurrentHandlerID,
+			"designer_id":        task.DesignerID,
+		})
+	}
 	for _, permission := range permissions {
 		if domain.EffectiveAccessAllowsTask(actor, permission, subject) {
 			return nil
@@ -2289,6 +2308,16 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetT
 		"task_status":          task.TaskStatus,
 		"required_permissions": permissions,
 	})
+}
+
+func taskAssetActorIsCurrentHandler(actorID int64, task *domain.Task) bool {
+	if actorID <= 0 || task == nil {
+		return false
+	}
+	if task.CurrentHandlerID != nil && *task.CurrentHandlerID > 0 {
+		return *task.CurrentHandlerID == actorID
+	}
+	return task.DesignerID != nil && *task.DesignerID > 0 && *task.DesignerID == actorID
 }
 
 func authorizeV8TaskAssetSessionRead(ctx context.Context, task *domain.Task) *domain.AppError {

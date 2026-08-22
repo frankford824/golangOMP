@@ -1076,7 +1076,9 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 		domain.EffectiveAccessAllowsTaskReassign(actor, subject) {
 		actions = append(actions, "task.assign")
 	}
-	if status == domain.TaskStatusInProgress && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskUploadSource, subject) {
+	if status == domain.TaskStatusInProgress &&
+		v8ActorIsCurrentTaskHandler(actor.ID, subject) &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskUploadSource, subject) {
 		actions = append(actions, "task.design.submit")
 	}
 	// 自接单是设计能力，不是管理能力。任务中心此前拿 task.assign 当接单开关，
@@ -1096,6 +1098,16 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 		actions = append(actions, "task.reopen")
 	}
 	return actions
+}
+
+func v8ActorIsCurrentTaskHandler(actorID int64, subject domain.TaskAccessSubject) bool {
+	if actorID <= 0 {
+		return false
+	}
+	if subject.CurrentHandlerID != nil && *subject.CurrentHandlerID > 0 {
+		return *subject.CurrentHandlerID == actorID
+	}
+	return subject.DesignerID != nil && *subject.DesignerID > 0 && *subject.DesignerID == actorID
 }
 
 // UpdateBusinessInfo handles PATCH /v1/tasks/:id/business-info

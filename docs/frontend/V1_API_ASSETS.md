@@ -724,7 +724,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Creates a staged task-asset upload session and lets the backend choose single-part or multipart OSS upload. The task must be in an editable design or audit state. Authorization is `task.upload_source`, `task.audit`, or `asset.manage`, intersected with the task's stable organization-ID scope. `task.create` may create, complete, and cancel only `reference` uploads; it never authorizes source or final-product uploads. Upload completion never advances workflow state. Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state is locked and checked again in every transaction that writes upload-session state.
+- `POST`: Creates a staged task-asset upload session and lets the backend choose single-part or multipart OSS upload. The task must be in an editable design or audit state. Authorization is `task.upload_source`, `task.audit`, or `asset.manage`, intersected with the task's stable organization-ID scope. During design/retouch, `task.upload_source` additionally requires the caller to be the current task handler; `asset.manage` is the explicit administrative override. `task.create` may create, complete, and cancel only `reference` uploads; it never authorizes source or final-product uploads. Upload completion never advances workflow state. Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state is locked and checked again in every transaction that writes upload-session state.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -859,7 +859,7 @@ curl -X GET https://api.example.com/v1/assets/upload-sessions/<session_id> \
 ### 简介
 支持方法: POST。
 
-- `POST`: Completes one staged upload after OSS bytes are verified. It never advances workflow state. Completed and Archived tasks reject the mutation and require reopen; task state is locked and checked again inside the transaction.
+- `POST`: Completes one staged upload after OSS bytes are verified. During design/retouch, `task.upload_source` requires the current task handler while `asset.manage` remains the administrative override. It never advances workflow state. Completed and Archived tasks reject the mutation and require reopen; task state and handler are locked and checked again inside the transaction.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

@@ -60,7 +60,7 @@
     <aside v-else-if="isRetouchStage" class="contract-note retouch-folder-note">
       <FolderUp :size="17" aria-hidden="true" />
       <strong>支持整目录批量上传</strong>
-      <span>优先沿用批量下载生成的“需求1 / 需求2”目录；平铺文件夹可保留原素材文件名或在路径中包含 SKU。无法唯一匹配时不会开始上传。</span>
+      <span>可一次上传全部需求，也可逐个选择需求文件夹分批上传；1.jpg / 2.jpg 会按待修素材顺序匹配，同目录其他改名文件会跟随可唯一识别的同组文件。</span>
     </aside>
 
     <section v-if="isAuditStage && auditReferences.length" class="audit-references" aria-label="审核参考图">
@@ -565,7 +565,7 @@ async function uploadRetouchFolder(event: Event) {
   const plan = buildRetouchFolderUploadPlan(selected, retouchFolderTargets())
   const planError = retouchFolderUploadPlanError(plan)
   if (planError) {
-    error.value = `文件夹上传未开始：${planError}。请沿用批量下载的“需求1 / 需求2”目录，或保留原素材文件名。`
+    error.value = `文件夹上传未开始：${planError}。可用 1.jpg / 2.jpg 对应待修素材顺序，或在目录中保留原素材文件名、需求编号或 SKU。`
     input.value = ''
     return
   }
@@ -611,7 +611,8 @@ async function uploadRetouchFolder(event: Event) {
     if (failures.length) {
       error.value = `文件夹批量上传完成 ${completed} 项，失败 ${failures.length} 项：${failures.slice(0, 3).join('；')}`
     } else {
-      success.value = `文件夹批量上传完成：${completed} 项修图需求，共 ${uploadedFileCount} 个成品文件。`
+      const remaining = plan.missingTargets.length ? ` 其余 ${plan.missingTargets.length} 项可继续选择文件夹上传。` : ''
+      success.value = `文件夹批量上传完成：${completed} 项修图需求，共 ${uploadedFileCount} 个成品文件。${remaining}`
     }
   } finally {
     folderUploading.value = false

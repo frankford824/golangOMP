@@ -861,6 +861,14 @@ func (s *taskResourceWorkflowService) SubmitDesign(ctx context.Context, taskID i
 		if !domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskDesignSubmit, task.AccessSubject()) {
 			return domain.NewAppError(domain.ErrCodePermissionDenied, "task is outside the effective data scope", nil)
 		}
+		if !taskWorkflowHandledByActor(task, actor.ID) {
+			return domain.NewAppError(domain.ErrCodePermissionDenied, "only the current task handler can submit design resources", map[string]interface{}{
+				"deny_code":          "design_submit_requires_current_handler",
+				"task_id":            task.TaskID,
+				"current_handler_id": task.CurrentHandlerID,
+				"designer_id":        task.DesignerID,
+			})
+		}
 		if task.WorkflowRevision != request.ExpectedWorkflowRevision || task.Status != domain.TaskStatusInProgress {
 			return repo.ErrConflict
 		}
@@ -929,6 +937,16 @@ func (s *taskResourceWorkflowService) SubmitDesign(ctx context.Context, taskID i
 		return replay, nil
 	}
 	return s.ResourceBundle(ctx, taskID, actor)
+}
+
+func taskWorkflowHandledByActor(task *domain.TaskWorkflowLock, actorID int64) bool {
+	if task == nil || actorID <= 0 {
+		return false
+	}
+	if task.CurrentHandlerID != nil && *task.CurrentHandlerID > 0 {
+		return *task.CurrentHandlerID == actorID
+	}
+	return task.DesignerID != nil && *task.DesignerID > 0 && *task.DesignerID == actorID
 }
 
 func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID int64, actor domain.RequestActor, request domain.AuditDecisionRequest) (*domain.ResourceBundle, *domain.AppError) {

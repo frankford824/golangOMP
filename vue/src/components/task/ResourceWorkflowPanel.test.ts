@@ -290,6 +290,43 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
+  it('uploads one requirement folder incrementally and groups renamed sibling files', async () => {
+    mocks.upload
+      .mockResolvedValueOnce({ version: { id: 311 } })
+      .mockResolvedValueOnce({ version: { id: 312 } })
+      .mockResolvedValueOnce({ version: { id: 313 } })
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'retouch_task',
+        bundle: retouchBundle(),
+        retouchRequirements,
+        allowedActions: ['task.design.submit'],
+      },
+    })
+    const input = wrapper.get('[aria-label="选择修图成品文件夹"]')
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [
+        folderFile('8.11 谷本文 平衡kt板/细节图-完成.png'),
+        folderFile('8.11 谷本文 平衡kt板/正面.jpg'),
+        folderFile('8.11 谷本文 平衡kt板/背面.jpg'),
+      ],
+    })
+    await input.trigger('change')
+    await vi.waitFor(() => expect(mocks.upload).toHaveBeenCalledTimes(3))
+    await flushPromises()
+
+    expect(mocks.upload.mock.calls.map((call) => [(call[1] as File).name, call[3]])).toEqual([
+      ['细节图-完成.png', { retouchRequirementId: 502 }],
+      ['正面.jpg', { retouchRequirementId: 502 }],
+      ['背面.jpg', { retouchRequirementId: 502 }],
+    ])
+    expect(wrapper.text()).toContain('文件夹批量上传完成：1 项修图需求，共 3 个成品文件。')
+    expect(wrapper.text()).toContain('其余 1 项可继续选择文件夹上传。')
+    wrapper.unmount()
+  })
+
   it('does not upload a retouch folder when files cannot be mapped safely', async () => {
     const wrapper = mount(ResourceWorkflowPanel, {
       props: {
@@ -311,7 +348,7 @@ describe('ResourceWorkflowPanel action contract', () => {
     expect(mocks.upload).not.toHaveBeenCalled()
     expect(wrapper.get('[role="alert"]').text()).toContain('文件夹上传未开始')
     expect(wrapper.get('[role="alert"]').text()).toContain('无法匹配需求')
-    expect(wrapper.get('[role="alert"]').text()).toContain('缺少成品')
+    expect(wrapper.get('[role="alert"]').text()).not.toContain('缺少成品')
     wrapper.unmount()
   })
 

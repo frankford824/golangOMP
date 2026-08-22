@@ -1000,7 +1000,7 @@ func TestSubmitDesignRollsBackEntireTransactionWhenFinalOutputIsSentDuringDesign
 	actorID := int64(7)
 	sourceID, finalID := int64(1), int64(2)
 	repository := &bindingRollbackRepo{
-		task:  &domain.TaskWorkflowLock{TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusInProgress, WorkflowRevision: 3, CreatorID: actorID},
+		task:  &domain.TaskWorkflowLock{TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusInProgress, WorkflowRevision: 3, CreatorID: actorID, DesignerID: &actorID, CurrentHandlerID: &actorID},
 		group: domain.TaskAssetGroup{ID: 20, TaskID: 10, ScopeKind: domain.TaskAssetGroupScopeTask, LockVersion: 0},
 		staged: map[int64]domain.StagedTaskAssetBinding{
 			sourceID: {TaskAssetID: sourceID, TaskID: 10, BindingState: "staged", StagedRole: "source", StagedBy: &actorID},
@@ -1071,7 +1071,7 @@ func TestSubmitDesignRejectsCustomizationBeforeReadyForSubmit(t *testing.T) {
 	repository := &bindingRollbackRepo{
 		task: &domain.TaskWorkflowLock{
 			TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusInProgress,
-			WorkflowRevision: 3, CreatorID: actorID, Customization: true,
+			WorkflowRevision: 3, CreatorID: actorID, DesignerID: &actorID, CurrentHandlerID: &actorID, Customization: true,
 		},
 		customizationReadyErr: domain.NewAppError(domain.ErrCodeInvalidStateTransition, "定制任务尚未完成设计准备", nil),
 	}
@@ -1088,6 +1088,30 @@ func TestSubmitDesignRejectsCustomizationBeforeReadyForSubmit(t *testing.T) {
 	}
 	if runner.rolledBack != 1 || runner.committed != 0 {
 		t.Fatalf("transaction rolled back/committed = %d/%d", runner.rolledBack, runner.committed)
+	}
+}
+
+func TestSubmitDesignRejectsDesignerWhoIsNotCurrentHandler(t *testing.T) {
+	actorID, otherHandlerID := int64(7), int64(8)
+	repository := &bindingRollbackRepo{
+		task: &domain.TaskWorkflowLock{
+			TaskID: 10, TaskType: domain.TaskTypeRetouchTask, Status: domain.TaskStatusInProgress,
+			WorkflowRevision: 3, CreatorID: 9, DesignerID: &otherHandlerID, CurrentHandlerID: &otherHandlerID,
+		},
+	}
+	runner := &recordingResourceWorkflowTxRunner{}
+	svc := NewTaskResourceWorkflowService(repository, runner, nil)
+	_, appErr := svc.SubmitDesign(context.Background(), 10, globalCapabilityActor(actorID, domain.PermissionTaskDesignSubmit), domain.SubmitDesignV2Request{
+		ExpectedWorkflowRevision: 3, IdempotencyKey: "cross-designer-submit",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("SubmitDesign() error = %+v, want permission denied", appErr)
+	}
+	if details, _ := appErr.Details.(map[string]interface{}); details["deny_code"] != "design_submit_requires_current_handler" {
+		t.Fatalf("SubmitDesign() deny details = %+v", appErr.Details)
+	}
+	if runner.rolledBack != 1 || runner.committed != 0 || repository.createCalls != 0 {
+		t.Fatalf("transaction rolled back/committed/create = %d/%d/%d", runner.rolledBack, runner.committed, repository.createCalls)
 	}
 }
 

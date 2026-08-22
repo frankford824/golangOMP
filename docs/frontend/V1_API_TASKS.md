@@ -850,7 +850,7 @@ curl -X GET https://api.example.com/v1/access/events \
 ### 简介
 支持方法: POST。
 
-- `POST`: Ordinary/customization design tasks submit one source per group plus the designer's single/set decision; final outputs are rejected at this stage. Retouch tasks submit final outputs here and complete directly. Upload-session completion never advances workflow state.
+- `POST`: Ordinary/customization design tasks submit one source per group plus the designer's single/set decision; final outputs are rejected at this stage. Retouch tasks submit final outputs here and complete directly. The caller must be the current task handler (with legacy `designer_id` fallback) and hold `task.upload_source` in the task's stable organization scope. Upload-session completion never advances workflow state.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

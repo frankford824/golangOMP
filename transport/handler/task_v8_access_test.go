@@ -74,7 +74,10 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	if !slices.Contains(pendingAssign, "task.assign") {
 		t.Fatalf("pending-assign actions = %v, want task.assign", pendingAssign)
 	}
-	designer := v8AllowedTaskActions(actorFor(domain.PermissionTaskDesignSubmit), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, subject)
+	designerSubject := subject
+	designerSubject.DesignerID = handlerInt64Ptr(9)
+	designerSubject.CurrentHandlerID = handlerInt64Ptr(9)
+	designer := v8AllowedTaskActions(actorFor(domain.PermissionTaskDesignSubmit), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, designerSubject)
 	if slices.Contains(designer, "task.reference.append") || slices.Contains(designer, "task.assign") || !slices.Contains(designer, "task.design.submit") {
 		t.Fatalf("task.design.submit actions = %v", designer)
 	}
@@ -90,8 +93,8 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	takenByOther := unclaimed
 	takenByOther.DesignerID = handlerInt64Ptr(77)
 	designerOnTaken := v8AllowedTaskActions(actorFor(domain.PermissionTaskUploadSource), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, takenByOther)
-	if slices.Contains(designerOnTaken, "task.claim") {
-		t.Fatalf("designer actions on a claimed task = %v, want no task.claim", designerOnTaken)
+	if slices.Contains(designerOnTaken, "task.claim") || slices.Contains(designerOnTaken, "task.design.submit") {
+		t.Fatalf("designer actions on another handler's task = %v, want no task.claim or task.design.submit", designerOnTaken)
 	}
 	planningPool := v8AllowedTaskActions(actorFor(domain.PermissionTaskUploadSource), domain.TaskTypeSKUPlanning, domain.TaskStatusPendingAssign, unclaimed)
 	if slices.Contains(planningPool, "task.claim") {

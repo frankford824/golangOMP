@@ -212,7 +212,9 @@ export interface paths {
          * Submit designer-selected mode and source files for unified audit
          * @description Ordinary/customization design tasks submit one source per group plus the designer's single/set
          *     decision; final outputs are rejected at this stage. Retouch tasks submit final outputs here and
-         *     complete directly. Upload-session completion never advances workflow state.
+         *     complete directly. The caller must be the current task handler (with legacy `designer_id` fallback)
+         *     and hold `task.upload_source` in the task's stable organization scope. Upload-session completion
+         *     never advances workflow state.
          */
         post: operations["submitTaskDesignV8"];
         delete?: never;
@@ -5140,7 +5142,9 @@ export interface paths {
          * @description Creates a staged task-asset upload session and lets the backend choose single-part or
          *     multipart OSS upload. The task must be in an editable design or audit state. Authorization
          *     is `task.upload_source`, `task.audit`, or `asset.manage`, intersected with the
-         *     task's stable organization-ID scope. `task.create` may create, complete, and cancel only
+         *     task's stable organization-ID scope. During design/retouch, `task.upload_source` additionally
+         *     requires the caller to be the current task handler; `asset.manage` is the explicit administrative
+         *     override. `task.create` may create, complete, and cancel only
          *     `reference` uploads; it never authorizes source or final-product uploads. Upload completion never advances workflow state.
          *     Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state
          *     is locked and checked again in every transaction that writes upload-session state.
@@ -5266,7 +5270,7 @@ export interface paths {
         put?: never;
         /**
          * Complete asset upload session
-         * @description Completes one staged upload after OSS bytes are verified. It never advances workflow state. Completed and Archived tasks reject the mutation and require reopen; task state is locked and checked again inside the transaction.
+         * @description Completes one staged upload after OSS bytes are verified. During design/retouch, `task.upload_source` requires the current task handler while `asset.manage` remains the administrative override. It never advances workflow state. Completed and Archived tasks reject the mutation and require reopen; task state and handler are locked and checked again inside the transaction.
          */
         post: {
             parameters: {

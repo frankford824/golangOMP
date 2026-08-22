@@ -355,9 +355,9 @@ func TestTaskAssetCenterServiceCompletedTaskRequiresReopenBeforeAnyResourceRepla
 }
 
 func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) {
-	const actorID = int64(610)
+	actorID := int64(610)
 	departmentID, otherDepartmentID := int64(41), int64(42)
-	task := &domain.Task{ID: 2100, CreatorID: actorID, TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &departmentID}
+	task := &domain.Task{ID: 2100, CreatorID: actorID, DesignerID: &actorID, CurrentHandlerID: &actorID, TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &departmentID}
 
 	legacyOnly := domain.WithRequestActor(taskAssetMutationTestContext(), domain.RequestActor{ID: actorID, Roles: []domain.Role{domain.RoleAdmin, domain.RoleAuditA}})
 	if appErr := authorizeV8TaskAssetMutation(legacyOnly, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
@@ -374,6 +374,16 @@ func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) 
 	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), inScopeActor), task, domain.TaskAssetTypeSource); appErr != nil {
 		t.Fatalf("in-scope design capability rejected: %+v", appErr)
 	}
+	otherHandlerID := actorID + 1
+	task.DesignerID = &otherHandlerID
+	task.CurrentHandlerID = &otherHandlerID
+	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), inScopeActor), task, domain.TaskAssetTypeDelivery); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("non-handler design upload authorization = %+v, want permission denied", appErr)
+	} else if details, _ := appErr.Details.(map[string]interface{}); details["deny_code"] != "task_asset_requires_current_handler" {
+		t.Fatalf("non-handler design upload deny details = %+v", appErr.Details)
+	}
+	task.DesignerID = &actorID
+	task.CurrentHandlerID = &actorID
 
 	task.TaskStatus = domain.TaskStatusPendingAudit
 	auditActor := scopedCapabilityActor(actorID, domain.PermissionTaskAuditDecision, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
@@ -407,6 +417,11 @@ func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) 
 	assetManager := scopedCapabilityActor(actorID, domain.PermissionAssetManage, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
 	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), assetManager), task, domain.TaskAssetTypeReference); appErr != nil {
 		t.Fatalf("in-scope asset manager reference mutation rejected: %+v", appErr)
+	}
+	task.DesignerID = &otherHandlerID
+	task.CurrentHandlerID = &otherHandlerID
+	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), assetManager), task, domain.TaskAssetTypeDelivery); appErr != nil {
+		t.Fatalf("in-scope asset manager administrative override rejected: %+v", appErr)
 	}
 }
 
