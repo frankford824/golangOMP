@@ -77,11 +77,17 @@ func (s *Service) ListDriveOrders(ctx context.Context, actor domain.RequestActor
 	return items, nil
 }
 
-func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, keyword string, ownerKeyword string, createdFrom *time.Time, createdTo *time.Time, sortBy string, sortDir string, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
+func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, keyword string, ownerKeyword string, operationSource string, createdFrom *time.Time, createdTo *time.Time, sortBy string, sortDir string, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
 	page, pageSize = normalizeDrivePage(page, pageSize)
+	operationSource = strings.TrimSpace(operationSource)
+	switch operationSource {
+	case "", "normal_upload", "supplement", "client_supplement", "admin_supplement":
+	default:
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "operation_source must be normal_upload, supplement, client_supplement, or admin_supplement.", nil)
+	}
 	filter := repo.AssetWorkbenchDriveFilter{
 		OwnerUserID:       s.driveOwnerFilter(actor),
 		UploadDirectoryID: directoryID,
@@ -89,6 +95,7 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 		OrderNo:           orderNo,
 		Keyword:           strings.TrimSpace(keyword),
 		OwnerKeyword:      strings.TrimSpace(ownerKeyword),
+		OperationSource:   operationSource,
 		CreatedFrom:       createdFrom,
 		CreatedTo:         createdTo,
 		SortBy:            strings.TrimSpace(sortBy),

@@ -84,6 +84,7 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 				"f.created_at <= ?",
 				"LEFT JOIN users u ON u.id = f.owner_user_id",
 				"LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id",
+				"i.entry_kind = 'supplement'",
 			}
 			for _, check := range checks {
 				if !strings.Contains(actualSQL, check) {
@@ -137,13 +138,14 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 
 	workbenchRepo := NewAssetWorkbenchRepo(New(db))
 	_, total, err := workbenchRepo.DriveListFiles(context.Background(), repo.AssetWorkbenchDriveFilter{
-		OwnerUserID:  &ownerID,
-		Keyword:      " 海报 ",
-		OwnerKeyword: " 张三 ",
-		CreatedFrom:  &createdFrom,
-		CreatedTo:    &createdTo,
-		Page:         2,
-		PageSize:     25,
+		OwnerUserID:     &ownerID,
+		Keyword:         " 海报 ",
+		OwnerKeyword:    " 张三 ",
+		OperationSource: "supplement",
+		CreatedFrom:     &createdFrom,
+		CreatedTo:       &createdTo,
+		Page:            2,
+		PageSize:        25,
 	})
 	if err != nil {
 		t.Fatalf("DriveListFiles() error = %v", err)
@@ -153,6 +155,26 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestDriveOperationSourceClause(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "normal", value: "normal_upload", want: "COALESCE(i.entry_kind, '') <> 'supplement'"},
+		{name: "all supplements", value: "supplement", want: "i.entry_kind = 'supplement'"},
+		{name: "client supplement", value: "client_supplement", want: "s.submitter_user_id = i.payee_user_id"},
+		{name: "admin supplement", value: "admin_supplement", want: "s.submitter_user_id <> i.payee_user_id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := driveOperationSourceClause(tt.value); !strings.Contains(got, tt.want) {
+				t.Fatalf("driveOperationSourceClause(%q) = %q, want %q", tt.value, got, tt.want)
+			}
+		})
 	}
 }
 

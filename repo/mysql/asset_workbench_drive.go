@@ -31,6 +31,21 @@ func driveDirectoryClause(filter repo.AssetWorkbenchDriveFilter) (string, []inte
 	return "", nil
 }
 
+func driveOperationSourceClause(operationSource string) string {
+	switch strings.TrimSpace(operationSource) {
+	case "normal_upload":
+		return " AND COALESCE(i.entry_kind, '') <> 'supplement'"
+	case "supplement":
+		return " AND i.entry_kind = 'supplement'"
+	case "client_supplement":
+		return " AND i.entry_kind = 'supplement' AND s.submitter_user_id = i.payee_user_id"
+	case "admin_supplement":
+		return " AND i.entry_kind = 'supplement' AND s.submitter_user_id <> i.payee_user_id"
+	default:
+		return ""
+	}
+}
+
 func (r *assetWorkbenchRepo) DriveListDirectories(ctx context.Context, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveDirectory, error) {
 	ownerSQL, ownerArgs := driveOwnerClause(filter)
 	query := `SELECT f.upload_directory_id AS directory_id,
@@ -212,7 +227,7 @@ func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.Ass
 	ownerSQL, ownerArgs := driveOwnerClause(filter)
 	dirSQL, dirArgs := driveDirectoryClause(filter)
 	orderNo := strings.TrimSpace(filter.OrderNo)
-	where := ""
+	where := driveOperationSourceClause(filter.OperationSource)
 	args := append([]interface{}{}, ownerArgs...)
 	args = append(args, dirArgs...)
 	if orderNo != "" {
@@ -391,6 +406,9 @@ func buildDriveSearchFullTextIDQuery(filter repo.AssetWorkbenchDriveFilter, full
 func driveSearchExtraClauses(filter repo.AssetWorkbenchDriveFilter) (string, []interface{}) {
 	args := []interface{}{}
 	clauses := []string{}
+	if operationClause := strings.TrimPrefix(driveOperationSourceClause(filter.OperationSource), " AND "); operationClause != "" {
+		clauses = append(clauses, operationClause)
+	}
 	if owner := strings.TrimSpace(filter.OwnerKeyword); owner != "" {
 		like := "%" + owner + "%"
 		clauses = append(clauses, `(COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ?)`)

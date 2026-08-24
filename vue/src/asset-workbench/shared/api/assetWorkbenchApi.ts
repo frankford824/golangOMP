@@ -1899,6 +1899,7 @@ export const assetWorkbenchApi = {
       order_no?: string
       q?: string
       owner?: string
+      operation_source?: 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
       created_from?: string
       created_to?: string
       sort_by?: string
@@ -1912,6 +1913,7 @@ export const assetWorkbenchApi = {
     if (params.order_no) query.order_no = params.order_no
     if (params.q) query.q = params.q
     if (params.owner) query.owner = params.owner
+    if (params.operation_source) query.operation_source = params.operation_source
     if (params.created_from) query.created_from = params.created_from
     if (params.created_to) query.created_to = params.created_to
     if (params.sort_by) query.sort_by = params.sort_by

@@ -9871,6 +9871,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/orders \
 | `order_no` | query | string | 否 | - |
 | `q` | query | string | 否 | Keyword filter across filename, relative path, format, upload directory, uploader, order number, and submission number. |
 | `owner` | query | string | 否 | Uploader name/account filter. |
+| `operation_source` | query | enum(normal_upload/supplement/client_supplement/admin_supplement) | 否 | Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. |
 | `created_from` | query | string | 否 | Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. |
 | `created_to` | query | string | 否 | Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD. |
 | `sort_by` | query | enum(created_at/owner/creator/directory/category/name/display_name/format/file_type) | 否 | Sort field for upload ledger views. |

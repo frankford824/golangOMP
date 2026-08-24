@@ -92,7 +92,7 @@ func (h *AssetWorkbenchHandler) DriveListFiles(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
-	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, dirID, unassigned, c.Query("order_no"), c.Query("q"), c.Query("owner"), createdFrom, createdTo, c.Query("sort_by"), c.Query("sort_dir"), page, pageSize)
+	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, dirID, unassigned, c.Query("order_no"), c.Query("q"), c.Query("owner"), c.Query("operation_source"), createdFrom, createdTo, c.Query("sort_by"), c.Query("sort_dir"), page, pageSize)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

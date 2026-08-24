@@ -378,6 +378,7 @@ type AssetWorkbenchDriveFilter struct {
 	OrderNo           string
 	Keyword           string
 	OwnerKeyword      string
+	OperationSource   string
 	CreatedFrom       *time.Time
 	CreatedTo         *time.Time
 	SortBy            string

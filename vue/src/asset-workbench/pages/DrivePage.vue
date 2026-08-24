@@ -1876,8 +1876,36 @@ function scheduleUnifiedSearch() {
   }, searchDebounceMs)
 }
 
+function locateExternalSearchMaterial(row: OverviewSearchRow) {
+  const asset = materialWithCurrentClientPublication(searchHitMaterial(row))
+  activeMode.value = 'operational'
+  operationalViewMode.value = 'paths'
+  resetMaterialScopeSnapshot()
+  materialSourceFilter.value = 'external'
+  materialBusinessLaneFilter.value = 'all'
+  materialFormatFilter.value = 'all'
+  materialQuery.value = searchHitFilename(row)
+    || asset.original_filename
+    || asset.file_name
+    || asset.resource_id
+    || row.title
+  materialItems.value = [asset]
+  materialFileTotal.value = 1
+  const directoryPath = materialDirectoryPath(asset)
+  rememberMaterialPath(directoryPath)
+  expandMaterialFolderTreePath(directoryPath)
+  activeMaterial.value = asset
+  searchActive.value = false
+  notice.value = `已定位外部素材：${asset.resource_id || row.primary_code || row.id}`
+}
+
 async function locateSearchRow(row: OverviewSearchRow) {
   if (row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material') {
+    const material = searchHitMaterial(row)
+    if (isExternalMaterialSource(material.source_type)) {
+      locateExternalSearchMaterial(row)
+      return
+    }
     activeMode.value = 'operational'
     operationalViewMode.value = 'paths'
     materialQuery.value = row.secondary_code || row.primary_code || row.title || ''

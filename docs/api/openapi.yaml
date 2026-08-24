@@ -14858,6 +14858,10 @@ paths:
           description: Uploader name/account filter.
           schema: { type: string }
         - in: query
+          name: operation_source
+          description: Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements.
+          schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }
+        - in: query
           name: created_from
           description: Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD.
           schema: { type: string }

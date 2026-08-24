@@ -132,4 +132,26 @@ describe('UploadOverviewPage operation source', () => {
     expect(mocks.listSettlementSupplements).toHaveBeenCalledWith({ business_month: '2026-08', page: 1, page_size: 100 }, expect.any(AbortSignal))
     expect(wrapper.get('.aw-upload-ledger__source-cell').text()).toBe('补录')
   })
+
+  it('filters the ledger by normal uploads or supplement source', async () => {
+    mocks.driveFiles.mockResolvedValue({ items: [], total: 0, page: 1, size: 50 })
+    const wrapper = mount(UploadOverviewPage, {
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const sourceFilter = wrapper.get('select[aria-label="操作来源筛选"]')
+    expect(sourceFilter.findAll('option').map((option) => option.text())).toEqual([
+      '全部来源', '正常上传', '补录（全部）', '客户端补录', '管理员补录',
+    ])
+    await sourceFilter.setValue('supplement')
+    await wrapper.get('form.aw-upload-ledger__filters').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.driveFiles).toHaveBeenLastCalledWith(expect.objectContaining({
+      operation_source: 'supplement',
+      page: 1,
+    }), expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('重置 1')
+  })
 })

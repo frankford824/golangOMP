@@ -23,6 +23,7 @@ import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vu
 
 type SortBy = 'created_at' | 'owner' | 'directory' | 'name' | 'format'
 type SortDir = 'asc' | 'desc'
+type OperationSourceFilter = 'all' | 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
 interface PieceworkDisplayState {
   isPrimary: boolean
   siblingCount: number
@@ -58,6 +59,7 @@ const owner = ref('')
 const createdFrom = ref('')
 const createdTo = ref('')
 const directory = ref('all')
+const operationSource = ref<OperationSourceFilter>('all')
 const sortBy = ref<SortBy>('created_at')
 const sortDir = ref<SortDir>('desc')
 const moveTargetDirectoryId = ref(0)
@@ -113,7 +115,14 @@ const pieceworkDisplayByFileID = computed(() => buildPieceworkDisplayByFileID(fi
 const totalAmount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.gross_amount || 0), 0))
 const totalCount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.page_count || 0), 0))
 const activeFilterCount = computed(() =>
-  [query.value.trim(), owner.value.trim(), createdFrom.value, createdTo.value, directory.value !== 'all' ? directory.value : ''].filter(Boolean).length,
+  [
+    query.value.trim(),
+    owner.value.trim(),
+    createdFrom.value,
+    createdTo.value,
+    directory.value !== 'all' ? directory.value : '',
+    operationSource.value !== 'all' ? operationSource.value : '',
+  ].filter(Boolean).length,
 )
 const directoryOptions = computed(() => directories.value.filter((dir) => Number(dir.directory_id || 0) > 0))
 const archiveBreadcrumbs = computed(() => {
@@ -416,6 +425,7 @@ async function loadFiles(nextPage = page.value) {
         ...directoryParams(),
         q: query.value.trim() || undefined,
         owner: owner.value.trim() || undefined,
+        operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
         created_from: createdFrom.value || undefined,
         created_to: createdTo.value || undefined,
         sort_by: sortBy.value,
@@ -457,6 +467,7 @@ async function resetFilters() {
   createdFrom.value = ''
   createdTo.value = ''
   directory.value = 'all'
+  operationSource.value = 'all'
   await applyFilters()
 }
 
@@ -766,6 +777,7 @@ async function exportCurrentFilter() {
         ...directoryParams(),
         q: query.value.trim() || undefined,
         owner: owner.value.trim() || undefined,
+        operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
         created_from: createdFrom.value || undefined,
         created_to: createdTo.value || undefined,
         sort_by: sortBy.value,
@@ -851,6 +863,16 @@ onBeforeUnmount(() => {
             <option v-for="dir in directoryOptions" :key="dir.directory_id ?? dir.name" :value="String(dir.directory_id)">
               {{ dir.name }}
             </option>
+          </select>
+        </label>
+        <label>
+          <span>操作来源</span>
+          <select v-model="operationSource" aria-label="操作来源筛选">
+            <option value="all">全部来源</option>
+            <option value="normal_upload">正常上传</option>
+            <option value="supplement">补录（全部）</option>
+            <option value="client_supplement">客户端补录</option>
+            <option value="admin_supplement">管理员补录</option>
           </select>
         </label>
         <label>

@@ -353,4 +353,53 @@ describe('DrivePage operational browsing', () => {
     expect(wrapper.text()).toContain('HSC11066 定制KT板.psd')
     expect(wrapper.text()).toContain('已在运营素材中检索：HSC11066')
   })
+
+  it('locates the exact external material by resource identity instead of searching ext ids', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 1, display_name: 'admin' },
+      is_admin: true,
+      capabilities: ['asset.workbench.manage', 'asset.workbench.material.download', 'asset.publish'],
+    } as never)
+    overviewSearch.mockResolvedValue({
+      items: [
+        {
+          source: 'system_asset', scope: 'operational', source_label: '外部资源', id: 18361695,
+          title: '/quark/kt板/退伍/HSC33647 第一份.psd', primary_code: 'ext-18361695', status: 'indexed',
+          created_at: '2026-08-21T00:00:00Z', updated_at: '2026-08-21T00:00:00Z',
+          meta_json: { source_type: 'external', resource_id: 'ext-18361695', file_name: 'HSC33647 第一份.psd', origin_path: '/quark/kt板/退伍/HSC33647 第一份.psd' },
+        },
+        {
+          source: 'system_asset', scope: 'operational', source_label: '外部资源', id: 18361654,
+          title: '/quark/kt板/开业/HSC33647 第二份.psd', primary_code: 'ext-18361654', status: 'indexed',
+          created_at: '2026-08-21T00:00:00Z', updated_at: '2026-08-21T00:00:00Z',
+          meta_json: { source_type: 'external', resource_id: 'ext-18361654', file_name: 'HSC33647 第二份.psd', origin_path: '/quark/kt板/开业/HSC33647 第二份.psd' },
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 60,
+    })
+    const wrapper = shallowMount(DrivePage, {
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('HSC33647')
+    await wrapper.get('form.aw-drive__search--global').trigger('submit')
+    await flushPromises()
+    const locateButtons = wrapper.findAll('button').filter((button) => button.text() === '在网盘中定位')
+    expect(locateButtons).toHaveLength(2)
+    await locateButtons[1].trigger('click')
+    await flushPromises()
+
+    expect(systemSearch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('已定位外部素材：ext-18361654')
+    expect(wrapper.text()).toContain('HSC33647 第二份.psd')
+    expect(wrapper.text()).toContain('/quark/kt板/开业/HSC33647 第二份.psd')
+  })
 })
