@@ -5668,7 +5668,7 @@ func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
 		"": {
 			Path: "",
 			Folders: []assetcenter.MaterialFolder{
-				{Path: "/quark", Name: "quark", SourceType: string(domain.AssetResourceSourceExternal), FileCount: 106351},
+				{Path: "/p3", Name: "p3", SourceType: string(domain.AssetResourceSourceExternal), FileCount: 69175},
 			},
 			Page: 1,
 			Size: 100,
@@ -5693,8 +5693,18 @@ func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("BrowseMaterials(root) error = %+v", appErr)
 	}
-	if len(root.Folders) != 2 || root.Folders[0].Path != "/quark" || root.Folders[0].FileCount != 3064 || root.Folders[0].DirectFileCount != 0 || root.Folders[1].Path != workbenchMaterialSystemRoot {
-		t.Fatalf("root folders = %+v, want /quark plus finalized resource-group root", root.Folders)
+	if len(root.Folders) != 3 {
+		t.Fatalf("root folders = %+v, want p3, finalized resource-group root, and synthesized /quark", root.Folders)
+	}
+	var quarkRoot *assetcenter.MaterialFolder
+	for index := range root.Folders {
+		if root.Folders[index].Path == workbenchQuarkMaterialVirtualRoot {
+			quarkRoot = &root.Folders[index]
+			break
+		}
+	}
+	if quarkRoot == nil || quarkRoot.FileCount != 3064 || quarkRoot.DirectFileCount != 0 {
+		t.Fatalf("root folders = %+v, want synthesized /quark count 3064", root.Folders)
 	}
 	if len(root.Files) != 1 || root.Files[0].SourceType != "task_resource_group" {
 		t.Fatalf("root files = %+v, want finalized resource groups and no legacy system files", root.Files)

@@ -6395,12 +6395,20 @@ func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, br
 			break
 		}
 	}
-	if quarkIndex < 0 {
-		return folders, nil
-	}
 	virtualRoot, appErr := s.browseWorkbenchVirtualQuarkRoot(ctx, browser, 1, 100, source, formatCategory, businessLane)
 	if appErr != nil {
 		return nil, appErr
+	}
+	if quarkIndex < 0 {
+		if virtualRoot.Total <= 0 {
+			return folders, nil
+		}
+		folders = append(folders, assetcenter.MaterialFolder{
+			Path:       workbenchQuarkMaterialVirtualRoot,
+			Name:       strings.TrimPrefix(workbenchQuarkMaterialVirtualRoot, "/"),
+			SourceType: string(domain.AssetResourceSourceExternal),
+		})
+		quarkIndex = len(folders) - 1
 	}
 	folders[quarkIndex].FileCount = virtualRoot.Total
 	folders[quarkIndex].DirectFileCount = 0
