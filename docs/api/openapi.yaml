@@ -10474,7 +10474,10 @@ paths:
             enum: [active_tasks, design_pending, pending_audit, handover, customization_in_progress, overdue, due_today, today_created]
         - { in: query, name: date_from, schema: { type: string } }
         - { in: query, name: date_to, schema: { type: string } }
-        - { in: query, name: keyword, schema: { type: string } }
+        - in: query
+          name: keyword
+          description: Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; fragments of at least two characters use the ngram search document.
+          schema: { type: string }
         - in: query
           name: sort
           description: Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker.

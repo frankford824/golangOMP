@@ -74,6 +74,8 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 			for _, fragment := range []string{
 				"INSERT INTO task_search_documents",
 				"ORDER BY id SEPARATOR ' '",
+				"tsi.product_name_snapshot",
+				"COALESCE(sku_items.sku_item_text, '')",
 				"ORDER BY tsi.id, revision.id SEPARATOR ' '",
 				"ON DUPLICATE KEY UPDATE",
 			} {
@@ -125,7 +127,7 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 		WithArgs("task_assets", "cleaned_at").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectExec("task-doc-upsert").
-		WithArgs(taskID, taskID, taskID).
+		WithArgs(taskID, taskID, taskID, taskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("task-reindex-enqueue").
 		WithArgs(taskID).
@@ -162,10 +164,10 @@ func TestRebuildAllTaskSearchDocumentProjectionsUsesCanonicalUpsert(t *testing.T
 	mock.ExpectQuery(`information_schema\.columns`).WithArgs("task_assets", "cleaned_at").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectExec(`DELETE FROM task_search_documents`).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`INSERT INTO task_search_documents[\s\S]+ORDER BY id SEPARATOR ' '[\s\S]+ORDER BY tsi.id, revision.id SEPARATOR ' '`).
-		WithArgs(int64(11), int64(11), int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`INSERT INTO task_search_documents[\s\S]+ORDER BY id SEPARATOR ' '[\s\S]+ORDER BY tsi.id, revision.id SEPARATOR ' '`).
-		WithArgs(int64(22), int64(22), int64(22)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO task_search_documents[\s\S]+ORDER BY id SEPARATOR ' '[\s\S]+sku_item_text[\s\S]+ORDER BY tsi.id, revision.id SEPARATOR ' '`).
+		WithArgs(int64(11), int64(11), int64(11), int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO task_search_documents[\s\S]+ORDER BY id SEPARATOR ' '[\s\S]+sku_item_text[\s\S]+ORDER BY tsi.id, revision.id SEPARATOR ' '`).
+		WithArgs(int64(22), int64(22), int64(22), int64(22)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM task_search_documents`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectQuery(`SELECT[\s\S]+LEFT JOIN task_search_documents[\s\S]+LEFT JOIN tasks`).
@@ -292,7 +294,7 @@ func TestReindexTaskSearchDocumentProjectionDoesNotRecursivelyEnqueue(t *testing
 	mock.ExpectQuery(`information_schema\.columns`).WithArgs("task_assets", "cleaned_at").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectExec(`INSERT INTO task_search_documents`).
-		WithArgs(taskID, taskID, taskID).
+		WithArgs(taskID, taskID, taskID, taskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := reindexTaskSearchDocumentProjection(context.Background(), db, taskID); err != nil {

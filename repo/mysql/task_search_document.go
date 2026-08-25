@@ -239,6 +239,7 @@ func upsertTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumen
 		    COALESCE(NULLIF(handler.display_name, ''), handler.username, ''),
 		    DATE_FORMAT(t.created_at, '%Y-%m-%d'), DATE_FORMAT(t.created_at, '%Y%m%d'),
 		    DATE_FORMAT(t.deadline_at, '%Y-%m-%d'), COALESCE(assets.asset_text, ''),
+		    COALESCE(sku_items.sku_item_text, ''),
 		    COALESCE(planning.planning_text, '')
 		  )
 		FROM tasks t
@@ -253,6 +254,16 @@ func upsertTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumen
 			  WHERE task_id = ? AND {{active_asset_where}}
 			  GROUP BY task_id
 			) assets ON assets.task_id = t.id
+		LEFT JOIN (
+		  SELECT tsi.task_id,
+		         GROUP_CONCAT(CONCAT_WS(' ', tsi.sku_code, tsi.product_name_snapshot,
+		           tsi.product_short_name, tsi.design_requirement, tsi.product_i_id,
+		           CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.product_i_id')) ELSE '' END)
+		           ORDER BY tsi.sequence_no, tsi.id SEPARATOR ' ') AS sku_item_text
+		  FROM task_sku_items tsi
+		  WHERE tsi.task_id = ?
+		  GROUP BY tsi.task_id
+		) sku_items ON sku_items.task_id = t.id
 		LEFT JOIN (
 		  SELECT tsi.task_id,
 		         GROUP_CONCAT(CONCAT_WS(' ', tsi.sku_code, revision.description_spec, revision.note,
@@ -294,6 +305,7 @@ func upsertTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumen
 			  asset_text = VALUES(asset_text),
 			  search_text = VALUES(search_text)`, "{{active_asset_where}}", activeAssetWhere, 1)
 	_, err := q.ExecContext(ctx, query,
+		taskID,
 		taskID,
 		taskID,
 		taskID,

@@ -3877,7 +3877,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `operational_bucket` | query | enum(active_tasks/design_pending/pending_audit/handover/customization_in_progress/overdue/due_today/today_created) | 否 | Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. |
 | `date_from` | query | string | 否 | - |
 | `date_to` | query | string | 否 | - |
-| `keyword` | query | string | 否 | - |
+| `keyword` | query | string | 否 | Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; fragments of at least two characters use the ngram search document. |
 | `sort` | query | enum(created_at/-created_at/updated_at/-updated_at/due_at/-due_at/task_no/-task_no) | 否 | Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |

@@ -1942,11 +1942,15 @@ func taskListSearchDocumentKeywordSupported(keyword string) bool {
 // index. Returns an empty string when the keyword cannot be recalled.
 func taskSearchDocumentKeywordRecall(kw normalizedSearchKeyword) (string, []interface{}) {
 	if kw.HasInt64 || kw.IsCode {
-		branches := make([]string, 0, 9)
-		args := make([]interface{}, 0, 9)
+		branches := make([]string, 0, 14)
+		args := make([]interface{}, 0, 14)
 		if kw.HasInt64 {
 			branches = append(branches, "SELECT task_id FROM task_search_documents WHERE task_id = ?")
 			args = append(args, kw.Int64)
+			if len([]rune(kw.Raw)) >= 2 {
+				branches = append(branches, "SELECT task_id FROM task_search_documents WHERE MATCH(search_text) AGAINST (? IN BOOLEAN MODE)")
+				args = append(args, booleanPhraseSearchQuery(kw.Raw))
+			}
 		}
 		if kw.IsCode {
 			exact := []string{"task_no", "sku_code", "primary_sku_code", "product_i_id"}
@@ -1958,6 +1962,11 @@ func taskSearchDocumentKeywordRecall(kw normalizedSearchKeyword) (string, []inte
 				branches = append(branches, "SELECT task_id FROM task_search_documents WHERE "+col+" LIKE ?")
 				args = append(args, kw.Upper+"%")
 			}
+			branches = append(branches,
+				"SELECT task_id FROM task_sku_items WHERE sku_code = ?",
+				"SELECT task_id FROM task_sku_items WHERE sku_code LIKE ?",
+			)
+			args = append(args, kw.Upper, kw.Upper+"%")
 		}
 		if len(branches) == 0 {
 			return "", nil
