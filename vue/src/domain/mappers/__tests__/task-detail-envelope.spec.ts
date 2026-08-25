@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { mergeDetailEnvelopeIntoTaskRaw } from '@/domain/mappers/task-detail-envelope'
 
 describe('mergeDetailEnvelopeIntoTaskRaw', () => {
+  it('promotes the current flat reference list over a stale task snapshot', () => {
+    const currentReferences = [{ ref_id: 'current-ref', filename: '补充.png' }]
+    const out = mergeDetailEnvelopeIntoTaskRaw({
+      task: { id: 9, reference_file_refs: [{ ref_id: 'legacy-ref', filename: '旧图.png' }] },
+      reference_file_refs: currentReferences,
+    })
+
+    expect(out.reference_file_refs).toEqual(currentReferences)
+  })
+
   it('merges task_detail into task root for category, design, note from remark, and filing', () => {
     const out = mergeDetailEnvelopeIntoTaskRaw({
       task: { id: '603', task_no: 'RW-1' },

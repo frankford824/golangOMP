@@ -10,28 +10,41 @@ import (
 	parentservice "workflow/service"
 )
 
-func TestBuildDetailReferenceFileRefsPrefersTaskDetailJSON(t *testing.T) {
+func TestBuildDetailReferenceFileRefsUsesFlatAuthorityAfterSupplement(t *testing.T) {
 	detail := &domain.TaskDetail{
 		ReferenceFileRefsJSON: `[{"asset_id":"ref-1","ref_id":"ref-1","storage_key":"tasks/ref-1.png","download_url":"/v1/assets/files/tasks/ref-1.png"}]`,
 	}
 
-	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(detail, []*domain.ReferenceFileRefFlat{{RefID: "flat-ref"}})
+	designAssetID := int64(4198)
+	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(detail, []*domain.ReferenceFileRefFlat{{
+		RefID: "flat-ref", DesignAssetID: &designAssetID, FileName: "补传参考图.png",
+	}})
 	if len(refs) != 1 {
 		t.Fatalf("refs len = %d, want 1", len(refs))
 	}
-	if refs[0].AssetID != "ref-1" || refs[0].StorageKey != "tasks/ref-1.png" || refs[0].DownloadURL == nil {
-		t.Fatalf("refs[0] = %+v, want formal ref object from task_detail JSON", refs[0])
+	if refs[0].AssetID != "4198" || refs[0].RefID != "flat-ref" || refs[0].Filename != "补传参考图.png" {
+		t.Fatalf("refs[0] = %+v, want current flat reference authority", refs[0])
+	}
+}
+
+func TestBuildDetailReferenceFileRefsFallsBackToTaskDetailJSONWithoutFlatRows(t *testing.T) {
+	detail := &domain.TaskDetail{
+		ReferenceFileRefsJSON: `[{"asset_id":"ref-1","ref_id":"ref-1","storage_key":"tasks/ref-1.png","download_url":"/v1/assets/files/tasks/ref-1.png"}]`,
+	}
+	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(detail, nil)
+	if len(refs) != 1 || refs[0].AssetID != "ref-1" || refs[0].DownloadURL == nil {
+		t.Fatalf("refs = %+v, want legacy JSON fallback", refs)
 	}
 }
 
 func TestBuildDetailReferenceFileRefsFallsBackToFlatRefs(t *testing.T) {
 	fileSize := int64(2048)
 	refs := parentservice.BuildTaskLevelDetailReferenceFileRefs(&domain.TaskDetail{ReferenceFileRefsJSON: "[]"}, []*domain.ReferenceFileRefFlat{{
-		RefID:        "flat-ref",
-		FileName:     "补传参考图.png",
-		MimeType:     "image/png",
-		FileSize:     &fileSize,
-		StorageKey:   "tasks/RW-001/assets/reference/补传参考图.png",
+		RefID:         "flat-ref",
+		FileName:      "补传参考图.png",
+		MimeType:      "image/png",
+		FileSize:      &fileSize,
+		StorageKey:    "tasks/RW-001/assets/reference/补传参考图.png",
 		StorageStatus: string(domain.AssetStorageRefStatusRecorded),
 	}})
 	if len(refs) != 1 {

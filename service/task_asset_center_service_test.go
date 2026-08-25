@@ -426,7 +426,10 @@ func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) 
 }
 
 type capturingReferenceFileRefRepo struct {
-	inserted []*domain.ReferenceFileRefFlat
+	inserted      []*domain.ReferenceFileRefFlat
+	replacedTask  int64
+	replacedOldID string
+	replacedNewID string
 }
 
 func (r *capturingReferenceFileRefRepo) InsertFlat(_ context.Context, _ repo.Tx, ref *domain.ReferenceFileRefFlat) (int64, error) {
@@ -443,6 +446,62 @@ func (*capturingReferenceFileRefRepo) ListByTask(context.Context, int64) ([]*dom
 
 func (*capturingReferenceFileRefRepo) DeleteByTaskAndRef(context.Context, repo.Tx, int64, string) error {
 	return nil
+}
+
+func (r *capturingReferenceFileRefRepo) ReplaceTaskLevelReference(_ context.Context, _ repo.Tx, taskID int64, oldRefID, newRefID string) error {
+	r.replacedTask = taskID
+	r.replacedOldID = oldRefID
+	r.replacedNewID = newRefID
+	return nil
+}
+
+func TestTaskAssetCenterServiceReplacesTaskLevelReference(t *testing.T) {
+	const (
+		taskID       = int64(2105)
+		actorID      = int64(611)
+		newAssetID   = int64(7105)
+		newVersionID = int64(8105)
+		oldReference = "old-reference-ref"
+		newReference = "new-reference-ref"
+	)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskNo: "T-2105", TaskStatus: domain.TaskStatusInProgress, CreatorID: actorID})
+	designAssetRepo := newStep67DesignAssetRepo()
+	designAssetRepo.assets[newAssetID] = &domain.DesignAsset{
+		ID: newAssetID, TaskID: taskID, AssetNo: "AST-7105", AssetType: domain.TaskAssetTypeReference, CurrentVersionID: uploadRequestInt64Ptr(newVersionID), CreatedBy: actorID,
+	}
+	taskAssetRepo := newStep04TaskAssetRepo()
+	taskAssetRepo.assets[newVersionID] = &domain.TaskAsset{
+		ID: newVersionID, TaskID: taskID, AssetID: uploadRequestInt64Ptr(newAssetID), AssetType: domain.TaskAssetTypeReference, StorageRefID: strPtr(newReference),
+	}
+	referenceRepo := &capturingReferenceFileRefRepo{}
+	eventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		designAssetRepo,
+		taskAssetRepo,
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		eventRepo,
+		step04TxRunner{},
+		newStubUploadServiceClient(),
+		WithTaskAssetCenterReferenceFileRefFlatRepo(referenceRepo),
+	).(*taskAssetCenterService)
+	actor := scopedCapabilityActor(actorID, domain.PermissionTaskCreate, domain.AccessScopeGlobal, nil, nil, nil)
+	ctx := domain.WithRequestActor(context.Background(), actor)
+
+	result, appErr := svc.ReplaceTaskReference(ctx, ReplaceTaskReferenceParams{TaskID: taskID, OldRefID: oldReference, NewAssetID: newAssetID, ReplacedBy: actorID})
+	if appErr != nil {
+		t.Fatalf("ReplaceTaskReference() error = %+v", appErr)
+	}
+	if result == nil || result.NewRefID != newReference || result.NewAssetID != newAssetID {
+		t.Fatalf("ReplaceTaskReference() result = %+v", result)
+	}
+	if referenceRepo.replacedTask != taskID || referenceRepo.replacedOldID != oldReference || referenceRepo.replacedNewID != newReference {
+		t.Fatalf("reference swap = task %d, old %q, new %q", referenceRepo.replacedTask, referenceRepo.replacedOldID, referenceRepo.replacedNewID)
+	}
+	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventReferenceReplaced {
+		t.Fatalf("replacement events = %+v", eventRepo.events)
+	}
 }
 
 func TestTaskAssetCenterServiceCompletingTaskReferencePersistsFlatRelation(t *testing.T) {

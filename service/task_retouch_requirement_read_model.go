@@ -160,8 +160,12 @@ func groupRequirementReferenceFileRefs(
 		if _, ok := hasDesignRefs[reqID]; ok {
 			continue
 		}
+		assetID := flat.RefID
+		if flat.DesignAssetID != nil && *flat.DesignAssetID > 0 {
+			assetID = strconv.FormatInt(*flat.DesignAssetID, 10)
+		}
 		ref := domain.ReferenceFileRef{
-			AssetID:    flat.RefID,
+			AssetID:    assetID,
 			RefID:      flat.RefID,
 			Filename:   strings.TrimSpace(flat.FileName),
 			MimeType:   strings.TrimSpace(flat.MimeType),
@@ -242,11 +246,14 @@ func groupRequirementSourceAssets(designAssets []*domain.DesignAsset) map[int64]
 }
 
 func BuildTaskLevelDetailReferenceFileRefs(detail *domain.TaskDetail, flatRefs []*domain.ReferenceFileRefFlat) []domain.ReferenceFileRef {
-	refs := buildDetailReferenceFileRefsFromDetail(detail, flatRefs)
+	if refs := buildTaskLevelReferenceFileRefsFromFlat(flatRefs); len(refs) > 0 {
+		return refs
+	}
+	refs := buildDetailReferenceFileRefsFromJSON(detail)
 	return FilterTaskLevelReferenceFileRefs(refs, flatRefs)
 }
 
-func buildDetailReferenceFileRefsFromDetail(detail *domain.TaskDetail, flatRefs []*domain.ReferenceFileRefFlat) []domain.ReferenceFileRef {
+func buildDetailReferenceFileRefsFromJSON(detail *domain.TaskDetail) []domain.ReferenceFileRef {
 	if detail != nil {
 		if refs := domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON); len(refs) > 0 {
 			return refs
@@ -255,16 +262,21 @@ func buildDetailReferenceFileRefsFromDetail(detail *domain.TaskDetail, flatRefs 
 			return refs
 		}
 	}
-	if len(flatRefs) == 0 {
-		return nil
-	}
+	return nil
+}
+
+func buildTaskLevelReferenceFileRefsFromFlat(flatRefs []*domain.ReferenceFileRefFlat) []domain.ReferenceFileRef {
 	refs := make([]domain.ReferenceFileRef, 0, len(flatRefs))
 	for _, flat := range flatRefs {
-		if flat == nil || flat.RefID == "" {
+		if flat == nil || flat.RefID == "" || flat.SKUItemID != nil || flat.RetouchRequirementID != nil {
 			continue
 		}
+		assetID := flat.RefID
+		if flat.DesignAssetID != nil && *flat.DesignAssetID > 0 {
+			assetID = strconv.FormatInt(*flat.DesignAssetID, 10)
+		}
 		ref := domain.ReferenceFileRef{
-			AssetID:    flat.RefID,
+			AssetID:    assetID,
 			RefID:      flat.RefID,
 			Filename:   strings.TrimSpace(flat.FileName),
 			MimeType:   strings.TrimSpace(flat.MimeType),

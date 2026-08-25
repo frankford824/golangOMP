@@ -1750,7 +1750,7 @@ func (s *taskService) loadTaskReadModel(ctx context.Context, id int64) (*domain.
 			}
 			requirements := s.listTaskRetouchRequirements(ctx, task)
 			readModel.RetouchRequirements = EnrichRetouchRequirementsReadModel(ctx, requirements, flatRefs, designAssets, s.referenceFileRefsEnricher)
-			readModel.ReferenceFileRefs = FilterTaskLevelReferenceFileRefs(readModel.ReferenceFileRefs, flatRefs)
+			readModel.ReferenceFileRefs = BuildTaskLevelDetailReferenceFileRefs(detail, flatRefs)
 		} else {
 			readModel.RetouchRequirements = s.listTaskRetouchRequirements(ctx, task)
 		}

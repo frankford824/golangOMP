@@ -328,6 +328,9 @@ func (s *taskAssetCenterServiceStub) CancelUploadSessionByID(context.Context, se
 func (s *taskAssetCenterServiceStub) CancelUploadSession(context.Context, service.CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError) {
 	return nil, nil
 }
+func (s *taskAssetCenterServiceStub) ReplaceTaskReference(_ context.Context, params service.ReplaceTaskReferenceParams) (*service.ReplaceTaskReferenceResult, *domain.AppError) {
+	return &service.ReplaceTaskReferenceResult{TaskID: params.TaskID, OldRefID: params.OldRefID, NewRefID: "new-reference-ref", NewAssetID: params.NewAssetID}, nil
+}
 func (s *taskAssetCenterServiceStub) BuildTaskReferenceBatchDownloadManifest(context.Context, int64, int64) (*service.TaskReferenceBatchDownloadManifest, *domain.AppError) {
 	return &service.TaskReferenceBatchDownloadManifest{}, nil
 }

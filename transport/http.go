@@ -261,6 +261,7 @@ func NewRouter(
 		taskGroup.GET("/:id/filing-status", capabilityAccess(taskGroup, http.MethodGet, "/:id/filing-status", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskH.GetFilingStatus)
 		taskGroup.POST("/:id/filing/retry", capabilityAccess(taskGroup, http.MethodPost, "/:id/filing/retry", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), taskH.RetryFiling)
 		taskGroup.GET("/:id/detail", capabilityAccess(taskGroup, http.MethodGet, "/:id/detail", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskDetailH.GetByTaskID)
+		taskGroup.POST("/:id/references/replace", capabilityAccess(taskGroup, http.MethodPost, "/:id/references/replace", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate, domain.PermissionAssetManage), taskAssetCenterH.ReplaceTaskReference)
 		taskGroup.POST("/:id/modules/:module_key/claim", capabilityAccess(taskGroup, http.MethodPost, "/:id/modules/:module_key/claim", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision), taskH.ModuleClaim)
 		taskGroup.POST("/:id/modules/:module_key/actions/:action", capabilityAccess(taskGroup, http.MethodPost, "/:id/modules/:module_key/actions/:action", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit), taskH.ModuleAction)
 		taskGroup.POST("/:id/cancel", capabilityAccess(taskGroup, http.MethodPost, "/:id/cancel", domain.APIReadinessReadyForFrontend, domain.PermissionTaskTerminate), taskH.CancelR3)

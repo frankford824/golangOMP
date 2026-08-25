@@ -53,6 +53,7 @@ type TaskModuleEvent struct {
 type ReferenceFileRefFlat struct {
 	ID                   int64     `json:"id"`
 	TaskID               int64     `json:"task_id"`
+	DesignAssetID        *int64    `json:"design_asset_id,omitempty"`
 	SKUItemID            *int64    `json:"sku_item_id,omitempty"`
 	RetouchRequirementID *int64    `json:"retouch_requirement_id,omitempty"`
 	RefID                string    `json:"ref_id"`

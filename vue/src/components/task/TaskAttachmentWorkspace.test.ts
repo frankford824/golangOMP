@@ -38,4 +38,24 @@ describe('TaskAttachmentWorkspace', () => {
     expect(wrapper.get('a[download]').attributes('href')).toBe('/v1/assets/AST-002/download')
     expect(wrapper.text()).not.toContain('不可下载')
   })
+
+  it('emits the selected task-level reference for replacement', async () => {
+    const file = {
+      asset_id: '54551',
+      ref_id: 'old-ref',
+      filename: '旧参考图.jpg',
+      mime_type: 'image/jpeg',
+      download_url: '/old.jpg',
+    }
+    const wrapper = mount(TaskAttachmentWorkspace, {
+      props: {
+        files: [file],
+        canReplace: true,
+        replaceableRefIds: ['old-ref'],
+      },
+    })
+
+    await wrapper.get('.attachment-preview header button').trigger('click')
+    expect(wrapper.emitted('replace')).toEqual([[file]])
+  })
 })

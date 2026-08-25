@@ -27,6 +27,7 @@ const (
 	TaskEventAssetUploadSessionCancelled = "task.asset.upload_session.cancelled"
 	TaskEventReferenceAssetFormalized    = "task.reference.asset.formalized"
 	TaskEventReferenceAssetFormalizeFail = "task.reference.asset.formalize_failed"
+	TaskEventReferenceReplaced           = "task.reference.replaced"
 	TaskEventFilingTriggered             = "task.filing.triggered"
 	TaskEventERPImageAutoSynced          = "task.erp_image.auto_synced"
 	TaskEventERPImageAutoSyncFailed      = "task.erp_image.auto_sync_failed"

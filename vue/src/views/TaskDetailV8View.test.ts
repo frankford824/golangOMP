@@ -7,7 +7,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(), cancel: vi.fn(),
-  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), resolveAssetDownload: vi.fn(), runRetouchBatchDownload: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
+  taskBundle: vi.fn(), uploadReference: vi.fn(), replaceReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), resolveAssetDownload: vi.fn(), runRetouchBatchDownload: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
 vi.mock('@/services/api/assetsApi', async (loadOriginal) => ({
@@ -102,6 +102,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.resolveAssetDownload.mockResolvedValue({ status: 'not_found', message: '资源不存在' })
     mocks.runRetouchBatchDownload.mockResolvedValue({ ok: true, writtenCount: 2, failureCount: 0 })
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
+    mocks.replaceReference.mockResolvedValue({})
     mocks.getPlanning.mockResolvedValue({ task_id: 41, task_no: 'RW-041', task_status: 'Completed', workflow_revision: 3, items: [] })
     mocks.downloadPlanning.mockResolvedValue(undefined)
     mocks.getDesigners.mockResolvedValue({ data: { data: [{ id: 99, display_name: '定制设计师' }] } })
@@ -271,6 +272,36 @@ describe('TaskDetailV8View business context', () => {
     await flushPromises()
     expect(mocks.uploadReference).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ taskId: '41', ownerModuleKey: 'basic_info', uploadPolicy: 'append_only' }))
     wrapper.unmount()
+  })
+
+  it('replaces the selected task-level reference after uploading its successor', async () => {
+    const designTask = { ...baseTask, task_status: 'InProgress', allowed_actions: ['task.reference.append', 'task.business_info.edit'] }
+    const oldReference = { asset_id: 'legacy-old', ref_id: 'legacy-old', filename: '旧参考图.png', mime_type: 'image/png', download_url: '/old.png' }
+    mocks.getById.mockResolvedValue({ data: { data: designTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: designTask, task_detail: { design_requirement: '完成主图。' }, reference_file_refs: [oldReference] } } })
+    mocks.uploadReference.mockResolvedValueOnce({ asset_id: '54551', ref_id: 'new-ref', filename: '新参考图.png' })
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
+    await flushPromises()
+    const attachmentButton = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.includes('查看全部附件'))
+    expect(attachmentButton).toBeDefined()
+    attachmentButton?.click()
+    await flushPromises()
+    const replaceButton = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.includes('替换当前参考图'))
+    expect(replaceButton).toBeDefined()
+    replaceButton?.click()
+    await flushPromises()
+
+    const input = wrapper.get('input[aria-label="替换当前任务参考附件"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['png'], '新参考图.png', { type: 'image/png' })] })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(mocks.uploadReference).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ taskId: '41', ownerModuleKey: 'basic_info', uploadPolicy: 'append_only' }))
+    expect(mocks.replaceReference).toHaveBeenCalledWith('41', { old_ref_id: 'legacy-old', new_asset_id: 54551 })
+    expect(wrapper.text()).toContain('已将“旧参考图.png”替换为“新参考图.png”')
   })
 
   it('does not infer reference attachment access from design or audit actions', async () => {

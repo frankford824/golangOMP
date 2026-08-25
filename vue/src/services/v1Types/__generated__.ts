@@ -6247,6 +6247,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tasks/{id}/references/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace one displayed task-level reference with a newly uploaded reference
+         * @description Atomically removes the selected task-level `old_ref_id` relation after verifying that
+         *     `new_asset_id` is a completed reference upload already attached to the same task. The new
+         *     file remains the current displayed reference and the replacement is recorded in task events.
+         *     This operation never guesses which existing reference should be replaced. Completed and
+         *     Archived tasks must be reopened first.
+         */
+        post: operations["replaceTaskReference"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tasks/{id}/detail": {
         parameters: {
             query?: never;
@@ -12899,6 +12923,8 @@ export interface paths {
                     q?: string;
                     /** @description Uploader name/account filter. */
                     owner?: string;
+                    /** @description Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. */
+                    operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                     /** @description Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. */
                     created_from?: string;
                     /** @description Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD. */
@@ -20162,9 +20188,9 @@ export interface components {
             ref_object?: components["schemas"]["ReferenceFileRef"];
         };
         ReferenceFileRef: {
-            /** @description Canonical reference object id used for backend validation. */
+            /** @description Numeric design-asset root id when the reference was uploaded after task creation and can be versioned/replaced; legacy task-create references retain their UUID id. */
             asset_id: string;
-            /** @description Compatibility alias of `asset_id`. */
+            /** @description Stable reference relation id. Use this value as `old_ref_id` when explicitly replacing the displayed task reference. */
             ref_id?: string;
             upload_request_id?: string;
             filename?: string;
@@ -24353,6 +24379,49 @@ export interface operations {
                 };
             };
             403: components["responses"]["V8Forbidden"];
+        };
+    };
+    replaceTaskReference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    old_ref_id: string;
+                    /** Format: int64 */
+                    new_asset_id: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Reference relation replaced */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            /** Format: int64 */
+                            task_id: number;
+                            old_ref_id: string;
+                            new_ref_id: string;
+                            /** Format: int64 */
+                            new_asset_id: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["V8BadRequest"];
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     getFinalizedAssetSyncManifest: {

@@ -76,6 +76,20 @@ type CompleteTaskAssetUploadSessionResult struct {
 	Version *domain.DesignAssetVersion `json:"version"`
 }
 
+type ReplaceTaskReferenceParams struct {
+	TaskID     int64
+	OldRefID   string
+	NewAssetID int64
+	ReplacedBy int64
+}
+
+type ReplaceTaskReferenceResult struct {
+	TaskID     int64  `json:"task_id"`
+	OldRefID   string `json:"old_ref_id"`
+	NewRefID   string `json:"new_ref_id"`
+	NewAssetID int64  `json:"new_asset_id"`
+}
+
 type TaskAssetCenterService interface {
 	ListAssetResources(ctx context.Context, params ListAssetResourcesParams) ([]*domain.DesignAsset, *domain.AppError)
 	GetAsset(ctx context.Context, assetID int64) (*domain.DesignAsset, *domain.AppError)
@@ -96,6 +110,7 @@ type TaskAssetCenterService interface {
 	CompleteUploadSession(ctx context.Context, params CompleteTaskAssetUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError)
 	CancelUploadSessionByID(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
 	CancelUploadSession(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
+	ReplaceTaskReference(ctx context.Context, params ReplaceTaskReferenceParams) (*ReplaceTaskReferenceResult, *domain.AppError)
 	BuildTaskReferenceBatchDownloadManifest(ctx context.Context, taskID int64, actorID int64) (*TaskReferenceBatchDownloadManifest, *domain.AppError)
 	EnsureDerivedPreviewAssets(ctx context.Context, taskID, sourceAssetID, actorID int64) *domain.AppError
 }
@@ -157,6 +172,14 @@ type uploadRequestForUpdateRepo interface {
 
 type designAssetForUpdateRepo interface {
 	GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.DesignAsset, error)
+}
+
+type taskAssetForUpdateRepo interface {
+	GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.TaskAsset, error)
+}
+
+type taskLevelReferenceReplaceRepo interface {
+	ReplaceTaskLevelReference(ctx context.Context, tx repo.Tx, taskID int64, oldRefID, newRefID string) error
 }
 
 type taskForUpdateRepo interface {
@@ -1519,6 +1542,75 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 	return s.GetUploadSession(ctx, params.TaskID, request.RequestID)
 }
 
+func (s *taskAssetCenterService) ReplaceTaskReference(ctx context.Context, params ReplaceTaskReferenceParams) (*ReplaceTaskReferenceResult, *domain.AppError) {
+	params.OldRefID = strings.TrimSpace(params.OldRefID)
+	if params.TaskID <= 0 || params.ReplacedBy <= 0 || params.OldRefID == "" || params.NewAssetID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_id, old_ref_id, new_asset_id and replaced_by are required", nil)
+	}
+	swapRepo, ok := s.referenceFileRefFlatRepo.(taskLevelReferenceReplaceRepo)
+	if !ok {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "task reference replacement repository is unavailable", nil)
+	}
+
+	var result *ReplaceTaskReferenceResult
+	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		task, err := s.getTaskForUpdate(ctx, tx, params.TaskID)
+		if err != nil {
+			return fmt.Errorf("lock task before reference replacement: %w", err)
+		}
+		if task == nil {
+			return domain.ErrNotFound
+		}
+		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+			return appErr
+		}
+		if appErr := authorizeV8TaskAssetMutation(ctx, task, domain.TaskAssetTypeReference); appErr != nil {
+			return appErr
+		}
+		asset, err := s.getDesignAssetForUpdate(ctx, tx, params.NewAssetID)
+		if err != nil {
+			return fmt.Errorf("lock replacement reference asset: %w", err)
+		}
+		if asset == nil || asset.TaskID != params.TaskID || !asset.AssetType.IsReference() || asset.CurrentVersionID == nil || *asset.CurrentVersionID <= 0 {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "new_asset_id must be a completed reference upload for this task", nil)
+		}
+		version, err := s.getTaskAssetForUpdate(ctx, tx, *asset.CurrentVersionID)
+		if err != nil {
+			return fmt.Errorf("lock replacement reference version: %w", err)
+		}
+		if version == nil || version.TaskID != params.TaskID || version.AssetID == nil || *version.AssetID != asset.ID || version.StorageRefID == nil {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "replacement reference version is incomplete", nil)
+		}
+		newRefID := strings.TrimSpace(*version.StorageRefID)
+		if newRefID == "" || newRefID == params.OldRefID {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "replacement reference must differ from the current reference", nil)
+		}
+		if err := swapRepo.ReplaceTaskLevelReference(ctx, tx, params.TaskID, params.OldRefID, newRefID); err != nil {
+			if errors.Is(err, repo.ErrNotFound) {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "current or replacement reference is not attached to this task", nil)
+			}
+			return err
+		}
+		if _, err := s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventReferenceReplaced, &params.ReplacedBy, map[string]interface{}{
+			"old_ref_id": params.OldRefID, "new_ref_id": newRefID, "new_asset_id": params.NewAssetID,
+		}); err != nil {
+			return fmt.Errorf("append task reference replaced event: %w", err)
+		}
+		result = &ReplaceTaskReferenceResult{TaskID: params.TaskID, OldRefID: params.OldRefID, NewRefID: newRefID, NewAssetID: params.NewAssetID}
+		return nil
+	})
+	if txErr != nil {
+		if appErr, ok := txErr.(*domain.AppError); ok {
+			return nil, appErr
+		}
+		if errors.Is(txErr, domain.ErrNotFound) || errors.Is(txErr, repo.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, infraError("replace task reference", txErr)
+	}
+	return result, nil
+}
+
 func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params CreateTaskAssetUploadSessionParams, mode domain.DesignAssetUploadMode) (*CreateTaskAssetUploadSessionResult, *domain.AppError) {
 	normalizedAssetType, appErr := normalizeRequestedUploadAssetType(params.AssetType, mode)
 	if appErr != nil {
@@ -2370,6 +2462,13 @@ func (s *taskAssetCenterService) getDesignAssetForUpdate(ctx context.Context, tx
 		return lockingRepo.GetByIDForUpdate(ctx, tx, assetID)
 	}
 	return s.designAssetRepo.GetByID(ctx, assetID)
+}
+
+func (s *taskAssetCenterService) getTaskAssetForUpdate(ctx context.Context, tx repo.Tx, taskAssetID int64) (*domain.TaskAsset, error) {
+	if lockingRepo, ok := s.taskAssetRepo.(taskAssetForUpdateRepo); ok {
+		return lockingRepo.GetByIDForUpdate(ctx, tx, taskAssetID)
+	}
+	return s.taskAssetRepo.GetByID(ctx, taskAssetID)
 }
 
 func optionalInt64Equal(left, right *int64) bool {

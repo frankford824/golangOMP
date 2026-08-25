@@ -2724,10 +2724,10 @@ components:
       properties:
         asset_id:
           type: string
-          description: Canonical reference object id used for backend validation.
+          description: Numeric design-asset root id when the reference was uploaded after task creation and can be versioned/replaced; legacy task-create references retain their UUID id.
         ref_id:
           type: string
-          description: Compatibility alias of `asset_id`.
+          description: Stable reference relation id. Use this value as `old_ref_id` when explicitly replacing the displayed task reference.
         upload_request_id:
           type: string
         filename:
@@ -10991,6 +10991,51 @@ paths:
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
         '404':
           description: Task not found
+  /v1/tasks/{id}/references/replace:
+    post:
+      operationId: replaceTaskReference
+      summary: Replace one displayed task-level reference with a newly uploaded reference
+      description: |
+        Atomically removes the selected task-level `old_ref_id` relation after verifying that
+        `new_asset_id` is a completed reference upload already attached to the same task. The new
+        file remains the current displayed reference and the replacement is recorded in task events.
+        This operation never guesses which existing reference should be replaced. Completed and
+        Archived tasks must be reopened first.
+      tags: [Tasks, Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [task.create, asset.manage]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_ref_id, new_asset_id]
+              properties:
+                old_ref_id: { type: string, minLength: 1 }
+                new_asset_id: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Reference relation replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [task_id, old_ref_id, new_ref_id, new_asset_id]
+                    properties:
+                      task_id: { type: integer, format: int64 }
+                      old_ref_id: { type: string }
+                      new_ref_id: { type: string }
+                      new_asset_id: { type: integer, format: int64 }
+        '400': { $ref: '#/components/responses/V8BadRequest' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
+        '409': { $ref: '#/components/responses/V8Conflict' }
   /v1/tasks/{id}/detail:
     get:
       summary: Get task aggregate detail (V1.1-A1 fast-path)

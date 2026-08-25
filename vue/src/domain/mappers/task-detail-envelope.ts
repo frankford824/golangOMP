@@ -36,6 +36,8 @@ export function mergeDetailEnvelopeIntoTaskRaw(
     'currentHandlerName',
     'sku_items',
     'skuItems',
+    'reference_file_refs',
+    'referenceFileRefs',
     'asset_versions',
     'assetVersions',
     'retouch_requirements',

@@ -37,6 +37,7 @@
       </section>
 
       <div v-if="error" class="message error" role="alert">{{ error }}</div>
+      <div v-if="referenceStatus" class="message success" role="status">{{ referenceStatus }}</div>
 
       <TaskResourceRail
         v-if="bundle"
@@ -222,7 +223,16 @@
           <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles" :enable-revision-history="can('asset.view')" /></div>
 
           <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
-            <TaskAttachmentWorkspace :files="displayReferenceFiles" :can-upload="canManageReferences" :uploading="referenceUploading" @upload="referenceInput?.click()" />
+            <TaskAttachmentWorkspace
+              :files="displayReferenceFiles"
+              :can-upload="canManageReferences"
+              :can-replace="canManageReferences"
+              :replaceable-ref-ids="replaceableReferenceIDs"
+              :uploading="referenceUploading"
+              :replacing="referenceReplacing"
+              @upload="referenceInput?.click()"
+              @replace="requestReferenceReplacement"
+            />
           </div>
 
           <div v-else-if="workspaceMode === 'details'" class="workspace-body detail-sections">
@@ -230,12 +240,12 @@
             <section v-if="canEditTaskBusinessInfo" class="edit-attachment-hint">
               <div>
                 <strong>要补充或更换参考图？</strong>
-                <p v-if="canManageReferences">图片不在上面这张表单里改。点右边的按钮直接选文件，现有 {{ displayReferenceFiles.length }} 个附件都不会被覆盖。</p>
+                <p v-if="canManageReferences">“补充附件”只追加；需要替换时先打开“查看全部附件”，选中旧图后点“替换当前参考图”。</p>
                 <p v-else>图片不在上面这张表单里改。当前账号没有补充附件的权限，可以让任务创建人或资产管理员上传。</p>
               </div>
               <div class="edit-attachment-actions">
                 <button v-if="canManageReferences" type="button" class="primary-button" :disabled="referenceUploading" @click="referenceInput?.click()">
-                  <Upload :size="16" aria-hidden="true" />{{ referenceUploading ? '上传中…' : '补充附件' }}
+                  <Upload :size="16" aria-hidden="true" />{{ referenceUploading ? '上传中…' : '补充附件（追加）' }}
                 </button>
                 <button type="button" class="secondary-button" @click="openWorkspace('attachments')"><FileText :size="16" aria-hidden="true" />查看全部附件</button>
               </div>
@@ -356,6 +366,7 @@
         </div>
       </Teleport>
       <input v-if="canManageReferences" ref="referenceInput" class="sr-only" type="file" accept="image/*,.pdf,.zip" multiple aria-label="补充任务参考附件" @change="uploadReferenceFiles" />
+      <input v-if="canManageReferences" ref="referenceReplaceInput" class="sr-only" type="file" accept="image/*,.pdf,.zip" aria-label="替换当前任务参考附件" @change="replaceReferenceFile" />
     </template>
   </main>
 </template>
@@ -422,7 +433,7 @@ interface V8Task extends Record<string, unknown> {
   sku_code?: string; primary_sku_code?: string; product_name_snapshot?: string; current_handler_name?: string; designer_id?: number | string | null; designer_name?: string; creator_id?: number | string; creator_name?: string; owner_department?: string; owner_org_team?: string; business_lane?: string
   requirement_description?: string; description?: string; design_requirement?: string; change_request?: string; note?: string; remark?: string; operation_note?: string; reference_file_refs?: ReferenceFile[]; updated_at?: string; due_at?: string; deadline_at?: string
 }
-interface ReferenceFile extends Record<string, unknown> { id?: number; asset_id?: string; file_name?: string; filename?: string; mime_type?: string; download_url?: string; preview_url?: string; url?: string }
+interface ReferenceFile extends Record<string, unknown> { id?: number; asset_id?: string; ref_id?: string; file_name?: string; filename?: string; mime_type?: string; download_url?: string; preview_url?: string; url?: string }
 interface TaskEvent extends Record<string, unknown> { id?: number; event_type?: string; title?: string; operator_name?: string; actor_name?: string; created_at?: string; reason?: string; remark?: string }
 interface AuditHandover { id: number; handover_no?: string; status?: string; allowed_actions?: string[] }
 type WorkspaceMode = 'workflow' | 'resources' | 'attachments' | 'details' | 'history' | 'collaboration'
@@ -472,6 +483,10 @@ const terminateReason = ref('')
 const terminateError = ref('')
 const referenceInput = ref<HTMLInputElement | null>(null)
 const referenceUploading = ref(false)
+const referenceReplaceInput = ref<HTMLInputElement | null>(null)
+const referenceReplaceTarget = ref<ReferenceFile | null>(null)
+const referenceReplacing = ref(false)
+const referenceStatus = ref('')
 const retouchDownloadingKey = ref('')
 const retouchBatchDownloading = ref(false)
 const retouchBatchStatus = ref('')
@@ -531,6 +546,9 @@ const retouchMaterialCount = computed(() => retouchMaterialRows.value.length)
 const displayReferenceFiles = computed(() => dedupeReferenceFileRefs(
   [...referenceFiles.value, ...retouchReferenceFiles.value],
 ) as ReferenceFile[])
+const replaceableReferenceIDs = computed(() => referenceFiles.value
+  .map((file) => String(file.ref_id || file.asset_id || '').trim())
+  .filter(Boolean))
 const skuModeHints = computed<Record<string, boolean>>(() => {
   const hints = Object.fromEntries(
     skuItems.value
@@ -879,6 +897,7 @@ async function uploadReferenceFiles(event: Event) {
   if (!task.value || !canManageReferences.value || !files.length || referenceUploading.value) return
   referenceUploading.value = true
   error.value = ''
+  referenceStatus.value = ''
   try {
     for (const file of files) {
       await uploadReferenceFileRef(file, {
@@ -888,10 +907,54 @@ async function uploadReferenceFiles(event: Event) {
       })
     }
     await load()
+    referenceStatus.value = `已追加 ${files.length} 个参考附件，原附件保持不变。`
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '参考附件上传失败，请稍后重试。'
   } finally {
     referenceUploading.value = false
+  }
+}
+function requestReferenceReplacement(file: ReferenceFile) {
+  if (!canManageReferences.value || referenceReplacing.value) return
+  const oldRefID = String(file.ref_id || file.asset_id || '').trim()
+  if (!oldRefID) {
+    error.value = '当前参考附件缺少可替换标识，请刷新页面后重试。'
+    return
+  }
+  referenceReplaceTarget.value = file
+  referenceReplaceInput.value?.click()
+}
+async function replaceReferenceFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  const target = referenceReplaceTarget.value
+  referenceReplaceTarget.value = null
+  if (!task.value || !target || !file || !canManageReferences.value || referenceReplacing.value) return
+  const oldRefID = String(target.ref_id || target.asset_id || '').trim()
+  if (!oldRefID) return
+  referenceReplacing.value = true
+  error.value = ''
+  referenceStatus.value = ''
+  try {
+    const uploaded = await uploadReferenceFileRef(file, {
+      taskId: String(task.value.id),
+      ownerModuleKey: 'basic_info',
+      uploadPolicy: 'append_only',
+    })
+    const newAssetID = Number.parseInt(String(uploaded.asset_id || ''), 10)
+    if (!Number.isSafeInteger(newAssetID) || newAssetID <= 0) {
+      throw new Error('新参考图上传完成，但缺少可替换的资源编号。')
+    }
+    await tasksApi.replaceReference(String(task.value.id), { old_ref_id: oldRefID, new_asset_id: newAssetID })
+    await load()
+    referenceStatus.value = `已将“${String(target.filename || target.file_name || '原参考图')}”替换为“${file.name}”。`
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : '参考图替换失败，请稍后重试。'
+    await load()
+    error.value = message
+  } finally {
+    referenceReplacing.value = false
   }
 }
 async function downloadPlanningResult() {
@@ -1118,7 +1181,7 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .reference-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.reference-detail-grid a{min-width:0;display:grid;grid-template-columns:48px 1fr;align-items:center;gap:8px;padding:8px;border:1px solid rgb(var(--yb-border));border-radius:11px;color:rgb(var(--yb-text));text-decoration:none}.reference-detail-grid img{width:48px;height:48px;border-radius:8px;object-fit:cover}.reference-detail-grid strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .history-body{max-width:880px;width:100%;margin:0 auto}.history-now{display:grid;grid-template-columns:18px 1fr;gap:12px;padding:16px;border-radius:15px;background:rgb(var(--yb-brand-soft))}.history-now h3,.history-now p{margin:3px 0}.history-heading{display:flex;align-items:end;justify-content:space-between;margin:22px 0 16px}.history-heading h3{margin:3px 0 0}.history-heading span{color:rgb(var(--yb-text-muted));font-size:12px}.full-timeline{gap:0}.full-timeline li{position:relative;padding:0 0 22px}.full-timeline li:not(:last-child)::before{content:"";position:absolute;left:5px;top:14px;bottom:0;width:1px;background:rgb(var(--yb-border))}
 .collaboration-body{display:grid;grid-template-columns:minmax(280px,.75fr) 1.25fr;gap:16px}.handover-form,.handover-list,.handover-side{display:grid;align-content:start;gap:12px}.handover-form{padding:18px;border:1px solid rgb(var(--yb-border));border-radius:16px}.handover-form label{display:grid;gap:6px;font-weight:700;font-size:13px}.handover-form input,.handover-form textarea,.handover-form select{min-height:40px;padding:9px 11px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-weight:500}
-.event-count{margin-left:6px;padding:1px 7px;border-radius:999px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:11px;font-style:normal;font-weight:750}.handover-list article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px;border-radius:12px;background:rgb(var(--yb-surface-soft))}.handover-list p{margin:3px 0 0;color:rgb(var(--yb-text-muted))}.message,.state{padding:18px;border-radius:14px;background:rgb(var(--yb-surface-muted))}.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}
+.event-count{margin-left:6px;padding:1px 7px;border-radius:999px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:11px;font-style:normal;font-weight:750}.handover-list article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px;border-radius:12px;background:rgb(var(--yb-surface-soft))}.handover-list p{margin:3px 0 0;color:rgb(var(--yb-text-muted))}.message,.state{padding:18px;border-radius:14px;background:rgb(var(--yb-surface-muted))}.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.success{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}
 @media(max-width:1160px){.hero-main{align-items:start;flex-direction:column}.hero-facts{width:100%}.command-strip{align-items:flex-start;flex-direction:column}.stage-summary{width:100%;flex-wrap:wrap}.stage-context{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.command-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-card{grid-column:1/-1}.resource-story{grid-template-columns:1fr}}
 @media(max-width:760px){.task-page{padding:10px}.task-hero{min-height:248px;border-radius:19px}.hero-content{min-height:248px;padding:12px}.hero-nav,.command-strip,.workspace-head{align-items:flex-start}.hero-actions{flex-wrap:wrap}.hero-main{gap:8px}.hero-main h1{font-size:27px;line-height:1.02}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-facts div{min-width:0;padding:7px}.hero-facts dd{overflow:hidden;font-size:11px;line-height:1.35;text-overflow:ellipsis}.overview-grid{grid-template-columns:1fr}.mission-card{grid-column:auto}.mission-copy,.detail-copy-grid{grid-template-columns:1fr}.command-strip{align-items:flex-start;flex-direction:column}.stage-summary{width:100%;display:grid;grid-template-columns:34px 1fr;align-items:start}.stage-orb{width:34px;height:34px}.stage-copy{min-width:0}.stage-context{grid-column:1/-1;width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.stage-context dd{max-width:none}.command-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.command-actions>*{min-width:0}.command-actions>.primary-button{grid-column:1/-1}.resource-story{display:block}.resource-steps{grid-template-columns:1fr;margin-top:12px}.resource-steps i{transform:rotate(90deg);justify-self:center}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border:0;border-radius:0}.workspace-head{padding:13px}.workspace-body{padding:12px}.detail-sections,.collaboration-body{grid-template-columns:1fr}.detail-summary-strip,.detail-requirement{grid-column:auto}.detail-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-list,.reference-detail-grid{grid-template-columns:1fr}.hero-progress{overflow:auto}}
 @media(max-width:420px){.command-actions>*{flex-basis:100%}}

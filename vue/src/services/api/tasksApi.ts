@@ -313,6 +313,12 @@ export const tasksApi = {
   submitDesign: (id: string, payload: SubmitDesignPayload, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/submit-design`, payload, { signal }),
 
+  replaceReference: (
+    id: string,
+    payload: { old_ref_id: string; new_asset_id: number },
+    signal?: AbortSignal,
+  ) => http.post(`/v1/tasks/${encodeURIComponent(id)}/references/replace`, payload, { signal }),
+
   // ─── 审核流程 ──────────────────────────────────────────────────────────────
 
   /**

@@ -187,6 +187,11 @@ type cancelTaskAssetUploadSessionReq struct {
 	OSSObjectKey string `json:"oss_object_key"`
 }
 
+type replaceTaskReferenceReq struct {
+	OldRefID   string `json:"old_ref_id" binding:"required"`
+	NewAssetID int64  `json:"new_asset_id" binding:"required"`
+}
+
 func (h *TaskAssetCenterHandler) BatchDownloadTaskReferenceAssets(c *gin.Context) {
 	taskID, err := parseID(c)
 	if err != nil {
@@ -708,6 +713,32 @@ func (h *TaskAssetCenterHandler) CancelAssetUploadSession(c *gin.Context) {
 
 func (h *TaskAssetCenterHandler) AbortUploadSession(c *gin.Context) {
 	h.CancelUploadSession(c)
+}
+
+func (h *TaskAssetCenterHandler) ReplaceTaskReference(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	var req replaceTaskReferenceReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	actorID, appErr := actorIDOrRequestValue(c, nil, "replaced_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.ReplaceTaskReference(c.Request.Context(), service.ReplaceTaskReferenceParams{
+		TaskID: taskID, OldRefID: strings.TrimSpace(req.OldRefID), NewAssetID: req.NewAssetID, ReplacedBy: actorID,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *TaskAssetCenterHandler) createUploadSession(c *gin.Context, taskID int64, mode domain.DesignAssetUploadMode, topLevel bool) {

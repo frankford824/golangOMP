@@ -62,7 +62,7 @@ func (r *taskRepo) GetTaskDetailReadBundle(ctx context.Context, taskID int64, ev
 		ORDER BY task_module_events.created_at DESC, task_module_events.id DESC
 		LIMIT %[2]d;
 
-		SELECT rfr.id, rfr.task_id, rfr.sku_item_id,
+		SELECT rfr.id, rfr.task_id, COALESCE(formal_asset.asset_id, bound_asset.asset_id), rfr.sku_item_id,
 		       rfr.retouch_requirement_id, rfr.ref_id,
 		       rfr.owner_module_key, rfr.context, rfr.attached_at,
 		       COALESCE(NULLIF(asr.ref_key, ''), NULLIF(bound_asset.storage_key, ''), bound_storage.ref_key, ''),
@@ -73,6 +73,7 @@ func (r *taskRepo) GetTaskDetailReadBundle(ctx context.Context, taskID int64, ev
 		                CASE WHEN bound_asset.upload_status = 'uploaded' THEN 'recorded' ELSE '' END, '')
 		FROM reference_file_refs rfr
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rfr.ref_id
+		LEFT JOIN task_assets formal_asset ON formal_asset.id = asr.asset_id
 		LEFT JOIN task_reference_asset_bindings ref_binding
 		  ON ref_binding.task_id = rfr.task_id
 		 AND CONVERT(ref_binding.ref_id USING utf8mb4) COLLATE utf8mb4_unicode_ci =
@@ -339,17 +340,18 @@ func scanReferenceFileRefFlatRows(rows *sql.Rows) ([]*domain.ReferenceFileRefFla
 	var out []*domain.ReferenceFileRefFlat
 	for rows.Next() {
 		var ref domain.ReferenceFileRefFlat
-		var skuID, retouchRequirementID sql.NullInt64
+		var designAssetID, skuID, retouchRequirementID sql.NullInt64
 		var contextValue sql.NullString
 		var fileSize sql.NullInt64
 		if err := rows.Scan(
-			&ref.ID, &ref.TaskID, &skuID, &retouchRequirementID,
+			&ref.ID, &ref.TaskID, &designAssetID, &skuID, &retouchRequirementID,
 			&ref.RefID, &ref.OwnerModuleKey, &contextValue,
 			&ref.AttachedAt, &ref.StorageKey, &ref.FileName,
 			&ref.MimeType, &fileSize, &ref.StorageStatus,
 		); err != nil {
 			return nil, fmt.Errorf("scan reference_file_ref flat: %w", err)
 		}
+		ref.DesignAssetID = fromNullInt64(designAssetID)
 		ref.SKUItemID = fromNullInt64(skuID)
 		ref.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 		ref.Context = fromNullString(contextValue)
