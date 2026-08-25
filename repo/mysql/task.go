@@ -1948,8 +1948,8 @@ func taskSearchDocumentKeywordRecall(kw normalizedSearchKeyword) (string, []inte
 			branches = append(branches, "SELECT task_id FROM task_search_documents WHERE task_id = ?")
 			args = append(args, kw.Int64)
 			if len([]rune(kw.Raw)) >= 2 {
-				branches = append(branches, "SELECT task_id FROM task_search_documents WHERE MATCH(search_text) AGAINST (? IN BOOLEAN MODE)")
-				args = append(args, booleanPhraseSearchQuery(kw.Raw))
+				branches = append(branches, "SELECT task_id FROM task_sku_items WHERE sku_code LIKE ?")
+				args = append(args, kw.Like)
 			}
 		}
 		if kw.IsCode {

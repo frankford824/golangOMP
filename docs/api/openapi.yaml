@@ -10476,7 +10476,7 @@ paths:
         - { in: query, name: date_to, schema: { type: string } }
         - in: query
           name: keyword
-          description: Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; fragments of at least two characters use the ngram search document.
+          description: Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document.
           schema: { type: string }
         - in: query
           name: sort

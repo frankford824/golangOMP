@@ -24393,7 +24393,7 @@ export interface operations {
                 operational_bucket?: "active_tasks" | "design_pending" | "pending_audit" | "handover" | "customization_in_progress" | "overdue" | "due_today" | "today_created";
                 date_from?: string;
                 date_to?: string;
-                /** @description Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; fragments of at least two characters use the ngram search document. */
+                /** @description Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document. */
                 keyword?: string;
                 /** @description Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker. */
                 sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at" | "due_at" | "-due_at" | "task_no" | "-task_no";

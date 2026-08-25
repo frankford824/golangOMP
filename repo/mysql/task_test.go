@@ -184,13 +184,16 @@ func TestBuildTaskListQuerySpecUsesUnionRecallForCodeKeyword(t *testing.T) {
 	}
 }
 
-func TestBuildTaskListQuerySpecUsesNgramRecallForNumericFragment(t *testing.T) {
+func TestBuildTaskListQuerySpecUsesChildSKUContainsRecallForNumericFragment(t *testing.T) {
 	spec, err := buildTaskListQuerySpecWithOptions(repo.TaskListFilter{Keyword: "39"}, nil, taskListQueryBuildOptions{UseSearchDocumentKeyword: true})
 	if err != nil {
 		t.Fatalf("buildTaskListQuerySpecWithOptions() error = %v", err)
 	}
-	if !strings.Contains(spec.whereSQL, "task_id = ?") || !strings.Contains(spec.whereSQL, "MATCH(search_text) AGAINST (? IN BOOLEAN MODE)") {
-		t.Fatalf("whereSQL missing task-id plus ngram numeric-fragment recall: %s", spec.whereSQL)
+	if !strings.Contains(spec.whereSQL, "task_id = ?") || !strings.Contains(spec.whereSQL, "SELECT task_id FROM task_sku_items WHERE sku_code LIKE ?") {
+		t.Fatalf("whereSQL missing task-id plus child-SKU numeric-fragment recall: %s", spec.whereSQL)
+	}
+	if strings.Contains(spec.whereSQL, "MATCH(search_text)") {
+		t.Fatalf("numeric fragments must not search dates or unrelated numbers in the full task document: %s", spec.whereSQL)
 	}
 }
 
