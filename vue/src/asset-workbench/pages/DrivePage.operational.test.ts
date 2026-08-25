@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const browseMaterials = vi.hoisted(() => vi.fn())
 const listClientMaterials = vi.hoisted(() => vi.fn())
+const searchClientMaterials = vi.hoisted(() => vi.fn())
 const batchUpdateClientMaterials = vi.hoisted(() => vi.fn())
 const overviewSearch = vi.hoisted(() => vi.fn())
 const systemSearch = vi.hoisted(() => vi.fn())
@@ -32,6 +33,7 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
       driveDirectories: vi.fn().mockResolvedValue([]),
       listUploadDirectoriesAdmin: vi.fn().mockResolvedValue([]),
       listClientMaterials,
+      searchClientMaterials,
       browseMaterials,
       batchUpdateClientMaterials,
       overviewSearch,
@@ -55,6 +57,7 @@ describe('DrivePage operational browsing', () => {
     vi.clearAllMocks()
     browseMaterials.mockResolvedValue({ path: '', folders: [], files: [], total: 0, page: 1, page_size: 100 })
     listClientMaterials.mockResolvedValue([])
+    searchClientMaterials.mockResolvedValue({ items: [], total: 0, page: 1, size: 100 })
     batchUpdateClientMaterials.mockResolvedValue({
       requested: 1, created: 1, updated: 0, removed: 0, skipped: 0, failed: 0, items: [], failures: [], async_required: false,
     })
@@ -185,7 +188,7 @@ describe('DrivePage operational browsing', () => {
       is_admin: false,
       capabilities: ['asset.workbench.material.download'],
     } as never)
-    listClientMaterials.mockResolvedValue([{
+    searchClientMaterials.mockResolvedValue({ items: [{
       id: 501,
       asset_id: 0,
       source_type: 'task_resource_group',
@@ -205,7 +208,7 @@ describe('DrivePage operational browsing', () => {
       published_at: '2026-08-20T00:00:00Z',
       created_at: '2026-08-20T00:00:00Z',
       updated_at: '2026-08-20T00:00:00Z',
-    }])
+    }], total: 1, page: 1, size: 100 })
 
     const wrapper = shallowMount(DrivePage, {
       global: {
@@ -215,13 +218,48 @@ describe('DrivePage operational browsing', () => {
     })
     await flushPromises()
 
-    expect(listClientMaterials).toHaveBeenCalledWith(false, expect.any(AbortSignal))
+    expect(searchClientMaterials).toHaveBeenCalledWith({ page: 1, page_size: 100 }, expect.any(AbortSignal))
     expect(wrapper.findComponent({ name: 'ResourceLibraryPanel' }).exists()).toBe(false)
     expect(wrapper.text()).toContain('已上架素材')
     const materialCard = wrapper.findComponent({ name: 'ResourceGroupMaterialCard' })
     expect(materialCard.exists()).toBe(true)
     expect(materialCard.props('asset')).toMatchObject({ material_id: 501, resource_group_id: 8, product_name: '管理员已上架定制素材' })
     expect(wrapper.findAll('button').some((button) => button.text() === '资源组')).toBe(false)
+  })
+
+  it('loads published client materials page by page', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 22, display_name: 'client-user' },
+      is_admin: false,
+      capabilities: ['asset.workbench.material.download'],
+    } as never)
+    searchClientMaterials
+      .mockResolvedValueOnce({
+        items: [{ id: 601, asset_id: 18000601, source_type: 'external', source_ref: 'ext-18000601', title: '夸克素材第一页', filename_snapshot: 'page-1.psd', enabled: true }],
+        total: 2, page: 1, size: 100,
+      })
+      .mockResolvedValueOnce({
+        items: [{ id: 602, asset_id: 18000602, source_type: 'external', source_ref: 'ext-18000602', title: '夸克素材第二页', filename_snapshot: 'page-2.psd', enabled: true }],
+        total: 2, page: 2, size: 100,
+      })
+
+    const wrapper = shallowMount(DrivePage, {
+      global: {
+        plugins: [pinia],
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('夸克素材第一页')
+    await textButton(wrapper, '加载更多素材').trigger('click')
+    await flushPromises()
+
+    expect(searchClientMaterials).toHaveBeenLastCalledWith({ page: 2, page_size: 100 }, expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('夸克素材第一页')
+    expect(wrapper.text()).toContain('夸克素材第二页')
   })
 
   it('keeps published client-material hits in client unified search and hides raw system resources', async () => {

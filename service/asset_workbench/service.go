@@ -6423,37 +6423,22 @@ func (s *Service) SearchClientMaterials(ctx context.Context, actor domain.Reques
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to search client materials.", nil)
 	}
 	admin := params.Admin && domain.ActorHasPermission(actor, domain.PermissionAssetPublish)
-	items, appErr := s.ListClientMaterials(ctx, actor, admin)
-	if appErr != nil {
-		return nil, appErr
-	}
-	query := strings.ToLower(strings.TrimSpace(params.Query))
-	sku := strings.ToLower(strings.TrimSpace(params.SKU))
-	filtered := make([]*domain.AssetWorkbenchClientMaterial, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		if query != "" && !clientMaterialMatchesQuery(item, query) {
-			continue
-		}
-		if sku != "" && !clientMaterialMatchesSKU(item, sku) {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
 	page, pageSize := normalizeServicePage(params.Page, params.PageSize, 50, 100)
-	start := (page - 1) * pageSize
-	if start > len(filtered) {
-		start = len(filtered)
+	var enabled *bool
+	if !admin {
+		value := true
+		enabled = &value
 	}
-	end := start + pageSize
-	if end > len(filtered) {
-		end = len(filtered)
+	items, total, err := s.repo.SearchClientMaterials(ctx, repo.AssetWorkbenchClientMaterialFilter{
+		Enabled: enabled, Keyword: params.Query, SKU: params.SKU, Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to search asset workbench client materials.", err.Error())
 	}
+	s.hydrateClientMaterialRows(ctx, items)
 	return &ClientMaterialSearchResult{
-		Items: filtered[start:end],
-		Total: int64(len(filtered)),
+		Items: items,
+		Total: total,
 		Page:  page,
 		Size:  pageSize,
 	}, nil

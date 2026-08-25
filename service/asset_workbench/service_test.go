@@ -1454,6 +1454,41 @@ func (r *clientMaterialRepo) ListClientMaterials(_ context.Context, filter repo.
 	return items, nil
 }
 
+func (r *clientMaterialRepo) SearchClientMaterials(ctx context.Context, filter repo.AssetWorkbenchClientMaterialFilter) ([]*domain.AssetWorkbenchClientMaterial, int64, error) {
+	items, err := r.ListClientMaterials(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	filtered := make([]*domain.AssetWorkbenchClientMaterial, 0, len(items))
+	for _, item := range items {
+		haystack := strings.ToLower(strings.Join([]string{item.Title, item.Description, item.FilenameSnapshot, item.SourceRef}, " "))
+		if keyword := strings.ToLower(strings.TrimSpace(filter.Keyword)); keyword != "" && !strings.Contains(haystack, keyword) {
+			continue
+		}
+		if sku := strings.ToLower(strings.TrimSpace(filter.SKU)); sku != "" && !strings.Contains(haystack, sku) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	total := int64(len(filtered))
+	page, pageSize := filter.Page, filter.PageSize
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	start := (page - 1) * pageSize
+	if start >= len(filtered) {
+		return []*domain.AssetWorkbenchClientMaterial{}, total, nil
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return filtered[start:end], total, nil
+}
+
 func (r *clientMaterialRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
 	copyEvent := *event
 	copyEvent.ID = int64(len(r.events) + 1)
@@ -3978,6 +4013,38 @@ func TestListClientMaterialsHydratesSystemBusinessLane(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].BusinessLane != string(domain.TaskBusinessLaneCustomization) {
 		t.Fatalf("ListClientMaterials() items = %+v, want customization lane", items)
+	}
+}
+
+func TestSearchClientMaterialsPaginatesBeforeHydration(t *testing.T) {
+	materials := make(map[int64]*domain.AssetWorkbenchClientMaterial, 120)
+	for id := int64(1); id <= 120; id++ {
+		materials[id] = &domain.AssetWorkbenchClientMaterial{
+			ID: id, AssetID: 18000000 + id, SourceType: string(domain.AssetResourceSourceExternal),
+			SourceRef: fmt.Sprintf("ext-%d", 18000000+id), Title: fmt.Sprintf("夸克素材 %03d", id), Enabled: true,
+		}
+	}
+	workbenchRepo := &clientMaterialRepo{materials: materials}
+	provider := &externalMaterialProviderStub{}
+	svc := NewService(
+		Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetSearcher(provider),
+	)
+
+	result, appErr := svc.SearchClientMaterials(
+		context.Background(),
+		domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetView}},
+		ClientMaterialSearchParams{Page: 2, PageSize: 50},
+	)
+	if appErr != nil {
+		t.Fatalf("SearchClientMaterials() error = %+v", appErr)
+	}
+	if result.Total != 120 || len(result.Items) != 50 || result.Items[0].ID != 51 || result.Items[49].ID != 100 {
+		t.Fatalf("SearchClientMaterials() result = %+v, want page 2 ids 51..100 of 120", result)
+	}
+	if len(provider.detailCalls) != 50 {
+		t.Fatalf("external detail calls = %d, want hydration only for the 50 returned rows", len(provider.detailCalls))
 	}
 }
 

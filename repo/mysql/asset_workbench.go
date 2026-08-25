@@ -1523,6 +1523,47 @@ func (r *assetWorkbenchRepo) ListClientMaterials(ctx context.Context, filter rep
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) SearchClientMaterials(ctx context.Context, filter repo.AssetWorkbenchClientMaterialFilter) ([]*domain.AssetWorkbenchClientMaterial, int64, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if filter.Enabled != nil {
+		where = append(where, "enabled = ?")
+		args = append(args, *filter.Enabled)
+	}
+	appendKeyword := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		like := "%" + value + "%"
+		where = append(where, "(title LIKE ? OR description LIKE ? OR filename_snapshot LIKE ? OR source_ref LIKE ?)")
+		args = append(args, like, like, like, like)
+	}
+	appendKeyword(filter.Keyword)
+	appendKeyword(filter.SKU)
+	whereSQL := " WHERE " + strings.Join(where, " AND ")
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_client_materials`+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench client materials: %w", err)
+	}
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	listArgs := append(append([]interface{}{}, args...), pageSize, (page-1)*pageSize)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchClientMaterialSelect()+whereSQL+` ORDER BY sort_order ASC, id ASC LIMIT ? OFFSET ?`, listArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search asset workbench client materials: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchClientMaterial{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchClientMaterial(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
 func (r *assetWorkbenchRepo) GetClientMaterial(ctx context.Context, materialID int64) (*domain.AssetWorkbenchClientMaterial, error) {
 	row := r.db.db.QueryRowContext(ctx, assetWorkbenchClientMaterialSelect()+` WHERE id = ?`, materialID)
 	return scanAssetWorkbenchClientMaterial(row)

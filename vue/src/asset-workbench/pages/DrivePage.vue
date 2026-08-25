@@ -558,7 +558,7 @@ const materialSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]
     .map((asset) => ({ rowKey: materialAssetKey(asset), columnKey: 'sku', tone: 'warn', message: `${materialDisplayTitle(asset)} 缺少 SKU` })),
 )
 const materialCanLoadMore = computed(() =>
-  canManageDrive.value &&
+  canUseOperational.value &&
   !materialLoading.value &&
   !materialLoadingMore.value &&
   materialItems.value.length < materialFileTotal.value,
@@ -1087,6 +1087,12 @@ function mergeMaterialItems(current: SystemAssetRow[], incoming: SystemAssetRow[
     merged.push(item)
   }
   return merged
+}
+
+function mergeClientMaterialItems(current: ClientMaterialRow[], incoming: ClientMaterialRow[]) {
+  const byID = new Map(current.map((item) => [item.id, item]))
+  for (const item of incoming) byID.set(item.id, item)
+  return [...byID.values()]
 }
 
 function isAbortError(err: unknown) {
@@ -2413,14 +2419,17 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
         rememberMaterialPath(materialDirectoryPath(asset))
       }
     } else {
-      const published = await assetWorkbenchApi.listClientMaterials(false)
-      clientMaterials.value = published
-      materialItems.value = published.map(materialFromClient).filter((asset) => {
+      const result = await assetWorkbenchApi.searchClientMaterials({ q: materialQuery.value || undefined, page, page_size: materialPageSize }, materialAbortController.signal)
+      if (requestID !== materialRequestSeq) return
+      const published = result.items || []
+      clientMaterials.value = append ? mergeClientMaterialItems(clientMaterials.value, published) : published
+      const visibleItems = published.map(materialFromClient).filter((asset) => {
         if (!materialMatchesActiveFilters(asset)) return false
         return matchesClientMaterialQuery(asset, materialQuery.value)
       })
-      materialFileTotal.value = materialItems.value.length
-      materialPage.value = 1
+      materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleItems) : visibleItems
+      materialFileTotal.value = Number(result.total || visibleItems.length)
+      materialPage.value = result.page || page
     }
   } catch (err) {
     if (requestID !== materialRequestSeq || isAbortError(err)) return
@@ -2496,12 +2505,14 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
       materialPage.value = browse.page || page
       clientMaterials.value = published
     } else {
-      const published = await assetWorkbenchApi.listClientMaterials(false, materialAbortController.signal)
+      const result = await assetWorkbenchApi.searchClientMaterials({ page, page_size: materialPageSize }, materialAbortController.signal)
       if (requestID !== materialRequestSeq) return
-      clientMaterials.value = published
-      materialItems.value = published.map(materialFromClient).filter(materialMatchesActiveFilters)
-      materialFileTotal.value = materialItems.value.length
-      materialPage.value = 1
+      const published = result.items || []
+      clientMaterials.value = append ? mergeClientMaterialItems(clientMaterials.value, published) : published
+      const visibleItems = published.map(materialFromClient).filter(materialMatchesActiveFilters)
+      materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleItems) : visibleItems
+      materialFileTotal.value = Number(result.total || visibleItems.length)
+      materialPage.value = result.page || page
     }
   } catch (err) {
     if (requestID !== materialRequestSeq || isAbortError(err)) return

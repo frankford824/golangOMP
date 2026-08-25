@@ -448,7 +448,11 @@ type AssetWorkbenchUploadDirectoryFilter struct {
 }
 
 type AssetWorkbenchClientMaterialFilter struct {
-	Enabled *bool
+	Enabled  *bool
+	Keyword  string
+	SKU      string
+	Page     int
+	PageSize int
 }
 
 type AssetWorkbenchBatchJobFilter struct {
@@ -535,6 +539,7 @@ type AssetWorkbenchRepo interface {
 	UpdateUploadDirectory(ctx context.Context, tx Tx, directory *domain.AssetWorkbenchUploadDirectory) (*domain.AssetWorkbenchUploadDirectory, error)
 
 	ListClientMaterials(ctx context.Context, filter AssetWorkbenchClientMaterialFilter) ([]*domain.AssetWorkbenchClientMaterial, error)
+	SearchClientMaterials(ctx context.Context, filter AssetWorkbenchClientMaterialFilter) ([]*domain.AssetWorkbenchClientMaterial, int64, error)
 	GetClientMaterial(ctx context.Context, materialID int64) (*domain.AssetWorkbenchClientMaterial, error)
 	CreateClientMaterial(ctx context.Context, tx Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error)
 	UpdateClientMaterial(ctx context.Context, tx Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error)

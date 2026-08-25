@@ -14,6 +14,40 @@ import (
 	"workflow/repo"
 )
 
+func TestSearchClientMaterialsFiltersAndPaginatesInSQL(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	like := "%HSC11066%"
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM asset_workbench_client_materials").
+		WithArgs(true, like, like, like, like).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(18337)))
+	mock.ExpectQuery("SELECT id, asset_id, source_type, source_ref").
+		WithArgs(true, like, like, like, like, 50, 50).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "asset_id", "source_type", "source_ref", "title", "description", "filename_snapshot", "mime_type_snapshot", "file_size_snapshot",
+			"resource_group_id", "finalized_revision_id", "cover_revision_item_id", "enabled", "sort_order", "published_by", "updated_by", "published_at", "created_at", "updated_at",
+		}))
+
+	workbenchRepo := NewAssetWorkbenchRepo(New(db))
+	enabled := true
+	items, total, err := workbenchRepo.SearchClientMaterials(context.Background(), repo.AssetWorkbenchClientMaterialFilter{
+		Enabled: &enabled, Keyword: "HSC11066", Page: 2, PageSize: 50,
+	})
+	if err != nil {
+		t.Fatalf("SearchClientMaterials() error = %v", err)
+	}
+	if total != 18337 || len(items) != 0 {
+		t.Fatalf("SearchClientMaterials() total=%d items=%d, want 18337 and empty mocked page", total, len(items))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
 func TestGetUploadSessionForUpdateUsesRowLock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
