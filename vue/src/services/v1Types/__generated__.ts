@@ -5882,11 +5882,20 @@ export interface paths {
                         product_i_id?: string | null;
                         spec_text?: string | null;
                         size_text?: string | null;
-                        /** Format: double */
+                        /**
+                         * Format: double
+                         * @description Task width in centimetres; converted server-side before rule evaluation.
+                         */
                         width?: number | null;
-                        /** Format: double */
+                        /**
+                         * Format: double
+                         * @description Task height in centimetres; converted server-side before rule evaluation.
+                         */
                         height?: number | null;
-                        /** Format: double */
+                        /**
+                         * Format: double
+                         * @description Task billable area in square metres.
+                         */
                         area?: number | null;
                         /** Format: int64 */
                         quantity?: number | null;
@@ -6010,11 +6019,20 @@ export interface paths {
                         operator_id?: number | null;
                         category_id?: number | null;
                         category_code?: string | null;
-                        /** Format: double */
+                        /**
+                         * Format: double
+                         * @description Task width override in centimetres; converted server-side before rule evaluation.
+                         */
                         width?: number | null;
-                        /** Format: double */
+                        /**
+                         * Format: double
+                         * @description Task height override in centimetres; converted server-side before rule evaluation.
+                         */
                         height?: number | null;
-                        /** Format: double */
+                        /**
+                         * Format: double
+                         * @description Task billable-area override in square metres.
+                         */
                         area?: number | null;
                         quantity?: number | null;
                         process?: string | null;
@@ -19351,11 +19369,20 @@ export interface components {
             material?: string;
             size_text?: string;
             craft_text?: string;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Stored task width in centimetres.
+             */
             width?: number | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Stored task height in centimetres.
+             */
             height?: number | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Stored task billable area in square metres.
+             */
             area?: number | null;
             /** Format: int64 */
             quantity?: number | null;
@@ -20801,11 +20828,20 @@ export interface components {
         CostRulePreviewRequest: {
             category_id?: number | null;
             category_code?: string;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Width in metres for rule-preview calculations.
+             */
             width?: number | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Height in metres for rule-preview calculations.
+             */
             height?: number | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Billable area in square metres.
+             */
             area?: number | null;
             /** Format: int64 */
             quantity?: number | null;

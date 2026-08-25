@@ -1415,14 +1415,17 @@ components:
           type: number
           format: double
           nullable: true
+          description: Stored task width in centimetres.
         height:
           type: number
           format: double
           nullable: true
+          description: Stored task height in centimetres.
         area:
           type: number
           format: double
           nullable: true
+          description: Stored task billable area in square metres.
         quantity:
           type: integer
           format: int64
@@ -3550,14 +3553,17 @@ components:
           type: number
           format: double
           nullable: true
+          description: Width in metres for rule-preview calculations.
         height:
           type: number
           format: double
           nullable: true
+          description: Height in metres for rule-preview calculations.
         area:
           type: number
           format: double
           nullable: true
+          description: Billable area in square metres.
         quantity:
           type: integer
           format: int64
@@ -10767,9 +10773,9 @@ paths:
                 product_i_id: { type: string, nullable: true }
                 spec_text: { type: string, nullable: true }
                 size_text: { type: string, nullable: true }
-                width: { type: number, format: double, nullable: true }
-                height: { type: number, format: double, nullable: true }
-                area: { type: number, format: double, nullable: true }
+                width: { type: number, format: double, nullable: true, description: "Task width in centimetres; converted server-side before rule evaluation." }
+                height: { type: number, format: double, nullable: true, description: "Task height in centimetres; converted server-side before rule evaluation." }
+                area: { type: number, format: double, nullable: true, description: "Task billable area in square metres." }
                 quantity: { type: integer, format: int64, nullable: true }
                 design_requirement: { type: string, nullable: true }
                 reference_file_refs:
@@ -10857,9 +10863,9 @@ paths:
                 operator_id: { type: integer, nullable: true }
                 category_id: { type: integer, nullable: true }
                 category_code: { type: string, nullable: true }
-                width: { type: number, format: double, nullable: true }
-                height: { type: number, format: double, nullable: true }
-                area: { type: number, format: double, nullable: true }
+                width: { type: number, format: double, nullable: true, description: "Task width override in centimetres; converted server-side before rule evaluation." }
+                height: { type: number, format: double, nullable: true, description: "Task height override in centimetres; converted server-side before rule evaluation." }
+                area: { type: number, format: double, nullable: true, description: "Task billable-area override in square metres." }
                 quantity: { type: integer, nullable: true }
                 process: { type: string, nullable: true }
                 notes: { type: string, nullable: true }

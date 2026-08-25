@@ -1785,8 +1785,8 @@ func (h *TaskHandler) PreviewCostQuote(c *gin.Context) {
 	previewReq := domain.CostRulePreviewRequest{
 		CategoryID:   firstInt64(req.CategoryID, detail.CategoryID),
 		CategoryCode: categoryCode,
-		Width:        firstFloat64(req.Width, detail.Width),
-		Height:       firstFloat64(req.Height, detail.Height),
+		Width:        taskCostCentimetersToMeters(firstFloat64(req.Width, detail.Width)),
+		Height:       taskCostCentimetersToMeters(firstFloat64(req.Height, detail.Height)),
 		Area:         firstFloat64(req.Area, detail.Area),
 		Quantity:     firstInt64(req.Quantity, detail.Quantity),
 		Process:      process,
@@ -1802,6 +1802,14 @@ func (h *TaskHandler) PreviewCostQuote(c *gin.Context) {
 		return
 	}
 	respondOK(c, result)
+}
+
+func taskCostCentimetersToMeters(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	converted := *value / 100
+	return &converted
 }
 
 func (h *TaskHandler) loadTaskAggregate(c *gin.Context, taskID int64) (*domain.TaskDetailAggregate, *domain.AppError) {

@@ -1861,9 +1861,9 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |
-| `width` | number | 否 | - |
-| `height` | number | 否 | - |
-| `area` | number | 否 | - |
+| `width` | number | 否 | Width in metres for rule-preview calculations. |
+| `height` | number | 否 | Height in metres for rule-preview calculations. |
+| `area` | number | 否 | Billable area in square metres. |
 | `quantity` | integer | 否 | - |
 | `process` | string | 否 | - |
 | `notes` | string | 否 | - |

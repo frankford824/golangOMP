@@ -3110,8 +3110,8 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 func taskSKUItemCostPreviewDimensions(detail *domain.TaskDetail, item *domain.TaskSKUItem, text string) (*float64, *float64, *float64) {
 	width, height, area := taskSKUItemVariantDimensions(item)
 	itemDimensions := withTextDerivedCostRuleDimensions(domain.CostRulePreviewRequest{
-		Width:  width,
-		Height: height,
+		Width:  costDimensionCentimetersToMeters(width),
+		Height: costDimensionCentimetersToMeters(height),
 		Area:   area,
 		Notes:  text,
 	})
@@ -3784,7 +3784,7 @@ func applyTextDerivedCostDimensions(detail *domain.TaskDetail, refreshFromText b
 		return
 	}
 	if refreshAreaFromWidthHeight && !refreshFromText && detail.Width != nil && detail.Height != nil && *detail.Width > 0 && *detail.Height > 0 {
-		area := (*detail.Width) * (*detail.Height)
+		area := ((*detail.Width) * (*detail.Height)) / 10000
 		detail.Area = &area
 		return
 	}
@@ -3792,10 +3792,10 @@ func applyTextDerivedCostDimensions(detail *domain.TaskDetail, refreshFromText b
 	if refreshFromText {
 		extracted := extractCostDimensionsFromText(notes)
 		if extracted.WidthM != nil {
-			detail.Width = cloneFloat64Ptr(extracted.WidthM)
+			detail.Width = costDimensionMetersToCentimeters(extracted.WidthM)
 		}
 		if extracted.HeightM != nil {
-			detail.Height = cloneFloat64Ptr(extracted.HeightM)
+			detail.Height = costDimensionMetersToCentimeters(extracted.HeightM)
 		}
 		if extracted.AreaM2 != nil {
 			detail.Area = cloneFloat64Ptr(extracted.AreaM2)
@@ -3804,10 +3804,10 @@ func applyTextDerivedCostDimensions(detail *domain.TaskDetail, refreshFromText b
 	}
 	width, height, area := taskCostPreviewDimensions(detail, notes)
 	if width != nil {
-		detail.Width = cloneFloat64Ptr(width)
+		detail.Width = costDimensionMetersToCentimeters(width)
 	}
 	if height != nil {
-		detail.Height = cloneFloat64Ptr(height)
+		detail.Height = costDimensionMetersToCentimeters(height)
 	}
 	if area != nil {
 		detail.Area = cloneFloat64Ptr(area)
@@ -3898,12 +3898,28 @@ func taskCostPreviewDimensions(detail *domain.TaskDetail, text string) (*float64
 		return nil, nil, nil
 	}
 	req := withTextDerivedCostRuleDimensions(domain.CostRulePreviewRequest{
-		Width:  cloneFloat64Ptr(detail.Width),
-		Height: cloneFloat64Ptr(detail.Height),
+		Width:  costDimensionCentimetersToMeters(detail.Width),
+		Height: costDimensionCentimetersToMeters(detail.Height),
 		Area:   cloneFloat64Ptr(detail.Area),
 		Notes:  text,
 	})
 	return req.Width, req.Height, req.Area
+}
+
+func costDimensionCentimetersToMeters(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	converted := *value / 100
+	return &converted
+}
+
+func costDimensionMetersToCentimeters(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	converted := *value * 100
+	return &converted
 }
 
 func cloneFloat64Ptr(value *float64) *float64 {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -378,14 +379,76 @@ func TestTaskCostPreviewDimensionsPrefersTextOverStaleDetailArea(t *testing.T) {
 
 	applyTextDerivedCostDimensions(detail, true, false)
 
-	if detail.Width == nil || math.Abs(*detail.Width-0.46) > 0.000001 {
-		t.Fatalf("width = %+v, want 0.46", detail.Width)
+	if detail.Width == nil || math.Abs(*detail.Width-46) > 0.000001 {
+		t.Fatalf("width = %+v, want 46 cm", detail.Width)
 	}
-	if detail.Height == nil || math.Abs(*detail.Height-1.2) > 0.000001 {
-		t.Fatalf("height = %+v, want 1.2", detail.Height)
+	if detail.Height == nil || math.Abs(*detail.Height-120) > 0.000001 {
+		t.Fatalf("height = %+v, want 120 cm", detail.Height)
 	}
 	if detail.Area == nil || math.Abs(*detail.Area-0.552) > 0.000001 {
 		t.Fatalf("area = %+v, want 0.552", detail.Area)
+	}
+}
+
+func TestTaskCostPreviewDimensionsConvertsStructuredCentimetersToMeters(t *testing.T) {
+	widthCM := 180.0
+	heightCM := 90.0
+	detail := &domain.TaskDetail{Width: &widthCM, Height: &heightCM}
+
+	widthM, heightM, area := taskCostPreviewDimensions(detail, "")
+	if widthM == nil || math.Abs(*widthM-1.8) > 0.000001 {
+		t.Fatalf("width = %+v, want 1.8 m", widthM)
+	}
+	if heightM == nil || math.Abs(*heightM-0.9) > 0.000001 {
+		t.Fatalf("height = %+v, want 0.9 m", heightM)
+	}
+	if area != nil {
+		t.Fatalf("area = %+v, want nil when only structured width/height exist", area)
+	}
+}
+
+func TestTaskSKUItemCostPreviewDimensionsConvertsVariantCentimeters(t *testing.T) {
+	item := &domain.TaskSKUItem{VariantJSON: json.RawMessage(`{"width":180,"height":90}`)}
+
+	widthM, heightM, area := taskSKUItemCostPreviewDimensions(&domain.TaskDetail{}, item, "")
+	if widthM == nil || math.Abs(*widthM-1.8) > 0.000001 {
+		t.Fatalf("width = %+v, want 1.8 m", widthM)
+	}
+	if heightM == nil || math.Abs(*heightM-0.9) > 0.000001 {
+		t.Fatalf("height = %+v, want 0.9 m", heightM)
+	}
+	if area != nil {
+		t.Fatalf("area = %+v, want nil when only structured width/height exist", area)
+	}
+	rules := []*domain.CostRule{{
+		RuleID: 10, RuleVersion: 1, RuleName: "常规覆膜KT板基础单价", CategoryCode: "KT_STANDARD_FILM",
+		RuleType: domain.CostRuleTypeFixedUnitPrice, BasePrice: costRuleFloat64Ptr(13), TaxMultiplier: costRuleFloat64Ptr(1.1), IsActive: true,
+	}}
+	preview := previewCostRules(domain.CostRulePreviewRequest{Width: widthM, Height: heightM}, rules).Response
+	if preview.EstimatedCost == nil || math.Abs(*preview.EstimatedCost-23.166) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 23.166", preview.EstimatedCost)
+	}
+}
+
+func TestCostRulePreviewBlocksSuspiciousAutomaticAmount(t *testing.T) {
+	rules := []*domain.CostRule{{
+		RuleID: 10, RuleVersion: 1, RuleName: "常规覆膜KT板基础单价", CategoryCode: "KT_STANDARD_FILM",
+		RuleType: domain.CostRuleTypeFixedUnitPrice, BasePrice: costRuleFloat64Ptr(13), TaxMultiplier: costRuleFloat64Ptr(1.1), IsActive: true,
+	}}
+	result := previewCostRules(domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD_FILM",
+		Width:        costRuleFloat64Ptr(180),
+		Height:       costRuleFloat64Ptr(90),
+	}, rules).Response
+
+	if !result.RequiresManualReview {
+		t.Fatalf("requires_manual_review = false, want true")
+	}
+	if result.EstimatedCost != nil {
+		t.Fatalf("estimated_cost = %+v, want nil when amount guard blocks automatic write", result.EstimatedCost)
+	}
+	if !strings.Contains(result.Explanation, "超过自动写入上限") {
+		t.Fatalf("explanation = %q, want amount-guard message", result.Explanation)
 	}
 }
 

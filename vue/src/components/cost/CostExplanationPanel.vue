@@ -119,11 +119,12 @@ const error = ref('')
 watch(
   () => props.seed,
   (seed) => {
+    const dimensions = seedDimensionsInMeters(seed)
     draft.categoryCode = text(seed.categoryCode)
     draft.productIID = text(seed.productIID)
     draft.erpIID = text(seed.erpIID)
-    draft.width = text(seed.width)
-    draft.height = text(seed.height)
+    draft.width = text(dimensions.width)
+    draft.height = text(dimensions.height)
     draft.area = text(seed.area)
     draft.quantity = text(seed.quantity)
     draft.process = text(seed.process)
@@ -161,6 +162,24 @@ const diagnosis = computed(() => {
 
 function text(value: unknown) {
   return value == null ? '' : String(value)
+}
+
+function seedDimensionsInMeters(seed: CostPreviewSeed) {
+  const width = numeric(seed.width)
+  const height = numeric(seed.height)
+  const area = numeric(seed.area)
+  const storedAsMeters = width != null && height != null && area != null && area > 0
+    && Math.abs((width * height) - area) <= Math.max(0.000001, area * 0.001)
+  return {
+    width: width == null ? seed.width : storedAsMeters ? width : width / 100,
+    height: height == null ? seed.height : storedAsMeters ? height : height / 100,
+  }
+}
+
+function numeric(value: number | string | null | undefined) {
+  if (value == null || String(value).trim() === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function optionalNumber(value: string) {

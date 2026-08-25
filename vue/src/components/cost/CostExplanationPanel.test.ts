@@ -137,7 +137,27 @@ describe('CostExplanationPanel', () => {
     expect(mocks.getRule).toHaveBeenCalledWith(17)
     expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({
       category_code: 'KT_STANDARD',
+	  width: 0.55,
+	  height: 1.4,
       area: 0.77,
+    }))
+  })
+
+  it('converts task dimensions from centimetres before calling the metre-based preview API', async () => {
+    const wrapper = mount(CostExplanationPanel, {
+      props: {
+        open: true,
+        title: '成本解释',
+        seed: { categoryCode: 'KT_STANDARD_FILM', width: 180, height: 90 },
+      },
+    })
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({
+      width: 1.8,
+      height: 0.9,
     }))
   })
 })

@@ -4378,9 +4378,9 @@ Content-Type: `application/json`
 | `product_i_id` | string | 否 | - |
 | `spec_text` | string | 否 | - |
 | `size_text` | string | 否 | - |
-| `width` | number | 否 | - |
-| `height` | number | 否 | - |
-| `area` | number | 否 | - |
+| `width` | number | 否 | Task width in centimetres; converted server-side before rule evaluation. |
+| `height` | number | 否 | Task height in centimetres; converted server-side before rule evaluation. |
+| `area` | number | 否 | Task billable area in square metres. |
 | `quantity` | integer | 否 | - |
 | `design_requirement` | string | 否 | - |
 | `reference_file_refs` | array<ReferenceFileRef> | 否 | - |
@@ -4523,9 +4523,9 @@ Content-Type: `application/json`
 | `operator_id` | integer | 否 | - |
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |
-| `width` | number | 否 | - |
-| `height` | number | 否 | - |
-| `area` | number | 否 | - |
+| `width` | number | 否 | Task width override in centimetres; converted server-side before rule evaluation. |
+| `height` | number | 否 | Task height override in centimetres; converted server-side before rule evaluation. |
+| `area` | number | 否 | Task billable-area override in square metres. |
 | `quantity` | integer | 否 | - |
 | `process` | string | 否 | - |
 | `notes` | string | 否 | - |

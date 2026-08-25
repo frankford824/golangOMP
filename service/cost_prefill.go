@@ -16,6 +16,8 @@ type costPreviewComputation struct {
 	MatchTrace  *domain.CostRuleMatchTrace
 }
 
+const maxAutomaticEstimatedCost = 9999.999
+
 func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
 	req = withTextDerivedCostRuleDimensions(req)
 	sortedRules := make([]*domain.CostRule, 0, len(rules))
@@ -133,8 +135,13 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 		}
 	}
 
+	blockedByAmountGuard := estimated > maxAutomaticEstimatedCost
+	if blockedByAmountGuard {
+		manualReview = true
+		explanations = append(explanations, fmt.Sprintf("试算金额 ¥%.3f 超过自动写入上限 ¥10,000，已转人工复核，未写入自动成本。", estimated))
+	}
 	var estimatedPtr *float64
-	if len(applied) > 0 && (!manualReview || estimated > 0) {
+	if len(applied) > 0 && (!manualReview || estimated > 0) && !blockedByAmountGuard {
 		estimatedCopy := roundCostAmount(estimated)
 		estimatedPtr = &estimatedCopy
 	}
