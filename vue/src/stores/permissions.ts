@@ -175,10 +175,22 @@ export const usePermissionsStore = defineStore('permissions', () => {
     if (!token) throw new Error('登录响应缺少 token')
     setToken(token)
 
+    const loginUser = payload?.user
+    const loginAccess = loginUser?.frontend_access ?? payload?.frontend_access
+    if (loginUser && loginAccess) {
+      applyAuthenticatedUser(loginUser, loginAccess)
+      startAuthenticatedServices()
+      return
+    }
+
     try {
       await restoreSession()
     } catch (error) {
-      clearToken()
+      // A transient 429/5xx from /auth/me must not discard the token that the
+      // successful login response just issued. Only an actual 401 invalidates it.
+      if (typeof error === 'object' && error !== null && 'status' in error && error.status === 401) {
+        clearToken()
+      }
       throw error
     }
   }
@@ -195,6 +207,11 @@ export const usePermissionsStore = defineStore('permissions', () => {
     if (!user) throw new Error('会话恢复失败：缺少用户信息')
     const access = snapshot?.frontendAccess ?? user.frontend_access
     if (!access) throw new Error('会话恢复失败：缺少 frontend_access')
+    applyAuthenticatedUser(user, access)
+    startAuthenticatedServices()
+  }
+
+  function applyAuthenticatedUser(user: BackendUser, access: FrontendAccess): void {
     // /v1/auth/me canonical user fields are id + display_name; keep alias fallback only for read-compat.
     // 某些环境（如 v1.4 后端）只返回 `username`，这里兜底避免 AppShell 顶栏空名。
     const rawUser = user as BackendUser & { user_id?: string; displayName?: string }
@@ -209,6 +226,9 @@ export const usePermissionsStore = defineStore('permissions', () => {
         avatar_url: rawUser.avatar_url,
       },
     )
+  }
+
+  function startAuthenticatedServices(): void {
     void authApi.refreshAssetCookie().catch(() => undefined)
     void useNotificationsStore().load().catch(() => undefined)
     void useWebPushStore().initAfterLogin().catch(() => undefined)
