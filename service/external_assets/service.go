@@ -1353,8 +1353,42 @@ func hasUsableExternalSearchItems(resp *AListSearchResponse) bool {
 }
 
 func (s *Service) resolveNetdiskDirectURL(ctx context.Context, row *domain.ExternalAssetRecord, preview bool) (string, error) {
+	var alistRawURL string
+	var alistErr error
+	if !preview && s.alist != nil && s.alist.Enabled() {
+		info, err := s.alist.Get(ctx, row.OriginPath)
+		alistErr = err
+		if err == nil && info != nil {
+			alistRawURL = strings.TrimSpace(info.RawURL)
+			if alistRawURL != "" && !s.isInternalProviderURL(alistRawURL) {
+				return alistRawURL, nil
+			}
+		}
+	}
 	if s.bff != nil && s.bff.Enabled() {
-		return s.bff.DirectURL(ctx, row.OriginPath, preview)
+		resolved, err := s.bff.DirectURL(ctx, row.OriginPath, preview)
+		if err == nil {
+			return strings.TrimSpace(resolved), nil
+		}
+		if alistRawURL != "" {
+			return alistRawURL, nil
+		}
+		if alistErr != nil {
+			return "", fmt.Errorf("external asset bff direct link failed: %v; alist direct link failed: %w", err, alistErr)
+		}
+		return "", err
+	}
+	if alistRawURL != "" {
+		return alistRawURL, nil
+	}
+	if alistErr != nil {
+		return "", alistErr
+	}
+	if !preview && s.alist != nil && s.alist.Enabled() {
+		return "", fmt.Errorf("alist returned an empty direct link")
+	}
+	if s.alist == nil || !s.alist.Enabled() {
+		return "", fmt.Errorf("external asset direct link service is not configured")
 	}
 	info, err := s.alist.Get(ctx, row.OriginPath)
 	if err != nil {
@@ -1621,7 +1655,7 @@ func (s *Service) ResolveNetdiskStream(ctx context.Context, id int64) (*NetdiskS
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该资源不是可下载的外部网盘文件", nil)
 	}
 	rawURL := strings.TrimSpace(row.RawURL)
-	if s.shouldRefreshDirectURL(row) {
+	if s.shouldRefreshDirectURL(row) || s.isInternalProviderURL(rawURL) {
 		resolved, resolveErr := s.resolveNetdiskDirectURL(ctx, row, false)
 		if resolveErr != nil {
 			_ = s.repo.UpdateDirectURL(ctx, row.ID, "", nil, "failed")

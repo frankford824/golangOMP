@@ -726,6 +726,58 @@ func TestResolveNetdiskStreamBuildsProtectedAListInternalRedirect(t *testing.T) 
 	}
 }
 
+func TestResolveNetdiskStreamRefreshesInternalCacheToPublicAListRawURL(t *testing.T) {
+	checkedAt := time.Now().UTC()
+	alist := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/fs/get" {
+			t.Fatalf("path = %q, want /api/fs/get", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code": 200,
+			"data": map[string]interface{}{
+				"raw_url": "https://public-download.example.com/HSC11066.psd?token=fresh",
+			},
+		})
+	}))
+	defer alist.Close()
+	bffCalled := false
+	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		bffCalled = true
+		w.Header().Set("Location", "http://172.21.0.1:5244/p/quark/HSC11066.psd?sign=stale")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer bff.Close()
+	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
+		ID:                42,
+		Kind:              domain.ExternalAssetKindNetdisk,
+		MountPath:         "/quark",
+		OriginPath:        "/quark/HSC11066.psd",
+		FileName:          "HSC11066.psd",
+		MimeType:          "image/vnd.adobe.photoshop",
+		Status:            domain.ExternalAssetStatusIndexed,
+		RawURL:            "http://172.21.0.1:5244/p/quark/HSC11066.psd?sign=stale",
+		LastLinkCheckedAt: &checkedAt,
+	}}
+	svc := NewService(repo, Config{
+		Enabled:      true,
+		AListBaseURL: alist.URL,
+		AListToken:   "token",
+		BFFBaseURL:   bff.URL,
+		Mounts:       ParseMounts("/quark:netdisk"),
+	}, nil)
+
+	target, appErr := svc.ResolveNetdiskStream(context.Background(), 42)
+	if appErr != nil {
+		t.Fatalf("ResolveNetdiskStream() error = %+v", appErr)
+	}
+	if target == nil || target.RedirectURL != "https://public-download.example.com/HSC11066.psd?token=fresh" || target.InternalRedirect != "" {
+		t.Fatalf("target = %+v, want public provider redirect", target)
+	}
+	if bffCalled {
+		t.Fatal("BFF direct link should not be used when AList exposes a public raw URL")
+	}
+}
+
 func TestNetdiskDownloadUsesReadyOSSOriginal(t *testing.T) {
 	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
 		Enabled:         true,
