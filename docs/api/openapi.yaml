@@ -10128,7 +10128,7 @@ paths:
       summary: Stream external netdisk asset content
       description: |
         Authenticated byte-stream endpoint for external netdisk resources such as `/quark`.
-        The backend authorizes and resolves the resource, then Nginx internally streams the signed AList `/p` source with HTTP Range support.
+        The backend authorizes and resolves the resource, then Nginx internally streams through the normalized BFF proxy when configured, with signed AList `/p` as a fallback. Both paths support HTTP Range.
         Original bytes are not copied to OSS; derived thumbnails and previews remain OSS-backed.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
@@ -10143,7 +10143,7 @@ paths:
           description: External resource id such as `ext-123`.
       responses:
         '200':
-          description: External file byte stream, including Range responses handled by the internal AList proxy.
+          description: External file byte stream, including Range responses handled by the internal BFF or AList proxy.
           content:
             application/octet-stream:
               schema:

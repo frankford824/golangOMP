@@ -613,7 +613,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/download \
 ### 简介
 支持方法: GET。
 
-- `GET`: Authenticated byte-stream endpoint for external netdisk resources such as `/quark`. The backend authorizes and resolves the resource, then Nginx internally streams the signed AList `/p` source with HTTP Range support. Original bytes are not copied to OSS; derived thumbnails and previews remain OSS-backed.
+- `GET`: Authenticated byte-stream endpoint for external netdisk resources such as `/quark`. The backend authorizes and resolves the resource, then Nginx internally streams through the normalized BFF proxy when configured, with signed AList `/p` as a fallback. Both paths support HTTP Range. Original bytes are not copied to OSS; derived thumbnails and previews remain OSS-backed.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

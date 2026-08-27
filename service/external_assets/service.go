@@ -25,7 +25,10 @@ import (
 
 const ErrCodeExternalAssetPreparing = "EXTERNAL_ASSET_PREPARING"
 
-const externalNetdiskContentPath = "/v1/assets/%s/content"
+const (
+	externalNetdiskContentPath   = "/v1/assets/%s/content"
+	externalNetdiskBFFStreamPath = "/_protected/external-bff/api/fetch"
+)
 
 type NetdiskStreamTarget struct {
 	InternalRedirect string
@@ -1654,6 +1657,18 @@ func (s *Service) ResolveNetdiskStream(ctx context.Context, id int64) (*NetdiskS
 	if row.IsDir || row.Kind != domain.ExternalAssetKindNetdisk {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该资源不是可下载的外部网盘文件", nil)
 	}
+	target := &NetdiskStreamTarget{
+		Filename: row.FileName,
+		FileSize: row.FileSize,
+		MimeType: row.MimeType,
+	}
+	if s.bff != nil && s.bff.Enabled() {
+		query := url.Values{}
+		query.Set("path", cleanAListPath(row.OriginPath))
+		query.Set("proxy", "1")
+		target.InternalRedirect = externalNetdiskBFFStreamPath + "?" + query.Encode()
+		return target, nil
+	}
 	rawURL := strings.TrimSpace(row.RawURL)
 	if s.shouldRefreshDirectURL(row) || s.isInternalProviderURL(rawURL) {
 		resolved, resolveErr := s.resolveNetdiskDirectURL(ctx, row, false)
@@ -1666,11 +1681,6 @@ func (s *Service) ResolveNetdiskStream(ctx context.Context, id int64) (*NetdiskS
 	}
 	if rawURL == "" {
 		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘暂时无法连接，请稍后重试", nil)
-	}
-	target := &NetdiskStreamTarget{
-		Filename: row.FileName,
-		FileSize: row.FileSize,
-		MimeType: row.MimeType,
 	}
 	if !s.isInternalProviderURL(rawURL) {
 		target.RedirectURL = rawURL

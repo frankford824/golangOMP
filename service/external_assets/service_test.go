@@ -692,15 +692,7 @@ func TestNetdiskDownloadUsesAuthenticatedAListStreamWithoutQueuingOSS(t *testing
 	}
 }
 
-func TestResolveNetdiskStreamBuildsProtectedAListInternalRedirect(t *testing.T) {
-	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/fetch" {
-			t.Fatalf("path = %q, want /api/fetch", r.URL.Path)
-		}
-		w.Header().Set("Location", "http://172.21.0.1:5244/p/quark/%E6%B5%B7%E6%8A%A5/poster.psd?sign=token%3A0")
-		w.WriteHeader(http.StatusFound)
-	}))
-	defer bff.Close()
+func TestResolveNetdiskStreamBuildsProtectedBFFInternalRedirect(t *testing.T) {
 	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
 		ID:         42,
 		Kind:       domain.ExternalAssetKindNetdisk,
@@ -712,8 +704,41 @@ func TestResolveNetdiskStreamBuildsProtectedAListInternalRedirect(t *testing.T) 
 	}}
 	svc := NewService(repo, Config{
 		Enabled:    true,
-		BFFBaseURL: bff.URL,
+		BFFBaseURL: "http://external-bff.internal:8080",
 		Mounts:     ParseMounts("/quark:netdisk"),
+	}, nil)
+
+	target, appErr := svc.ResolveNetdiskStream(context.Background(), 42)
+	if appErr != nil {
+		t.Fatalf("ResolveNetdiskStream() error = %+v", appErr)
+	}
+	want := "/_protected/external-bff/api/fetch?path=%2Fquark%2F%E6%B5%B7%E6%8A%A5%2Fposter.psd&proxy=1"
+	if target == nil || target.InternalRedirect != want || target.RedirectURL != "" {
+		t.Fatalf("target = %+v, want internal redirect %q", target, want)
+	}
+}
+
+func TestResolveNetdiskStreamFallsBackToProtectedAListInternalRedirect(t *testing.T) {
+	alist := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/fs/get" {
+			t.Fatalf("path = %q, want /api/fs/get", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code": 200,
+			"data": map[string]interface{}{
+				"raw_url": "http://172.21.0.1:5244/p/quark/%E6%B5%B7%E6%8A%A5/poster.psd?sign=token%3A0",
+			},
+		})
+	}))
+	defer alist.Close()
+	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
+		ID: 42, Kind: domain.ExternalAssetKindNetdisk, MountPath: "/quark",
+		OriginPath: "/quark/海报/poster.psd", FileName: "poster.psd",
+		MimeType: "image/vnd.adobe.photoshop", Status: domain.ExternalAssetStatusIndexed,
+	}}
+	svc := NewService(repo, Config{
+		Enabled: true, AListBaseURL: alist.URL, AListToken: "token",
+		Mounts: ParseMounts("/quark:netdisk"),
 	}, nil)
 
 	target, appErr := svc.ResolveNetdiskStream(context.Background(), 42)
@@ -722,12 +747,11 @@ func TestResolveNetdiskStreamBuildsProtectedAListInternalRedirect(t *testing.T) 
 	}
 	want := "/_protected/external-alist/p/quark/%E6%B5%B7%E6%8A%A5/poster.psd?sign=token%3A0"
 	if target == nil || target.InternalRedirect != want || target.RedirectURL != "" {
-		t.Fatalf("target = %+v, want internal redirect %q", target, want)
+		t.Fatalf("target = %+v, want AList fallback %q", target, want)
 	}
 }
 
-func TestResolveNetdiskStreamRefreshesInternalCacheToPublicAListRawURL(t *testing.T) {
-	checkedAt := time.Now().UTC()
+func TestResolveNetdiskDirectURLPrefersPublicAListRawURL(t *testing.T) {
 	alist := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/fs/get" {
 			t.Fatalf("path = %q, want /api/fs/get", r.URL.Path)
@@ -747,17 +771,17 @@ func TestResolveNetdiskStreamRefreshesInternalCacheToPublicAListRawURL(t *testin
 		w.WriteHeader(http.StatusFound)
 	}))
 	defer bff.Close()
-	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
-		ID:                42,
-		Kind:              domain.ExternalAssetKindNetdisk,
-		MountPath:         "/quark",
-		OriginPath:        "/quark/HSC11066.psd",
-		FileName:          "HSC11066.psd",
-		MimeType:          "image/vnd.adobe.photoshop",
-		Status:            domain.ExternalAssetStatusIndexed,
-		RawURL:            "http://172.21.0.1:5244/p/quark/HSC11066.psd?sign=stale",
-		LastLinkCheckedAt: &checkedAt,
-	}}
+	row := &domain.ExternalAssetRecord{
+		ID:         42,
+		Kind:       domain.ExternalAssetKindNetdisk,
+		MountPath:  "/quark",
+		OriginPath: "/quark/HSC11066.psd",
+		FileName:   "HSC11066.psd",
+		MimeType:   "image/vnd.adobe.photoshop",
+		Status:     domain.ExternalAssetStatusIndexed,
+		RawURL:     "http://172.21.0.1:5244/p/quark/HSC11066.psd?sign=stale",
+	}
+	repo := &externalAssetRepoStub{getRow: row}
 	svc := NewService(repo, Config{
 		Enabled:      true,
 		AListBaseURL: alist.URL,
@@ -766,12 +790,12 @@ func TestResolveNetdiskStreamRefreshesInternalCacheToPublicAListRawURL(t *testin
 		Mounts:       ParseMounts("/quark:netdisk"),
 	}, nil)
 
-	target, appErr := svc.ResolveNetdiskStream(context.Background(), 42)
-	if appErr != nil {
-		t.Fatalf("ResolveNetdiskStream() error = %+v", appErr)
+	resolved, err := svc.resolveNetdiskDirectURL(context.Background(), row, false)
+	if err != nil {
+		t.Fatalf("resolveNetdiskDirectURL() error = %v", err)
 	}
-	if target == nil || target.RedirectURL != "https://public-download.example.com/HSC11066.psd?token=fresh" || target.InternalRedirect != "" {
-		t.Fatalf("target = %+v, want public provider redirect", target)
+	if resolved != "https://public-download.example.com/HSC11066.psd?token=fresh" {
+		t.Fatalf("resolved = %q, want public provider URL", resolved)
 	}
 	if bffCalled {
 		t.Fatal("BFF direct link should not be used when AList exposes a public raw URL")
