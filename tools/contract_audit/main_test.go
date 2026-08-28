@@ -122,6 +122,24 @@ func TestStructJSONFieldsDetectsOnlyInCode(t *testing.T) {
 	}
 }
 
+func TestStructIndexResponseFieldsExpandsDataArrayEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "response.go")
+	source := "package domain\ntype Item struct { ID int `json:\"id\"`; Cost string `json:\"cost_price\"` }\ntype Response struct { Data []Item `json:\"data\"`; Next string `json:\"next_cursor,omitempty\"` }\n"
+	if err := os.WriteFile(goFile, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := BuildStructIndex([]string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := idx.ResponseFields("Response")
+	want := []string{"cost_price", "id", "next_cursor"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ResponseFields() = %v, want %v", got, want)
+	}
+}
+
 func buildFixtureReport(t *testing.T, name string) Report {
 	t.Helper()
 	report, err := BuildReport(fixturePath(name, "transport/http.go"), fixturePath(name, "transport/handler"), fixturePath(name, "domain"), fixturePath(name, "openapi.yaml"))

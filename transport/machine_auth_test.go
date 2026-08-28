@@ -109,3 +109,36 @@ func TestAssetSyncBearerBypassesSessionResolutionAndReachesMachineAuth(t *testin
 		t.Fatalf("wrong machine bearer status = %d", got)
 	}
 }
+
+func TestERPBridgeCostTokenIsDedicatedFailClosedAndBypassesSessionResolution(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previous := erpBridgeCostAPIToken
+	t.Cleanup(func() { erpBridgeCostAPIToken = previous })
+
+	request := func(configured, headerName, token string) int {
+		erpBridgeCostAPIToken = configured
+		router := gin.New()
+		router.Use(injectRequestActor(rejectingMachineBearerActorResolver{}))
+		group := router.Group("/api/cost")
+		group.Use(withERPBridgeCostTokenAuth())
+		group.GET("/skus", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		req := httptest.NewRequest(http.MethodGet, "/api/cost/skus", nil)
+		req.Header.Set(headerName, token)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		return resp.Code
+	}
+
+	if got := request("", erpBridgeCostTokenHeader, "cost-secret"); got != http.StatusUnauthorized {
+		t.Fatalf("unset token status = %d", got)
+	}
+	if got := request("cost-secret", erpBridgeCostTokenHeader, "cost-secret"); got != http.StatusNoContent {
+		t.Fatalf("dedicated header status = %d", got)
+	}
+	if got := request("cost-secret", authorizationHeader, "Bearer cost-secret"); got != http.StatusNoContent {
+		t.Fatalf("bearer status = %d", got)
+	}
+	if got := request("cost-secret", erpBridgeInternalTokenHeader, "cost-secret"); got != http.StatusUnauthorized {
+		t.Fatalf("internal token header status = %d", got)
+	}
+}

@@ -134,6 +134,20 @@ func TestLoadUsesERPBridgeInternalToken(t *testing.T) {
 	}
 }
 
+func TestLoadUsesERPHistoryCostPath(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+	t.Setenv("ERP_REMOTE_HISTORY_COST_PATH", "/custom/history-cost")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ERPRemote.HistoryCostPath != "/custom/history-cost" {
+		t.Fatalf("ERPRemote.HistoryCostPath = %q", cfg.ERPRemote.HistoryCostPath)
+	}
+}
+
 func TestLoadIncludesUploadServiceDefaults(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
 	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")

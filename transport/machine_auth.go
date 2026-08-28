@@ -15,6 +15,7 @@ import (
 const agentTokenHeader = "X-Agent-Token"
 const externalAssetEventTokenHeader = "X-External-Asset-Event-Token"
 const assetSyncTokenHeader = "X-Asset-Sync-Token"
+const erpBridgeCostTokenHeader = "X-ERP-Bridge-Cost-Token"
 
 // agentAPIToken is the pre-shared secret for the NAS agent machine endpoints
 // (/v1/agent/*). When unset the endpoints reject every request, so deployments
@@ -22,6 +23,7 @@ const assetSyncTokenHeader = "X-Asset-Sync-Token"
 var agentAPIToken = strings.TrimSpace(os.Getenv("AGENT_API_TOKEN"))
 var externalAssetEventToken = strings.TrimSpace(os.Getenv("EXTERNAL_ASSETS_EVENT_TOKEN"))
 var assetSyncToken = strings.TrimSpace(os.Getenv("ASSET_SYNC_API_TOKEN"))
+var erpBridgeCostAPIToken = strings.TrimSpace(os.Getenv("ERP_BRIDGE_COST_API_TOKEN"))
 
 // withAgentTokenAuth protects machine-to-machine NAS agent endpoints with a
 // pre-shared token carried in X-Agent-Token (or Authorization: Bearer).
@@ -67,6 +69,23 @@ func withAssetSyncTokenAuth() gin.HandlerFunc {
 		}
 		if assetSyncToken == "" || provided == "" ||
 			subtle.ConstantTimeCompare([]byte(provided), []byte(assetSyncToken)) != 1 {
+			abortUnauthorized(c)
+			return
+		}
+		c.Next()
+	}
+}
+
+// withERPBridgeCostTokenAuth protects the read-only /api/cost endpoints with a
+// credential that is intentionally distinct from ERP_BRIDGE_INTERNAL_TOKEN.
+func withERPBridgeCostTokenAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		provided := strings.TrimSpace(c.GetHeader(erpBridgeCostTokenHeader))
+		if provided == "" {
+			provided = parseBearerToken(c.GetHeader(authorizationHeader))
+		}
+		if erpBridgeCostAPIToken == "" || provided == "" ||
+			subtle.ConstantTimeCompare([]byte(provided), []byte(erpBridgeCostAPIToken)) != 1 {
 			abortUnauthorized(c)
 			return
 		}

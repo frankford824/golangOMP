@@ -41,6 +41,31 @@ type ProductRepo interface {
 	UpsertBatch(ctx context.Context, tx Tx, products []*domain.Product) (int64, error)
 }
 
+type ERPCostFeedPageQuery struct {
+	UpdatedSince   time.Time
+	Watermark      time.Time
+	LastModifiedAt time.Time
+	LastSKUID      string
+	Limit          int
+}
+
+type ERPCostChangePageQuery struct {
+	ChangedSince time.Time
+	WatermarkID  int64
+	LastID       int64
+	Limit        int
+}
+
+// ERPCostReadRepo reads the 8082-maintained jst_inventory projection and the
+// immutable trigger-backed cost change stream. It never mutates either source.
+type ERPCostReadRepo interface {
+	InventoryWatermark(ctx context.Context) (time.Time, error)
+	ListInventoryCosts(ctx context.Context, query ERPCostFeedPageQuery) ([]domain.ERPCostSKU, error)
+	BatchInventoryCosts(ctx context.Context, skuIDs []string) ([]domain.ERPCostSKU, time.Time, error)
+	CostChangeWatermark(ctx context.Context) (int64, error)
+	ListCostChanges(ctx context.Context, query ERPCostChangePageQuery) ([]domain.ERPCostChange, error)
+}
+
 type ProductManagementListFilter struct {
 	Keyword         string
 	DisplayScope    string

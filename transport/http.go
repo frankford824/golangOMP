@@ -54,6 +54,7 @@ func NewRouter(
 	searchH *handler.SearchHandler,
 	aiChatH *handler.AIChatHandler,
 	wsH *transportws.Handler,
+	erpCostAPIH *handler.ERPCostAPIHandler,
 	routeAccessCatalog *RouteAccessCatalog,
 	actorResolver RequestActorResolver,
 	permissionLogger PermissionLogWriter,
@@ -72,6 +73,14 @@ func NewRouter(
 	r.Use(injectRequestActor(actorResolver))
 	r.Use(requestLogger(logger, serverLogH, traceRecorder))
 	registerOperationalRoutes(r)
+	if erpCostAPIH != nil {
+		costGroup := r.Group("/api/cost")
+		costGroup.Use(withERPBridgeCostTokenAuth())
+		costGroup.GET("/skus", erpCostAPIH.Feed)
+		costGroup.POST("/batch-query", erpCostAPIH.BatchQuery)
+		costGroup.GET("/history", erpCostAPIH.History)
+		costGroup.GET("/changes", erpCostAPIH.Changes)
+	}
 
 	v1 := r.Group("/v1")
 	if routeAccessCatalog == nil {

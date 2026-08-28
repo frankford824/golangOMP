@@ -168,7 +168,7 @@ func injectRequestActorWithFallback(resolver RequestActorResolver, enableSystemF
 		}
 
 		bearerToken := parseBearerToken(c.GetHeader(authorizationHeader))
-		if resolver != nil && bearerToken != "" && !deferBearerToAssetSyncMachineAuth(c.Request.URL.Path) {
+		if resolver != nil && bearerToken != "" && !deferBearerToDedicatedMachineAuth(c.Request.URL.Path) {
 			resolvedActor, appErr := resolver.ResolveRequestActor(c.Request.Context(), bearerToken)
 			if appErr != nil {
 				appErr.TraceID = c.GetString(traceIDKey)
@@ -211,8 +211,10 @@ func injectRequestActorWithFallback(resolver RequestActorResolver, enableSystemF
 	}
 }
 
-func deferBearerToAssetSyncMachineAuth(path string) bool {
-	return strings.HasPrefix(strings.TrimSpace(path), "/v1/integration/asset-sync/")
+func deferBearerToDedicatedMachineAuth(path string) bool {
+	path = strings.TrimSpace(path)
+	return strings.HasPrefix(path, "/v1/integration/asset-sync/") ||
+		strings.HasPrefix(path, "/api/cost/")
 }
 
 func withAccessMeta(readiness domain.APIReadiness, roles ...domain.Role) gin.HandlerFunc {

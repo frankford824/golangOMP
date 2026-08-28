@@ -35,6 +35,7 @@ type ERPRemoteClientConfig struct {
 	GetCompanyUsersPath      string
 	SkuQueryPath             string
 	CombineSKUQueryPath      string
+	HistoryCostPath          string
 	OpenWebCharset           string
 	OpenWebVersion           string
 	Timeout                  time.Duration
@@ -65,6 +66,7 @@ type remoteERPBridgeClient struct {
 	getCompanyUsersPath      string
 	skuQueryPath             string
 	combineSKUQueryPath      string
+	historyCostPath          string
 	openWebCharset           string
 	openWebVersion           string
 	httpClient               *http.Client
@@ -245,6 +247,7 @@ func NewRemoteERPBridgeClient(cfg ERPRemoteClientConfig) (ERPBridgeClient, error
 		getCompanyUsersPath:      normalizeERPRemotePath(getCompanyUsersPath),
 		skuQueryPath:             normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.SkuQueryPath), "/open/sku/query")),
 		combineSKUQueryPath:      normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.CombineSKUQueryPath), "/open/combine/sku/query")),
+		historyCostPath:          normalizeERPRemotePath(firstNonEmptyString(strings.TrimSpace(cfg.HistoryCostPath), "/open/webapi/itemapi/itemsku/gethistorycostpricev2")),
 		openWebCharset:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebCharset), "utf-8"),
 		openWebVersion:           firstNonEmptyString(strings.TrimSpace(cfg.OpenWebVersion), "2"),
 		httpClient:               &http.Client{Timeout: timeout},

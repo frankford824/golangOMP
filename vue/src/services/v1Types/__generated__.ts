@@ -4,6 +4,247 @@
  */
 
 export interface paths {
+    "/api/cost/skus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a stable incremental current-cost feed from the 8081 Bridge
+         * @description Uses a fixed JST modification-time watermark plus an HMAC-signed keyset cursor. Every page in one traversal carries the same snapshot_version. Normal and Combine SKUs share this contract.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description RFC3339 timestamp, Unix seconds, or Unix milliseconds. Omit for the initial full feed. */
+                    updated_since?: string;
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description One fixed-watermark cost feed page. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ERPBridgeCostFeedResponse"];
+                    };
+                };
+                /** @description Invalid timestamp */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid dedicated cost API token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cost/batch-query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Query current costs for up to 2000 SKU ids */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ERPBridgeCostBatchQueryRequest"];
+                };
+            };
+            responses: {
+                /** @description Current costs in caller input order plus missing sku ids. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ERPBridgeCostBatchResponse"];
+                    };
+                };
+                /** @description Invalid or oversized sku id list */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid dedicated cost API token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cost/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read effective JST history cost for a date
+         * @description Proxies gethistorycostpricev2 in batches and selects the effective begin_date/end_date interval for each SKU and warehouse owner. It never falls back to the local current-cost cache.
+         */
+        get: {
+            parameters: {
+                query: {
+                    sku_ids: string[];
+                    as_of: string;
+                    wms_co_ids?: number[];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Effective history costs grouped by SKU and warehouse owner. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ERPBridgeHistoryCostResponse"];
+                    };
+                };
+                /** @description Invalid SKU list */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid dedicated cost API token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description JST history provider is not configured */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description JST history cost upstream failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cost/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read immutable cost changes after a timestamp
+         * @description Reads trigger-captured old/new cost values under a fixed auto-increment watermark. Normal and Combine SKUs share the same stream. The immutable stream starts when migration 137 is applied; existing inventory rows are not synthesized into historical change events.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description RFC3339 timestamp, Unix seconds, or Unix milliseconds. Omit to read from the beginning of the retained stream. */
+                    since?: string;
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description One fixed-watermark cost change page. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ERPBridgeCostChangesResponse"];
+                    };
+                };
+                /** @description Invalid timestamp */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid dedicated cost API token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/access/permissions": {
         parameters: {
             query?: never;
@@ -2611,6 +2852,7 @@ export interface paths {
          * List ERP product i_id options
          * @description Returns distinct Jushuitan product style/family `i_id` values from the local ERP sync replica for frontend selection.
          *     New task creation should use this endpoint to select `i_id`; `category_code` is backend-owned compatibility metadata and should not be a required frontend input.
+         *     Browser callers may use any one of `catalog.view`, `task.create`, or `planning_sku.create`, so task creation does not depend on a separate catalog permission.
          */
         get: {
             parameters: {
@@ -4968,7 +5210,7 @@ export interface paths {
         /**
          * Stream external netdisk asset content
          * @description Authenticated byte-stream endpoint for external netdisk resources such as `/quark`.
-         *     The backend authorizes and resolves the resource, then Nginx internally streams the signed AList `/p` source with HTTP Range support.
+         *     The backend authorizes and resolves the resource, then Nginx internally streams through the normalized BFF proxy when configured, with signed AList `/p` as a fallback. Both paths support HTTP Range.
          *     Original bytes are not copied to OSS; derived thumbnails and previews remain OSS-backed.
          */
         get: {
@@ -4983,7 +5225,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description External file byte stream, including Range responses handled by the internal AList proxy. */
+                /** @description External file byte stream, including Range responses handled by the internal BFF or AList proxy. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -23103,6 +23345,73 @@ export interface components {
             oss_direct?: components["schemas"]["OSSDirectUploadPlan"];
             complete_endpoint?: string;
             cancel_endpoint?: string;
+        };
+        ERPBridgeCostSKU: {
+            sku_id: string;
+            /** @description Source value from jst_inventory. Historical rows may be null; the API never guesses Normal or Combine. */
+            sku_type: string | null;
+            /** @description Current JST inventory cost rendered with exactly four decimal places. */
+            cost_price: string | null;
+            sale_price: string | null;
+            /**
+             * Format: date-time
+             * @description JST source modification time currently stored in jst_inventory.local_updated_at; the unused jst_inventory.modified_at column is not read.
+             */
+            modified_at: string;
+        };
+        ERPBridgeCostFeedResponse: {
+            data: components["schemas"]["ERPBridgeCostSKU"][];
+            next_cursor?: string;
+            /** Format: date-time */
+            watermark: string;
+            snapshot_version: string;
+        };
+        ERPBridgeCostBatchQueryRequest: {
+            sku_ids: string[];
+        };
+        ERPBridgeCostBatchResponse: {
+            data: components["schemas"]["ERPBridgeCostSKU"][];
+            missing_sku_ids: string[];
+            /** Format: date-time */
+            watermark: string;
+            snapshot_version: string;
+        };
+        ERPBridgeHistoryCostItem: {
+            sku_id: string;
+            wms_co_id: string;
+            cost_price: string | null;
+            /** Format: date */
+            as_of: string;
+            begin_date?: string;
+            end_date?: string;
+            remark?: string;
+        };
+        ERPBridgeHistoryCostResponse: {
+            data: components["schemas"]["ERPBridgeHistoryCostItem"][];
+            missing_sku_ids: string[];
+            snapshot_version: string;
+        };
+        ERPBridgeCostChange: {
+            /** Format: int64 */
+            id: number;
+            sku_id: string;
+            sku_type: string | null;
+            old_cost_price: string | null;
+            new_cost_price: string | null;
+            /**
+             * Format: date-time
+             * @description JST source modification time copied from jst_inventory.local_updated_at by the trigger.
+             */
+            modified_at?: string | null;
+            /** Format: date-time */
+            changed_at: string;
+        };
+        ERPBridgeCostChangesResponse: {
+            data: components["schemas"]["ERPBridgeCostChange"][];
+            next_cursor?: string;
+            /** Format: int64 */
+            watermark: number;
+            snapshot_version: string;
         };
     };
     responses: {

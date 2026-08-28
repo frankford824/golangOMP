@@ -17,6 +17,11 @@
   an SSH/SCP round trip. `deploy/deploy.sh` remains the emergency workstation
   path.
 - MAIN runtime keeps same-host Bridge access at `http://127.0.0.1:8081`
+- The read-only Bridge cost API is mounted only when `SERVER_PORT=8081` and
+  requires the dedicated `ERP_BRIDGE_COST_API_TOKEN`; do not reuse or disclose
+  `ERP_BRIDGE_INTERNAL_TOKEN`. Migration `137_jst_cost_change_stream.sql`
+  requires the 8082-maintained `jst_inventory` table to exist in the same
+  database before pending migrations run.
 - Remote Linux base path defaults to `/root/ecommerce_ai`
 
 ## Release History Rule

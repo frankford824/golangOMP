@@ -95,6 +95,7 @@ func main() {
 	permissionLogRepo := mysqlrepo.NewPermissionLogRepo(mdb)
 	productRepo := mysqlrepo.NewProductRepo(mdb)
 	productManagementRepo := mysqlrepo.NewProductManagementRepo(mdb)
+	erpCostReadRepo := mysqlrepo.NewERPCostReadRepo(mdb)
 	categoryRepo := mysqlrepo.NewCategoryRepo(mdb)
 	categoryERPMappingRepo := mysqlrepo.NewCategoryERPMappingRepo(mdb)
 	costRuleRepo := mysqlrepo.NewCostRuleRepo(mdb)
@@ -222,6 +223,11 @@ func main() {
 		}
 	}
 	erpBridgeSvc := service.NewERPBridgeService(erpBridgeClient, productRepo, mdb)
+	var erpCostAPISvc service.ERPCostAPIService
+	if cfg.Server.Port == "8081" {
+		historyProvider, _ := erpBridgeClient.(service.JSTHistoryCostProvider)
+		erpCostAPISvc = service.NewERPCostAPIService(erpCostReadRepo, historyProvider, os.Getenv("ERP_BRIDGE_COST_API_TOKEN"))
+	}
 	productManagementERPBridgeSvc := erpBridgeSvc
 	if cfg.Server.Port != "8081" &&
 		strings.TrimSpace(cfg.ERPRemote.BaseURL) != "" &&
@@ -571,9 +577,13 @@ func main() {
 	searchH := handler.NewSearchHandler(searchSvc)
 	aiChatH := handler.NewAIChatHandler(aiChatService, cfg.AIChat.HeartbeatInterval, analyticsService)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
+	var erpCostAPIH *handler.ERPCostAPIHandler
+	if erpCostAPISvc != nil {
+		erpCostAPIH = handler.NewERPCostAPIHandler(erpCostAPISvc)
+	}
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(authH, accessPolicyH, userAdminH, erpBridgeH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, taskH, taskAssignmentH, taskAssetCenterH, taskCreateReferenceUploadH, assetFilesH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, assetWorkbenchH, integrationCenterH, codeRuleH, auditV7H, serverLogH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, aiChatH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(authH, accessPolicyH, userAdminH, erpBridgeH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, taskH, taskAssignmentH, taskAssetCenterH, taskCreateReferenceUploadH, assetFilesH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, assetWorkbenchH, integrationCenterH, codeRuleH, auditV7H, serverLogH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, aiChatH, wsH, erpCostAPIH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
@@ -975,6 +985,7 @@ func erpRemoteServiceConfig(cfg *config.Config, log *zap.Logger) service.ERPRemo
 		GetCompanyUsersPath:      cfg.ERPRemote.GetCompanyUsersPath,
 		SkuQueryPath:             cfg.ERPRemote.SkuQueryPath,
 		CombineSKUQueryPath:      cfg.ERPRemote.CombineSKUQueryPath,
+		HistoryCostPath:          cfg.ERPRemote.HistoryCostPath,
 		OpenWebCharset:           cfg.ERPRemote.OpenWebCharset,
 		OpenWebVersion:           cfg.ERPRemote.OpenWebVersion,
 		Timeout:                  cfg.ERPRemote.Timeout,

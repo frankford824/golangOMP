@@ -458,7 +458,7 @@ func BuildReport(transport, handlers, domain, openapiPath string) (Report, error
 					if shape.Direct {
 						fields = append(fields, shape.Fields...)
 					} else {
-						fields = append(fields, structIndex.Fields(shape.Type)...)
+						fields = append(fields, structIndex.ResponseFields(shape.Type)...)
 					}
 					fields = append(fields, shape.ExtraFields...)
 					fields = normalizeFields(fields)
@@ -1102,6 +1102,43 @@ func DiffFields(code, openapi []string) (onlyCode, onlyOpenAPI []string) {
 func (idx StructIndex) Fields(typeName string) []string {
 	typeName = baseTypeName(typeName)
 	return append([]string(nil), idx.FieldsByType[typeName]...)
+}
+
+// ResponseFields mirrors responseFieldsExpanded for Go response structs. When
+// a response uses the common {data: []Item, ...metadata} envelope, compare the
+// item fields plus metadata rather than treating the literal data key as the
+// business payload shape.
+func (idx StructIndex) ResponseFields(typeName string) []string {
+	typeName = baseTypeName(typeName)
+	st := idx.RawByType[typeName]
+	if st == nil {
+		return idx.Fields(typeName)
+	}
+	var fields []string
+	expandedData := false
+	for _, field := range st.Fields.List {
+		name := ""
+		if field.Tag != nil {
+			name = jsonTagName(strings.Trim(field.Tag.Value, "`"))
+		}
+		if name == "data" {
+			if array, ok := field.Type.(*ast.ArrayType); ok {
+				itemType := baseTypeName(resultType(array.Elt))
+				if itemFields := idx.Fields(itemType); len(itemFields) > 0 {
+					fields = append(fields, itemFields...)
+					expandedData = true
+					continue
+				}
+			}
+		}
+		if name != "" && name != "-" {
+			fields = append(fields, name)
+		}
+	}
+	if !expandedData {
+		return idx.Fields(typeName)
+	}
+	return normalizeFields(fields)
 }
 
 func (idx StructIndex) structFields(st *ast.StructType, seen map[string]bool) []string {
