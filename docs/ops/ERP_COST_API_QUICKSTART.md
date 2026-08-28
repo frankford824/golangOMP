@@ -10,11 +10,14 @@
 
 ## 连接信息
 
-公司 Tailscale 网络内推荐地址：
+公网 HTTPS 地址：
 
 ```text
-http://100.125.196.22:8081
+https://yongbo.cloud
 ```
+
+该域名通过服务器公网 IP 提供服务，不需要 Tailscale。8081 仍只作为
+服务器内部 Bridge 端口，由 Nginx 将 `/api/cost/*` 转发到 8081。
 
 固定请求头：
 
@@ -31,7 +34,7 @@ Authorization: Bearer <双方约定的固定Token>
 以下示例统一使用：
 
 ```bash
-BASE_URL="http://100.125.196.22:8081"
+BASE_URL="https://yongbo.cloud"
 TOKEN="由接口提供方单独发送的固定Token"
 ```
 
