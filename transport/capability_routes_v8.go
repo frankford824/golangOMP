@@ -35,6 +35,9 @@ func v8BusinessRoutePermissions(method, path string) ([]domain.PermissionCode, b
 		return []domain.PermissionCode{domain.PermissionTaskView}, true
 	case strings.HasPrefix(path, "/v1/erp"), strings.HasPrefix(path, "/v1/products"):
 		if method == http.MethodGet {
+			if path == "/v1/erp/iids" {
+				return []domain.PermissionCode{domain.PermissionCatalogView, domain.PermissionTaskCreate, domain.PermissionPlanningSKUCreate}, true
+			}
 			return []domain.PermissionCode{domain.PermissionCatalogView}, true
 		}
 		return []domain.PermissionCode{domain.PermissionERPManage}, true

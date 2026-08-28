@@ -99,7 +99,7 @@ curl -X GET https://api.example.com/v1/erp/products \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns distinct Jushuitan product style/family `i_id` values from the local ERP sync replica for frontend selection. New task creation should use this endpoint to select `i_id`; `category_code` is backend-owned compatibility metadata and should not be a required frontend input.
+- `GET`: Returns distinct Jushuitan product style/family `i_id` values from the local ERP sync replica for frontend selection. New task creation should use this endpoint to select `i_id`; `category_code` is backend-owned compatibility metadata and should not be a required frontend input. Browser callers may use any one of `catalog.view`, `task.create`, or `planning_sku.create`, so task creation does not depend on a separate catalog permission.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
