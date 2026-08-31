@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SkuResourceMatrix from './SkuResourceMatrix.vue'
 import type { ResourceBundle } from '@/services/api/resourceGroupsApi'
+
+const mocks = vi.hoisted(() => ({
+  download: vi.fn(async (): Promise<{ ok: boolean; message?: string }> => ({ ok: true })),
+}))
+
+vi.mock('@/utils/assetFileDownload', () => ({
+  downloadAssetFileWithOriginalFilename: mocks.download,
+}))
 
 vi.mock('@/components/media/AssetPreviewMedia.vue', () => ({
   default: {
@@ -64,6 +72,11 @@ const bundle: ResourceBundle = {
 }
 
 describe('SkuResourceMatrix', () => {
+  beforeEach(() => {
+    mocks.download.mockReset()
+    mocks.download.mockResolvedValue({ ok: true })
+  })
+
   it('uses task-level references only as a fallback for an empty legacy resource shell', () => {
     const emptyBundle = structuredClone(bundle)
     emptyBundle.groups[0].finalized_revision = null
@@ -167,12 +180,13 @@ describe('SkuResourceMatrix', () => {
     expect(wrapper.findAll('.final-gallery .asset-preview-media-stub').map((item) => item.attributes('data-task-asset-id'))).toEqual(['101', '102'])
   })
 
-  it('offers controlled downloads for non-image reference and final files', () => {
+  it('uses authenticated download resolution for source, reference, and final files', async () => {
     const fileBundle = structuredClone(bundle)
     const revision = fileBundle.groups[0].finalized_revision!
     revision.references = [{
       id: 9,
       reference_file_ref_id: 19,
+      formal_task_asset_id: 109,
       sort_order: 0,
       ref_id: 'ref-xls',
       file_name: 'requirements.xls',
@@ -198,12 +212,57 @@ describe('SkuResourceMatrix', () => {
       global: { stubs: { Teleport: true } },
     })
 
-    expect(wrapper.find('.reference-grid img').exists()).toBe(false)
-    expect(wrapper.get('.reference-grid a[download]').attributes('href')).toBe('/controlled/requirements.xls?download=1')
-    expect(wrapper.get('.reference-grid a[download]').text()).toContain('XLS')
-    expect(wrapper.find('.final-gallery img').exists()).toBe(false)
-    expect(wrapper.get('.final-gallery a[download]').attributes('href')).toBe('/controlled/delivery.zip?download=1')
-    expect(wrapper.get('.final-gallery a[download]').text()).toContain('ZIP')
+    expect(wrapper.findAll('a[download]')).toHaveLength(0)
+
+    await wrapper.get('.source-file-card .file-download-button').trigger('click')
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenNthCalledWith(1, {
+      taskAssetId: '100',
+      downloadUrl: undefined,
+      preferredFilename: 'living-room.psd',
+    }))
+
+    await wrapper.get('.reference-grid .file-download-tile').trigger('click')
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenNthCalledWith(2, {
+      taskAssetId: '109',
+      downloadUrl: undefined,
+      preferredFilename: 'requirements.xls',
+    }))
+
+    await wrapper.get('.final-gallery .file-download-tile').trigger('click')
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenNthCalledWith(3, {
+      taskAssetId: '110',
+      downloadUrl: undefined,
+      preferredFilename: 'delivery.zip',
+    }))
+  })
+
+  it('keeps URL fallback only for a legacy reference without a task-asset id', async () => {
+    const fileBundle = structuredClone(bundle)
+    fileBundle.groups[0].finalized_revision!.references = [{
+      id: 9,
+      reference_file_ref_id: 19,
+      sort_order: 0,
+      ref_id: 'legacy-ref',
+      file_name: 'legacy-requirements.xls',
+      mime_type: 'application/vnd.ms-excel',
+      download_url: '/legacy/requirements.xls',
+    }]
+    const wrapper = mount(SkuResourceMatrix, { props: { bundle: fileBundle }, global: { stubs: { Teleport: true } } })
+
+    await wrapper.get('.reference-grid .file-download-tile').trigger('click')
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledWith({
+      taskAssetId: undefined,
+      downloadUrl: '/legacy/requirements.xls',
+      preferredFilename: 'legacy-requirements.xls',
+    }))
+  })
+
+  it('shows a user-facing error when controlled download resolution fails', async () => {
+    mocks.download.mockResolvedValueOnce({ ok: false, message: '获取下载地址失败' })
+    const wrapper = mount(SkuResourceMatrix, { props: { bundle }, global: { stubs: { Teleport: true } } })
+
+    await wrapper.get('.source-file-card .file-download-button').trigger('click')
+    await vi.waitFor(() => expect(wrapper.get('[role="alert"]').text()).toBe('获取下载地址失败'))
   })
 
   it('does not promote preview-only non-image files to downloads', () => {
