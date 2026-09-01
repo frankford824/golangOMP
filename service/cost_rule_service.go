@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -439,8 +440,19 @@ func applyFixedUnitPrice(rule *domain.CostRule, area float64, quantity int64) (*
 	return &total, true
 }
 
-func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes string) (float64, string, bool) {
+func applySizeBasedFormula(rule *domain.CostRule, area float64, quantity int64, process, notes string) (float64, string, bool) {
 	expr := strings.TrimSpace(rule.FormulaExpression)
+	if keyword, unitPrice, ok := parseKeywordAreaUnitPriceFormula(expr); ok {
+		if area <= 0 || !strings.Contains(strings.ToLower(process+" "+notes), strings.ToLower(keyword)) {
+			return 0, "", false
+		}
+		effectiveQuantity := quantity
+		if effectiveQuantity <= 0 {
+			effectiveQuantity = 1
+		}
+		total := roundCurrencyAmount(area * unitPrice * float64(effectiveQuantity))
+		return total, fmt.Sprintf("%s：命中“%s”，按面积 %.4f ㎡ × 单价 ¥%.3f/㎡ × 数量 %d，成本为 ¥%.2f。", rule.RuleName, keyword, area, unitPrice, effectiveQuantity, total), true
+	}
 	if expr == "size_lookup_required" && costRuleLooksLikeCopperPaper(rule, notes) {
 		side := detectPrintSide(process, notes)
 		price := 0.5
@@ -467,6 +479,30 @@ func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes
 		return total, fmt.Sprintf("%s：按%s价格计算，本次为 ¥%.3f。", rule.RuleName, printSideLabel(side), total), true
 	}
 	return 0, "", false
+}
+
+func parseKeywordAreaUnitPriceFormula(expr string) (string, float64, bool) {
+	const prefix = "keyword_area_unit_price:"
+	if !strings.HasPrefix(expr, prefix) {
+		return "", 0, false
+	}
+	parts := strings.SplitN(strings.TrimSpace(strings.TrimPrefix(expr, prefix)), "=", 2)
+	if len(parts) != 2 {
+		return "", 0, false
+	}
+	keyword := strings.TrimSpace(parts[0])
+	var unitPrice float64
+	if keyword == "" {
+		return "", 0, false
+	}
+	if _, err := fmt.Sscanf(strings.TrimSpace(parts[1]), "%f", &unitPrice); err != nil || unitPrice <= 0 || math.IsNaN(unitPrice) || math.IsInf(unitPrice, 0) {
+		return "", 0, false
+	}
+	return keyword, unitPrice, true
+}
+
+func roundCurrencyAmount(value float64) float64 {
+	return math.Round((value+1e-9)*100) / 100
 }
 
 func printSideLabel(side string) string {

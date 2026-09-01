@@ -912,6 +912,88 @@ func TestCostRulePreviewReturnsManualReviewForManualQuote(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewCalculatesKeywordAreaUnitPrice(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   2,
+		CategoryCode: "ACRYLIC",
+		CategoryName: "亚克力",
+		DisplayName:  "亚克力",
+		CategoryType: domain.CategoryTypeMaterial,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{{
+		RuleID:            26,
+		RuleVersion:       2,
+		RuleName:          "教师节亚克力面积成本",
+		CategoryCode:      "ACRYLIC",
+		RuleType:          domain.CostRuleTypeSizeBasedFormula,
+		FormulaExpression: "keyword_area_unit_price:教师节=264",
+		Priority:          10,
+		IsActive:          true,
+		Source:            "test",
+	}}
+
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "ACRYLIC",
+		Area:         costRuleFloat64Ptr(0.035475),
+		Notes:        "定制亚克力/教师节/16.5*21.5cm厚4.5mm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.RequiresManualReview {
+		t.Fatalf("requires_manual_review = true, want false; result=%+v", result)
+	}
+	if result.EstimatedCost == nil || *result.EstimatedCost != 9.37 {
+		t.Fatalf("estimated_cost = %+v, want 9.37", result.EstimatedCost)
+	}
+	for _, tt := range []struct {
+		name string
+		area float64
+		want float64
+	}{
+		{name: "DZA000036", area: 0.03335, want: 8.80},
+		{name: "DZA000037", area: 0.03960, want: 10.45},
+		{name: "DZA000039", area: 0.03360, want: 8.87},
+		{name: "DZA000043", area: 0.034075, want: 9.00},
+		{name: "DZA000048", area: 0.04165, want: 11.00},
+		{name: "DZA000049", area: 0.03335, want: 8.80},
+		{name: "DZA000050", area: 0.034075, want: 9.00},
+		{name: "DZA000052", area: 0.028275, want: 7.46},
+		{name: "DZA000053", area: 0.034075, want: 9.00},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+				CategoryCode: "ACRYLIC",
+				Area:         costRuleFloat64Ptr(tt.area),
+				Notes:        "定制亚克力/教师节",
+			})
+			if appErr != nil {
+				t.Fatalf("Preview() unexpected error: %+v", appErr)
+			}
+			if result.EstimatedCost == nil || *result.EstimatedCost != tt.want {
+				t.Fatalf("estimated_cost = %+v, want %.2f", result.EstimatedCost, tt.want)
+			}
+		})
+	}
+
+	result, appErr = svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "ACRYLIC",
+		Area:         costRuleFloat64Ptr(0.0015),
+		Notes:        "定制亚克力/钥匙扣/5*3cm厚2mm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() without keyword unexpected error: %+v", appErr)
+	}
+	if !result.RequiresManualReview || result.EstimatedCost != nil {
+		t.Fatalf("non-teacher acrylic result = %+v, want manual review without estimate", result)
+	}
+}
+
 func TestCostRuleCreateAutoVersionsWhenSupersedingPriorRule(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()

@@ -316,7 +316,7 @@ func TestInvalidateProductManagementCostDashboardCacheDeletesPolicyKeys(t *testi
 
 func TestProductManagementAreaTraceUsesSKUItemVariant(t *testing.T) {
 	record := productManagementTestRecord(11, "CGK000011", time.Now())
-	record.DimensionVariantJSON = json.RawMessage(`{"spec_text":"单个 160*125cm","size_text":"160*125cm","width":1.6,"height":1.25,"quantity":3}`)
+	record.DimensionVariantJSON = json.RawMessage(`{"spec_text":"单个 160*125cm","size_text":"160*125cm","width":160,"height":125,"quantity":3}`)
 
 	decorateProductManagementArea(record)
 
@@ -328,6 +328,9 @@ func TestProductManagementAreaTraceUsesSKUItemVariant(t *testing.T) {
 	}
 	if math.Abs(*record.AreaTrace.AreaM2-6) > 0.000001 {
 		t.Fatalf("area = %.6f, want 6", *record.AreaTrace.AreaM2)
+	}
+	if record.AreaTrace.WidthM == nil || record.AreaTrace.HeightM == nil || math.Abs(*record.AreaTrace.WidthM-1.6) > 0.000001 || math.Abs(*record.AreaTrace.HeightM-1.25) > 0.000001 {
+		t.Fatalf("width/height = %+v/%+v, want 1.6m/1.25m", record.AreaTrace.WidthM, record.AreaTrace.HeightM)
 	}
 	if record.AreaTrace.Source != "sku_item_variant" {
 		t.Fatalf("source = %q, want sku_item_variant", record.AreaTrace.Source)

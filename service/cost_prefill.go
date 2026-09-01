@@ -118,7 +118,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				explanations = append(explanations, fmt.Sprintf("%s：特殊工艺附加 ¥%.3f。", rule.RuleName, extra))
 			}
 		case domain.CostRuleTypeSizeBasedFormula:
-			calculated, explanation, ok := applySizeBasedFormula(rule, quantity, req.Process, req.Notes)
+			calculated, explanation, ok := applySizeBasedFormula(rule, area, quantity, req.Process, req.Notes)
 			if ok {
 				estimated += calculated
 				applied = append(applied, match)

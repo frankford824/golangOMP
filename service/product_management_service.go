@@ -1539,8 +1539,8 @@ func decorateProductManagementArea(record *domain.ProductManagementRecord) {
 	record.SpecText = firstNonEmptyString(record.SpecText, variantSpec, record.DimensionTaskSpecText)
 	record.SizeText = firstNonEmptyString(record.SizeText, variantSize, record.DimensionTaskSizeText)
 
-	width := cloneFloat64Ptr(variantFloatFromObject(variant, "width", "width_m"))
-	height := cloneFloat64Ptr(variantFloatFromObject(variant, "height", "height_m"))
+	width := costDimensionCentimetersToMeters(variantFloatFromObject(variant, "width", "width_m"))
+	height := costDimensionCentimetersToMeters(variantFloatFromObject(variant, "height", "height_m"))
 	area := cloneFloat64Ptr(variantFloatFromObject(variant, "area", "area_m2"))
 	quantity := cloneFloat64Ptr(variantFloatFromObject(variant, "quantity", "qty"))
 	source := ""
@@ -1553,10 +1553,10 @@ func decorateProductManagementArea(record *domain.ProductManagementRecord) {
 	}
 
 	if width == nil {
-		width = cloneFloat64Ptr(record.DimensionTaskWidthM)
+		width = costDimensionCentimetersToMeters(record.DimensionTaskWidthM)
 	}
 	if height == nil {
-		height = cloneFloat64Ptr(record.DimensionTaskHeightM)
+		height = costDimensionCentimetersToMeters(record.DimensionTaskHeightM)
 	}
 	if area == nil {
 		area = cloneFloat64Ptr(record.DimensionTaskAreaM2)
