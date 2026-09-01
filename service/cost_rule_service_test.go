@@ -814,6 +814,12 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			want:         []string{"PP_PLAIN"},
 		},
 		{
+			name:         "legacy chinese acrylic category maps to acrylic rule",
+			categoryCode: "亚克力",
+			notes:        "CPT紫定制亚克力/教师节/24.5*17cm厚4.5cm",
+			want:         []string{"ACRYLIC"},
+		},
+		{
 			name:         "regular poster maps to poster rule",
 			categoryCode: "GENERAL",
 			notes:        "常规海报 30*40cm",

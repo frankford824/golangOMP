@@ -3590,6 +3590,9 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 	if strings.Contains(combined, "白卡纸") {
 		return add("WHITE_CARD")
 	}
+	if strings.Contains(combined, "亚克力") || strings.Contains(combined, "acrylic") {
+		return add("ACRYLIC")
+	}
 	if strings.Contains(combined, "无背胶") && hasPPMaterial {
 		return add("PP_PLAIN")
 	} else if strings.Contains(combined, "背胶") && hasPPMaterial {
