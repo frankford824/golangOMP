@@ -74,6 +74,8 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 			for _, fragment := range []string{
 				"INSERT INTO task_search_documents",
 				"ORDER BY id SEPARATOR ' '",
+				"scope_sku_code",
+				"asset_type NOT IN ('preview', 'design_thumb')",
 				"tsi.product_name_snapshot",
 				"COALESCE(sku_items.sku_item_text, '')",
 				"ORDER BY tsi.id, revision.id SEPARATOR ' '",
@@ -82,6 +84,9 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 				if !strings.Contains(normalized, fragment) {
 					return fmt.Errorf("task document SQL missing %q: %s", fragment, normalized)
 				}
+			}
+			if strings.Contains(normalized, "original_filename, storage_key") {
+				return fmt.Errorf("task document SQL must not index storage_key: %s", normalized)
 			}
 		case "task-reindex-enqueue":
 			for _, fragment := range []string{"INSERT IGNORE INTO search_reindex_outbox", "SHA2", "FROM task_search_documents"} {
@@ -316,6 +321,23 @@ func TestEnqueueTaskSearchReindexUsesContentVersionedDedupe(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := enqueueTaskSearchReindex(context.Background(), db, 91); err != nil {
 		t.Fatalf("enqueueTaskSearchReindex() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnqueueTaskSearchReindexForAssetMutationUsesAssetVersionDedupe(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec(`INSERT IGNORE INTO search_reindex_outbox[\s\S]+VALUES \('task', \?, \?\)`).
+		WithArgs(int64(5375), "task:5375:asset:69379").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := enqueueTaskSearchReindexForAssetMutation(context.Background(), db, 5375, 69379); err != nil {
+		t.Fatalf("enqueueTaskSearchReindexForAssetMutation() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

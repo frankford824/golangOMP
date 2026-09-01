@@ -249,9 +249,10 @@ func upsertTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumen
 		LEFT JOIN users designer ON designer.id = t.designer_id
 		LEFT JOIN users handler ON handler.id = t.current_handler_id
 		LEFT JOIN (
-			  SELECT task_id, GROUP_CONCAT(CONCAT_WS(' ', file_name, original_filename, storage_key, source_module_key) ORDER BY id SEPARATOR ' ') AS asset_text
+			  SELECT task_id, GROUP_CONCAT(CONCAT_WS(' ', scope_sku_code, file_name, original_filename, asset_type, source_module_key) ORDER BY id SEPARATOR ' ') AS asset_text
 			  FROM task_assets
 			  WHERE task_id = ? AND {{active_asset_where}}
+			    AND asset_type NOT IN ('preview', 'design_thumb')
 			  GROUP BY task_id
 			) assets ON assets.task_id = t.id
 		LEFT JOIN (
@@ -434,6 +435,29 @@ func enqueueTaskSearchReindex(ctx context.Context, q taskSearchDocumentSQL, task
 		return fmt.Errorf("read task search reindex enqueue result: %w", err)
 	} else if rows > 1 {
 		return fmt.Errorf("enqueue task search reindex: unexpected affected rows %d", rows)
+	}
+	return nil
+}
+
+// enqueueTaskSearchReindexForAssetMutation records an asset-version-specific
+// refresh without reading the current task_search_documents row. The asset id
+// makes the dedupe key monotonic for this mutation, so a stale or missing
+// projection cannot suppress the repair job.
+func enqueueTaskSearchReindexForAssetMutation(ctx context.Context, q taskSearchDocumentSQL, taskID, taskAssetID int64) error {
+	if taskID <= 0 || taskAssetID <= 0 {
+		return nil
+	}
+	dedupeKey := fmt.Sprintf("task:%d:asset:%d", taskID, taskAssetID)
+	result, err := q.ExecContext(ctx, `
+		INSERT IGNORE INTO search_reindex_outbox (entity_type, entity_id, dedupe_key)
+		VALUES ('task', ?, ?)`, taskID, dedupeKey)
+	if err != nil {
+		return fmt.Errorf("enqueue task search reindex for asset mutation: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("read task asset search reindex enqueue result: %w", err)
+	} else if rows > 1 {
+		return fmt.Errorf("enqueue task search reindex for asset mutation: unexpected affected rows %d", rows)
 	}
 	return nil
 }

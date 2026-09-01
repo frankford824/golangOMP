@@ -79,7 +79,11 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 	if err != nil {
 		return 0, err
 	}
-	if err := reindexTaskSearchDocument(ctx, sqlTx, asset.TaskID); err != nil {
+	// Task search is a downstream projection. Queue its refresh durably instead
+	// of rebuilding it inside the asset transaction: an oversized or otherwise
+	// unhealthy search document must never roll back verified upload bytes and
+	// the authoritative task_assets row.
+	if err := enqueueTaskSearchReindexForAssetMutation(ctx, sqlTx, asset.TaskID, id); err != nil {
 		return 0, err
 	}
 	return id, nil
