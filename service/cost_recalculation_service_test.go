@@ -47,6 +47,30 @@ func TestCostRecalculationListActiveRunCostRulesCanDisableTextAliasFallback(t *t
 	}
 }
 
+func TestCostRecalculationListActiveRunCostRulesFallsBackWhenDirectCategoryHasNoRules(t *testing.T) {
+	costRuleRepo := newCostRuleRepoStub()
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:            31,
+			RuleVersion:       2,
+			RuleName:          "教师节亚克力面积成本",
+			CategoryCode:      "ACRYLIC",
+			RuleType:          domain.CostRuleTypeSizeBasedFormula,
+			FormulaExpression: "keyword_area_unit_price:教师节=264",
+			IsActive:          true,
+		},
+	}
+	svc := NewCostRecalculationService(nil, nil, nil, costRuleRepo, nil, nil).(*costRecalculationService)
+
+	rules, err := svc.listActiveRunCostRules(context.Background(), nil, "亚克力", "CPT紫定制亚克力/教师节/24.5*17cm厚4.5cm")
+	if err != nil {
+		t.Fatalf("listActiveRunCostRules() error = %v", err)
+	}
+	if len(rules) != 1 || rules[0].RuleID != 31 {
+		t.Fatalf("rules = %+v, want rule 31", rules)
+	}
+}
+
 func TestCostRecalculationExplicitModeResolvesExactSKUCodes(t *testing.T) {
 	records := &productManagementRecordRepoFake{items: []*domain.ProductManagementRecord{
 		{ID: 101, SKUCode: "DZA000036"},

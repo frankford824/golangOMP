@@ -595,7 +595,7 @@ func (s *costRecalculationService) previewRunSKUItemCost(ctx context.Context, de
 
 func (s *costRecalculationService) listActiveRunCostRules(ctx context.Context, categoryID *int64, categoryCode string, matchText string) ([]*domain.CostRule, error) {
 	rules, err := s.costRules.ListActiveByCategory(ctx, categoryID, categoryCode, s.now())
-	if err != nil || len(rules) == 0 {
+	if err != nil {
 		return rules, err
 	}
 	if !s.legacyAliasFallbackEnabled {
