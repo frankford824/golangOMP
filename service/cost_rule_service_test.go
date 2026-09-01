@@ -951,6 +951,17 @@ func TestCostRulePreviewCalculatesKeywordAreaUnitPrice(t *testing.T) {
 	if result.EstimatedCost == nil || *result.EstimatedCost != 9.37 {
 		t.Fatalf("estimated_cost = %+v, want 9.37", result.EstimatedCost)
 	}
+	result, appErr = svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "ACRYLIC",
+		Area:         costRuleFloat64Ptr(0.03335),
+		Notes:        "定制亚克力/教师节/14.5*23.5cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() with stale structured area unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || *result.EstimatedCost != 9.00 {
+		t.Fatalf("text-authoritative estimated_cost = %+v, want 9.00", result.EstimatedCost)
+	}
 	for _, tt := range []struct {
 		name string
 		area float64

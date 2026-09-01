@@ -443,15 +443,23 @@ func applyFixedUnitPrice(rule *domain.CostRule, area float64, quantity int64) (*
 func applySizeBasedFormula(rule *domain.CostRule, area float64, quantity int64, process, notes string) (float64, string, bool) {
 	expr := strings.TrimSpace(rule.FormulaExpression)
 	if keyword, unitPrice, ok := parseKeywordAreaUnitPriceFormula(expr); ok {
-		if area <= 0 || !strings.Contains(strings.ToLower(process+" "+notes), strings.ToLower(keyword)) {
+		formulaText := strings.TrimSpace(process + " " + notes)
+		if !strings.Contains(strings.ToLower(formulaText), strings.ToLower(keyword)) {
+			return 0, "", false
+		}
+		formulaArea := area
+		if extracted := extractCostDimensionsFromText(formulaText); extracted.AreaM2 != nil {
+			formulaArea = *extracted.AreaM2
+		}
+		if formulaArea <= 0 {
 			return 0, "", false
 		}
 		effectiveQuantity := quantity
 		if effectiveQuantity <= 0 {
 			effectiveQuantity = 1
 		}
-		total := roundCurrencyAmount(area * unitPrice * float64(effectiveQuantity))
-		return total, fmt.Sprintf("%s：命中“%s”，按面积 %.4f ㎡ × 单价 ¥%.3f/㎡ × 数量 %d，成本为 ¥%.2f。", rule.RuleName, keyword, area, unitPrice, effectiveQuantity, total), true
+		total := roundCurrencyAmount(formulaArea * unitPrice * float64(effectiveQuantity))
+		return total, fmt.Sprintf("%s：命中“%s”，按面积 %.4f ㎡ × 单价 ¥%.3f/㎡ × 数量 %d，成本为 ¥%.2f。", rule.RuleName, keyword, formulaArea, unitPrice, effectiveQuantity, total), true
 	}
 	if expr == "size_lookup_required" && costRuleLooksLikeCopperPaper(rule, notes) {
 		side := detectPrintSide(process, notes)
