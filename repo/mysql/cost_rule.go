@@ -82,6 +82,15 @@ func (r *costRuleRepo) ListActiveByCategory(ctx context.Context, categoryID *int
 	args = append(args, asOf)
 	where = append(where, "(effective_to IS NULL OR effective_to >= ?)")
 	args = append(args, asOf)
+	where = append(where, `NOT EXISTS (
+		SELECT 1
+		  FROM cost_rules successor
+		 WHERE successor.supersedes_rule_id = cost_rules.id
+		   AND successor.is_active = 1
+		   AND (successor.effective_from IS NULL OR successor.effective_from <= ?)
+		   AND (successor.effective_to IS NULL OR successor.effective_to >= ?)
+	)`)
+	args = append(args, asOf, asOf)
 
 	query := `
 		SELECT id, rule_name, rule_version, category_id, category_code, product_family, rule_type,
