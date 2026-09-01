@@ -4292,6 +4292,10 @@ components:
         record_ids:
           type: array
           items: { type: integer, format: int64 }
+        sku_codes:
+          type: array
+          description: Exact SKU codes for explicit mode. Each code must resolve to exactly one product-management record; missing or ambiguous codes are rejected.
+          items: { type: string, minLength: 1, maxLength: 64 }
         filters:
           type: object
           description: Server-side selection filter used by all_matching mode.

@@ -192,6 +192,7 @@ type CreateCostRecalculationRunRequest struct {
 	Mode                      string                      `json:"mode"`
 	ProductManagementRecordID int64                       `json:"product_management_record_id,omitempty"`
 	RecordIDs                 []int64                     `json:"record_ids,omitempty"`
+	SKUCodes                  []string                    `json:"sku_codes,omitempty"`
 	Filters                   ProductManagementCostFilter `json:"filters,omitempty"`
 	IssueGroup                string                      `json:"issue_group,omitempty"`
 	IssueTag                  string                      `json:"issue_tag,omitempty"`

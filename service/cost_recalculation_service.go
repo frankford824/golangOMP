@@ -729,13 +729,15 @@ func (s *costRecalculationService) collectRunRecords(ctx context.Context, mode d
 		return []*domain.ProductManagementRecord{record}, map[string]interface{}{"mode": mode, "record_ids": []int64{id}, "reason": reqReason(req)}, nil
 	case domain.CostRecalculationRunModeExplicit:
 		ids := uniquePositiveInt64s(req.RecordIDs)
-		if len(ids) == 0 {
-			return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "record_ids is required for explicit mode", nil)
+		skuCodes := uniqueCostRecalculationSKUCodes(req.SKUCodes)
+		if len(ids) == 0 && len(skuCodes) == 0 {
+			return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "record_ids or sku_codes is required for explicit mode", nil)
 		}
-		if len(ids) > costRecalculationBatchLimit {
-			return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "BATCH_LIMIT_EXCEEDED", map[string]interface{}{"limit": costRecalculationBatchLimit, "matched_count": len(ids)})
+		if len(ids)+len(skuCodes) > costRecalculationBatchLimit {
+			return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "BATCH_LIMIT_EXCEEDED", map[string]interface{}{"limit": costRecalculationBatchLimit, "matched_count": len(ids) + len(skuCodes)})
 		}
-		records := make([]*domain.ProductManagementRecord, 0, len(ids))
+		records := make([]*domain.ProductManagementRecord, 0, len(ids)+len(skuCodes))
+		seenRecordIDs := make(map[int64]struct{})
 		for _, id := range ids {
 			record, err := s.records.GetByID(ctx, id)
 			if err != nil {
@@ -743,9 +745,23 @@ func (s *costRecalculationService) collectRunRecords(ctx context.Context, mode d
 			}
 			if record != nil {
 				records = append(records, record)
+				seenRecordIDs[record.ID] = struct{}{}
 			}
 		}
-		return records, map[string]interface{}{"mode": mode, "record_ids": ids, "reason": reqReason(req)}, nil
+		for _, skuCode := range skuCodes {
+			matched, appErr := s.exactCostRecordsBySKU(ctx, skuCode)
+			if appErr != nil {
+				return nil, nil, appErr
+			}
+			for _, record := range matched {
+				if _, exists := seenRecordIDs[record.ID]; exists {
+					continue
+				}
+				records = append(records, record)
+				seenRecordIDs[record.ID] = struct{}{}
+			}
+		}
+		return records, map[string]interface{}{"mode": mode, "record_ids": ids, "sku_codes": skuCodes, "reason": reqReason(req)}, nil
 	case domain.CostRecalculationRunModeAllMatching:
 		filter := repo.ProductManagementListFilter{
 			Keyword:    strings.TrimSpace(req.Filters.Keyword),
@@ -779,6 +795,44 @@ func (s *costRecalculationService) collectRunRecords(ctx context.Context, mode d
 	default:
 		return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid mode", nil)
 	}
+}
+
+func uniqueCostRecalculationSKUCodes(values []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (s *costRecalculationService) exactCostRecordsBySKU(ctx context.Context, skuCode string) ([]*domain.ProductManagementRecord, *domain.AppError) {
+	items, _, err := s.records.List(ctx, repo.ProductManagementListFilter{Keyword: skuCode, IssueScope: "all", Page: 1, PageSize: 100})
+	if err != nil {
+		return nil, infraAppError("find exact product management record by SKU", err)
+	}
+	matches := make([]*domain.ProductManagementRecord, 0, 1)
+	for _, item := range items {
+		if item != nil && strings.EqualFold(strings.TrimSpace(item.SKUCode), strings.TrimSpace(skuCode)) {
+			matches = append(matches, item)
+		}
+	}
+	if len(matches) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "SKU_CODE_NOT_FOUND", map[string]interface{}{"sku_code": skuCode})
+	}
+	if len(matches) > 1 {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "SKU_CODE_AMBIGUOUS", map[string]interface{}{"sku_code": skuCode, "match_count": len(matches)})
+	}
+	return matches, nil
 }
 
 func (s *costRecalculationService) filterRunRecordsByCostFilter(ctx context.Context, records []*domain.ProductManagementRecord, filter domain.ProductManagementCostFilter, issueGroup string, issueTag string) ([]*domain.ProductManagementRecord, error) {

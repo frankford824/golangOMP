@@ -2759,6 +2759,7 @@ Content-Type: `application/json`
 | `mode` | enum(single/explicit/all_matching) | 是 | - |
 | `product_management_record_id` | integer | 否 | Required for single mode unless the first `record_ids` entry is used. |
 | `record_ids` | array<integer> | 否 | - |
+| `sku_codes` | array<string> | 否 | Exact SKU codes for explicit mode. Each code must resolve to exactly one product-management record; missing or ambiguous codes are rejected. |
 | `filters` | object | 否 | Server-side selection filter used by all_matching mode. |
 | `issue_group` | string | 否 | - |
 | `issue_tag` | string | 否 | - |

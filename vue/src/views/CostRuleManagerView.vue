@@ -109,6 +109,10 @@
           <span :class="{ warning: erpMismatchCount > 0 }"><b>{{ erpMismatchCount }}</b> 个 ERP 差异</span>
         </div>
       </header>
+      <div class="exact-run-builder">
+        <label><span>指定 SKU 生成影响预览</span><textarea v-model="explicitSKUText" rows="2" placeholder="输入 SKU，支持空格、逗号或换行分隔" /></label>
+        <button class="secondary" :disabled="creatingExplicitRun || !explicitSKUCodes.length" @click="createExplicitRun">{{ creatingExplicitRun ? '生成中…' : `预览 ${explicitSKUCodes.length || ''} 个 SKU` }}</button>
+      </div>
       <div v-if="!runs.length" class="empty-large">尚未生成成本影响预览。</div>
       <div v-else class="run-list">
         <article v-for="run in runs" :key="run.id" class="run-card">
@@ -149,6 +153,8 @@
             <label>工艺关键字<input v-model.trim="ruleDraft.special_process_keyword" placeholder="选填" /></label>
             <label>工艺加价<input v-model.number="ruleDraft.special_process_price" type="number" min="0" step="0.01" /></label>
             <label>优先级<input v-model.number="ruleDraft.priority" type="number" step="1" /></label>
+            <label v-if="ruleDraft.rule_type === 'size_based_formula'" class="span-2">尺寸公式<input v-model.trim="ruleDraft.formula_expression" placeholder="例如：keyword_area_unit_price:教师节=264" /></label>
+            <label v-if="!ruleDraft.rule_id">替代规则 ID<input v-model.number="ruleDraft.supersedes_rule_id" type="number" min="1" step="1" placeholder="新版本可填写" /></label>
             <label class="switch-row"><input v-model="ruleDraft.is_active" type="checkbox" /> 当前启用</label>
             <label class="span-2">维护说明<textarea v-model.trim="ruleDraft.governance_note" rows="3" placeholder="说明本次调整原因，方便后续追溯。" /></label>
           </div>
@@ -224,6 +230,8 @@ interface CostRuleRow {
   surcharge_amount?: number | null
   special_process_keyword?: string
   special_process_price?: number | null
+  formula_expression?: string
+  supersedes_rule_id?: number | null
   priority?: number
   is_active?: boolean
   governance_note?: string
@@ -256,6 +264,8 @@ const savingRule = ref(false)
 const savingBinding = ref(false)
 const previewing = ref(false)
 const runActionBusy = ref<number | null>(null)
+const creatingExplicitRun = ref(false)
+const explicitSKUText = ref('')
 const candidateKeyword = ref('')
 const preview = ref<CostRulePreviewResponse | null>(null)
 const ruleDraft = reactive<RuleDraft>(emptyRuleDraft())
@@ -279,6 +289,7 @@ const candidateStats = computed(() => candidates.value.reduce((result, candidate
 const previewCostLabel = computed(() => typeof preview.value?.estimated_cost === 'number' ? `¥ ${preview.value.estimated_cost.toFixed(2)}` : preview.value?.requires_manual_review ? '需要人工报价' : '—')
 const previewExplanation = computed(() => preview.value?.explanation || (preview.value ? '计算完成。' : '填写尺寸后试算，不会修改任何任务或 ERP 数据。'))
 const erpMismatchCount = computed(() => costDashboard.value.tags?.find((item) => item.code === 'erp_mismatch')?.count || 0)
+const explicitSKUCodes = computed(() => [...new Set(explicitSKUText.value.split(/[\s,，;；]+/u).map((item) => item.trim()).filter(Boolean))])
 
 watch(selectedGroup, (group) => {
   if (!group) return
@@ -302,6 +313,7 @@ function ruleSummary(rule: CostRuleRow) {
   if (rule.rule_type === 'minimum_billable_area') return `${ruleTypeLabel(rule.rule_type)} · 最低 ${rule.min_area ?? '未填写'} ㎡`
   if (rule.rule_type === 'area_threshold_surcharge') return `${ruleTypeLabel(rule.rule_type)} · ${rule.area_threshold ?? '未填写'} ㎡以内加 ${money(rule.surcharge_amount)}`
   if (rule.rule_type === 'special_process_surcharge') return `${ruleTypeLabel(rule.rule_type)} · “${rule.special_process_keyword || '未填写工艺'}”加 ${money(rule.special_process_price)}`
+  if (rule.rule_type === 'size_based_formula') return `${ruleTypeLabel(rule.rule_type)} · ${rule.formula_expression || '公式待配置'}`
   return ruleTypeLabel(rule.rule_type)
 }
 
@@ -393,6 +405,18 @@ async function openRun(id: number) {
   try { selectedRun.value = await costManagementApi.getCostRecalculationRun(id, { page: 1, page_size: 200 }); runDialogOpen.value = true }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '成本影响明细加载失败。' }
 }
+async function createExplicitRun() {
+  if (!explicitSKUCodes.value.length || creatingExplicitRun.value) return
+  creatingExplicitRun.value = true; error.value = ''; notice.value = ''
+  try {
+    const run = await costManagementApi.createCostRecalculationRun({ mode: 'explicit', sku_codes: explicitSKUCodes.value, reason: '指定 SKU 成本修复预览' })
+    explicitSKUText.value = ''
+    await loadAll()
+    await openRun(run.id)
+    notice.value = `已生成 ${run.run_no || `#${run.id}`} 影响预览，确认前不会修改任务或 ERP 成本。`
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '指定 SKU 影响预览生成失败。' }
+  finally { creatingExplicitRun.value = false }
+}
 async function applyRun(id: number) {
   runActionBusy.value = id; error.value = ''
   try { const result = await costManagementApi.applyCostRecalculationRun(id); selectedRun.value = result.run; notice.value = '已更新确认范围内的任务与 SKU 成本。ERP 尚未同步，需要单独确认。'; await loadAll() }
@@ -425,6 +449,7 @@ onMounted(loadAll)
 @media(max-width:900px){.cost-layout{grid-template-columns:1fr}.rule-groups{position:static;display:flex;max-height:none;overflow:auto}.rule-groups>header{display:none}.rule-groups>button{min-width:11rem;border-right:1px solid rgb(var(--yb-border));border-bottom:0}.calculator{grid-column:auto}}
 @media(max-width:620px){.calculator{grid-template-columns:1fr}.calculator>header,.preview-result,.calculate-button{grid-column:auto}.workspace-heading,.binding-panel>header{display:grid}.field-pair{grid-template-columns:1fr}.cost-health,.run-summary,.run-actions{width:100%;flex-wrap:wrap}}
 .mapping-diagnostics{display:grid;gap:1rem;padding:1rem;border:1px solid rgb(var(--yb-border));border-radius:1rem;background:rgb(var(--yb-surface))}
+.exact-run-builder{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:.7rem;padding:.8rem;border:1px solid rgb(var(--yb-border));border-radius:.8rem;background:rgb(var(--yb-surface-soft))}.exact-run-builder label{display:grid;gap:.35rem;color:rgb(var(--yb-text-muted));font-size:.72rem}.exact-run-builder textarea{box-sizing:border-box;width:100%;min-height:3.6rem;resize:vertical;border:1px solid rgb(var(--yb-border));border-radius:.65rem;padding:.55rem .7rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font:inherit}@media(max-width:620px){.exact-run-builder{grid-template-columns:1fr}.exact-run-builder button{width:100%}}
 .mapping-diagnostics>header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
 .mapping-diagnostics h2{margin:.2rem 0}
 .mapping-diagnostics p{margin:.25rem 0 0;color:rgb(var(--yb-text-muted));font-size:.78rem}

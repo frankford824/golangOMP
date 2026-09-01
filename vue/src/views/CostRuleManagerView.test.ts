@@ -64,6 +64,7 @@ describe('CostRuleManagerView', () => {
     mocks.applyRun.mockResolvedValue({ run: { ...previewRun, status: 'applied', summary: { total_count: 3, applied_count: 3, erp_synced_count: 0 } } })
     mocks.syncRun.mockResolvedValue({ run: { ...previewRun, status: 'erp_syncing' } })
     mocks.createRun.mockResolvedValue({ id: 8, run_no: 'CR-008', status: 'previewed' })
+    mocks.createCostRule.mockResolvedValue({})
     mocks.updateCostRule.mockResolvedValue({})
   })
 
@@ -149,5 +150,45 @@ describe('CostRuleManagerView', () => {
     expect(mocks.createRun).toHaveBeenCalledWith(expect.objectContaining({ mode: 'all_matching', filters: { rule_group: 'KT_BOARD' } }))
     expect(mocks.applyRun).not.toHaveBeenCalled()
     expect(mocks.syncRun).not.toHaveBeenCalled()
+  })
+
+  it('creates an exact impact preview from normalized SKU codes', async () => {
+    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('.exact-run-builder textarea').setValue('DZA000036, DZA000037\nDZA000036')
+    await wrapper.get('.exact-run-builder button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.createRun).toHaveBeenCalledWith({
+      mode: 'explicit',
+      sku_codes: ['DZA000036', 'DZA000037'],
+      reason: '指定 SKU 成本修复预览',
+    })
+  })
+
+  it('preserves governed formula and supersession fields when editing a rule', async () => {
+    mocks.listCostRules.mockResolvedValue({ data: { data: [{
+      rule_id: 26,
+      rule_name: '教师节亚克力面积成本',
+      category_code: 'ACRYLIC',
+      product_family: 'material',
+      rule_type: 'size_based_formula',
+      formula_expression: 'keyword_area_unit_price:教师节=264',
+      supersedes_rule_id: 25,
+      priority: 10,
+      is_active: true,
+    }] } })
+    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '编辑')?.trigger('click')
+    await flushPromises()
+    expect((document.body.querySelector('input[placeholder*="keyword_area_unit_price"]') as HTMLInputElement).value).toBe('keyword_area_unit_price:教师节=264')
+    document.body.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(mocks.updateCostRule).toHaveBeenCalledWith(26, expect.objectContaining({
+      formula_expression: 'keyword_area_unit_price:教师节=264',
+      supersedes_rule_id: 25,
+    }))
   })
 })

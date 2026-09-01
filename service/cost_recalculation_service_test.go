@@ -46,3 +46,30 @@ func TestCostRecalculationListActiveRunCostRulesCanDisableTextAliasFallback(t *t
 		t.Fatalf("category = %q, want GENERAL", rules[0].CategoryCode)
 	}
 }
+
+func TestCostRecalculationExplicitModeResolvesExactSKUCodes(t *testing.T) {
+	records := &productManagementRecordRepoFake{items: []*domain.ProductManagementRecord{
+		{ID: 101, SKUCode: "DZA000036"},
+		{ID: 102, SKUCode: "DZA000037"},
+		{ID: 103, SKUCode: "OTHER"},
+	}}
+	svc := NewCostRecalculationService(records, nil, nil, nil, nil, nil).(*costRecalculationService)
+
+	matched, filters, appErr := svc.collectRunRecords(context.Background(), domain.CostRecalculationRunModeExplicit, domain.CreateCostRecalculationRunRequest{
+		SKUCodes: []string{" DZA000036 ", "dza000037", "DZA000036"},
+	})
+	if appErr != nil {
+		t.Fatalf("collectRunRecords() appErr = %+v", appErr)
+	}
+	if len(matched) != 2 || matched[0].ID != 101 || matched[1].ID != 102 {
+		t.Fatalf("matched records = %+v, want ids 101/102", matched)
+	}
+	if got, ok := filters["sku_codes"].([]string); !ok || len(got) != 2 || got[0] != "DZA000036" || got[1] != "dza000037" {
+		t.Fatalf("filters sku_codes = %#v", filters["sku_codes"])
+	}
+
+	_, _, appErr = svc.collectRunRecords(context.Background(), domain.CostRecalculationRunModeExplicit, domain.CreateCostRecalculationRunRequest{SKUCodes: []string{"MISSING"}})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("missing SKU appErr = %+v, want invalid request", appErr)
+	}
+}

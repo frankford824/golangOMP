@@ -21618,6 +21618,8 @@ export interface components {
              */
             product_management_record_id?: number;
             record_ids?: number[];
+            /** @description Exact SKU codes for explicit mode. Each code must resolve to exactly one product-management record; missing or ambiguous codes are rejected. */
+            sku_codes?: string[];
             /** @description Server-side selection filter used by all_matching mode. */
             filters?: {
                 keyword?: string;

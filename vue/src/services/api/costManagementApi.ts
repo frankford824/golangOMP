@@ -181,6 +181,7 @@ export type CostRecalculationRunItemStatus =
 export interface CreateCostRecalculationRunRequest {
   mode: CostRecalculationRunMode
   record_ids?: number[]
+  sku_codes?: string[]
   product_management_record_id?: number
   filters?: Record<string, unknown>
   issue_group?: ProductCostIssueGroupCode | ''
