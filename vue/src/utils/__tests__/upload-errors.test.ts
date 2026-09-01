@@ -48,6 +48,20 @@ describe('formatUploadFailureMessage', () => {
     expect(message).not.toContain('阶段：')
   })
 
+  it('explains an OSS 403 as an expired or rejected upload credential', () => {
+    const message = formatUploadFailureMessage(
+      'part_upload',
+      axiosLikeError(403, {
+        Code: 'AccessDenied',
+        Message: 'Request has expired',
+      }),
+    )
+
+    expect(message).toContain('上传凭证已过期或被存储服务拒绝')
+    expect(message).toContain('减少同时上传数量')
+    expect(message).not.toContain('暂无权限')
+  })
+
   it('tells the user to refresh before retrying a failed completion', () => {
     const message = formatUploadFailureMessage(
       'main_complete',

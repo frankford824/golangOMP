@@ -144,15 +144,16 @@ type CostGovernanceConfig struct {
 }
 
 type OSSDirectConfig struct {
-	Enabled         bool
-	Endpoint        string
-	Bucket          string
-	AccessKeyID     string
-	AccessKeySecret string
-	PresignExpiry   time.Duration
-	HTTPTimeout     time.Duration
-	PublicEndpoint  string
-	PartSize        int64
+	Enabled             bool
+	Endpoint            string
+	Bucket              string
+	AccessKeyID         string
+	AccessKeySecret     string
+	PresignExpiry       time.Duration
+	UploadPresignExpiry time.Duration
+	HTTPTimeout         time.Duration
+	PublicEndpoint      string
+	PartSize            int64
 }
 
 type AssetCleanupConfig struct {
@@ -390,15 +391,16 @@ func Load() (*Config, error) {
 			StorageProvider:         getEnv("UPLOAD_STORAGE_PROVIDER", "oss"),
 		},
 		OSSDirect: OSSDirectConfig{
-			Enabled:         mustParseBool(getEnv("OSS_DIRECT_ENABLED", "false")),
-			Endpoint:        getEnv("OSS_ENDPOINT", ""),
-			Bucket:          getEnv("OSS_BUCKET", ""),
-			AccessKeyID:     getEnv("OSS_ACCESS_KEY_ID", ""),
-			AccessKeySecret: getEnv("OSS_ACCESS_KEY_SECRET", ""),
-			PresignExpiry:   mustParseDuration(getEnv("OSS_PRESIGN_EXPIRY", "15m")),
-			HTTPTimeout:     mustParseDuration(getEnv("OSS_HTTP_TIMEOUT", "5m")),
-			PublicEndpoint:  getEnv("OSS_PUBLIC_ENDPOINT", ""),
-			PartSize:        mustParseInt64(getEnv("OSS_PART_SIZE", "10485760")),
+			Enabled:             mustParseBool(getEnv("OSS_DIRECT_ENABLED", "false")),
+			Endpoint:            getEnv("OSS_ENDPOINT", ""),
+			Bucket:              getEnv("OSS_BUCKET", ""),
+			AccessKeyID:         getEnv("OSS_ACCESS_KEY_ID", ""),
+			AccessKeySecret:     getEnv("OSS_ACCESS_KEY_SECRET", ""),
+			PresignExpiry:       mustParseDuration(getEnv("OSS_PRESIGN_EXPIRY", "15m")),
+			UploadPresignExpiry: mustParseDuration(getEnv("OSS_UPLOAD_PRESIGN_EXPIRY", "2h")),
+			HTTPTimeout:         mustParseDuration(getEnv("OSS_HTTP_TIMEOUT", "5m")),
+			PublicEndpoint:      getEnv("OSS_PUBLIC_ENDPOINT", ""),
+			PartSize:            mustParseInt64(getEnv("OSS_PART_SIZE", "10485760")),
 		},
 		ExternalAssets: ExternalAssetsConfig{
 			Enabled:             mustParseBool(getEnv("EXTERNAL_ASSETS_ENABLED", "false")),

@@ -120,6 +120,25 @@ func TestLoadUsesExplicitERPBridgeBaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadSeparatesOSSUploadAndDownloadPresignExpiry(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+	t.Setenv("OSS_PRESIGN_EXPIRY", "12m")
+	t.Setenv("OSS_UPLOAD_PRESIGN_EXPIRY", "90m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.OSSDirect.PresignExpiry != 12*time.Minute {
+		t.Fatalf("download presign expiry = %s, want 12m", cfg.OSSDirect.PresignExpiry)
+	}
+	if cfg.OSSDirect.UploadPresignExpiry != 90*time.Minute {
+		t.Fatalf("upload presign expiry = %s, want 90m", cfg.OSSDirect.UploadPresignExpiry)
+	}
+}
+
 func TestLoadUsesERPBridgeInternalToken(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
 	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")

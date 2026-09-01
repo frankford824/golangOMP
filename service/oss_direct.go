@@ -25,15 +25,16 @@ import (
 )
 
 type OSSDirectConfig struct {
-	Enabled         bool
-	Endpoint        string
-	Bucket          string
-	AccessKeyID     string
-	AccessKeySecret string
-	PresignExpiry   time.Duration
-	HTTPTimeout     time.Duration
-	PublicEndpoint  string
-	PartSize        int64
+	Enabled             bool
+	Endpoint            string
+	Bucket              string
+	AccessKeyID         string
+	AccessKeySecret     string
+	PresignExpiry       time.Duration
+	UploadPresignExpiry time.Duration
+	HTTPTimeout         time.Duration
+	PublicEndpoint      string
+	PartSize            int64
 }
 
 type OSSDirectService struct {
@@ -47,6 +48,9 @@ var ossObjectExtensionPattern = regexp.MustCompile(`^[A-Za-z0-9]{1,10}$`)
 func NewOSSDirectService(cfg OSSDirectConfig) *OSSDirectService {
 	if cfg.PresignExpiry <= 0 {
 		cfg.PresignExpiry = 15 * time.Minute
+	}
+	if cfg.UploadPresignExpiry <= 0 {
+		cfg.UploadPresignExpiry = 2 * time.Hour
 	}
 	if cfg.HTTPTimeout <= 0 {
 		cfg.HTTPTimeout = 5 * time.Minute
@@ -189,7 +193,7 @@ func (s *OSSDirectService) CreateMultipartUploadPlan(ctx context.Context, object
 		parts[i] = s.presignPartUploadURL(objectKey, init.UploadID, i+1, contentType)
 	}
 
-	expires := s.now().Add(s.cfg.PresignExpiry)
+	expires := s.now().Add(s.cfg.UploadPresignExpiry)
 
 	log.Printf("oss_direct_create_multipart_plan object_key=%s upload_id=%s parts_total=%d part_size=%d",
 		objectKey, init.UploadID, partsTotal, partSize)
@@ -214,7 +218,7 @@ func (s *OSSDirectService) CreateSingleUploadPlan(objectKey, contentType string)
 	}
 	contentType = normalizeRequiredUploadContentType(contentType)
 
-	expires := s.now().Add(s.cfg.PresignExpiry)
+	expires := s.now().Add(s.cfg.UploadPresignExpiry)
 	expiresStr := strconv.FormatInt(expires.Unix(), 10)
 
 	canonResource := "/" + s.cfg.Bucket + "/" + objectKey
@@ -671,7 +675,7 @@ func (s *OSSDirectService) initiateMultipartUpload(ctx context.Context, objectKe
 
 func (s *OSSDirectService) presignPartUploadURL(objectKey, uploadID string, partNumber int, contentType string) OSSPresignedPart {
 	contentType = normalizeRequiredUploadContentType(contentType)
-	expires := s.now().Add(s.cfg.PresignExpiry)
+	expires := s.now().Add(s.cfg.UploadPresignExpiry)
 	expiresStr := strconv.FormatInt(expires.Unix(), 10)
 
 	canonResource := "/" + s.cfg.Bucket + "/" + objectKey + "?partNumber=" + strconv.Itoa(partNumber) + "&uploadId=" + uploadID

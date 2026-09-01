@@ -187,6 +187,12 @@ export function formatUploadFailureMessage(
     const userMessage = resolveApiUserMessage(err, { fallback: '' })
 
     if (status != null) {
+      if (phase === 'part_upload' && status === 403) {
+        return appendTraceId(
+          '文件上传凭证已过期或被存储服务拒绝，请重新选择该文件上传；批量大文件请减少同时上传数量',
+          traceId,
+        )
+      }
       if (phase === 'main_complete' && status >= 500) {
         return appendTraceId(
           '确认上传结果失败：系统未能登记本次文件；请先刷新任务确认现有文件，再重新上传',

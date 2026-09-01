@@ -371,6 +371,36 @@ func TestPresignPartUploadURL_SignsDeclaredContentType(t *testing.T) {
 	}
 }
 
+func TestUploadPresignExpiryIsIndependentFromDownloadExpiry(t *testing.T) {
+	now := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	svc := NewOSSDirectService(OSSDirectConfig{
+		Enabled:             true,
+		Endpoint:            "oss-cn-hangzhou.aliyuncs.com",
+		Bucket:              "test-bucket",
+		AccessKeyID:         "test-id",
+		AccessKeySecret:     "test-secret",
+		PresignExpiry:       15 * time.Minute,
+		UploadPresignExpiry: 2 * time.Hour,
+	})
+	svc.nowFn = func() time.Time { return now }
+
+	upload, err := svc.CreateSingleUploadPlan("tasks/T1/upload-sessions/S1/S1.tif", "image/tiff")
+	if err != nil {
+		t.Fatalf("CreateSingleUploadPlan() error = %v", err)
+	}
+	download := svc.PresignDownloadURL("tasks/T1/upload-sessions/S1/S1.tif")
+	if upload.ExpiresAt.Sub(now) != 2*time.Hour {
+		t.Fatalf("upload expiry = %s, want 2h", upload.ExpiresAt.Sub(now))
+	}
+	if download == nil || download.ExpiresAt.Sub(now) != 15*time.Minute {
+		t.Fatalf("download expiry = %+v, want 15m", download)
+	}
+	part := svc.presignPartUploadURL("tasks/T1/upload-sessions/S1/S1.tif", "UPLOAD1", 1, "image/tiff")
+	if part.ExpiresAt.Sub(now) != 2*time.Hour {
+		t.Fatalf("multipart part expiry = %s, want 2h", part.ExpiresAt.Sub(now))
+	}
+}
+
 func TestPresignPartUploadURL_BlankContentTypeDefaultsConsistently(t *testing.T) {
 	svc := newTestOSSDirectService()
 	withoutContentType := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 1, "")

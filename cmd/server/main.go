@@ -270,15 +270,16 @@ func main() {
 		mdb,
 	)
 	ossDirectSvc := service.NewOSSDirectService(service.OSSDirectConfig{
-		Enabled:         cfg.OSSDirect.Enabled,
-		Endpoint:        cfg.OSSDirect.Endpoint,
-		Bucket:          cfg.OSSDirect.Bucket,
-		AccessKeyID:     cfg.OSSDirect.AccessKeyID,
-		AccessKeySecret: cfg.OSSDirect.AccessKeySecret,
-		PresignExpiry:   cfg.OSSDirect.PresignExpiry,
-		HTTPTimeout:     cfg.OSSDirect.HTTPTimeout,
-		PublicEndpoint:  cfg.OSSDirect.PublicEndpoint,
-		PartSize:        cfg.OSSDirect.PartSize,
+		Enabled:             cfg.OSSDirect.Enabled,
+		Endpoint:            cfg.OSSDirect.Endpoint,
+		Bucket:              cfg.OSSDirect.Bucket,
+		AccessKeyID:         cfg.OSSDirect.AccessKeyID,
+		AccessKeySecret:     cfg.OSSDirect.AccessKeySecret,
+		PresignExpiry:       cfg.OSSDirect.PresignExpiry,
+		UploadPresignExpiry: cfg.OSSDirect.UploadPresignExpiry,
+		HTTPTimeout:         cfg.OSSDirect.HTTPTimeout,
+		PublicEndpoint:      cfg.OSSDirect.PublicEndpoint,
+		PartSize:            cfg.OSSDirect.PartSize,
 	})
 	if ossDirectSvc.Enabled() {
 		logger.Info("OSS direct presign service enabled",
