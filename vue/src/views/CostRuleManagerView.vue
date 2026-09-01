@@ -129,6 +129,7 @@
           </div>
           <div class="run-actions">
             <button class="secondary" @click="openRun(run.id)">查看影响</button>
+            <button v-if="canCancelRun(run.status)" class="secondary" :disabled="runActionBusy === run.id" @click="cancelRun(run.id)">取消预览</button>
             <button v-if="canApplyRun(run.status)" class="primary" :disabled="runActionBusy === run.id" @click="applyRun(run.id)">确认更新</button>
             <button v-if="canSyncRun(run.status)" class="primary" :disabled="runActionBusy === run.id" @click="syncRunERP(run.id)">同步到 ERP</button>
           </div>
@@ -187,7 +188,7 @@
           <header><div><p class="eyebrow">应用前核对</p><h2 id="run-dialog-title">{{ selectedRun?.run_no || '成本影响明细' }}</h2></div><button class="close" @click="runDialogOpen = false">×</button></header>
           <div class="run-detail-list">
             <article v-for="item in selectedRun?.items || []" :key="item.id">
-              <div><strong>{{ item.sku_code || '未命名 SKU' }}</strong><small>{{ item.task_no || '未关联任务号' }}</small></div>
+              <div><strong>{{ item.sku_code || '未命名 SKU' }}</strong><small>{{ item.task_no || '未关联任务号' }}</small><small v-if="item.conflict_reason || item.skip_reason" class="warning">{{ item.conflict_reason || item.skip_reason }}</small></div>
               <span>{{ costChangeLabel(item.old_cost_price, item.new_cost_price) }}</span>
               <em>{{ runItemStatusLabel(item.status) }}</em>
             </article>
@@ -195,6 +196,7 @@
           </div>
           <footer>
             <button class="secondary" @click="runDialogOpen = false">关闭</button>
+            <button v-if="selectedRun && canCancelRun(selectedRun.status)" class="secondary" :disabled="runActionBusy === selectedRun.id" @click="cancelRun(selectedRun.id)">取消本次预览</button>
             <button v-if="selectedRun && canApplyRun(selectedRun.status)" class="primary" :disabled="runActionBusy === selectedRun.id" @click="applyRun(selectedRun.id)">确认更新这些 SKU</button>
             <button v-if="selectedRun && canSyncRun(selectedRun.status)" class="primary" :disabled="runActionBusy === selectedRun.id" @click="syncRunERP(selectedRun.id)">同步已更新成本到 ERP</button>
           </footer>
@@ -398,6 +400,7 @@ function runStatusTone(status: string) { return status.includes('failed') ? 'dan
 function runItemStatusLabel(status: string) { return ({ previewed: '可更新', applied: '已更新', skipped: '已跳过', conflict: '有冲突', failed: '失败', erp_queued: '等待 ERP', erp_synced: 'ERP 已同步', erp_failed: 'ERP 失败' } as Record<string, string>)[status] || '处理中' }
 function canApplyRun(status: string) { return status === 'previewed' }
 function canSyncRun(status: string) { return status === 'applied' || status === 'partially_applied' }
+function canCancelRun(status: string) { return status === 'previewed' }
 function formatDateTime(value?: string) { if (!value) return '时间待确认'; const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间待确认' : date.toLocaleString('zh-CN', { hour12: false }) }
 function costChangeLabel(oldValue?: number | null, nextValue?: number | null) { const oldLabel = typeof oldValue === 'number' ? `¥${oldValue.toFixed(2)}` : '未设置'; const nextLabel = typeof nextValue === 'number' ? `¥${nextValue.toFixed(2)}` : '需人工确认'; return `${oldLabel} → ${nextLabel}` }
 async function openRun(id: number) {
@@ -419,13 +422,23 @@ async function createExplicitRun() {
 }
 async function applyRun(id: number) {
   runActionBusy.value = id; error.value = ''
-  try { const result = await costManagementApi.applyCostRecalculationRun(id); selectedRun.value = result.run; notice.value = '已更新确认范围内的任务与 SKU 成本。ERP 尚未同步，需要单独确认。'; await loadAll() }
+  try { const result = await costManagementApi.applyCostRecalculationRun(id); selectedRun.value = result.run; await loadAll(); notice.value = '已更新确认范围内的任务与 SKU 成本。ERP 尚未同步，需要单独确认。' }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '成本更新失败，请核对冲突后重试。' }
+  finally { runActionBusy.value = null }
+}
+async function cancelRun(id: number) {
+  runActionBusy.value = id; error.value = ''
+  try {
+    const run = await costManagementApi.cancelCostRecalculationRun(id)
+    if (selectedRun.value?.id === id) selectedRun.value = { ...selectedRun.value, ...run }
+    await loadAll()
+    notice.value = '本次成本影响预览已取消，不会再阻塞同一 SKU 的新预览。'
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '成本影响预览取消失败，请稍后重试。' }
   finally { runActionBusy.value = null }
 }
 async function syncRunERP(id: number) {
   runActionBusy.value = id; error.value = ''
-  try { const result = await costManagementApi.syncCostRecalculationRunERP(id); selectedRun.value = result.run; notice.value = '成本已进入 ERP 同步队列，可在更新记录中继续查看结果。'; await loadAll() }
+  try { const result = await costManagementApi.syncCostRecalculationRunERP(id); selectedRun.value = result.run; await loadAll(); notice.value = '成本已进入 ERP 同步队列，可在更新记录中继续查看结果。' }
   catch (cause) { error.value = cause instanceof Error ? cause.message : 'ERP 成本同步失败，请稍后重试。' }
   finally { runActionBusy.value = null }
 }

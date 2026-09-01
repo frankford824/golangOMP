@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   createRun: vi.fn(),
   applyRun: vi.fn(),
   syncRun: vi.fn(),
+  cancelRun: vi.fn(),
   preview: vi.fn(),
   dashboard: vi.fn(),
 }))
@@ -36,6 +37,7 @@ vi.mock('@/services/api/costManagementApi', () => ({
     createCostRecalculationRun: mocks.createRun,
     applyCostRecalculationRun: mocks.applyRun,
     syncCostRecalculationRunERP: mocks.syncRun,
+    cancelCostRecalculationRun: mocks.cancelRun,
     previewCostRule: mocks.preview,
   },
 }))
@@ -63,6 +65,7 @@ describe('CostRuleManagerView', () => {
     mocks.getRun.mockResolvedValue({ ...previewRun, items: [{ id: 1, status: 'previewed', sku_code: 'SKU-A', task_no: 'RW-01', old_cost_price: 20, new_cost_price: 25 }] })
     mocks.applyRun.mockResolvedValue({ run: { ...previewRun, status: 'applied', summary: { total_count: 3, applied_count: 3, erp_synced_count: 0 } } })
     mocks.syncRun.mockResolvedValue({ run: { ...previewRun, status: 'erp_syncing' } })
+    mocks.cancelRun.mockResolvedValue({ ...previewRun, status: 'cancelled' })
     mocks.createRun.mockResolvedValue({ id: 8, run_no: 'CR-008', status: 'previewed' })
     mocks.createCostRule.mockResolvedValue({})
     mocks.updateCostRule.mockResolvedValue({})
@@ -134,6 +137,17 @@ describe('CostRuleManagerView', () => {
     await flushPromises()
     expect(mocks.applyRun).toHaveBeenCalledWith(7)
     expect(mocks.syncRun).not.toHaveBeenCalled()
+  })
+
+  it('allows an obsolete preview to be cancelled before creating a replacement', async () => {
+    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '取消预览')?.trigger('click')
+    await flushPromises()
+
+    expect(mocks.cancelRun).toHaveBeenCalledWith(7)
+    expect(wrapper.text()).toContain('本次成本影响预览已取消')
   })
 
   it('saves a rule and creates only an impact preview', async () => {
