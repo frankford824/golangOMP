@@ -62,10 +62,13 @@ func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T
 		TokenTTL:      time.Hour,
 	})
 	expectedImageURL := signer.BuildImageURL(asset)
+	productName := strings.Repeat("产", ERPProductNameMaxLength)
 	bridge := &productManagementERPBridgeCapture{
 		readbackProduct: &domain.ERPProduct{
-			SKUCode:  "CGK000181",
-			ImageURL: *expectedImageURL,
+			SKUCode:     "CGK000181",
+			IID:         "KT板",
+			ProductName: productName,
+			ImageURL:    *expectedImageURL,
 		},
 	}
 	svc := &productManagementService{
@@ -77,7 +80,6 @@ func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T
 		now:        time.Now,
 	}
 
-	productName := strings.Repeat("产", ERPProductNameMaxLength)
 	appErr := svc.syncRecordToERP(context.Background(), &domain.ProductManagementRecord{
 		ID:                  1,
 		TaskNo:              "RW-20260604-A-001114",
@@ -467,6 +469,40 @@ func TestProductManagementBaseSyncTreatsTimeoutAsSuccessWhenReadbackMatches(t *t
 	})
 	if appErr != nil {
 		t.Fatalf("syncBaseRecordToERP() appErr = %+v, want nil after matching readback", appErr)
+	}
+	if bridge.upsertCalls != 1 {
+		t.Fatalf("UpsertProduct calls = %d, want 1", bridge.upsertCalls)
+	}
+}
+
+func TestProductManagementBaseSyncRejectsAcceptedWriteWhenReadbackCostDoesNotMatch(t *testing.T) {
+	previousSleeper := productManagementERPBaseReadbackSleep
+	productManagementERPBaseReadbackSleep = func(time.Duration) {}
+	defer func() { productManagementERPBaseReadbackSleep = previousSleeper }()
+
+	expectedCost := 8.8
+	staleCost := 0.068
+	productName := "CPT紫定制亚克力/教师节/14.5*23cm"
+	bridge := &productManagementERPBridgeCapture{
+		readbackProduct: &domain.ERPProduct{
+			SKUCode:     "DZA000036",
+			IID:         "亚克力",
+			ProductName: productName,
+			CostPrice:   &staleCost,
+		},
+	}
+	svc := &productManagementService{erpBridge: bridge, now: time.Now}
+
+	appErr := svc.syncBaseRecordToERP(context.Background(), &domain.ProductManagementRecord{
+		ID:          7001,
+		TaskNo:      "RW-20260821-A-004821",
+		SKUCode:     "DZA000036",
+		ProductIID:  "亚克力",
+		ProductName: productName,
+		CostPrice:   &expectedCost,
+	})
+	if appErr == nil || !strings.Contains(appErr.Message, "ERP 基础资料回读校验未通过") {
+		t.Fatalf("syncBaseRecordToERP() appErr = %+v, want readback mismatch", appErr)
 	}
 	if bridge.upsertCalls != 1 {
 		t.Fatalf("UpsertProduct calls = %d, want 1", bridge.upsertCalls)

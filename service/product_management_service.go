@@ -831,14 +831,15 @@ func (s *productManagementService) syncBaseRecordToERP(ctx context.Context, reco
 		cost := *record.CostPrice
 		payload.CostPrice = &cost
 	}
-	_, appErr := s.erpBridge.UpsertProduct(ctx, payload)
-	if appErr == nil {
+	_, upsertErr := s.erpBridge.UpsertProduct(ctx, payload)
+	readbackErr := s.verifyERPBaseReadback(ctx, record, payload)
+	if readbackErr == nil {
 		return nil
 	}
-	if readbackErr := s.verifyERPBaseReadback(ctx, record, payload); readbackErr == nil {
-		return nil
+	if upsertErr != nil {
+		return upsertErr
 	}
-	return appErr
+	return readbackErr
 }
 
 func (s *productManagementService) syncImageRecordToERP(ctx context.Context, record *domain.ProductManagementRecord) *domain.AppError {
