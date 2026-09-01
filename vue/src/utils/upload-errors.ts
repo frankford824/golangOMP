@@ -189,7 +189,7 @@ export function formatUploadFailureMessage(
     if (status != null) {
       if (phase === 'main_complete' && status >= 500) {
         return appendTraceId(
-          '确认上传结果失败：系统未能登记本次文件，已自动清理上传；请先刷新任务确认现有文件，再重新上传',
+          '确认上传结果失败：系统未能登记本次文件；请先刷新任务确认现有文件，再重新上传',
           traceId,
         )
       }

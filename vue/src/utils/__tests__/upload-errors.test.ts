@@ -62,6 +62,7 @@ describe('formatUploadFailureMessage', () => {
 
     expect(message).toContain('系统未能登记本次文件')
     expect(message).toContain('请先刷新任务确认现有文件')
+    expect(message).not.toContain('已自动清理')
     expect(message).toContain('trace-upload-complete')
     expect(message).not.toContain('服务暂时不可用')
   })
