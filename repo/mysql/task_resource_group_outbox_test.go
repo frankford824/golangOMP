@@ -51,6 +51,20 @@ func TestAssetObjectDeletionOutboxProducersUseAdapterSnapshot(t *testing.T) {
 	}
 }
 
+func TestSupersededResourceQueryMaterializesReachableAssetsWithoutCartesianRevisionJoin(t *testing.T) {
+	raw, err := os.ReadFile("task_resource_group.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized := strings.Join(strings.Fields(string(raw)), " ")
+	if !strings.Contains(normalized, "current_revision_ids AS") || !strings.Contains(normalized, "reachable_assets AS") {
+		t.Fatalf("superseded resource query must materialize current revision and reachable asset sets")
+	}
+	if strings.Contains(normalized, "current_revision.id = current_group.working_revision_id OR current_revision.id = current_group.finalized_revision_id") {
+		t.Fatalf("superseded resource query reintroduced the cartesian OR revision join")
+	}
+}
+
 func TestFinalizeGroupQueuesAllSupersededResourceObjectsWithAdapterSnapshot(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

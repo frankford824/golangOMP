@@ -1569,8 +1569,7 @@ func (r *TaskResourceGroupRepo) FinalizeGroup(ctx context.Context, tx repo.Tx, g
 // any resource group's current working/finalized snapshot.
 func revokeSupersededResourceGroupObjects(ctx context.Context, sqlTx *sql.Tx, groupID int64, revokedAt time.Time) error {
 	rows, err := sqlTx.QueryContext(ctx, `
-		SELECT DISTINCT candidate.task_asset_id
-		FROM (
+		WITH candidate_assets AS (
 			SELECT revision.source_task_asset_id AS task_asset_id
 			FROM task_asset_group_revisions revision
 			WHERE revision.group_id = ?
@@ -1584,31 +1583,39 @@ func revokeSupersededResourceGroupObjects(ctx context.Context, sqlTx *sql.Tx, gr
 			FROM task_asset_group_revision_references reference
 			JOIN task_asset_group_revisions revision ON revision.id = reference.revision_id
 			WHERE revision.group_id = ?
-		) candidate
+		), current_revision_ids AS (
+			SELECT working_revision_id AS revision_id
+			FROM task_asset_groups
+			WHERE working_revision_id IS NOT NULL
+			UNION
+			SELECT finalized_revision_id
+			FROM task_asset_groups
+			WHERE finalized_revision_id IS NOT NULL
+		), reachable_assets AS (
+			SELECT revision.source_task_asset_id AS task_asset_id
+			FROM task_asset_group_revisions revision
+			JOIN current_revision_ids current_id ON current_id.revision_id = revision.id
+			WHERE revision.source_task_asset_id IS NOT NULL
+			UNION
+			SELECT item.task_asset_id
+			FROM task_asset_group_revision_items item
+			JOIN current_revision_ids current_id ON current_id.revision_id = item.revision_id
+			UNION
+			SELECT reference.formal_task_asset_id
+			FROM task_asset_group_revision_references reference
+			JOIN current_revision_ids current_id ON current_id.revision_id = reference.revision_id
+			WHERE reference.formal_task_asset_id IS NOT NULL
+		)
+		SELECT DISTINCT candidate.task_asset_id
+		FROM candidate_assets candidate
 		JOIN task_assets asset ON asset.id = candidate.task_asset_id
+		LEFT JOIN reachable_assets reachable ON reachable.task_asset_id = candidate.task_asset_id
 		WHERE candidate.task_asset_id IS NOT NULL
 		  AND asset.deleted_at IS NULL
 		  AND asset.cleaned_at IS NULL
 		  AND asset.object_deleted_at IS NULL
 		  AND asset.access_revoked_at IS NULL
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM task_asset_groups current_group
-			JOIN task_asset_group_revisions current_revision
-			  ON current_revision.id = current_group.working_revision_id
-			  OR current_revision.id = current_group.finalized_revision_id
-			WHERE current_revision.source_task_asset_id = candidate.task_asset_id
-			   OR EXISTS (
-					SELECT 1 FROM task_asset_group_revision_items current_item
-					WHERE current_item.revision_id = current_revision.id
-					  AND current_item.task_asset_id = candidate.task_asset_id
-			   )
-			   OR EXISTS (
-					SELECT 1 FROM task_asset_group_revision_references current_reference
-					WHERE current_reference.revision_id = current_revision.id
-					  AND current_reference.formal_task_asset_id = candidate.task_asset_id
-			   )
-		  )
+		  AND reachable.task_asset_id IS NULL
 		ORDER BY candidate.task_asset_id`, groupID, groupID, groupID)
 	if err != nil {
 		return fmt.Errorf("list superseded resource group objects: %w", err)
