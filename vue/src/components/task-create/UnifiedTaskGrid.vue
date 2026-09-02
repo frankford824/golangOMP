@@ -19,7 +19,7 @@ const emit = defineEmits<{
   'update:rows': [ComposeRow[]]
   select: [rowId: string]
   selection: [rowIds: string[]]
-  files: [payload: { rowId: string; field: 'reference_assets' | 'source_assets'; files: File[] }]
+  files: [payload: { rowId: string; field: 'reference_assets' | 'source_assets'; files: File[]; preserveGridViewport?: boolean }]
 }>()
 
 const rootRef = ref<HTMLElement | null>(null)
@@ -279,9 +279,9 @@ async function boot() {
       worksheet: () => facade.getActiveSheet()?.worksheet ?? null,
       hooks: facade.getSheetHooks(),
       onBeforeFiles: readRowsFromWorkbook,
-      onFiles(rowId, column, files) {
+      onFiles(rowId, column, files, context) {
         const field = column === 'source_assets' ? 'source_assets' : 'reference_assets'
-        emit('files', { rowId, field, files })
+        emit('files', { rowId, field, files, preserveGridViewport: context.previewInserted })
       },
     }) as typeof imageBinding
     ready.value = true

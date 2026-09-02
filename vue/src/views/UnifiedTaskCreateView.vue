@@ -535,7 +535,7 @@ function handleFileInput(event: Event, field: 'reference_assets' | 'source_asset
   input.value = ''
 }
 
-async function addFiles(payload: { rowId: string; field: 'reference_assets' | 'source_assets'; files: File[] }) {
+async function addFiles(payload: { rowId: string; field: 'reference_assets' | 'source_assets'; files: File[]; preserveGridViewport?: boolean }) {
   const row = rows.value.find((item) => item.id === payload.rowId)
   if (!row) return
   const limit = intent.value === 'planning_sku' ? 1 : intent.value === 'retouch' && payload.field === 'source_assets' ? 50 : 5
@@ -549,7 +549,7 @@ async function addFiles(payload: { rowId: string; field: 'reference_assets' | 's
   row[payload.field].push(...drafts)
   if (intent.value === 'retouch') {
     drafts.forEach((draft) => patchAssetDraft(payload.rowId, payload.field, draft.id, { status: 'local' }))
-    gridRevision.value += 1
+    if (!payload.preserveGridViewport) gridRevision.value += 1
     return
   }
   let uploadFailed = false
@@ -568,9 +568,11 @@ async function addFiles(payload: { rowId: string; field: 'reference_assets' | 's
       })
     }
   }
-  // Successful planning images are already real Univer cell images. Rebuilding
-  // the workbook here would replace the thumbnail with plain status text.
-  if (intent.value !== 'planning_sku' || uploadFailed) gridRevision.value += 1
+  // A successful grid paste/drop already inserted a real Univer cell preview.
+  // Rebuilding here would reset horizontal scroll and force the operator to
+  // drag back to the image column after every paste. Picker uploads and failed
+  // preview insertion still rebuild so the sheet reflects their status.
+  if (!payload.preserveGridViewport || uploadFailed) gridRevision.value += 1
 }
 
 function patchAssetDraft(

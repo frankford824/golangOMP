@@ -413,7 +413,7 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
-  it('keeps a successfully uploaded planning image embedded without rebuilding the workbook', async () => {
+  it('keeps a successfully pasted planning image embedded without rebuilding the workbook', async () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
         stubs: {
@@ -422,7 +422,7 @@ describe('UnifiedTaskCreateView', () => {
             emits: ['files'],
             data: () => ({ image: new File(['image'], 'product.png', { type: 'image/png' }) }),
             template: `<div>
-              <button class="paste-product-image" @click="$emit('files', { rowId: rows[0].id, field: 'reference_assets', files: [image] })">paste image</button>
+              <button class="paste-product-image" @click="$emit('files', { rowId: rows[0].id, field: 'reference_assets', files: [image], preserveGridViewport: true })">paste image</button>
               <span class="grid-revision">{{ revision || 0 }}</span>
               <span class="grid-assets">{{ rows[0].reference_assets.length }}</span>
             </div>`,
@@ -439,6 +439,64 @@ describe('UnifiedTaskCreateView', () => {
     expect(mocks.uploadPlanningImage).toHaveBeenCalledOnce()
     expect(wrapper.get('.grid-assets').text()).toBe('1')
     expect(wrapper.get('.grid-revision').text()).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('preserves the new-design grid viewport after a successful in-cell image paste', async () => {
+    mocks.route.query = { intent: 'new_design' }
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: {
+            props: ['rows', 'revision'],
+            emits: ['files'],
+            data: () => ({ image: new File(['image'], 'reference.png', { type: 'image/png' }) }),
+            template: `<div>
+              <button class="paste-reference-image" @click="$emit('files', { rowId: rows[0].id, field: 'reference_assets', files: [image], preserveGridViewport: true })">paste image</button>
+              <span class="grid-revision">{{ revision || 0 }}</span>
+              <span class="grid-assets">{{ rows[0].reference_assets.length }}</span>
+            </div>`,
+          },
+          IIdSelector: true,
+          RouterLink: true,
+        },
+      },
+    })
+
+    await wrapper.get('.paste-reference-image').trigger('click')
+    await flushPromises()
+
+    expect(mocks.uploadReferenceFileRef).toHaveBeenCalledOnce()
+    expect(wrapper.get('.grid-assets').text()).toBe('1')
+    expect(wrapper.get('.grid-revision').text()).toBe('0')
+    wrapper.unmount()
+  })
+
+  it('rebuilds the grid when an in-cell image upload fails so status stays visible', async () => {
+    mocks.route.query = { intent: 'new_design' }
+    mocks.uploadReferenceFileRef.mockRejectedValueOnce(new Error('上传失败'))
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: {
+            props: ['rows', 'revision'],
+            emits: ['files'],
+            data: () => ({ image: new File(['image'], 'reference.png', { type: 'image/png' }) }),
+            template: `<div>
+              <button class="paste-reference-image" @click="$emit('files', { rowId: rows[0].id, field: 'reference_assets', files: [image], preserveGridViewport: true })">paste image</button>
+              <span class="grid-revision">{{ revision || 0 }}</span>
+            </div>`,
+          },
+          IIdSelector: true,
+          RouterLink: true,
+        },
+      },
+    })
+
+    await wrapper.get('.paste-reference-image').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.grid-revision').text()).toBe('1')
     wrapper.unmount()
   })
 

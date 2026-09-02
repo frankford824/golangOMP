@@ -44,7 +44,7 @@ describe('compose grid image cell bridge', () => {
 
     expect(insert).toHaveBeenCalledWith(file)
     expect(setRowHeight).toHaveBeenCalledWith(1, 72)
-    expect(onFiles).toHaveBeenCalledWith('row-1', 'reference_assets', [file])
+    expect(onFiles).toHaveBeenCalledWith('row-1', 'reference_assets', [file], { previewInserted: true })
     expect(calls).toEqual(['flush', 'files'])
     expect(event.defaultPrevented).toBe(true)
     expect(downstreamPaste).not.toHaveBeenCalled()
@@ -106,7 +106,7 @@ describe('compose grid image cell bridge', () => {
     element.dispatchEvent(event)
     await Promise.resolve()
 
-    expect(onFiles).toHaveBeenCalledWith('row-1', 'source_assets', [source])
+    expect(onFiles).toHaveBeenCalledWith('row-1', 'source_assets', [source], { previewInserted: false })
     binding.dispose()
   })
 
@@ -131,7 +131,7 @@ describe('compose grid image cell bridge', () => {
     element.dispatchEvent(event)
     await Promise.resolve()
 
-    expect(onFiles).toHaveBeenCalledWith('row-1', 'source_assets', files)
+    expect(onFiles).toHaveBeenCalledWith('row-1', 'source_assets', files, { previewInserted: false })
     binding.dispose()
   })
 })

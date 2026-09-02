@@ -31,7 +31,7 @@ export interface ComposeImageCellOptions {
   worksheet: () => UniverWorksheetLike | null
   hooks: SheetHookLike
   onBeforeFiles?(): void
-  onFiles(rowId: string, column: ComposeColumnKey, files: File[]): void
+  onFiles(rowId: string, column: ComposeColumnKey, files: File[], context: { previewInserted: boolean }): void
   onActiveCell?(position: ComposeGridCellPosition): void
 }
 
@@ -83,11 +83,12 @@ export function bindComposeGridImageCells(options: ComposeImageCellOptions): Com
     // can otherwise restore the older row model and erase the fresh text.
     options.onBeforeFiles?.()
     const worksheet = options.worksheet()
+    let previewInserted = false
     if (worksheet && isComposeImageFile(accepted[0])) {
       worksheet.setRowHeight?.(target.row, COMPOSE_IMAGE_ROW_HEIGHT)
-      await worksheet.getRange(target.row, target.col, 1, 1).insertCellImageAsync(accepted[0]).catch(() => false)
+      previewInserted = await worksheet.getRange(target.row, target.col, 1, 1).insertCellImageAsync(accepted[0]).catch(() => false)
     }
-    options.onFiles(row.id, column.key, accepted)
+    options.onFiles(row.id, column.key, accepted, { previewInserted })
   }
 
   const onDragOver = (event: DragEvent) => {
