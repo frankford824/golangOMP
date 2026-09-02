@@ -153,7 +153,7 @@ curl -X GET https://api.example.com/v1/auth/register-options \
 ### 简介
 支持方法: POST。
 
-- `POST`: Login endpoint for local session-token auth. Returns a bearer token backed by persisted `user_sessions` rows. This contract does not introduce SSO, org sync, or external identity providers. The response includes `session_id` plus the current frontend permission contract under `user.frontend_access`.
+- `POST`: Login endpoint for local session-token auth. Returns a bearer token backed by persisted `user_sessions` rows. This contract does not introduce SSO, org sync, or external identity providers. The response includes `session_id` plus the current frontend permission contract under `user.frontend_access`. Session expiry is an idle timeout renewed after each successfully authenticated request, so active operators are not interrupted mid-task.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

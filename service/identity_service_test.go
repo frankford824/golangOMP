@@ -68,6 +68,10 @@ func TestIdentityServiceRegisterCreatesOnlyExplicitMember(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("ResolveRequestActor() error = %+v", appErr)
 	}
+	renewedSession := sessionRepo.sessions[hashToken(loginResult.Session.Token)]
+	if renewedSession == nil || !renewedSession.ExpiresAt.After(loginResult.Session.ExpiresAt) {
+		t.Fatalf("ResolveRequestActor() session expiry = %+v, want later than login expiry %s", renewedSession, loginResult.Session.ExpiresAt)
+	}
 	sessionCtx := domain.WithRequestActor(context.Background(), *actor)
 	currentUser, appErr := svc.GetCurrentUser(sessionCtx)
 	if appErr != nil {
@@ -1638,10 +1642,11 @@ func (r *identitySessionRepoStub) GetByTokenHash(_ context.Context, tokenHash st
 	return nil, nil
 }
 
-func (r *identitySessionRepoStub) Touch(_ context.Context, sessionID string, at time.Time) error {
+func (r *identitySessionRepoStub) Touch(_ context.Context, sessionID string, at time.Time, expiresAt time.Time) error {
 	for _, session := range r.sessions {
 		if session.SessionID == sessionID {
 			session.LastSeenAt = &at
+			session.ExpiresAt = expiresAt
 		}
 	}
 	return nil

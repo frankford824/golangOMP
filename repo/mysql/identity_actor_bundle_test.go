@@ -38,11 +38,7 @@ func TestResolveActorBundleUsesParameterizedSingleStatements(t *testing.T) {
 	mock.ExpectQuery("SELECT role FROM user_roles WHERE user_id = \\? ORDER BY role ASC").
 		WithArgs(int64(292)).
 		WillReturnRows(sqlmock.NewRows([]string{"role"}).AddRow("operator"))
-	mock.ExpectExec("UPDATE user_sessions").
-		WithArgs(now, tokenHash).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	session, user, roles, err := repository.ResolveActorBundle(context.Background(), tokenHash, now)
+	session, user, roles, err := repository.ResolveActorBundle(context.Background(), tokenHash)
 	if err != nil {
 		t.Fatalf("ResolveActorBundle() error = %v", err)
 	}
@@ -72,12 +68,35 @@ func TestResolveActorBundleReturnsNilForUnknownToken(t *testing.T) {
 		WithArgs("unknown").
 		WillReturnError(sql.ErrNoRows)
 
-	session, user, roles, err := repository.ResolveActorBundle(context.Background(), "unknown", time.Now())
+	session, user, roles, err := repository.ResolveActorBundle(context.Background(), "unknown")
 	if err != nil {
 		t.Fatalf("ResolveActorBundle() error = %v", err)
 	}
 	if session != nil || user != nil || roles != nil {
 		t.Fatalf("bundle = (%+v, %+v, %#v), want all nil", session, user, roles)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUserSessionTouchRenewsIdleExpiryOnlyWhileSessionIsActive(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	repository := NewUserSessionRepo(New(db)).(*userSessionRepo)
+	now := time.Date(2026, 9, 2, 3, 4, 5, 0, time.UTC)
+	nextExpiry := now.Add(24 * time.Hour)
+
+	mock.ExpectExec("UPDATE user_sessions").
+		WithArgs(now, nextExpiry, "session-1", now).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := repository.Touch(context.Background(), "session-1", now, nextExpiry); err != nil {
+		t.Fatalf("Touch() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -451,9 +451,13 @@ func (r *userSessionRepo) GetByTokenHash(ctx context.Context, tokenHash string) 
 	return &session, nil
 }
 
-func (r *userSessionRepo) Touch(ctx context.Context, sessionID string, at time.Time) error {
+func (r *userSessionRepo) Touch(ctx context.Context, sessionID string, at time.Time, expiresAt time.Time) error {
 	_, err := r.db.db.ExecContext(ctx, `
-		UPDATE user_sessions SET last_seen_at = ? WHERE session_id = ?`, at, sessionID)
+		UPDATE user_sessions
+		SET last_seen_at = ?, expires_at = ?
+		WHERE session_id = ?
+		  AND revoked_at IS NULL
+		  AND expires_at > ?`, at, expiresAt, sessionID, at)
 	if err != nil {
 		return fmt.Errorf("touch user session: %w", err)
 	}

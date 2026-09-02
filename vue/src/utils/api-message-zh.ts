@@ -7,7 +7,7 @@ import axios from 'axios'
 
 /** 后端 error.code（大写）→ 中文 */
 export const API_ERROR_CODE_ZH: Record<string, string> = {
-  UNAUTHORIZED: '账号或密码不正确，请检查后重试',
+  UNAUTHORIZED: '登录状态已失效，请重新登录后再试',
   UNAUTHENTICATED: '登录已过期，请重新登录',
   FORBIDDEN: '暂无权限执行该操作',
   PERMISSION_DENIED: '暂无权限执行该操作',
@@ -300,7 +300,7 @@ export function mapDenyCodeToZh(denyCode: string | undefined): string {
 }
 
 function statusFallbackZh(status: number | undefined): string {
-  if (status === 401) return '账号或密码不正确，请检查后重试'
+  if (status === 401) return '登录状态已失效，请重新登录后再试'
   if (status === 403) return '暂无权限，如需开通请联系管理员'
   if (status === 404) return '请求的服务不存在或已变更'
   if (status === 408) return '请求超时，请稍后重试'
@@ -405,12 +405,22 @@ export function resolveApiUserMessage(
   const parsed = parseApiErrorPayload(err)
   const fallback = options?.fallback ?? '操作失败，请稍后重试'
 
+  // A 401 means invalid credentials only on the login endpoint. Treating an
+  // expired bearer session during uploads as a password error misdiagnoses
+  // the problem and sends operators back to recheck a password they never sent.
+  const requestURL = err && typeof err === 'object' && 'config' in err
+    ? String((err as { config?: { url?: unknown } }).config?.url ?? '')
+    : ''
+  const isLoginRequest = /(?:^|\/)v1\/auth\/login(?:$|[?#])/.test(requestURL)
+
   const codeZh = parsed.code ? API_ERROR_CODE_ZH[parsed.code] : undefined
   const denyZh = mapDenyCodeToZh(parsed.denyCode)
   const shouldPreferBackendMessage = !!parsed.code && MESSAGE_FIRST_CODES.has(parsed.code)
   const hasRealMessage = !!parsed.message && !isNoiseMessage(parsed.message)
 
-  let main = isResourceMigrationIncomplete(parsed)
+  let main = parsed.status === 401 && isLoginRequest
+    ? '账号或密码不正确，请检查后重试'
+    : isResourceMigrationIncomplete(parsed)
     ? '任务资源迁移尚未完成，请稍后刷新；若持续出现，请联系管理员。'
     : ''
 

@@ -322,7 +322,7 @@ type userRoleRawReader interface {
 }
 
 type sessionActorBundleReader interface {
-	ResolveActorBundle(ctx context.Context, tokenHash string, at time.Time) (*domain.UserSession, *domain.User, []string, error)
+	ResolveActorBundle(ctx context.Context, tokenHash string) (*domain.UserSession, *domain.User, []string, error)
 }
 
 const defaultSessionTTL = 24 * time.Hour
@@ -1745,7 +1745,7 @@ func (s *identityService) ResolveRequestActor(ctx context.Context, bearerToken s
 	s.emitActorRoleHydrationTelemetry(ctx, user, rawRolesKnown, rawRoles, rawRolesCount, normalizedRoles, canonicalRoles)
 
 	now := time.Now().UTC()
-	_ = s.sessionRepo.Touch(ctx, session.SessionID, now)
+	_ = s.sessionRepo.Touch(ctx, session.SessionID, now, now.Add(s.sessionTTL))
 	actor := &domain.RequestActor{
 		ID:                 user.ID,
 		Username:           user.Username,
@@ -1765,7 +1765,7 @@ func (s *identityService) ResolveRequestActor(ctx context.Context, bearerToken s
 
 func (s *identityService) resolveRequestActorBundle(ctx context.Context, bearerToken string, reader sessionActorBundleReader) (*domain.RequestActor, *domain.AppError) {
 	now := time.Now().UTC()
-	session, user, rawRoles, err := reader.ResolveActorBundle(ctx, hashToken(bearerToken), now)
+	session, user, rawRoles, err := reader.ResolveActorBundle(ctx, hashToken(bearerToken))
 	if err != nil {
 		return nil, infraError("get session actor bundle", err)
 	}
@@ -1785,6 +1785,9 @@ func (s *identityService) resolveRequestActorBundle(ctx context.Context, bearerT
 	canonicalRoles := append([]domain.Role(nil), user.Roles...)
 
 	s.emitActorRoleHydrationTelemetry(ctx, user, true, rawRoles, len(rawRoles), normalizedRoles, canonicalRoles)
+	// Session expiry is an idle timeout: every successfully authenticated
+	// request renews it so an active operator is never logged out mid-task.
+	_ = s.sessionRepo.Touch(ctx, session.SessionID, now, now.Add(s.sessionTTL))
 
 	return &domain.RequestActor{
 		ID:                 user.ID,

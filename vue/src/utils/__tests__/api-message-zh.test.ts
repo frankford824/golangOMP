@@ -20,6 +20,7 @@ describe('resolveApiUserMessage', () => {
   it('keeps semantic auth code copy ahead of backend noise', () => {
     const message = resolveApiUserMessage({
       status: 401,
+      config: { url: '/v1/auth/login' },
       responseData: {
         error: {
           code: 'UNAUTHORIZED',
@@ -29,6 +30,21 @@ describe('resolveApiUserMessage', () => {
     })
 
     expect(message).toBe('账号或密码不正确，请检查后重试')
+  })
+
+  it('identifies an expired authenticated session without blaming the password', () => {
+    const message = resolveApiUserMessage({
+      status: 401,
+      config: { url: '/v1/tasks/reference-upload-sessions' },
+      responseData: {
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'authentication required',
+        },
+      },
+    })
+
+    expect(message).toBe('登录状态已失效，请重新登录后再试')
   })
 
   it('distinguishes an ERP test-catalog miss from an ERP upstream outage', () => {

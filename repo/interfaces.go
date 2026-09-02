@@ -849,7 +849,7 @@ type OrgRepo interface {
 type UserSessionRepo interface {
 	Create(ctx context.Context, tx Tx, session *domain.UserSession) (*domain.UserSession, error)
 	GetByTokenHash(ctx context.Context, tokenHash string) (*domain.UserSession, error)
-	Touch(ctx context.Context, sessionID string, at time.Time) error
+	Touch(ctx context.Context, sessionID string, at time.Time, expiresAt time.Time) error
 }
 
 type PermissionLogRepo interface {

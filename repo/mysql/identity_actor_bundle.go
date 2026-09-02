@@ -5,12 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	"workflow/domain"
 )
 
-func (r *userSessionRepo) ResolveActorBundle(ctx context.Context, tokenHash string, at time.Time) (*domain.UserSession, *domain.User, []string, error) {
+func (r *userSessionRepo) ResolveActorBundle(ctx context.Context, tokenHash string) (*domain.UserSession, *domain.User, []string, error) {
 	tokenHash = strings.TrimSpace(tokenHash)
 	if tokenHash == "" {
 		return nil, nil, nil, nil
@@ -41,14 +40,6 @@ func (r *userSessionRepo) ResolveActorBundle(ctx context.Context, tokenHash stri
 		return nil, nil, nil, fmt.Errorf("resolve actor bundle roles: %w", err)
 	}
 
-	if _, err := r.db.db.ExecContext(ctx, `
-		UPDATE user_sessions
-		SET last_seen_at = ?
-		WHERE token_hash = ?
-		  AND revoked_at IS NULL
-		  AND expires_at > UTC_TIMESTAMP(6)`, at.UTC(), tokenHash); err != nil {
-		return nil, nil, nil, fmt.Errorf("resolve actor bundle touch session: %w", err)
-	}
 	return session, user, roles, nil
 }
 
