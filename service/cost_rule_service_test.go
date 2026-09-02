@@ -752,6 +752,71 @@ func TestCostRulePreviewCopperPaperSizeLookupUsesNameAndPrintSide(t *testing.T) 
 	}
 }
 
+func TestCostRulePreviewCopperPaperCardSetCapsMultiDesignQuantityAtTwo(t *testing.T) {
+	rule := &domain.CostRule{
+		RuleID:            22,
+		RuleVersion:       1,
+		RuleName:          "铜版纸尺寸规则骨架",
+		CategoryCode:      "COPPER_PAPER",
+		RuleType:          domain.CostRuleTypeSizeBasedFormula,
+		FormulaExpression: "size_lookup_required",
+		Priority:          10,
+		IsActive:          true,
+		Source:            "test",
+	}
+
+	tests := []struct {
+		name     string
+		notes    string
+		quantity *int64
+		want     float64
+	}{
+		{name: "single card", notes: "常规250g铜版纸/双面接亲卡片/20*28.5cm/共1张", want: 0.6},
+		{name: "two design set inferred from name", notes: "常规250g铜版纸/双面接亲卡片/20*28.5cm/共2张", want: 1.2},
+		{name: "seven design set does not multiply seven times", notes: "常规250g铜版纸/双面接亲卡片/20*28.5cm/共7张", quantity: costRuleInt64Ptr(7), want: 1.2},
+		{name: "eight design set inferred from name", notes: "常规250g铜版纸/双面接亲卡片/20*28.5cm/共8张", want: 1.2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := previewCostRules(domain.CostRulePreviewRequest{
+				CategoryCode: "COPPER_PAPER",
+				Quantity:     tt.quantity,
+				Notes:        tt.notes,
+			}, []*domain.CostRule{rule}).Response
+			if result.RequiresManualReview {
+				t.Fatalf("requires_manual_review = true, want false; result=%+v", result)
+			}
+			if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-tt.want) > 0.000001 {
+				t.Fatalf("estimated_cost = %+v, want %.3f", result.EstimatedCost, tt.want)
+			}
+		})
+	}
+}
+
+func TestCostRulePreviewCopperPaperNonCardRetainsQuantityMultiplier(t *testing.T) {
+	quantity := int64(7)
+	result := previewCostRules(domain.CostRulePreviewRequest{
+		CategoryCode: "COPPER_PAPER",
+		Quantity:     &quantity,
+		Notes:        "常规250g铜版纸/双面菜单/20*28.5cm",
+	}, []*domain.CostRule{{
+		RuleID:            22,
+		RuleVersion:       1,
+		RuleName:          "铜版纸尺寸规则骨架",
+		CategoryCode:      "COPPER_PAPER",
+		RuleType:          domain.CostRuleTypeSizeBasedFormula,
+		FormulaExpression: "size_lookup_required",
+		Priority:          10,
+		IsActive:          true,
+		Source:            "test",
+	}}).Response
+
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-4.2) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 4.2 for a non-card copper-paper product", result.EstimatedCost)
+	}
+}
+
 func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -1325,5 +1390,9 @@ func (r *costRuleRepoStub) copyRuleWithDerivedLineage(rule *domain.CostRule) *do
 }
 
 func costRuleFloat64Ptr(v float64) *float64 {
+	return &v
+}
+
+func costRuleInt64Ptr(v int64) *int64 {
 	return &v
 }

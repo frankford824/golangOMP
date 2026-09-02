@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -461,13 +463,18 @@ func applySizeBasedFormula(rule *domain.CostRule, area float64, quantity int64, 
 		total := roundCurrencyAmount(formulaArea * unitPrice * float64(effectiveQuantity))
 		return total, fmt.Sprintf("%s：命中“%s”，按面积 %.4f ㎡ × 单价 ¥%.3f/㎡ × 数量 %d，成本为 ¥%.2f。", rule.RuleName, keyword, formulaArea, unitPrice, effectiveQuantity, total), true
 	}
-	if expr == "size_lookup_required" && costRuleLooksLikeCopperPaper(rule, notes) {
+	costContext := strings.TrimSpace(process + " " + notes)
+	if expr == "size_lookup_required" && costRuleLooksLikeCopperPaper(rule, costContext) {
 		side := detectPrintSide(process, notes)
 		price := 0.5
 		if side == "double" {
 			price = 0.6
 		}
-		total := price * float64(quantity)
+		billableQuantity, setCount, isCardSet := copperPaperBillableQuantity(quantity, costContext)
+		total := price * float64(billableQuantity)
+		if isCardSet {
+			return total, fmt.Sprintf("%s：接亲卡片套装共 %d 张，按套装最多 2 张计价；%s单价 ¥%.3f，本次成本为 ¥%.3f。", rule.RuleName, setCount, printSideLabel(side), price, total), true
+		}
 		return total, fmt.Sprintf("%s：按铜版纸%s价格计算，本次为 ¥%.3f。", rule.RuleName, printSideLabel(side), total), true
 	}
 	if strings.HasPrefix(expr, "print_side:") {
@@ -487,6 +494,34 @@ func applySizeBasedFormula(rule *domain.CostRule, area float64, quantity int64, 
 		return total, fmt.Sprintf("%s：按%s价格计算，本次为 ¥%.3f。", rule.RuleName, printSideLabel(side), total), true
 	}
 	return 0, "", false
+}
+
+var copperPaperCardSetCountPattern = regexp.MustCompile(`共\s*([0-9]+)\s*张`)
+
+// copperPaperBillableQuantity keeps the narrow, production-confirmed pricing
+// rule for the 接亲卡片 family: a multi-design SKU is one card set and is
+// capped at two billable printed cards. The displayed "共 N 张" is the number
+// of designs in the set, not N independently sold SKU units. Other copper
+// paper products retain their ordinary quantity multiplier.
+func copperPaperBillableQuantity(quantity int64, notes string) (billableQuantity, setCount int64, isCardSet bool) {
+	effectiveQuantity := quantity
+	if effectiveQuantity <= 0 {
+		effectiveQuantity = 1
+	}
+	normalizedNotes := strings.TrimSpace(notes)
+	if !strings.Contains(normalizedNotes, "接亲卡片") {
+		return effectiveQuantity, effectiveQuantity, false
+	}
+	setCount = effectiveQuantity
+	if matches := copperPaperCardSetCountPattern.FindStringSubmatch(normalizedNotes); len(matches) == 2 {
+		if parsed, err := strconv.ParseInt(matches[1], 10, 64); err == nil && parsed > 0 {
+			setCount = parsed
+		}
+	}
+	if setCount > 1 {
+		return 2, setCount, true
+	}
+	return 1, setCount, true
 }
 
 func parseKeywordAreaUnitPriceFormula(expr string) (string, float64, bool) {
