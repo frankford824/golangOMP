@@ -67,7 +67,7 @@ func TestTaskERPOutboxProcessorDispatchesFinalizedTaskJobs(t *testing.T) {
 	if err := processor.ProcessTaskERPOutbox(context.Background(), repo.TaskERPOutboxItem{ID: 1, TaskID: 42, JobType: "task_filing"}); err != nil {
 		t.Fatalf("ProcessTaskERPOutbox(task_filing) error = %v", err)
 	}
-	if filing.params.TaskID != 42 || filing.params.Source != TaskFilingTriggerSourceAuditFinalApproved || !filing.params.Force {
+	if filing.params.TaskID != 42 || filing.params.Source != TaskFilingTriggerSourceAuditFinalApproved || filing.params.Force {
 		t.Fatalf("filing params = %+v", filing.params)
 	}
 	if err := processor.ProcessTaskERPOutbox(context.Background(), repo.TaskERPOutboxItem{ID: 2, TaskID: 42, JobType: "task_image_sync"}); err != nil {

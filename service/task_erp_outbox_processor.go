@@ -100,17 +100,25 @@ func decodeTaskFilingOutboxParams(item repo.TaskERPOutboxItem) (TriggerTaskFilin
 	}
 
 	source := TaskFilingTriggerSourceAuditFinalApproved
+	force := false
 	switch strings.TrimSpace(payload.Source) {
 	case "", string(TaskFilingTriggerSourceAuditFinalApproved):
 		// Historical workflow-finalization jobs did not persist a source field.
+		// They must retain the normal payload-hash idempotency guard: a re-close
+		// after replacing only a finalized file must not overwrite ERP fields
+		// that were maintained directly after the original filing.
 	case "task_create", string(TaskFilingTriggerSourceCreate):
 		source = TaskFilingTriggerSourceCreate
+		force = true
 	case "task_sku_sync_recovery", string(TaskFilingTriggerSourceManualRetry):
 		source = TaskFilingTriggerSourceManualRetry
+		force = true
 	case string(TaskFilingTriggerSourceBusinessInfoPatch):
 		source = TaskFilingTriggerSourceBusinessInfoPatch
+		force = true
 	case string(TaskFilingTriggerSourceLegacyFiledAt):
 		source = TaskFilingTriggerSourceLegacyFiledAt
+		force = true
 	default:
 		return TriggerTaskFilingParams{}, fmt.Errorf("unsupported task filing ERP source %q", payload.Source)
 	}
@@ -118,7 +126,7 @@ func decodeTaskFilingOutboxParams(item repo.TaskERPOutboxItem) (TriggerTaskFilin
 		TaskID:     item.TaskID,
 		OperatorID: payload.OperatorID,
 		Source:     source,
-		Force:      true,
+		Force:      force,
 	}, nil
 }
 

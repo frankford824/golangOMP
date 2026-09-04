@@ -872,9 +872,11 @@ func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T
 	expectedImageURL := signer.BuildImageURL(asset)
 	bridge := &productManagementERPBridgeCapture{
 		readbackProduct: &domain.ERPProduct{
-			SKUCode:  "NSAC000001",
-			IID:      "定制亚克力",
-			ImageURL: *expectedImageURL,
+			SKUCode:          "NSAC000001",
+			IID:              "定制亚克力",
+			ProductName:      "ERP当前商品/14.5*23cm厚5.5mm",
+			ProductShortName: "ERP当前商品/厚5.5mm",
+			ImageURL:         *expectedImageURL,
 		},
 	}
 	svc := &productManagementService{
@@ -904,9 +906,12 @@ func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T
 	if bridge.itemStyleCalls != 0 {
 		t.Fatalf("image sync used UpdateItemStyle %d times, want 0", bridge.itemStyleCalls)
 	}
-	expectedERPName := truncateERPShortName(longHistoricalName, ERPProductNameMaxLength)
+	expectedERPName := "ERP当前商品/14.5*23cm厚5.5mm"
 	if bridge.payload.Name != expectedERPName || bridge.payload.ProductName != expectedERPName {
-		t.Fatalf("image upsert payload should use an ERP-safe historical name: %+v", bridge.payload)
+		t.Fatalf("image upsert payload should preserve the current ERP name instead of the stale task snapshot: %+v", bridge.payload)
+	}
+	if bridge.payload.ShortName != "ERP当前商品/厚5.5mm" || bridge.payload.ProductShortName != "ERP当前商品/厚5.5mm" {
+		t.Fatalf("image upsert payload should preserve the current ERP short name: %+v", bridge.payload)
 	}
 	if bridge.payload.SKUID != "NSAC000001" || bridge.payload.SKUCode != "NSAC000001" || bridge.payload.IID != "定制亚克力" {
 		t.Fatalf("image upsert payload identifiers = sku:%q sku_code:%q iid:%q", bridge.payload.SKUID, bridge.payload.SKUCode, bridge.payload.IID)

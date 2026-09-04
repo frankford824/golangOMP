@@ -876,15 +876,24 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	if appErr != nil {
 		return appErr
 	}
-	productIID, lookupErr := s.resolveProductManagementStyleIID(ctx, record)
+	currentERPProduct, productIID, lookupErr := s.resolveProductManagementERPProduct(ctx, record)
 	if lookupErr != nil {
 		return lookupErr
 	}
 	productName := truncateERPShortName(
-		firstNonEmptyString(strings.TrimSpace(record.ProductName), skuCode),
+		firstNonEmptyString(
+			strings.TrimSpace(currentERPProduct.ProductName),
+			strings.TrimSpace(currentERPProduct.Name),
+			strings.TrimSpace(record.ProductName),
+			skuCode,
+		),
 		ERPProductNameMaxLength,
 	)
-	shortName := productManagementERPShortName(productName, productIID, skuCode)
+	shortName := truncateERPShortName(firstNonEmptyString(
+		strings.TrimSpace(currentERPProduct.ProductShortName),
+		strings.TrimSpace(currentERPProduct.ShortName),
+		productManagementERPShortName(productName, productIID, skuCode),
+	), ERPProductNameMaxLength)
 	payload := domain.ERPProductUpsertPayload{
 		ProductID:        skuCode,
 		SKUID:            skuCode,
@@ -911,23 +920,24 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	return s.verifyERPImageReadback(ctx, record, imageURL)
 }
 
-func (s *productManagementService) resolveProductManagementStyleIID(ctx context.Context, record *domain.ProductManagementRecord) (string, *domain.AppError) {
+func (s *productManagementService) resolveProductManagementERPProduct(ctx context.Context, record *domain.ProductManagementRecord) (*domain.ERPProduct, string, *domain.AppError) {
 	if s == nil || s.erpBridge == nil {
-		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步服务未配置，无法确认 SKU 是否已建档", nil)
+		return nil, "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步服务未配置，无法确认 SKU 是否已建档", nil)
 	}
 	skuCode := strings.TrimSpace(record.SKUCode)
 	product, appErr := s.erpBridge.GetProductByID(ctx, skuCode)
 	if appErr != nil {
-		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步前未找到该 SKU："+appErr.Message, nil)
+		return nil, "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步前未找到该 SKU："+appErr.Message, nil)
+	}
+	if product == nil {
+		return nil, "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步前未找到该 SKU", nil)
 	}
 	productIID := firstNonEmptyString(strings.TrimSpace(record.ERPIID), strings.TrimSpace(record.ProductIID))
-	if product != nil {
-		productIID = firstNonEmptyString(productIID, strings.TrimSpace(product.IID))
-	}
+	productIID = firstNonEmptyString(productIID, strings.TrimSpace(product.IID))
 	if productIID == "" {
-		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步缺少款式编码，请先确认该 SKU 已在聚水潭建档", nil)
+		return nil, "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步缺少款式编码，请先确认该 SKU 已在聚水潭建档", nil)
 	}
-	return productIID, nil
+	return product, productIID, nil
 }
 
 var productManagementERPImageReadbackRetryDelays = []time.Duration{
