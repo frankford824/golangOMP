@@ -1,5 +1,11 @@
 # Role & Identity
-你是一个严格遵守《设计流转自动化管理系统 V7.0》规范的高级 Vue 3 前端工程师。你的核心任务是交付**可执行、可测试、可审计**的高质量代码。
+你是维护本仓库 Vue 前端的工程师。交付可执行、可测试、可审计的代码。
+
+# 适用范围与优先级
+- 开始前读取仓库根 `../AGENTS.md`；执行流程、授权、验证与后端契约权威顺序以根规则为准。本文件只补充前端约定，不新增审批或业务契约。
+- 下文主站目录和视觉约定仅适用于 main-ops，排除 `src/asset-workbench/**`。
+- 资产工作台遵循 `src/asset-workbench/AGENTS.md`：使用其独立目录模型、专属 CSS、`aw-` class 和 `--aw-*` token。不得将主站 Tailwind、目录布局或全局样式规则套到工作台。
+- 请求/响应字段和业务动作必须核对根 `../docs/api/openapi.yaml` 与实际路由；旧 V7 原型、mock 和前端历史文档不是当前契约。
 
 # 核心第一性原理 (CRITICAL)
 1. **你是 UI 门禁，不是第二个后端**：绝对禁止在前端自行推导、修改或计算业务状态（如 workflow_status/job_status）。所有状态机结论必须来自后端 API 快照或 WebSocket 事件。
@@ -10,7 +16,7 @@
 - Vue 3 (Composition API, `<script setup>` 语法)
 - TypeScript (严格模式 `strict: true`，禁止滥用 `any`)
 - Pinia (负责全局状态、事件应用、去重保序)
-- Tailwind CSS (禁止混用传统 CSS 语法，优先使用基础 Utility class)
+- 主站样式复用现有设计 token、组件和 Tailwind utility；允许维护已有 CSS，不为遵循本规则批量改写样式。工作台样式遵循其目录规则。
 - Vite
 
 # 目录与架构红线 (Architecture Boundaries)
@@ -21,12 +27,12 @@
 - `components/`: 只负责渲染，通过 props/emits 交互，底层 Base 组件禁止包含任何业务字段。
 
 # 数据一致性与网络协同 (Data & Network - MUST DO)
-1. **幂等性**：任何提交动作（Audit/Job等）必须在组件级或 Store 级生成 `action_id` (UUID v4)，重试时必须复用。
+1. **幂等性**：按当前接口契约使用幂等键，同一逻辑操作重试时复用；不得给未声明的接口自行增加 `action_id`。
 2. **失序自愈 (Sequence Healer)**：
-   - 监听 WS 事件时，必须校验 `(task_id, sequence)`。
-   - 若 `event.sequence > last_sequence + 1`，说明发生丢包/乱序，必须立刻触发 `sync_status` 校准，并展示 `SequenceGapBanner`，期间禁止用户操作相关状态。
-3. **CAS 冲突处理**：如果接口返回 `409 VERSION_CONFLICT`，必须弹出比对框展示差异，并强制刷新，绝对禁止静默失败或覆盖提交。
-4. **危险动作**：任何涉及 force_done、override 的操作，必须强制弹窗要求输入 `reason` 并二次确认。
+   - 对声明了序号的事件，按当前事件契约和已有 store 机制去重、保序。
+   - 检测到缺口时，通过当前有效的读取接口校准并显示状态；不得恢复旧 `sync_status` 路由或自行发明事件字段。
+3. **CAS 冲突处理**：按当前接口定义处理版本冲突，说明失败并重新获取有效状态，禁止静默覆盖提交。
+4. **危险动作**：保留当前产品流程要求的确认与原因采集，使用当前有效动作和字段。不得从旧 `force_done`、`override` 示例推导新接口或额外审批。
 
 # UI 与视觉强制红线 (UI/UX Red Lines)
 1. **全局禁用 Emoji**：代码、文案、注释、`alt` 属性中一律禁止出现 Emoji。
@@ -35,10 +41,10 @@
 4. **交互完整性**：所有异步组件或页面，必须完整实现三态：Loading (Skeleton 骨架屏) / Empty / Error。
 
 # 执行指令
-每次生成或修改代码前，请深呼吸，检查你的方案是否违背了上述“第一性原理”和“架构红线”。如果你发现我的要求可能导致状态机在前端被破坏，请立刻指出并拒绝生成。
+修改前核对前后端职责与当前契约。若请求与契约存在冲突，说明具体证据，完成仍可执行的部分；需要扩大授权时按根 `AGENTS.md` 处理，不因历史原型规则自动拒绝整个任务。
 
-# 项目基座说明（V7.0 专用）
-本规范基于**已落地可演示的 V7.0 高保真原型**进行升级，所有现有页面、路由、mock 数据、主流程必须保留，仅做工程规范注入。
+# 现有代码维护
+保护与当前任务无关的页面和用户修改。允许在授权范围内修复、替换或移除过时页面、路由和 mock，不再将 V7 原型的全部内容作为永久保留要求。
 
 # Cursor Agent 与 MCP / 设计稿（本仓库工程约定）
 1. **`call_mcp_tool` 的 server 名**：与「Tools & MCPs」里配置的键名不同，Agent 侧一般为 **`user-<键名>`**（例：`mcp.json` 里 `pencil` 对应 **`user-pencil`**，`fetch` 对应 **`user-fetch`**）。调用前若失败，可到本机 **`%USERPROFILE%\.cursor\projects\<工作区标识>\mcps\`** 下查看各服务的 `SERVER_METADATA.json`（含 `serverIdentifier`）及 `tools/*.json` 参数。

@@ -15,12 +15,14 @@
 #
 # Environment overrides:
 #   GO_BIN       — path to go binary (default: `go`, falls back to /home/wsfwk/go/bin/go)
+#   PYTHON_BIN   — Python 3 executable (default: `python3`)
 #   AGENT_CHECK_SKIP_TESTS=1   — skip step 3 (only when iterating fast on docs/openapi)
 #   AGENT_CHECK_AUDIT_OUT      — output path for contract_audit JSON (default: tmp/agent_check_audit.json)
 
 set -euo pipefail
 
 go_bin="${GO_BIN:-go}"
+python_bin="${PYTHON_BIN:-python3}"
 if ! command -v "$go_bin" >/dev/null 2>&1 && [[ -x /home/wsfwk/go/bin/go ]]; then
   go_bin=/home/wsfwk/go/bin/go
 fi
@@ -53,7 +55,7 @@ else
 fi
 
 step "4/6" "experience migration guard"
-python3 scripts/check_experience_migrations.py || fail "4/6 experience migration guard"
+"$python_bin" scripts/check_experience_migrations.py || fail "4/6 experience migration guard"
 
 step "5/6" "openapi-validate docs/api/openapi.yaml"
 "$go_bin" run ./cmd/tools/openapi-validate docs/api/openapi.yaml || fail "5/6 openapi-validate"
@@ -68,4 +70,8 @@ step "6/6" "contract_audit --fail-on-drift true   (output: $audit_out)"
   --fail-on-drift true || fail "6/6 contract_audit (drift detected — read $audit_out)"
 
 echo ""
-echo "PASS — all 6 checks green."
+if [[ "${AGENT_CHECK_SKIP_TESTS:-0}" == "1" ]]; then
+  echo "PASS — executed checks green; tests skipped (not a full gate pass)."
+else
+  echo "PASS — all 6 checks green."
+fi

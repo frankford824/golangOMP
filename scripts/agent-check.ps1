@@ -1,16 +1,18 @@
 # agent-check.ps1 — consolidated full-gate verification for AI coding agents.
 #
 # PowerShell mirror of scripts/agent-check.sh.
-# Runs the five checks AGENTS.md §After Editing requires; first failure exits.
+# Runs the six checks AGENTS.md §After Editing requires; first failure exits.
 #
 # Environment overrides:
 #   $env:GO_BIN                  — path to go binary (default: 'go')
+#   $env:PYTHON_BIN              — Python 3 executable (default: 'python')
 #   $env:AGENT_CHECK_SKIP_TESTS  — '1' to skip step 3
 #   $env:AGENT_CHECK_AUDIT_OUT   — JSON output path (default: tmp/agent_check_audit.json)
 
 $ErrorActionPreference = 'Stop'
 
 $goBin = if ($env:GO_BIN) { $env:GO_BIN } else { 'go' }
+$pythonBin = if ($env:PYTHON_BIN) { $env:PYTHON_BIN } else { 'python' }
 if (-not (Get-Command $goBin -ErrorAction SilentlyContinue)) {
     throw "go binary not found (looked for '$goBin'). Set `$env:GO_BIN to the full path."
 }
@@ -37,24 +39,27 @@ function Invoke-Step {
     }
 }
 
-Step '1/5' 'go vet ./...'
-Invoke-Step '1/5' { & $goBin vet ./... }
+Step '1/6' 'go vet ./...'
+Invoke-Step '1/6' { & $goBin vet ./... }
 
-Step '2/5' 'go build ./...'
-Invoke-Step '2/5' { & $goBin build ./... }
+Step '2/6' 'go build ./...'
+Invoke-Step '2/6' { & $goBin build ./... }
 
 if ($env:AGENT_CHECK_SKIP_TESTS -eq '1') {
-    Step '3/5' 'go test ./... -count=1   [SKIPPED via $env:AGENT_CHECK_SKIP_TESTS=1]'
+    Step '3/6' 'go test ./... -count=1   [SKIPPED via $env:AGENT_CHECK_SKIP_TESTS=1]'
 } else {
-    Step '3/5' 'go test ./... -count=1'
-    Invoke-Step '3/5' { & $goBin test ./... -count=1 }
+    Step '3/6' 'go test ./... -count=1'
+    Invoke-Step '3/6' { & $goBin test ./... -count=1 }
 }
 
-Step '4/5' 'openapi-validate docs/api/openapi.yaml'
-Invoke-Step '4/5' { & $goBin run ./cmd/tools/openapi-validate docs/api/openapi.yaml }
+Step '4/6' 'experience migration guard'
+Invoke-Step '4/6' { & $pythonBin scripts/check_experience_migrations.py }
 
-Step '5/5' "contract_audit --fail-on-drift true   (output: $auditOut)"
-Invoke-Step '5/5' {
+Step '5/6' 'openapi-validate docs/api/openapi.yaml'
+Invoke-Step '5/6' { & $goBin run ./cmd/tools/openapi-validate docs/api/openapi.yaml }
+
+Step '6/6' "contract_audit --fail-on-drift true   (output: $auditOut)"
+Invoke-Step '6/6' {
     & $goBin run ./tools/contract_audit `
         --transport transport/http.go `
         --handlers transport/handler `
@@ -65,4 +70,8 @@ Invoke-Step '5/5' {
 }
 
 Write-Host ""
-Write-Host 'PASS - all 5 checks green.'
+if ($env:AGENT_CHECK_SKIP_TESTS -eq '1') {
+    Write-Host 'PASS - executed checks green; tests skipped (not a full gate pass).'
+} else {
+    Write-Host 'PASS - all 6 checks green.'
+}

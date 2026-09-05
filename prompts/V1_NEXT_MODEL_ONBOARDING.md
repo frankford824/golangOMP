@@ -1,4 +1,7 @@
-# V1 后端 · 下一模型接手包(V1.1 → V1.2 / V2 通用入口)
+# V1 后端 · 历史接手包（已停用）
+
+> **历史证据，非当前会话入口。** 新任务使用 [CODEX_SESSION_BOOTSTRAP.md](CODEX_SESSION_BOOTSTRAP.md) 和根 [AGENTS.md](../AGENTS.md)。
+> 以下正文原样保留；旧 SHA、测试库清理、隧道、签字和 ABORT 步骤不适用于新任务，不构成执行授权。
 
 > Last updated: 2026-04-25
 > 性质:**接手 prompt 起步包**(给下一个接手 V1 后端的 Codex / Claude / GPT 模型用)

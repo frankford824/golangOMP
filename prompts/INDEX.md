@@ -1,15 +1,16 @@
 # Prompts Index
 
-> V1.2 generated prompt index. Prompts are Tier-3 historical inputs and must not define current API fields.
+> Current session entry: [CODEX_SESSION_BOOTSTRAP.md](CODEX_SESSION_BOOTSTRAP.md), which delegates workflow rules to root [AGENTS.md](../AGENTS.md).
+> The V1.2 index below is historical. Its prompts do not define current API fields, startup prerequisites or authorization for new work.
 
 | file | bucket | title |
 |---|---|---|
-| `V1_1_A1_DETAIL_P99.md` | active | V1.1-A1 · `/v1/tasks/{id}/detail` P99 收口轮 |
-| `V1_1_A2_CONTRACT_DRIFT_PURGE.md` | active | V1.1-A2 · 全量契约漂移清算(Contract Drift Purge)· 一次性收口 |
-| `V1_1_FRONTEND_INTEGRATION_HANDOFF.md` | active | V1.1 前端联调入口 · Backend Ready Handoff |
-| `V1_2_AUTHORITY_AND_OPENAPI_PURGE.md` | active | V1.2 · Authority 归位 + OpenAPI 死内容清算 + 字段级 Audit 工具 + CI 硬门 · 治本一次性收口 |
-| `V1_NEXT_MODEL_ONBOARDING.md` | active | V1 后端 · 下一模型接手包(V1.1 → V1.2 / V2 通用入口) |
-| `V1_ROADMAP.md` | active | V1 重构 · Codex Prompt 路线总表 |
+| `V1_1_A1_DETAIL_P99.md` | historical | V1.1-A1 · `/v1/tasks/{id}/detail` P99 收口轮 |
+| `V1_1_A2_CONTRACT_DRIFT_PURGE.md` | historical | V1.1-A2 · 全量契约漂移清算(Contract Drift Purge)· 一次性收口 |
+| `V1_1_FRONTEND_INTEGRATION_HANDOFF.md` | historical | V1.1 前端联调入口 · Backend Ready Handoff |
+| `V1_2_AUTHORITY_AND_OPENAPI_PURGE.md` | historical | V1.2 · Authority 归位 + OpenAPI 死内容清算 + 字段级 Audit 工具 + CI 硬门 · 治本一次性收口 |
+| `V1_NEXT_MODEL_ONBOARDING.md` | historical | V1 后端 · 下一模型接手包(V1.1 → V1.2 / V2 通用入口) |
+| `V1_ROADMAP.md` | historical | V1 重构 · Codex Prompt 路线总表 |
 | `archive_pre_v1_2/STEP_01.md` | archive | Claude Step 01 Prompt |
 | `archive_pre_v1_2/STEP_02.md` | archive | Claude Step 02 Prompt |
 | `archive_pre_v1_2/STEP_03.md` | archive | Claude Step 03 Prompt |

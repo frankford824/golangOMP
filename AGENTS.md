@@ -11,6 +11,14 @@
 
 This file is an assistant guidance note. It is not the backend specification.
 
+## Instruction Scope And Authorization
+
+- Higher-priority runtime instructions and the user's explicit task scope take precedence over repository guidance. A read-only request does not authorize edits or operational actions.
+- Within repository guidance, this file owns workflow, authorization and validation rules. Nested `AGENTS.md` files add rules for their directories; entry prompts, `CLAUDE.md`, skills and editor rules must not redefine these rules or backend contracts. Apply the asset-workbench rules only within its boundary.
+- Reuse authorization already given in the conversation. For routine implementation choices within that scope, state reasonable assumptions and continue. Ask only when missing information materially changes the outcome or the required action is not authorized; continue independent authorized work while waiting.
+- Release preparation, tags, push, deployment, remote SSH and DB writes outside test fixtures require explicit user authorization for that action, including authorization already given for the active task. A generic request to fix, inspect or verify does not by itself authorize production operations. Reading a runbook is not authorization to execute it.
+- If a rule blocks progress, identify its file and instruction, explain the missing authorization or evidence, and finish any independent work still in scope. Do not ask again for an exception the user has already explicitly authorized.
+
 ## Current Repo Baseline
 
 - This is now a monorepo: Go backend code lives at the repository root, and Vue frontend code lives only under `vue/`.
@@ -20,7 +28,7 @@ This file is an assistant guidance note. It is not the backend specification.
 - Request/response field contracts are decided by `docs/api/openapi.yaml`.
 - New frontend or new integrations must start from the V1 SoT route families and the generated frontend docs under `docs/frontend/`.
 - Compatibility and deprecated surfaces remain documented only for migration safety.
-- Recent V1.21 work materially changed task detail aggregation, batch SKU/i_id flows, ERP filing projection, asset upload/read-model fields, task visibility, permissions, and frontend docs; do not rely on v0.9 handoff or archived model memory for those areas.
+- The V1-named authority files now describe the V8 replacement contract. Read their current contents; do not infer current behavior from old release labels, handoff snapshots or archived model memory.
 
 ## Monorepo Layout
 
@@ -56,8 +64,8 @@ This file is an assistant guidance note. It is not the backend specification.
 1. `docs/V1_BACKEND_SOURCE_OF_TRUTH.md`
 2. `docs/api/openapi.yaml`
 3. `transport/http.go`
-4. `git log --oneline -20` for recent V1.21 task/asset/ERP/frontend-doc deltas
-5. `docs/archive/legacy_specs/V0_9_BACKEND_SOURCE_OF_TRUTH.md` for historical background only
+4. `git log --oneline -20` for recent changes relevant to the task
+5. Read historical background only when needed to explain a specific change; it does not add prerequisites to a new task.
 
 ## Non-Authoritative Materials
 
@@ -68,7 +76,7 @@ These directories exist for historical evidence only. Never derive current rules
 - `docs/archive/*` (other subfolders) — historical archives, including `legacy_specs/` and `model_memory/`.
 - `docs/iterations/*` and `docs/phases/*` — retro reports and phase evidence; only what is restated in the V1 SoT counts as current.
 - `prompts/archive_pre_v1_2/` — pre-V1.2 prompt experiments, including `root_legacy/` (13 early `AGENT_*` / `AUTO_*` / `COMMANDER_*` / `MODEL_SWITCH_*` / `PHASE_*` / `ITERATION_TEMPLATE` / `CLAUDE_Backend_Master_Prompt` files moved from repo root in 2026-04).
-- `prompts/*` (active) — execution history for V1.2+ iterations, not current contract authority. The current standing handover prompt is `prompts/CODEX_SESSION_BOOTSTRAP.md`.
+- `prompts/*` — historical execution inputs, except `prompts/CODEX_SESSION_BOOTSTRAP.md`, the standing entry prompt that references this file. Historical prompts do not authorize cleanup, SSH, migrations, approvals or baseline repair in a new task.
 - `dist/*` — release build artifacts and their bundled `README.md` / `CHANGELOG.md`. Never read these for repository rules.
 
 ## Working Rule
@@ -83,17 +91,18 @@ When documents disagree:
 
 ## Session Start
 
-1. Run `git status` and inspect recent commits with `git log --oneline -20`.
+1. Confirm the working directory; run `git status --short --untracked-files=all`, `git branch --show-current`, `git rev-parse HEAD`, and `git log --oneline -20`.
 2. If the working tree is dirty, identify which files are unrelated user/work-in-flight changes before editing.
 3. Read the three authority files in the order above for the route family being touched.
 4. Restate the route family and contract files affected before making business-code edits.
+5. For guidance-only or tooling-only work with no business/API impact, state that scope and read the relevant instructions or scripts; unrelated route families need not be loaded. Measure current state instead of copying a historical PASS, SHA or release label. Do not update historical baselines as a side effect of unrelated work.
 
 ## Before Editing
 
 - Locate the route in `transport/http.go` and the schema in `docs/api/openapi.yaml` first.
 - Treat path additions/removals, query parameters, request bodies, response bodies, schema fields, pagination envelopes, and readiness/deprecation markers as API contract changes.
 - If a Go struct's JSON contract changes, update OpenAPI in the same logical change; newly added OpenAPI schemas must be referenced by at least one operation or component chain.
-- If OpenAPI changes, regenerate frontend docs with `python scripts/docs/generate_frontend_docs.py`.
+- If OpenAPI changes, regenerate frontend docs with `python3 scripts/docs/generate_frontend_docs.py` in Linux/WSL, or the configured Python 3 interpreter on Windows.
 - If `db/migrations/**` appears necessary, stop and surface the proposal unless the user explicitly authorized that migration work.
 
 ## Engineering Hygiene
@@ -101,13 +110,13 @@ When documents disagree:
 - Prefer the smallest useful change and reuse existing package/service boundaries before adding new abstractions.
 - Do not build platform-style future capacity unless the current task proves it is needed.
 - Keep compatibility and deprecated surfaces shrinking; do not add new compatibility routes unless explicitly requested.
-- Do not prepare a release, deploy, push, SSH, or write production data unless explicitly requested.
+- Follow the explicit authorization requirements in §Instruction Scope And Authorization for operational actions.
 
 ## After Editing
 
 Run the checks appropriate to the blast radius.
 
-**Full gate (default for any contract / handler / service / domain change)** — prefer the consolidated script:
+**Full gate (default for backend contract / handler / service / domain / repository changes, except the service-only case below)** — prefer the consolidated script:
 
 ```bash
 ./scripts/agent-check.sh        # Linux / macOS / WSL
@@ -122,14 +131,21 @@ The script runs, in order and stops on first failure:
 1. `go vet ./...`
 2. `go build ./...`
 3. `go test ./... -count=1`
-4. `go run ./cmd/tools/openapi-validate docs/api/openapi.yaml`
-5. `go run ./tools/contract_audit ... --fail-on-drift true` (output: `tmp/agent_check_audit.json`)
+4. Python 3: `scripts/check_experience_migrations.py` (static inspection; does not apply migrations)
+5. `go run ./cmd/tools/openapi-validate docs/api/openapi.yaml`
+6. `go run ./tools/contract_audit ... --fail-on-drift true` (output: `tmp/agent_check_audit.json`)
 
-If the script fails, do not bypass it. Read the failing step's output, fix the root cause, rerun. Use `AGENT_CHECK_SKIP_TESTS=1` only when iterating fast on docs/openapi-only changes — never when claiming done.
+Both scripts run these six checks in this order. `PYTHON_BIN` selects the Python 3 executable (default `python3` in Bash, `python` in PowerShell). For this WSL checkout, run backend commands in Linux rather than Windows Go against the UNC path.
 
-**Narrow gate (service-only fix, no contract change)**: run the focused package test plus `go test ./... -count=1` and a quick `go vet ./...` before deploying or claiming done. Skip steps 4–5 only when the diff touches **zero** files under `transport/`, `domain/`, or `docs/api/openapi.yaml`.
+If the script fails, it stops subsequent checks, not the whole task. Diagnose the failure, fix it within the authorized scope, and rerun the required gate. If resolving it requires an unauthorized action or an unrelated change, report the blocker and continue independent work; do not claim PASS or create an ABORT file automatically. Use `AGENT_CHECK_SKIP_TESTS=1` only for fast docs/openapi iteration, never as evidence that the full gate passed.
 
-**Frontend docs**: if OpenAPI changed, also run `python scripts/docs/generate_frontend_docs.py` and commit the regenerated `docs/frontend/*.md` in the same logical change.
+**Narrow gate (service-only fix, no contract change)**: run the focused package test plus `go test ./... -count=1` and `go vet ./...`. The exception applies only to service implementation and its tests, with zero changes under `transport/`, `domain/`, `repo/`, `db/migrations/`, or `docs/api/openapi.yaml`; skip full-gate steps 4–6 only for this case.
+
+**Guidance / scripts / tests only (no backend implementation or API contract change)**: review documentation references and the diff; validate changed scripts with syntax checks and relevant success/failure cases, or run the affected tests. Test files under backend directories still qualify for this exception. If backend implementation or the API contract also changes, use the full or service-only gate above. Do not run scripts that write artifacts or data during a read-only review.
+
+**Frontend implementation**: run relevant tests and the affected app build from `vue/` (`npm run build:prod` for main-ops, `npm run build:asset` for asset-workbench). Follow applicable nested rules, including `npm run asset:audit` for workbench page/component additions. Frontend guidance-only changes use the guidance checks above.
+
+**Frontend docs**: if OpenAPI changed, regenerate as described in §Before Editing and include `docs/frontend/*.md` in the same logical change. After required checks pass, repeat or broaden testing only for new changes, failures or unresolved concerns.
 
 ## Response format at end of any non-trivial task
 
@@ -166,10 +182,10 @@ intentionally changed, list the extras explicitly and label them
   `docs/V1_CUSTOMIZATION_WORKFLOW.md`.
 - Do not delete `docs/iterations/**`, `prompts/**`, or archived evidence.
 - Do not bulk rewrite files you have not read in this session.
-- Production deploy, remote SSH, and DB writes are operational actions; perform them only when the user requests or the active task clearly requires deployment/verification.
+- Operational actions follow §Instruction Scope And Authorization; do not infer production authorization from generic verification work.
 
 ## When Stuck
 
 - If two authority files disagree, follow the Working Rule precedence and surface the disagreement to the user.
-- If a fix needs to cross a hard boundary, stop and ask for direction.
+- If a fix crosses a hard boundary without the required explicit authorization already present, pause that action and ask for direction. Continue independent authorized work.
 - If a value, command, path, or behavior cannot be confirmed from the repository itself, write `Unknown` or `To be confirmed` in any document or report you produce. Never invent rules, paths, or behaviors that the repository does not already prove.
