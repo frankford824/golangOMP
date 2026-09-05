@@ -202,6 +202,7 @@ export function validateCompose(
     violations.push({ field: 'rows', message: '一次最多 100 行，请分批提交' })
   }
   const dimensionLabels = { width: '宽', height: '高', area: '面积' } as const
+  const seenNewDesignRows = new Map<string, number>()
   rows.forEach((row, rowIndex) => {
     const add = (field: ComposeViolation['field'], message: string) => violations.push({ row_id: row.id, row_index: rowIndex, field, message })
     for (const key of ['width', 'height', 'area'] as const) {
@@ -218,6 +219,19 @@ export function validateCompose(
       if (!row.product_name?.trim()) add('product_name', '产品名称不能为空')
       if (isErpProductNameTooLong(row.product_name)) add('product_name', erpProductNameError(row.product_name))
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写设计需求')
+      // Match the fields emitted for new-design batch items. Row IDs and
+      // reference files are not part of the backend's duplicate key.
+      if (row.product_i_id?.trim() && row.product_name?.trim() && row.design_requirement?.trim()) {
+        const key = JSON.stringify([
+          row.product_i_id.trim(), row.product_name.trim(), row.design_requirement.trim(), dimensionVariant(row) ?? {},
+        ])
+        const previous = seenNewDesignRows.get(key)
+        if (previous != null) {
+          add('product_name', `与第 ${previous + 1} 条明细（表格第 ${previous + 2} 行）内容重复，请删除重复行或填写真实的产品差异`)
+        } else {
+          seenNewDesignRows.set(key, rowIndex)
+        }
+      }
     } else if (intent === 'retouch') {
       if (!row.erp_sku?.trim()) add('erp_sku', '请填写 SKU 编码')
       if (!row.design_requirement?.trim()) add('design_requirement', '请填写修图要求')
@@ -427,18 +441,32 @@ export function buildPlanningInputs(rows: ComposeRow[], customizationRequired = 
 }
 
 export function applyBackendViolations(rows: ComposeRow[], raw: unknown): ComposeViolation[] {
-  const payload = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const root = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const response = root.response && typeof root.response === 'object' ? root.response as Record<string, unknown> : {}
+  const body = root.responseData ?? response.data ?? raw
+  const payload = body && typeof body === 'object' ? body as Record<string, unknown> : {}
   const error = payload.error && typeof payload.error === 'object' ? payload.error as Record<string, unknown> : payload
   const details = error.details && typeof error.details === 'object' ? error.details as Record<string, unknown> : {}
   const items = Array.isArray(details.violations) ? details.violations as Array<Record<string, unknown>> : []
   return items.map((item) => {
     const fieldPath = String(item.field ?? '')
-    const match = fieldPath.match(/(?:batch_items|planning_sku_items|retouch_requirements)\[(\d+)]\.([a-z0-9_]+)/i)
-    const rowIndex = match ? Number(match[1]) : undefined
+    const match = fieldPath.match(/^(batch_items|planning_sku_items|retouch_requirements)\[(\d+)](?:\.(.+))?$/i)
+    const index = match ? Number(match[2]) : undefined
+    const rowIndex = index != null && rows[index] ? index : undefined
+    const fieldName = match?.[3] || (match?.[1] === 'retouch_requirements' ? 'design_requirement' : match ? 'product_name' : fieldPath)
+    const aliases: Record<string, ComposeViolation['field']> = {
+      category_code: 'product_i_id', i_id: 'product_i_id', erp_product_i_id: 'product_i_id',
+      deadline_at: 'due_at', description: 'design_requirement',
+      reference_file_refs: 'reference_assets', variant_json: 'product_name',
+    }
+    const leaf = fieldName.replace(/^variant_json\./, '')
+    const field = aliases[leaf] ?? leaf
+    const knownField = Object.values(columns).flat().some((column) => column.key === field)
+      || ['due_at', 'customization_source_type', 'rows'].includes(field)
     return {
       row_id: rowIndex != null ? rows[rowIndex]?.id : undefined,
       row_index: rowIndex,
-      field: (match?.[2] || fieldPath || 'rows') as ComposeViolation['field'],
+      field: (knownField ? field : 'rows') as ComposeViolation['field'],
       message: String(item.message ?? item.reason ?? item.code ?? '提交内容不符合要求'),
     }
   })

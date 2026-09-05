@@ -201,8 +201,8 @@
       </div>
 
       <footer class="validation-dock">
-        <div class="validation-summary" :class="{ valid: !violations.length }"><CheckCircle2 v-if="!violations.length" :size="22" /><AlertTriangle v-else :size="22" /><div><strong>{{ violations.length ? `还有 ${violations.length} 处需要完善` : '内容都填好了，可以提交' }}</strong><span>{{ violations.length ? '点一下红色提示，会直接跳到要改的格子' : '提交后系统还会再整体核对一遍' }}</span></div></div>
-        <div v-if="violations.length" class="validation-items"><button v-for="issue in violations.slice(0, 4)" :key="`${issue.row_id}-${issue.field}-${issue.message}`" type="button" @click="locateViolation(issue)"><span>{{ issue.row_index == null ? '公共信息' : `第 ${issue.row_index + 1} 行` }}</span>{{ issue.message }}</button></div>
+        <div class="validation-summary" :class="{ valid: !violations.length && !submitError }"><CheckCircle2 v-if="!violations.length && !submitError" :size="22" /><AlertTriangle v-else :size="22" /><div><strong>{{ violations.length ? `还有 ${violations.length} 处需要完善` : submitError ? '提交未完成，请查看提示' : '填写检查通过，可提交校验' }}</strong><span>{{ violations.length ? '点一下红色提示，会直接跳到要改的格子' : submitError ? '填写内容已保留' : '最终创建结果以提交后的系统校验为准' }}</span></div></div>
+        <div v-if="violations.length" class="validation-items"><button v-for="issue in violations.slice(0, 4)" :key="`${issue.row_id}-${issue.field}-${issue.message}`" type="button" @click="locateViolation(issue)"><span>{{ issue.row_index == null ? '公共信息' : `第 ${issue.row_index + 1} 条明细（表格第 ${issue.row_index + 2} 行）` }}</span>{{ issue.message }}</button></div>
         <div class="dock-actions"><p v-if="submitError" role="alert">{{ submitError }}</p><button class="primary-button" type="button" :disabled="submitting || validatingIIDs || Boolean(violations.length)" @click="submit(false)">{{ validatingIIDs ? '正在核对款式编码…' : submitting ? '正在创建…' : submitLabel }}</button></div>
       </footer>
     </section>
@@ -346,6 +346,7 @@ const visiblePlanningItems = computed(() => planningResult.value?.items.filter((
 const resultTitle = computed(() => {
   if (planningResult.value) return `已生成 ${planningResult.value.items.length} 个 SKU`
   if (intent.value === 'retouch' && failedRows.value.some((row) => row.result_task_id)) return '任务已创建，部分附件上传失败'
+  if (failedRows.value.length === rows.value.length) return '本次任务未创建成功'
   return failedRows.value.length ? '部分任务创建失败' : '任务创建完成'
 })
 const resultSummary = computed(() => {
@@ -847,8 +848,27 @@ async function submit(retryOnly: boolean) {
           }
         }
       } catch (error) {
-        const response = (error as { response?: { data?: unknown } })?.response?.data
-        const mapped = applyBackendViolations(unitRows, response)
+        const mapped = applyBackendViolations(unitRows, error)
+        if (intent.value === 'new_design') {
+          const status = (error as { status?: number; response?: { status?: number } })?.status
+            ?? (error as { response?: { status?: number } })?.response?.status
+          const rejected = status === 400 || status === 422
+          // A confirmed validation rejection created no task. Edits must use a
+          // fresh key; network failures retain the original key for safe retry.
+          if (rejected) clientCreateId.value = generateActionId()
+          unitRows.forEach((row) => { row.status = 'draft'; row.error = '' })
+          await nextTick() // let the row watcher finish before retaining server violations
+          remoteViolations.value = mapped.map((issue) => ({
+            ...issue,
+            row_index: issue.row_id ? rows.value.findIndex((row) => row.id === issue.row_id) : undefined,
+          }))
+          const message = mapped.length ? '请按标出的明细修改后重新提交。' : error instanceof Error ? error.message : '请稍后重试。'
+          submitError.value = `${rejected ? `本次${unitRows.length > 1 ? '整批' : ''}未创建` : '本次提交未能确认成功'}，填写内容已保留。${message}`
+          result.value = false
+          dirty.value = true
+          if (remoteViolations.value[0]) locateViolation(remoteViolations.value[0])
+          return
+        }
         unitRows.forEach((row) => { row.status = 'failed'; row.error = mapped.filter((issue) => !issue.row_id || issue.row_id === row.id).map((issue) => issue.message).join('；') || (error instanceof Error ? error.message : '创建失败') })
       }
     }

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   uploadReferenceFileRef: vi.fn(), uploadPlanningImage: vi.fn(),
   uploadRetouchRequirementPendingAssets: vi.fn(), downloadPlanning: vi.fn(),
   gridFlush: vi.fn(),
+  gridFocus: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -39,8 +40,81 @@ vi.mock('@/services/upload/retouchRequirementUpload', () => ({ uploadRetouchRequ
 vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: (permission: string) => mocks.permissions.has(permission) }) }))
 
 import UnifiedTaskCreateView from './UnifiedTaskCreateView.vue'
+import { createComposeRow } from '@/domain/unified-task-compose'
+
+async function mountNewDesignBatch(names: string[]) {
+  mocks.route.query = { intent: 'new_design' }
+  const seed = names.map((name, index) => createComposeRow({
+    id: `batch-${index}`, product_i_id: 'KT_STANDARD', product_name: name, design_requirement: '生成编码', area: 0.168,
+    reference_assets: [{ id: `ref-${index}`, name: '参考图.png', status: 'uploaded', upload_ref: { asset_id: `asset-${index}` } }],
+  }))
+  const wrapper = mount(UnifiedTaskCreateView, {
+    global: { stubs: {
+      UnifiedTaskGrid: {
+        props: ['rows'], emits: ['update:rows'], data: () => ({ seed }),
+        methods: { focusCell: mocks.gridFocus, flushRowsFromWorkbook: mocks.gridFlush },
+        template: '<button class="seed-batch" @click="$emit(\'update:rows\', seed)">填入测试明细</button>',
+      }, IIdSelector: true, RouterLink: true,
+    } },
+  })
+  await wrapper.get('.seed-batch').trigger('click')
+  await flushPromises()
+  return wrapper
+}
 
 describe('UnifiedTaskCreateView', () => {
+  it('blocks duplicate rows before submission, locates the row, and accepts a genuine correction', async () => {
+    const wrapper = await mountNewDesignBatch(['挖挖乐', '挖福运', '挖挖乐'])
+    expect(wrapper.get('.validation-dock .primary-button').attributes('disabled')).toBeDefined()
+    const issue = wrapper.get('.validation-items button')
+    expect(issue.text()).toContain('第 3 条明细（表格第 4 行）')
+    expect(issue.text()).toContain('与第 1 条明细')
+    await issue.trigger('click')
+    expect(mocks.gridFocus).toHaveBeenCalledWith(2, 'product_name')
+    expect(mocks.addTask).not.toHaveBeenCalled()
+    await wrapper.get('[data-row-index="2"] textarea').setValue('第三款独立设计')
+    expect(wrapper.get('.validation-dock .primary-button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('填写检查通过，可提交校验')
+    wrapper.unmount()
+  })
+
+  it('keeps a rejected batch editable, shows the actual row error, and permits an edited retry', async () => {
+    mocks.addTask.mockRejectedValueOnce(Object.assign(new Error('请求参数有误，请检查填写内容'), {
+      status: 400, responseData: { error: { details: { violations: [{ field: 'batch_items[1]', code: 'duplicate_batch_item', message: '第 3 行与第 2 行内容重复，请核对产品信息' }] } } },
+    }))
+    const wrapper = await mountNewDesignBatch(['第一款', '第二款'])
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+    const firstKey = mocks.addTask.mock.calls[0]?.[1]
+    expect(wrapper.find('.task-result-grid').exists()).toBe(false)
+    expect(wrapper.text()).toContain('本次整批未创建，填写内容已保留')
+    expect(wrapper.get('.validation-items').text()).toContain('第 3 行与第 2 行内容重复')
+    expect(wrapper.get('.validation-dock .primary-button').attributes('disabled')).toBeDefined()
+    expect(mocks.gridFocus).toHaveBeenCalledWith(1, 'product_name')
+    await wrapper.get('[data-row-index="1"] textarea').setValue('修正后的真实设计差异')
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+    expect(mocks.addTask).toHaveBeenCalledTimes(2)
+    expect(mocks.addTask.mock.calls[1]?.[1]).not.toBe(firstKey)
+    expect(mocks.addTask.mock.calls[1]?.[0].batchItems).toHaveLength(2)
+    expect(mocks.addTask.mock.calls[1]?.[0].batchItems[1].referenceFileRefs).toEqual([{ asset_id: 'asset-1' }])
+    expect(wrapper.text()).toContain('任务创建完成')
+    wrapper.unmount()
+  })
+
+  it('keeps the same idempotency key after an uncertain network failure', async () => {
+    mocks.addTask.mockRejectedValueOnce(new Error('网络连接失败'))
+    const wrapper = await mountNewDesignBatch(['第一款', '第二款'])
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('本次提交未能确认成功')
+    expect(wrapper.get('.validation-summary').text()).toContain('提交未完成，请查看提示')
+    const key = mocks.addTask.mock.calls[0]?.[1]
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+    expect(mocks.addTask.mock.calls[1]?.[1]).toBe(key)
+    wrapper.unmount()
+  })
   afterEach(() => {
     vi.unstubAllGlobals()
   })

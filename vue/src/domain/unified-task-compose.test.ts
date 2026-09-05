@@ -21,6 +21,44 @@ const common: ComposeCommonInfo = {
 }
 
 describe('unified task compose domain', () => {
+  it('flags the first/third duplicate from a pasted batch even when reference images differ', () => {
+    const seed = { product_i_id: '雪弗板', product_name: '中秋挖挖乐80*21cm/厚度1cm', design_requirement: '生成编码', area: 0.168 }
+    const rows = [
+      createComposeRow({ ...seed, id: 'first' }),
+      createComposeRow({ ...seed, id: 'second', product_name: '中秋挖福运80*21cm/厚度1cm' }),
+      createComposeRow({ ...seed, id: 'third', product_name: ` ${seed.product_name} `, reference_assets: [{ id: 'ref', name: 'another.png', status: 'uploaded', upload_ref: 'ref' }] }),
+    ]
+    expect(validateCompose('new_design', common, rows, new Date('2026-07-16'))).toEqual([
+      expect.objectContaining({ row_id: 'third', row_index: 2, field: 'product_name', message: expect.stringContaining('第 1 条明细（表格第 2 行）') }),
+    ])
+    rows[2].design_requirement = '另一版图案'
+    expect(validateCompose('new_design', common, rows, new Date('2026-07-16'))).toEqual([])
+  })
+
+  it('allows genuine per-SKU dimension differences and does not apply batch dedupe to planning', () => {
+    const row = createComposeRow({ product_i_id: 'KT', product_name: '同系列', design_requirement: '画图', area: 0.168, quantity: 1, description_spec: '同系列' })
+    expect(validateCompose('new_design', common, [row, createComposeRow({ ...row, id: 'b', area: 0.48 })], new Date('2026-07-16'))).toEqual([])
+    expect(validateCompose('planning_sku', common, [row, createComposeRow({ ...row, id: 'c' })], new Date('2026-07-16'))).toEqual([])
+  })
+
+  it.each(['app', 'axios', 'body'])('maps row-level duplicate errors from the %s envelope', (envelope) => {
+    const rows = [createComposeRow({ id: 'a' }), createComposeRow({ id: 'b' }), createComposeRow({ id: 'c' })]
+    const body = { error: { details: { violations: [{ field: 'batch_items[2]', code: 'duplicate_batch_item', message: '第 4 行与第 2 行内容重复' }] } } }
+    const raw = envelope === 'app' ? Object.assign(new Error('请求参数有误'), { status: 400, responseData: body })
+      : envelope === 'axios' ? { response: { status: 400, data: body } } : body
+    expect(applyBackendViolations(rows, raw)).toEqual([
+      { row_id: 'c', row_index: 2, field: 'product_name', message: '第 4 行与第 2 行内容重复' },
+    ])
+  })
+
+  it('maps dimension paths and common fields to visible controls', () => {
+    const issues = applyBackendViolations([createComposeRow({ id: 'a' })], { error: { details: { violations: [
+      { field: 'batch_items[0].variant_json.area', message: '面积无效' },
+      { field: 'deadline_at', message: '截止时间已过' },
+    ] } } })
+    expect(issues[0]).toMatchObject({ row_id: 'a', row_index: 0, field: 'area' })
+    expect(issues[1]).toMatchObject({ row_id: undefined, field: 'due_at' })
+  })
   it('keeps the pre-workbench ERP sync defaults per intent', () => {
     expect(defaultErpSyncMode('new_design')).toBe('async')
     expect(buildTaskSubmissionUnits('new_design', { ...common, erp_sync_mode: defaultErpSyncMode('new_design') }, [
