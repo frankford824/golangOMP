@@ -5,6 +5,7 @@ import { useTasksStore } from '@/stores/tasks'
 import { formatMultipartPartsLabel } from '@/services/api/assetsApi'
 import {
   cancelPreparedTaskAssetUploadSession,
+  UploadCompletionPendingError,
   completeWithAssetVersionRaceRetry,
   prepareTaskAssetUploadSession,
   type PreparedTaskAssetUploadSession,
@@ -340,6 +341,7 @@ export const useDesignStore = defineStore('design', () => {
       debugUploadLog('sequence:error', e)
       stopSmoothLoop()
       const statusLocked = isTaskStatusNotActionableUploadError(e)
+      if (e instanceof UploadCompletionPendingError) cancellableSessionIds.delete(e.sessionId)
       if (!statusLocked && cancellableSessionIds.size > 0) {
         await Promise.allSettled(
           Array.from(cancellableSessionIds).map((id) => cancelPreparedTaskAssetUploadSession(id)),
@@ -602,6 +604,7 @@ export const useDesignStore = defineStore('design', () => {
       debugUploadLog('batches:error', e)
       stopSmoothLoop()
       const statusLocked = isTaskStatusNotActionableUploadError(e)
+      if (e instanceof UploadCompletionPendingError) cancellableSessionIds.delete(e.sessionId)
       if (!statusLocked && cancellableSessionIds.size > 0) {
         await Promise.allSettled(
           Array.from(cancellableSessionIds).map((id) => cancelPreparedTaskAssetUploadSession(id)),

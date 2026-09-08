@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { mapRawBackendMessageToZh, resolveApiUserMessage } from '@/utils/api-message-zh'
 
 describe('resolveApiUserMessage', () => {
+  it.each(['upload_session is already terminal', 'upload_session changed concurrently and is already terminal'])('explains %s without asking to reupload successful files', (message) => {
+    expect(resolveApiUserMessage({ status: 409, responseData: { error: { code: 'INVALID_STATE_TRANSITION', message } } })).toContain('其他已成功文件无需重传')
+  })
   it('prefers backend conflict message over generic CONFLICT copy', () => {
     const message = resolveApiUserMessage({
       status: 409,

@@ -621,6 +621,7 @@ async function uploadRetouchFolder(event: Event) {
   }
 }
 async function uploadFinals(event: Event, row: EditorRow) {
+  if (row.uploading) return
   const input = event.target as HTMLInputElement
   const selected = [...(input.files || [])]
   if (!selected.length) return
@@ -631,15 +632,17 @@ async function uploadFinals(event: Event, row: EditorRow) {
     if (row.mode === 'single' && files.length !== 1) {
       throw new Error('单图模式恰好需要 1 张成品；如需多张，请让设计阶段选择套装。')
     }
-    const uploadedFiles: UploadedFile[] = []
     for (const file of files) {
       row.uploading = file.name
       const uploaded = await uploadTaskFileViaAssetSession(String(props.taskId), file, { asset_kind: 'delivery', target_sku_code: row.group.sku_code || undefined, remark: file.name }, uploadOptions(row))
-      uploadedFiles.push({ id: assetVersionId(uploaded), name: file.name })
+      const uploadedFile = { id: assetVersionId(uploaded), name: file.name }
+      row.finals = row.mode === 'set' ? [...row.finals, uploadedFile] : [uploadedFile]
+      markChanged(row.group.id)
     }
-    row.finals = row.mode === 'set' ? [...row.finals, ...uploadedFiles] : uploadedFiles
-    markChanged(row.group.id)
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '成品图上传失败，可重新选择该组文件。' }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : '成品图上传失败，可重新选择该文件。'
+    error.value = `${row.group.sku_code || scopeLabel(row.group)} · ${row.uploading}：${message}。本组已成功文件已保留。`
+  }
   finally { row.uploading = ''; input.value = '' }
 }
 function move(row: EditorRow, index: number, delta: number) { const next = index + delta; if (next < 0 || next >= row.finals.length) return; const [item] = row.finals.splice(index,1); row.finals.splice(next,0,item); markChanged(row.group.id) }

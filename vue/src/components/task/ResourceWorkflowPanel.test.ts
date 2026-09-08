@@ -659,6 +659,25 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
+  it('retains successful finals when a later file fails and identifies the failed SKU/file', async () => {
+    mocks.upload.mockResolvedValueOnce({ version: { id: 77101 } }).mockRejectedValueOnce(new Error('确认上传结果失败'))
+    const wrapper = mountPanel(['task.audit.approve'])
+    await wrapper.findAll('.mode-control button').find((item) => item.text() === '套装')?.trigger('click')
+    const input = wrapper.get('.final-drop input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [
+      new File(['one'], '第一张.psd', { type: 'application/octet-stream' }),
+      new File(['two'], '第二张.psd', { type: 'application/octet-stream' }),
+    ] })
+    await input.trigger('change')
+    await flushPromises()
+    expect(wrapper.get('.final-order').text()).toContain('第一张.psd')
+    expect(wrapper.get('.final-order').text()).not.toContain('第二张.psd')
+    expect(wrapper.get('[role="alert"]').text()).toContain('SKU-001 · 第二张.psd')
+    expect(wrapper.get('[role="alert"]').text()).toContain('已成功文件已保留')
+    expect((input.element as HTMLInputElement).disabled).toBe(false)
+    wrapper.unmount()
+  })
+
   it('removes an unsubmitted source upload and restores the upload control', async () => {
     const emptySourceBundle = bundle()
     if (emptySourceBundle.groups[0].working_revision) {

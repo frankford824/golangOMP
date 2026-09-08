@@ -115,8 +115,9 @@ import {
   completePreparedTaskAssetUploadSession,
   cancelPreparedTaskAssetUploadSession,
   uploadTaskFileViaAssetSession,
+  UploadCompletionPendingError,
 } from '../assetUploadFlow'
-import { assetsApi } from '@/services/api/assetsApi'
+import { assetsApi, assertAssetCenterUploadCompleteOk } from '@/services/api/assetsApi'
 import { taskAssetsApi } from '@/services/api/taskAssetsApi'
 
 describe('normalizeUploadSessionNumericID', () => {
@@ -485,6 +486,63 @@ describe('formatCreateUploadSessionFailure', () => {
       name: 'design.tif',
       size: 1024,
     })).toBe('upload failed at create_session')
+  })
+})
+
+describe('completion confirmation failure does not destroy uploaded data', () => {
+  const prepared = {
+    sessionId: 'confirmation-only', taskId: '4908', assetKind: 'delivery' as const,
+    remote: { upload_url: 'https://proxy.internal/upload', required_upload_content_type: 'image/png' },
+    remark: 'file.png', sessionMime: 'image/png',
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(assetsApi.uploadToRemoteUrl).mockResolvedValue({} as never)
+  })
+
+  it('retries a timed-out confirmation without cancelling or uploading the file again', async () => {
+    vi.mocked(assetsApi.completeAssetUploadSession)
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce({ data: { version: { id: 71096 } } } as never)
+    await completePreparedTaskAssetUploadSession(prepared, fakeFile())
+    expect(assetsApi.uploadToRemoteUrl).toHaveBeenCalledTimes(1)
+    expect(assetsApi.completeAssetUploadSession).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(assetsApi.completeAssetUploadSession).mock.calls[0]).toEqual(vi.mocked(assetsApi.completeAssetUploadSession).mock.calls[1])
+    expect(assetsApi.cancelAssetUploadSession).not.toHaveBeenCalled()
+  })
+
+  it('caps retries and preserves the session when the result remains unknown', async () => {
+    vi.mocked(assetsApi.completeAssetUploadSession).mockRejectedValue(new Error('network unavailable'))
+    await expect(completePreparedTaskAssetUploadSession(prepared, fakeFile())).rejects.toMatchObject({
+      name: 'UploadCompletionPendingError', sessionId: 'confirmation-only',
+    })
+    expect(assetsApi.completeAssetUploadSession).toHaveBeenCalledTimes(3)
+    expect(assetsApi.uploadToRemoteUrl).toHaveBeenCalledTimes(1)
+    expect(assetsApi.cancelAssetUploadSession).not.toHaveBeenCalled()
+  })
+
+  it('also protects a committed upload when completion response validation fails', async () => {
+    vi.mocked(assetsApi.completeAssetUploadSession).mockResolvedValue({ data: {} } as never)
+    vi.mocked(assertAssetCenterUploadCompleteOk).mockImplementationOnce(() => { throw new Error('response incomplete') })
+    await expect(completePreparedTaskAssetUploadSession(prepared, fakeFile())).rejects.toBeInstanceOf(UploadCompletionPendingError)
+    expect(assetsApi.completeAssetUploadSession).toHaveBeenCalledTimes(1)
+    expect(assetsApi.cancelAssetUploadSession).not.toHaveBeenCalled()
+  })
+
+  it.each([401, 403, 409, 422])('does not retry a definitive HTTP %s response', async (status) => {
+    vi.mocked(assetsApi.completeAssetUploadSession).mockRejectedValue({ status, responseData: { error: { code: 'CONFLICT' } } })
+    await expect(completePreparedTaskAssetUploadSession(prepared, fakeFile())).rejects.toBeInstanceOf(UploadCompletionPendingError)
+    expect(assetsApi.completeAssetUploadSession).toHaveBeenCalledTimes(1)
+    expect(assetsApi.cancelAssetUploadSession).not.toHaveBeenCalled()
+  })
+
+  it('does not send completion after cancellation while transport was finishing', async () => {
+    const controller = new AbortController()
+    vi.mocked(assetsApi.uploadToRemoteUrl).mockImplementation(async () => { controller.abort(); return {} as never })
+    await expect(completePreparedTaskAssetUploadSession(prepared, fakeFile(), { signal: controller.signal })).rejects.toBeInstanceOf(UploadCompletionPendingError)
+    expect(assetsApi.completeAssetUploadSession).not.toHaveBeenCalled()
+    expect(assetsApi.cancelAssetUploadSession).not.toHaveBeenCalled()
   })
 })
 

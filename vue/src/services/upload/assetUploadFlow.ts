@@ -1,6 +1,6 @@
 /**
  * 规范资产上传：POST /v1/assets/upload-sessions → 执行 `oss_direct` 上传计划
- * → complete；失败或 complete 失败时调用 cancel 终止 MAIN 会话。
+ * → complete；传输失败可以取消，确认结果不明时必须保留会话。
  */
 import type { AssetUploadProgress, ReferenceFileRef } from '@/services/api/assetsApi'
 import {
@@ -26,6 +26,19 @@ type AssetUploadSessionCreateFn = (
   payload: CreateAssetUploadSessionPayload,
   signal?: AbortSignal,
 ) => ReturnType<typeof assetsApi.createAssetUploadSession>
+
+export class UploadCompletionPendingError extends Error {
+  constructor(message: string, public readonly sessionId: string) {
+    super(message)
+    this.name = 'UploadCompletionPendingError'
+  }
+}
+
+function retryableCompletionError(err: unknown): boolean {
+  if (err instanceof Error && ['AbortError', 'CanceledError'].includes(err.name)) return false
+  const status = parseApiErrorPayload(err).status ?? (err as { status?: number } | null)?.status
+  return status == null || status === 408 || status === 429 || status >= 500
+}
 
 export interface TaskAssetUploadFlowOptions {
   signal?: AbortSignal
@@ -135,17 +148,6 @@ export function isAssetVersionRaceRetryError(err: unknown): boolean {
   return denyCode === 'asset_version_race_retry'
 }
 
-function isTaskStatusNotActionableUploadError(err: unknown): boolean {
-  const code = parseApiErrorPayload(err).code
-  const denyCode = readUploadDenyDetail(err, 'deny_code')
-  const action = readUploadDenyDetail(err, 'action')
-  return (
-    code === 'PERMISSION_DENIED' &&
-    denyCode === 'task_status_not_actionable' &&
-    (action === 'asset_upload_session_complete' || action === 'asset_upload_session_cancel')
-  )
-}
-
 function taskIdForSessionBody(taskId: string): string | number {
   const t = taskId.trim()
   const n = Number(t)
@@ -194,7 +196,7 @@ function isMultipartOssPlan(mode: string | null | undefined, strategy: string | 
 }
 
 /**
- * 创建会话、直传 OSS、MAIN complete；任一步失败则 cancel（忽略 cancel 自身错误）。
+ * 创建会话、直传 OSS、MAIN complete；确认结果不明时不销毁上传会话。
  */
 async function uploadFileViaAssetSession(
   taskId: string | null | undefined,
@@ -370,30 +372,51 @@ export async function completePreparedTaskAssetUploadSession(
   const transportLabel = prepared.ossDirect ? 'oss_direct（主通道）' : 'remote（备用通道）'
   let completeRes
   try {
-    completeRes = prepared.completeEndpoint
-      ? await assetsApi.completeAssetUploadSessionAtEndpoint(
-          prepared.completeEndpoint,
-          completePayload,
-          options?.signal,
-        )
-      : await assetsApi.completeAssetUploadSession(
-          prepared.sessionId,
-          completePayload,
-          options?.signal,
-        )
+    // The file has already been transferred. Retry only the idempotent
+    // completion request; never repeat PUT or cancel a possibly in-flight commit.
+    for (let attempt = 0; ; attempt++) {
+      if (options?.signal?.aborted) throw options.signal.reason ?? new DOMException('Aborted', 'AbortError')
+      try {
+        completeRes = prepared.completeEndpoint
+          ? await assetsApi.completeAssetUploadSessionAtEndpoint(
+              prepared.completeEndpoint,
+              completePayload,
+              options?.signal,
+            )
+          : await assetsApi.completeAssetUploadSession(
+              prepared.sessionId,
+              completePayload,
+              options?.signal,
+            )
+        break
+      } catch (err) {
+        if (attempt >= 2 || options?.signal?.aborted || !retryableCompletionError(err)) throw err
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)))
+      }
+    }
   } catch (err) {
     if (isAssetVersionRaceRetryError(err)) {
       throw err
     }
-    if (!isTaskStatusNotActionableUploadError(err)) {
-      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
-    }
-    throw new Error(formatUploadFailureMessage('main_complete', err, undefined, { transportLabel }))
+    // A timeout does not prove the server rejected completion. Sending cancel
+    // here used to race the delayed complete request and turn it into HTTP 409.
+    throw new UploadCompletionPendingError(
+      formatUploadFailureMessage('main_complete', err, undefined, { transportLabel }),
+      prepared.sessionId,
+    )
   }
 
-  const normalized = normalizeAssetCenterCompleteData(completeRes.data)
-  assertAssetCenterUploadCompleteOk(normalized)
-  return normalized
+  try {
+    const normalized = normalizeAssetCenterCompleteData(completeRes.data)
+    assertAssetCenterUploadCompleteOk(normalized)
+    return normalized
+  } catch (err) {
+    // The server may have committed even if its response cannot be consumed.
+    throw new UploadCompletionPendingError(
+      formatUploadFailureMessage('main_complete', err, undefined, { transportLabel }),
+      prepared.sessionId,
+    )
+  }
 }
 
 /**
