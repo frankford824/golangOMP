@@ -917,7 +917,10 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	if appErr != nil {
 		return appErr
 	}
-	return s.verifyERPImageReadback(ctx, record, imageURL)
+	// Cost is checked for preservation, never sent by this image-only operation.
+	preserved := payload
+	preserved.CostPrice = currentERPProduct.CostPrice
+	return s.verifyERPImageReadback(ctx, record, imageURL, preserved)
 }
 
 func (s *productManagementService) resolveProductManagementERPProduct(ctx context.Context, record *domain.ProductManagementRecord) (*domain.ERPProduct, string, *domain.AppError) {
@@ -932,8 +935,9 @@ func (s *productManagementService) resolveProductManagementERPProduct(ctx contex
 	if product == nil {
 		return nil, "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步前未找到该 SKU", nil)
 	}
-	productIID := firstNonEmptyString(strings.TrimSpace(record.ERPIID), strings.TrimSpace(record.ProductIID))
-	productIID = firstNonEmptyString(productIID, strings.TrimSpace(product.IID))
+	// Image sync is not an instruction to reclassify a product. Local task
+	// snapshots may predate manual ERP corrections; never fall back to them.
+	productIID := strings.TrimSpace(product.IID)
 	if productIID == "" {
 		return nil, "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片同步缺少款式编码，请先确认该 SKU 已在聚水潭建档", nil)
 	}
@@ -1027,7 +1031,7 @@ func productManagementERPBaseReadbackMismatches(product *domain.ERPProduct, payl
 	return mismatches
 }
 
-func (s *productManagementService) verifyERPImageReadback(ctx context.Context, record *domain.ProductManagementRecord, expectedImageURL ...string) *domain.AppError {
+func (s *productManagementService) verifyERPImageReadback(ctx context.Context, record *domain.ProductManagementRecord, expectedImageURL string, preserved ...domain.ERPProductUpsertPayload) *domain.AppError {
 	if s == nil || s.erpBridge == nil || record == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片回读校验失败：同步服务未配置", nil)
 	}
@@ -1045,10 +1049,21 @@ func (s *productManagementService) verifyERPImageReadback(ctx context.Context, r
 			lastMessage = "ERP 未返回该 SKU 商品资料"
 		} else {
 			imageURL := strings.TrimSpace(product.ImageURL)
-			if isAbsoluteHTTPURL(imageURL) && productManagementERPImageURLsMatch(firstNonEmptyString(expectedImageURL...), imageURL) {
-				return nil
-			}
-			if imageURL == "" {
+			if isAbsoluteHTTPURL(imageURL) && productManagementERPImageURLsMatch(expectedImageURL, imageURL) {
+				var mismatches []string
+				if len(preserved) > 0 {
+					mismatches = productManagementERPBaseReadbackMismatches(product, preserved[0])
+					expectedShortName := strings.TrimSpace(firstNonEmptyString(preserved[0].ProductShortName, preserved[0].ShortName))
+					actualShortName := strings.TrimSpace(firstNonEmptyString(product.ProductShortName, product.ShortName))
+					if expectedShortName != "" && expectedShortName != actualShortName {
+						mismatches = append(mismatches, "ERP 商品简称在图片同步后发生变化")
+					}
+				}
+				if len(mismatches) == 0 {
+					return nil
+				}
+				lastMessage = "图片已更新，但商品资料保护校验失败：" + strings.Join(mismatches, "；")
+			} else if imageURL == "" {
 				lastMessage = "ERP 尚未返回商品图"
 			} else {
 				if !isAbsoluteHTTPURL(imageURL) {

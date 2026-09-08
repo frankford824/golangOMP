@@ -65,10 +65,11 @@ func TestProductManagementSyncRecordToERPUsesProductNameAsShortName(t *testing.T
 	productName := strings.Repeat("产", ERPProductNameMaxLength)
 	bridge := &productManagementERPBridgeCapture{
 		readbackProduct: &domain.ERPProduct{
-			SKUCode:     "CGK000181",
-			IID:         "KT板",
-			ProductName: productName,
-			ImageURL:    *expectedImageURL,
+			SKUCode:          "CGK000181",
+			IID:              "KT板",
+			ProductName:      productName,
+			ProductShortName: productName,
+			ImageURL:         *expectedImageURL,
 		},
 	}
 	svc := &productManagementService{
@@ -775,7 +776,7 @@ func TestProductManagementVerifyERPImageReadbackRejectsNonPublicImage(t *testing
 			},
 		},
 	}
-	appErr := svc.verifyERPImageReadback(context.Background(), &domain.ProductManagementRecord{SKUCode: "CGG000038"})
+	appErr := svc.verifyERPImageReadback(context.Background(), &domain.ProductManagementRecord{SKUCode: "CGG000038"}, "")
 	if appErr == nil {
 		t.Fatal("verifyERPImageReadback() appErr = nil, want non-public image failure")
 	}
@@ -894,6 +895,8 @@ func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T
 		TaskNo:              "RW-20260604-A-001115",
 		SKUCode:             "NSAC000001",
 		ProductName:         longHistoricalName,
+		ERPIID:              "过期的 ERP 快照款式",
+		ProductIID:          "过期的任务款式",
 		ImageAssetID:        &assetID,
 		ImageAssetVersionID: &versionID,
 	})
@@ -918,6 +921,95 @@ func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T
 	}
 	if bridge.payload.Pic == "" || bridge.payload.PicBig == "" || bridge.payload.SKUPic == "" {
 		t.Fatalf("image upsert payload missing image fields: %+v", bridge.payload)
+	}
+	if bridge.payload.CostPrice != nil || bridge.payload.BusinessInfo != nil {
+		t.Fatal("image sync must not send local cost or business data")
+	}
+	raw, err := json.Marshal(bridge.payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	biz, err := buildERPRemoteOpenWebBiz("upsert", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := biz["items"].([]map[string]interface{})[0]
+	if item["i_id"] != "定制亚克力" {
+		t.Fatalf("wire style = %v", item["i_id"])
+	}
+	if item["short_name"] != "ERP当前商品/厚5.5mm" {
+		t.Fatalf("wire short name = %v", item["short_name"])
+	}
+	for _, key := range []string{"cost_price", "c_price", "properties_value", "h", "w", "l"} {
+		if _, ok := item[key]; ok {
+			t.Fatalf("image-only wire payload contains %s", key)
+		}
+	}
+}
+
+func TestProductManagementImageStyleNeverFallsBackToLocalSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		product *domain.ERPProduct
+		fail    bool
+	}{
+		{"manual ERP correction", &domain.ERPProduct{IID: "定制模切"}, false},
+		{"blank ERP style", &domain.ERPProduct{}, true},
+		{"missing ERP product", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bridge := &productManagementERPBridgeCapture{readbackProduct: tc.product}
+			svc := &productManagementService{erpBridge: bridge}
+			_, iid, appErr := svc.resolveProductManagementERPProduct(context.Background(), &domain.ProductManagementRecord{SKUCode: "DZW000004", ERPIID: "模切不干胶", ProductIID: "模切不干胶"})
+			if (appErr != nil) != tc.fail {
+				t.Fatalf("err=%+v", appErr)
+			}
+			if !tc.fail && iid != "定制模切" {
+				t.Fatalf("iid=%q", iid)
+			}
+			if tc.fail && iid != "" {
+				t.Fatalf("unsafe fallback iid=%q", iid)
+			}
+			if bridge.upsertCalls != 0 {
+				t.Fatal("lookup must not write ERP")
+			}
+		})
+	}
+}
+
+func TestProductManagementImageReadbackChecksPreservedFields(t *testing.T) {
+	previousSleep := productManagementERPImageReadbackSleep
+	productManagementERPImageReadbackSleep = func(time.Duration) {}
+	defer func() { productManagementERPImageReadbackSleep = previousSleep }()
+	cost, changedCost := 2.0, 0.097
+	for _, field := range []string{"unchanged", "style", "name", "short_name", "cost"} {
+		t.Run(field, func(t *testing.T) {
+			product := &domain.ERPProduct{SKUCode: "DZW000004", IID: "定制模切", ProductName: "当前商品", ProductShortName: "当前简称", CostPrice: &cost, ImageURL: "https://example.com/image.jpg"}
+			payload := domain.ERPProductUpsertPayload{SKUCode: product.SKUCode, IID: product.IID, ProductName: product.ProductName, ProductShortName: product.ProductShortName, CostPrice: &cost}
+			switch field {
+			case "style":
+				product.IID = "模切不干胶"
+			case "name":
+				product.ProductName = "旧商品"
+			case "short_name":
+				product.ProductShortName = "旧简称"
+			case "cost":
+				product.CostPrice = &changedCost
+			}
+			bridge := &productManagementERPBridgeCapture{readbackProduct: product}
+			svc := &productManagementService{erpBridge: bridge}
+			appErr := svc.verifyERPImageReadback(context.Background(), &domain.ProductManagementRecord{SKUCode: product.SKUCode}, product.ImageURL, payload)
+			if field == "unchanged" {
+				if appErr != nil {
+					t.Fatal(appErr)
+				}
+			} else if appErr == nil || !strings.Contains(appErr.Message, "商品资料保护校验失败") {
+				t.Fatalf("err=%+v", appErr)
+			}
+			if bridge.upsertCalls != 0 {
+				t.Fatal("readback must never repair ERP by writing stale fields")
+			}
+		})
 	}
 }
 

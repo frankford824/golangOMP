@@ -1526,8 +1526,16 @@ func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) do
 		erpDisplayName := truncateERPShortName(displayName, ERPProductNameMaxLength)
 		payload.Name = erpDisplayName
 		payload.ProductName = erpDisplayName
-		payload.ShortName = erpDisplayName
-		payload.ProductShortName = erpDisplayName
+		if payload.Operation == "product_management_image_sync" {
+			// The image synchronizer already read the current ERP short name.
+			// Do not undo its preservation at either MAIN or Bridge normalization.
+			shortName := truncateERPShortName(firstNonEmptyString(payload.ShortName, payload.ProductShortName, erpDisplayName), ERPProductNameMaxLength)
+			payload.ShortName = shortName
+			payload.ProductShortName = shortName
+		} else {
+			payload.ShortName = erpDisplayName
+			payload.ProductShortName = erpDisplayName
+		}
 	}
 	if payload.SPrice == nil {
 		payload.SPrice = payload.Price
