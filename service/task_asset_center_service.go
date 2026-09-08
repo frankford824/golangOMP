@@ -960,7 +960,11 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	var previousCurrentVersionID *int64
 	alreadyCompleted := false
 
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	txErr := s.runAssetTransaction(ctx, params.TaskID, "complete_upload", func(tx repo.Tx) error {
+		// A deadlock rolls back the entire attempt. Never carry tentative IDs or
+		// an idempotency decision from that attempt into the next transaction.
+		assetID, versionID, attemptedTimelineVersionNo = 0, 0, 0
+		asset, previousCurrentVersionID, alreadyCompleted = nil, nil, false
 		lockedRequest, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
 		if err != nil {
 			return fmt.Errorf("lock upload request before completion: %w", err)
@@ -980,11 +984,11 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 			return appErr
 		}
-		if appErr := authorizeV8TaskAssetMutation(ctx, task, *request.TaskAssetType); appErr != nil {
-			return appErr
-		}
 		if request.TaskAssetType == nil {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session asset_type is required", nil)
+		}
+		if appErr := authorizeV8TaskAssetMutation(ctx, task, *request.TaskAssetType); appErr != nil {
+			return appErr
 		}
 		if appErr := validateTaskStageUploadAssetType(task, *request.TaskAssetType, "", request.AssetID); appErr != nil {
 			return appErr
@@ -2729,7 +2733,19 @@ func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 	}
 
 	var identity frozenUploadAssetIdentity
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	txErr := s.runAssetTransaction(ctx, taskID, "prepare_upload_identity", func(tx repo.Tx) error {
+		// Upload completion and resource binding lock the parent task first.
+		// Taking the asset-number range lock first reverses that order.
+		task, err := s.getTaskForUpdate(ctx, tx, taskID)
+		if err != nil {
+			return fmt.Errorf("lock task before upload identity: %w", err)
+		}
+		if task == nil {
+			return domain.ErrNotFound
+		}
+		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+			return appErr
+		}
 		assetNo, err := s.designAssetRepo.NextAssetNo(ctx, tx, taskID)
 		if err != nil {
 			return err

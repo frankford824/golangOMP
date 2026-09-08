@@ -102,6 +102,16 @@ func (r *designAssetRepo) ListByTaskID(ctx context.Context, taskID int64) ([]*do
 
 func (r *designAssetRepo) NextAssetNo(ctx context.Context, tx repo.Tx, taskID int64) (string, error) {
 	sqlTx := Unwrap(tx)
+	// All allocators, including task-reference formalization, must serialize
+	// on the parent before locking the asset range. Otherwise inserting a
+	// task_assets row can wait on its task FK while completion holds that task
+	// and waits on this range (InnoDB 1213).
+	var lockedTaskID int64
+	if err := sqlTx.QueryRowContext(ctx,
+		`SELECT id FROM tasks WHERE id = ? FOR UPDATE`, taskID,
+	).Scan(&lockedTaskID); err != nil {
+		return "", fmt.Errorf("design_asset lock task before next asset_no: %w", err)
+	}
 	var count int64
 	if err := sqlTx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM design_assets WHERE task_id = ? FOR UPDATE`,

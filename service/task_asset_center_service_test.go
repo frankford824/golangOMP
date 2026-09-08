@@ -2526,8 +2526,9 @@ func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets
 	ossServer := newFakeOSSDirectServer(t)
 	defer ossServer.Close()
 
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2052, TaskNo: "T-2052", TaskStatus: domain.TaskStatusInProgress})
-	designAssetRepo := newStep67DesignAssetRepo()
+	taskRepo := &assetLockOrderTaskRepo{newStep04TaskRepo(&domain.Task{ID: 2052, TaskNo: "T-2052", TaskStatus: domain.TaskStatusInProgress})}
+	designAssetRepo := &assetLockOrderDesignRepo{step67DesignAssetRepo: newStep67DesignAssetRepo()}
+	txRunner := &assetLockOrderRunner{}
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
 	taskEventRepo := &step04TaskEventRepo{}
@@ -2544,7 +2545,7 @@ func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets
 		PresignExpiry:   15 * time.Minute,
 		PartSize:        10 * 1024 * 1024,
 	})
-	ossDirect.httpClient = ossServer.Client()
+	ossDirect.httpClient = &http.Client{Transport: assetOutsideTxTransport{runner: txRunner, base: ossServer.Client().Transport, t: t}}
 
 	svc := NewTaskAssetCenterService(
 		taskRepo,
@@ -2553,7 +2554,7 @@ func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets
 		uploadRequestRepo,
 		storageRefRepo,
 		taskEventRepo,
-		step04TxRunner{},
+		txRunner,
 		uploadClient,
 		WithOSSDirectService(ossDirect),
 		WithTaskAssetCenterPreviewRenderer(testPreviewRenderer{}),
@@ -2600,6 +2601,9 @@ func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets
 		})
 	}
 
+	// Reproduce a rolled-back asset lock twice after OSS multipart completion.
+	// Retrying must keep the same session and must not send the file again.
+	designAssetRepo.deadlocks = 2
 	completeResult, appErr := svc.CompleteUploadSession(taskAssetMutationTestContext(), CompleteTaskAssetUploadSessionParams{
 		TaskID:            2052,
 		SessionID:         createResult.Session.ID,
@@ -2615,6 +2619,12 @@ func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets
 	}
 	if completeResult == nil || completeResult.Asset == nil || completeResult.Version == nil {
 		t.Fatalf("CompleteUploadSession() result = %+v", completeResult)
+	}
+	if got := countStep04TaskEvents(taskEventRepo.events, domain.TaskEventAssetUploadSessionCompleted); got != 1 {
+		t.Fatalf("upload completion events = %d, want exactly one after retries", got)
+	}
+	if designAssetRepo.deadlocks != 0 {
+		t.Fatal("deadlock retry path not exercised")
 	}
 
 	sourceAssetID := completeResult.Asset.ID

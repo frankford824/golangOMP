@@ -291,8 +291,36 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 	contentHashHex := hex.EncodeToString(contentHash[:])
 	now := s.nowFn().UTC()
 
-	return s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	// Network I/O must not hold task/asset locks. A unique immutable object key
+	// also prevents a rolled-back or concurrent derivation overwriting a preview
+	// that another transaction has already published.
+	taskRef := sanitizeOSSObjectKeySegment(task.TaskNo, fmt.Sprintf("TASK-%d", task.ID))
+	objectKey := fmt.Sprintf("tasks/%s/derived-previews/%d/%s/%s.webp", taskRef, sourceAsset.CurrentVersion.ID, spec.AssetType, uuid.NewString())
+	if err := s.ossDirectService.UploadObject(ctx, objectKey, spec.MimeType, content); err != nil {
+		return err
+	}
+
+	return s.runAssetTransaction(ctx, task.ID, "derived_preview", func(tx repo.Tx) error {
+		// The foreground upload locks tasks -> design_assets -> task_assets.
+		// NextAssetNo locks the task's asset range; taking it before the task
+		// caused a cycle with the task_assets foreign-key check in production.
+		lockedTask, err := s.getTaskForUpdate(ctx, tx, task.ID)
+		if err != nil {
+			return fmt.Errorf("lock task before derived preview: %w", err)
+		}
+		if lockedTask == nil {
+			return domain.ErrNotFound
+		}
 		asset := targetAsset
+		if asset != nil {
+			asset, err = s.getDesignAssetForUpdate(ctx, tx, asset.ID)
+			if err != nil {
+				return err
+			}
+			if asset == nil {
+				return domain.ErrNotFound
+			}
+		}
 		if asset == nil {
 			assetNo, err := s.designAssetRepo.NextAssetNo(ctx, tx, task.ID)
 			if err != nil {
@@ -319,14 +347,6 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 		}
 		assetVersionNo, err := s.taskAssetRepo.NextAssetVersionNo(ctx, tx, asset.ID)
 		if err != nil {
-			return err
-		}
-		taskRef := strings.TrimSpace(task.TaskNo)
-		if taskRef == "" {
-			taskRef = fmt.Sprintf("TASK-%d", task.ID)
-		}
-		objectKey := s.ossDirectService.BuildObjectKey(taskRef, asset.AssetNo, assetVersionNo, spec.AssetType, spec.Filename)
-		if err := s.ossDirectService.UploadObject(ctx, objectKey, spec.MimeType, content); err != nil {
 			return err
 		}
 		storageRefID := uuid.NewString()
