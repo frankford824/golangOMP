@@ -40,7 +40,8 @@ const taskAssetSearchSelect = `
 	       COALESCE(NULLIF(uploaded_user.display_name, ''), '') AS uploaded_by_name,
 	       COALESCE(derived_preview_version.storage_key, '') AS derived_preview_storage_key,
 	       COALESCE(derived_preview_version.original_filename, derived_preview_version.file_name, '') AS derived_preview_filename,
-	       COALESCE(derived_preview_version.mime_type, '') AS derived_preview_mime_type`
+	       COALESCE(derived_preview_version.mime_type, '') AS derived_preview_mime_type,
+	       ta.retouch_requirement_id`
 
 const taskAssetSearchFrom = `
 	  FROM task_assets ta
@@ -359,6 +360,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	var scopeSKUCode, uploadMode, uploadRequestID, storageRefID, originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var flowReviewStatus sql.NullString
 	var fileSize sql.NullInt64
+	var retouchRequirementID sql.NullInt64
 	var uploadedAt, archivedAt, cleanedAt, deletedAt, approvedAt, rejectedAt, supersededAt, cleanupAfterAt, deadlineAt sql.NullTime
 	var needOutsource, isOutsource, customizationRequired, isBatchTask sql.NullBool
 	var assetNo string
@@ -386,6 +388,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 		&assetCreatorUsername, &assetCreatorName,
 		&uploadedByUsername, &uploadedByName,
 		&derivedPreviewStorageKey, &derivedPreviewFilename, &derivedPreviewMimeType,
+		&retouchRequirementID,
 	); err != nil {
 		return nil, fmt.Errorf("scan task asset search row: %w", err)
 	}
@@ -400,6 +403,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	a.RemoteFileID = fromNullString(remoteFileID)
 	a.MimeType = fromNullString(mimeType)
 	a.FileSize = fromNullInt64(fileSize)
+	a.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 	a.FilePath = fromNullString(filePath)
 	a.StorageKey = fromNullString(storageKey)
 	a.WholeHash = fromNullString(wholeHash)

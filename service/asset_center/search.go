@@ -22,19 +22,20 @@ const materialSystemRoot = "/系统资源"
 const assetSearchTotalCacheTTL = 30 * time.Second
 
 type Service struct {
-	searchRepo         repo.TaskAssetSearchRepo
-	productionRepo     repo.ProductionPackageRepo
-	finalizedSyncRepo  repo.FinalizedAssetSyncRepo
-	finalizedSyncStore FinalizedAssetSyncObjectStore
-	packageJobRepo     repo.ProductionPackageJobRepo
-	packageStore       ProductionPackageObjectStore
-	presigner          DownloadPresigner
-	urlBuilder         BrowserURLBuilder
-	streamOpener       baseservice.StorageStreamOpener
-	externalSvc        *externalassets.Service
-	cache              AssetCenterCache
-	flightMu           sync.Mutex
-	searchFlights      map[string]*assetSearchFlight
+	searchRepo          repo.TaskAssetSearchRepo
+	retouchRequirements RetouchRequirementReader
+	productionRepo      repo.ProductionPackageRepo
+	finalizedSyncRepo   repo.FinalizedAssetSyncRepo
+	finalizedSyncStore  FinalizedAssetSyncObjectStore
+	packageJobRepo      repo.ProductionPackageJobRepo
+	packageStore        ProductionPackageObjectStore
+	presigner           DownloadPresigner
+	urlBuilder          BrowserURLBuilder
+	streamOpener        baseservice.StorageStreamOpener
+	externalSvc         *externalassets.Service
+	cache               AssetCenterCache
+	flightMu            sync.Mutex
+	searchFlights       map[string]*assetSearchFlight
 }
 
 type assetSearchFlight struct {
@@ -45,6 +46,14 @@ type assetSearchFlight struct {
 }
 
 type Option func(*Service)
+
+type RetouchRequirementReader interface {
+	GetByID(context.Context, int64) (*domain.TaskRetouchRequirement, error)
+}
+
+func WithRetouchInputDownloads(requirements RetouchRequirementReader) Option {
+	return func(s *Service) { s.retouchRequirements = requirements }
+}
 
 type AssetCenterCache interface {
 	Get(context.Context, string) *redis.StringCmd

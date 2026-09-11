@@ -16,6 +16,13 @@ func (s *Service) DownloadLatest(ctx context.Context, assetID int64) (*domain.As
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
+	if row == nil {
+		var appErr *domain.AppError
+		row, appErr = s.retouchInputDownloadRow(ctx, assetID)
+		if appErr != nil {
+			return nil, appErr
+		}
+	}
 	return s.downloadRow(row)
 }
 

@@ -117,7 +117,15 @@ func (s *Service) BuildBatchDownloadManifestForResources(ctx context.Context, re
 		var failure *BatchDownloadFailure
 		switch {
 		case ref.SystemAssetID > 0:
-			item, failure = s.buildBatchDownloadItem(rowMap[ref.SystemAssetID], ref.SystemAssetID, totalSize, usedNames, options.NamingMode)
+			row := rowMap[ref.SystemAssetID]
+			if row == nil {
+				var appErr *domain.AppError
+				row, appErr = s.retouchInputDownloadRow(ctx, ref.SystemAssetID)
+				if appErr != nil {
+					return nil, appErr
+				}
+			}
+			item, failure = s.buildBatchDownloadItem(row, ref.SystemAssetID, totalSize, usedNames, options.NamingMode)
 		case ref.ExternalAssetID > 0:
 			item, failure = s.buildExternalBatchDownloadItem(ctx, ref, totalSize, usedNames)
 		default:

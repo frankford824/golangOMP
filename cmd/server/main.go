@@ -389,6 +389,7 @@ func main() {
 		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
 		service.WithTaskAssetCenterAuditRepo(auditV7Repo))
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient,
+		assetcenter.WithRetouchInputDownloads(taskRetouchRequirementRepo),
 		assetcenter.WithAssetCenterRedis(rdb),
 		assetcenter.WithProductionPackageRepo(productionPackageRepo),
 		assetcenter.WithProductionPackageJobs(productionPackageJobRepo, ossDirectSvc),

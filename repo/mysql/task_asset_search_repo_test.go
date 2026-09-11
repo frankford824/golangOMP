@@ -1,12 +1,30 @@
 package mysqlrepo
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
 	"workflow/domain"
 )
+
+type retouchScopeSearchScanner struct{}
+
+func (retouchScopeSearchScanner) Scan(dest ...interface{}) error {
+	*(dest[len(dest)-1].(*sql.NullInt64)) = sql.NullInt64{Int64: 425, Valid: true}
+	return nil
+}
+
+func TestTaskAssetSearchHydratesRetouchRequirementScope(t *testing.T) {
+	if !strings.HasSuffix(strings.TrimSpace(taskAssetSearchSelect), "ta.retouch_requirement_id") {
+		t.Fatal("search projection must include retouch input ownership")
+	}
+	row, err := scanTaskAssetSearchScanner(retouchScopeSearchScanner{})
+	if err != nil || row.Asset.RetouchRequirementID == nil || *row.Asset.RetouchRequirementID != 425 {
+		t.Fatalf("retouch scope lost in search projection: row=%+v err=%v", row, err)
+	}
+}
 
 func TestBuildTaskAssetSearchWhereKeywordCoversPlannedFields(t *testing.T) {
 	query := domain.AssetSearchQuery{

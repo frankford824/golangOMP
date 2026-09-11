@@ -397,7 +397,7 @@ curl -X GET https://api.example.com/v1/assets/excel-package/jobs/<job_id> \
 ### 简介
 支持方法: POST。
 
-- `POST`: Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; external resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
+- `POST`: Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; retouch source inputs without a current-version pointer may resolve their latest uploaded version only when attached to an active requirement in the same retouch task and the caller has task-scoped asset.download access. Removed or incomplete latest inputs do not fall back to older versions. External resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -556,7 +556,7 @@ curl -X DELETE https://api.example.com/v1/assets/<asset_id> \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns backend-authorized download metadata for one asset resource. Canonical runtime prefers browser-direct byte access.
+- `GET`: Returns backend-authorized download metadata for one asset resource. Canonical runtime prefers browser-direct byte access. Retouch source inputs without a current-version pointer may resolve their latest uploaded version only for an active requirement in the same retouch task and a caller with task-scoped asset.download access; deleted, cleaned or incomplete latest inputs never fall back to older versions.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

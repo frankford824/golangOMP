@@ -10104,7 +10104,7 @@ paths:
   /v1/assets/batch-download:
     post:
       summary: Batch download asset direct URL manifest
-      description: Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; external resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
+      description: Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; retouch source inputs without a current-version pointer may resolve their latest uploaded version only when attached to an active requirement in the same retouch task and the caller has task-scoped asset.download access. Removed or incomplete latest inputs do not fall back to older versions. External resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [asset.view]
@@ -10297,7 +10297,7 @@ paths:
   /v1/assets/{asset_id}/download:
     get:
       summary: Get asset download info
-      description: Returns backend-authorized download metadata for one asset resource. Canonical runtime prefers browser-direct byte access.
+      description: Returns backend-authorized download metadata for one asset resource. Canonical runtime prefers browser-direct byte access. Retouch source inputs without a current-version pointer may resolve their latest uploaded version only for an active requirement in the same retouch task and a caller with task-scoped asset.download access; deleted, cleaned or incomplete latest inputs never fall back to older versions.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-A
