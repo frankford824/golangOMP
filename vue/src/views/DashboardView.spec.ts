@@ -12,7 +12,7 @@ vi.mock('@/services/api/tasksApi', () => ({
   tasksApi: { operationalOverview },
 }))
 vi.mock('@/composables/usePermission', () => ({
-  usePermission: () => ({ can: () => true }),
+  usePermission: () => ({ can: () => true, hasRole: (role: string) => role === 'department_admin' }),
 }))
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push }),
@@ -113,6 +113,10 @@ describe('DashboardView authoritative refresh', () => {
     expect(wrapper.text()).toContain('全局进行中任务 978')
     expect(wrapper.text()).toContain('本周完成率 20.0%')
     expect(wrapper.text()).toContain('今日结单')
+	const departmentBoardButton = wrapper.findAll('button').find((button) => button.text().includes('设计部看板'))
+	expect(departmentBoardButton).toBeTruthy()
+	await departmentBoardButton!.trigger('click')
+	expect(push).toHaveBeenCalledWith('/design-dashboard')
     expect(wrapper.text()).not.toContain('待仓库')
     expect(wrapper.text()).not.toContain('待结单')
     const routesByTitle = Object.fromEntries(

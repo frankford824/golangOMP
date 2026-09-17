@@ -52,6 +52,11 @@ export function usePermission() {
     return mods.includes(moduleKey)
   }
 
+  function hasRole(role: string): boolean {
+    const normalized = String(role ?? '').trim().toLowerCase()
+    return Boolean(normalized) && store.roles.some((candidate) => candidate.toLowerCase() === normalized)
+  }
+
   return {
     can,
     canAccessMenu,
@@ -59,5 +64,6 @@ export function usePermission() {
     canAccessAction,
     canAccessModule,
     canAccessModuleWhenDeclared,
+    hasRole,
   }
 }

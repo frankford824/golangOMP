@@ -40,6 +40,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, requiredMenuKey: 'dashboard' },
       },
       {
+        path: 'design-dashboard',
+        name: 'DesignDepartmentDashboard',
+        component: () => import('@/views/DesignDepartmentDashboardView.vue'),
+        meta: { requiresAuth: true, requiredMenuKey: 'dashboard', requiredPermissions: ['report.view'] },
+      },
+      {
         path: '403',
         name: 'Forbidden',
         component: () => import('@/views/error/403.vue'),

@@ -115,3 +115,140 @@ export interface TaskOperationalOverview {
   recent_tasks: TaskOperationalRecentTask[]
   recent_events: TaskOperationalEvent[]
 }
+
+export interface DesignDepartmentDashboardBreakdown {
+  key: string
+  label: string
+  task_count: number
+  design_file_count: number
+  sku_count: number
+  share: number
+}
+
+export interface DesignDepartmentMember {
+  user_id: number
+  employee_no?: number | null
+  display_name: string
+  username: string
+  team_id?: number | null
+  team_name: string
+  status: string
+}
+
+export interface DesignDepartmentPersonMetric extends DesignDepartmentMember {
+  task_count: number
+  completed_task_count: number
+  active_task_count: number
+  overdue_task_count: number
+  design_file_count: number
+  source_file_count: number
+  final_file_count: number
+  sku_count: number
+  design_submission_count: number
+  rejected_task_count: number
+  audit_reject_event_count: number
+  completion_rate: number
+  first_pass_rate: number
+  on_time_rate: number
+  average_turnaround_hours: number
+  workload_share: number
+  task_types: DesignDepartmentDashboardBreakdown[]
+}
+
+export interface DesignDepartmentTrendPoint {
+  period: string
+  task_count: number
+  completed_count: number
+  design_file_count: number
+  sku_count: number
+}
+
+export interface DesignDepartmentTaskRow {
+  task_id: number
+  task_no: string
+  product_name: string
+  designer_id: number
+  designer_name: string
+  task_type: string
+  task_status: string
+  priority: string
+  created_at: string
+  completed_at?: string | null
+  deadline_at?: string | null
+  turnaround_hours?: number | null
+  source_file_count: number
+  final_file_count: number
+  sku_count: number
+  audit_reject_count: number
+  overdue: boolean
+}
+
+export interface DesignDepartmentDashboardSummary {
+  task_count: number
+  completed_task_count: number
+  active_task_count: number
+  overdue_task_count: number
+  due_soon_task_count: number
+  design_submission_count: number
+  source_file_count: number
+  final_file_count: number
+  design_file_count: number
+  sku_count: number
+  resource_unit_count: number
+  member_count: number
+  contributing_member_count: number
+  completion_rate: number
+  first_pass_rate: number
+  on_time_rate: number
+  average_turnaround_hours: number
+  median_turnaround_hours: number
+  p90_turnaround_hours: number
+  average_files_per_task: number
+  turnaround_sample_count: number
+  deadline_sample_count: number
+  rejected_task_count: number
+  audit_reject_event_count: number
+}
+
+export interface DesignDepartmentDashboard {
+  generated_at: string
+  time_zone: 'Asia/Shanghai'
+  department_id: number
+  department_name: string
+  period_start: string
+  period_end: string
+  date_basis: 'created' | 'completed' | 'deadline'
+  granularity: 'day' | 'week' | 'month'
+  summary: DesignDepartmentDashboardSummary
+  trend: DesignDepartmentTrendPoint[]
+  people: DesignDepartmentPersonMetric[]
+  task_types: DesignDepartmentDashboardBreakdown[]
+  statuses: DesignDepartmentDashboardBreakdown[]
+  priorities: DesignDepartmentDashboardBreakdown[]
+  business_lanes: DesignDepartmentDashboardBreakdown[]
+  file_types: DesignDepartmentDashboardBreakdown[]
+  recent_tasks: DesignDepartmentTaskRow[]
+  options: {
+    members: DesignDepartmentMember[]
+    task_types: string[]
+    statuses: string[]
+    priorities: string[]
+    teams: Array<{ id: string; label: string }>
+    date_bases: string[]
+    granularities: string[]
+  }
+  definitions: Record<string, string>
+}
+
+export interface DesignDepartmentDashboardParams {
+  start_date?: string
+  end_date?: string
+  date_basis?: DesignDepartmentDashboard['date_basis']
+  granularity?: DesignDepartmentDashboard['granularity']
+  designer_ids?: string
+  team_ids?: string
+  task_types?: string
+  statuses?: string
+  priorities?: string
+  business_lanes?: string
+}

@@ -2,7 +2,9 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"workflow/domain"
@@ -31,6 +33,194 @@ type taskOperationalDashboardRepo struct{ db *DB }
 
 func NewTaskOperationalDashboardRepo(db *DB) repo.TaskOperationalDashboardRepo {
 	return &taskOperationalDashboardRepo{db: db}
+}
+
+func (r *taskOperationalDashboardRepo) ListDesignDepartmentMembers(ctx context.Context, departmentID int64) ([]domain.DesignDepartmentMember, error) {
+	queryCtx, cancel := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, `
+		SELECT id, employee_no, display_name, username, team_id, team, status
+		  FROM users
+		 WHERE department_id = ?
+		 ORDER BY status = 'active' DESC, COALESCE(employee_no, 65535), display_name, id`, departmentID)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("list design department members: %w", err)
+	}
+	defer cancel()
+	defer rows.Close()
+	items := make([]domain.DesignDepartmentMember, 0)
+	for rows.Next() {
+		var item domain.DesignDepartmentMember
+		var employeeNo, teamID sql.NullInt64
+		if err := rows.Scan(&item.UserID, &employeeNo, &item.DisplayName, &item.Username, &teamID, &item.TeamName, &item.Status); err != nil {
+			return nil, fmt.Errorf("scan design department member: %w", err)
+		}
+		item.EmployeeNo = fromNullInt64(employeeNo)
+		item.TeamID = fromNullInt64(teamID)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (r *taskOperationalDashboardRepo) ListDesignDepartmentTaskFacts(ctx context.Context, filter domain.DesignDepartmentDashboardFilter) ([]domain.DesignDepartmentTaskFact, error) {
+	dateColumn := "t.created_at"
+	primaryColumn := "tf.created_at"
+	switch filter.DateBasis {
+	case domain.DesignDashboardDateCompleted:
+		dateColumn = "COALESCE(cs.completed_at, CASE WHEN t.task_status = 'Completed' THEN t.updated_at END)"
+		primaryColumn = "tf.completed_at"
+	case domain.DesignDashboardDateDeadline:
+		dateColumn = "t.deadline_at"
+		primaryColumn = "tf.deadline_at"
+	}
+	where := []string{"d.department_id = ?", dateColumn + " >= ?", dateColumn + " < ?"}
+	args := []interface{}{filter.DepartmentID, filter.StartAt, filter.EndAt}
+	appendInt64List := func(column string, values []int64) {
+		if len(values) == 0 {
+			return
+		}
+		placeholders := make([]string, 0, len(values))
+		for _, value := range values {
+			if value > 0 {
+				placeholders = append(placeholders, "?")
+				args = append(args, value)
+			}
+		}
+		if len(placeholders) > 0 {
+			where = append(where, column+" IN ("+strings.Join(placeholders, ",")+")")
+		}
+	}
+	appendStringList := func(column string, values []string) {
+		if len(values) == 0 {
+			return
+		}
+		placeholders := make([]string, 0, len(values))
+		for _, value := range values {
+			if strings.TrimSpace(value) != "" {
+				placeholders = append(placeholders, "?")
+				args = append(args, strings.TrimSpace(value))
+			}
+		}
+		if len(placeholders) > 0 {
+			where = append(where, column+" IN ("+strings.Join(placeholders, ",")+")")
+		}
+	}
+	appendInt64List("d.id", filter.DesignerIDs)
+	appendInt64List("d.team_id", filter.TeamIDs)
+	taskTypes := make([]string, 0, len(filter.TaskTypes))
+	for _, value := range filter.TaskTypes {
+		taskTypes = append(taskTypes, string(value))
+	}
+	statuses := make([]string, 0, len(filter.Statuses))
+	for _, value := range filter.Statuses {
+		statuses = append(statuses, string(value))
+	}
+	priorities := make([]string, 0, len(filter.Priorities))
+	for _, value := range filter.Priorities {
+		priorities = append(priorities, string(value))
+	}
+	lanes := make([]string, 0, len(filter.BusinessLanes))
+	for _, value := range filter.BusinessLanes {
+		lanes = append(lanes, string(value))
+	}
+	appendStringList("t.task_type", taskTypes)
+	appendStringList("t.task_status", statuses)
+	appendStringList("t.priority", priorities)
+	appendStringList("COALESCE(t.business_lane, '')", lanes)
+
+	query := `
+	WITH completion_stats AS (
+		SELECT tel.task_id,
+		       MIN(tel.created_at) completed_at
+		  FROM task_event_logs tel
+		 WHERE tel.event_type = 'task.closed'
+		    OR (tel.event_type IN ('task.design.submitted', 'task.design_submitted') AND JSON_UNQUOTE(JSON_EXTRACT(tel.payload, '$.to_task_status')) = 'Completed')
+		 GROUP BY tel.task_id
+	), target_tasks AS (
+		SELECT t.*, d.id designer_user_id,
+		       COALESCE(NULLIF(d.display_name,''), d.username) designer_name,
+		       d.status designer_status, d.department_id designer_department_id,
+		       d.team_id designer_team_id, COALESCE(d.team,'') designer_team_name,
+		       COALESCE(cs.completed_at, CASE WHEN t.task_status = 'Completed' THEN t.updated_at END) completed_at
+		  FROM tasks t
+		  JOIN users d ON d.id = t.designer_id
+		  LEFT JOIN completion_stats cs ON cs.task_id = t.id
+		 WHERE ` + strings.Join(where, " AND ") + `
+	), event_stats AS (
+		SELECT tel.task_id,
+		       SUM(event_type IN ('task.design.submitted', 'task.design_submitted')) design_submission_count,
+		       SUM(event_type IN ('task.audit.rejected', 'task.audit.returned_to_design')) audit_reject_count,
+		       SUM(event_type = 'task.audit.approved') audit_approve_count
+		  FROM task_event_logs tel JOIN target_tasks tt ON tt.id = tel.task_id GROUP BY tel.task_id
+	), asset_stats AS (
+		SELECT ta.task_id,
+		       SUM(asset_type = 'source') source_file_count,
+		       SUM(asset_type = 'delivery') final_file_count
+		  FROM task_assets ta JOIN target_tasks tt ON tt.id = ta.task_id
+		 WHERE ta.deleted_at IS NULL AND ta.cleaned_at IS NULL AND ta.upload_status = 'uploaded'
+		 GROUP BY ta.task_id
+	), sku_stats AS (
+		SELECT tsi.task_id, COUNT(*) sku_count FROM task_sku_items tsi JOIN target_tasks tt ON tt.id = tsi.task_id GROUP BY tsi.task_id
+	), group_stats AS (
+		SELECT tag.task_id, COUNT(*) resource_unit_count FROM task_asset_groups tag JOIN target_tasks tt ON tt.id = tag.task_id GROUP BY tag.task_id
+	), task_facts AS (
+		SELECT t.id task_id, t.task_no, COALESCE(t.product_name_snapshot, '') product_name,
+		       t.task_type, t.task_status, t.priority, COALESCE(t.business_lane, '') business_lane,
+		       t.designer_user_id designer_id, t.designer_name,
+		       t.designer_status, t.designer_department_id,
+		       t.designer_team_id, t.designer_team_name,
+		       t.created_at, t.updated_at, t.completed_at,
+		       t.deadline_at,
+		       COALESCE(ss.sku_count,0) sku_count,
+		       COALESCE(gs.resource_unit_count,0) resource_unit_count,
+		       COALESCE(ast.source_file_count,0) source_file_count,
+		       COALESCE(ast.final_file_count,0) final_file_count,
+		       COALESCE(es.design_submission_count,0) design_submission_count,
+		       COALESCE(es.audit_reject_count,0) audit_reject_count,
+		       COALESCE(es.audit_approve_count,0) audit_approve_count
+		  FROM target_tasks t
+		  LEFT JOIN event_stats es ON es.task_id = t.id
+		  LEFT JOIN asset_stats ast ON ast.task_id = t.id
+		  LEFT JOIN sku_stats ss ON ss.task_id = t.id
+		  LEFT JOIN group_stats gs ON gs.task_id = t.id
+	)
+	SELECT tf.task_id, tf.task_no, tf.product_name, tf.task_type, tf.task_status, tf.priority, tf.business_lane,
+	       tf.designer_id, tf.designer_name, tf.designer_status, tf.designer_team_id, tf.designer_team_name,
+	       tf.created_at, tf.updated_at, tf.completed_at, tf.deadline_at, ` + primaryColumn + ` primary_at,
+	       tf.sku_count, tf.resource_unit_count, tf.source_file_count, tf.final_file_count,
+	       tf.design_submission_count, tf.audit_reject_count, tf.audit_approve_count
+	  FROM task_facts tf
+	 ORDER BY primary_at DESC, tf.task_id DESC`
+	queryCtx, cancel := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, query, args...)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("list design department dashboard facts: %w", err)
+	}
+	defer cancel()
+	defer rows.Close()
+	items := make([]domain.DesignDepartmentTaskFact, 0)
+	for rows.Next() {
+		var item domain.DesignDepartmentTaskFact
+		var businessLane string
+		var teamID sql.NullInt64
+		var completedAt, deadlineAt sql.NullTime
+		if err := rows.Scan(
+			&item.TaskID, &item.TaskNo, &item.ProductName, &item.TaskType, &item.TaskStatus, &item.Priority, &businessLane,
+			&item.DesignerID, &item.DesignerName, &item.DesignerStatus, &teamID, &item.TeamName,
+			&item.CreatedAt, &item.UpdatedAt, &completedAt, &deadlineAt, &item.PrimaryAt,
+			&item.SKUCount, &item.ResourceUnitCount, &item.SourceFileCount, &item.FinalFileCount,
+			&item.DesignSubmissionCount, &item.AuditRejectCount, &item.AuditApproveCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan design department dashboard fact: %w", err)
+		}
+		item.BusinessLane = domain.TaskBusinessLane(businessLane)
+		item.TeamID = fromNullInt64(teamID)
+		item.CompletedAt = fromNullTime(completedAt)
+		item.DeadlineAt = fromNullTime(deadlineAt)
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *taskOperationalDashboardRepo) GetTaskOperationalOverview(ctx context.Context, now time.Time) (*domain.TaskOperationalOverview, error) {

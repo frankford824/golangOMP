@@ -11,4 +11,6 @@ import (
 // main operations dashboard. It intentionally does not reuse paginated task-list data.
 type TaskOperationalDashboardRepo interface {
 	GetTaskOperationalOverview(ctx context.Context, now time.Time) (*domain.TaskOperationalOverview, error)
+	ListDesignDepartmentMembers(ctx context.Context, departmentID int64) ([]domain.DesignDepartmentMember, error)
+	ListDesignDepartmentTaskFacts(ctx context.Context, filter domain.DesignDepartmentDashboardFilter) ([]domain.DesignDepartmentTaskFact, error)
 }

@@ -122,3 +122,213 @@ type TaskOperationalOverview struct {
 	RecentTasks        []TaskOperationalRecentTask   `json:"recent_tasks"`
 	RecentEvents       []TaskOperationalEvent        `json:"recent_events"`
 }
+
+type DesignDashboardDateBasis string
+
+const (
+	DesignDashboardDateCreated   DesignDashboardDateBasis = "created"
+	DesignDashboardDateCompleted DesignDashboardDateBasis = "completed"
+	DesignDashboardDateDeadline  DesignDashboardDateBasis = "deadline"
+)
+
+func (v DesignDashboardDateBasis) Valid() bool {
+	return v == DesignDashboardDateCreated || v == DesignDashboardDateCompleted || v == DesignDashboardDateDeadline
+}
+
+type DesignDashboardGranularity string
+
+const (
+	DesignDashboardGranularityDay   DesignDashboardGranularity = "day"
+	DesignDashboardGranularityWeek  DesignDashboardGranularity = "week"
+	DesignDashboardGranularityMonth DesignDashboardGranularity = "month"
+)
+
+func (v DesignDashboardGranularity) Valid() bool {
+	return v == DesignDashboardGranularityDay || v == DesignDashboardGranularityWeek || v == DesignDashboardGranularityMonth
+}
+
+type DesignDepartmentDashboardFilter struct {
+	DepartmentID  int64
+	StartAt       time.Time
+	EndAt         time.Time
+	DesignerIDs   []int64
+	TeamIDs       []int64
+	TaskTypes     []TaskType
+	Statuses      []TaskStatus
+	Priorities    []TaskPriority
+	BusinessLanes []TaskBusinessLane
+	DateBasis     DesignDashboardDateBasis
+	Granularity   DesignDashboardGranularity
+}
+
+type DesignDepartmentMember struct {
+	UserID      int64  `json:"user_id"`
+	EmployeeNo  *int64 `json:"employee_no,omitempty"`
+	DisplayName string `json:"display_name"`
+	Username    string `json:"username"`
+	TeamID      *int64 `json:"team_id,omitempty"`
+	TeamName    string `json:"team_name"`
+	Status      string `json:"status"`
+}
+
+type DesignDepartmentTaskFact struct {
+	TaskID                int64
+	TaskNo                string
+	ProductName           string
+	TaskType              TaskType
+	TaskStatus            TaskStatus
+	Priority              TaskPriority
+	BusinessLane          TaskBusinessLane
+	DesignerID            int64
+	DesignerName          string
+	DesignerStatus        string
+	TeamID                *int64
+	TeamName              string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	CompletedAt           *time.Time
+	DeadlineAt            *time.Time
+	PrimaryAt             time.Time
+	SKUCount              int64
+	ResourceUnitCount     int64
+	SourceFileCount       int64
+	FinalFileCount        int64
+	DesignSubmissionCount int64
+	AuditRejectCount      int64
+	AuditApproveCount     int64
+}
+
+type DesignDepartmentDashboardSummary struct {
+	TaskCount               int64   `json:"task_count"`
+	CompletedTaskCount      int64   `json:"completed_task_count"`
+	ActiveTaskCount         int64   `json:"active_task_count"`
+	OverdueTaskCount        int64   `json:"overdue_task_count"`
+	DueSoonTaskCount        int64   `json:"due_soon_task_count"`
+	DesignSubmissionCount   int64   `json:"design_submission_count"`
+	SourceFileCount         int64   `json:"source_file_count"`
+	FinalFileCount          int64   `json:"final_file_count"`
+	DesignFileCount         int64   `json:"design_file_count"`
+	SKUCount                int64   `json:"sku_count"`
+	ResourceUnitCount       int64   `json:"resource_unit_count"`
+	MemberCount             int64   `json:"member_count"`
+	ContributingMemberCount int64   `json:"contributing_member_count"`
+	CompletionRate          float64 `json:"completion_rate"`
+	FirstPassRate           float64 `json:"first_pass_rate"`
+	OnTimeRate              float64 `json:"on_time_rate"`
+	AverageTurnaroundHours  float64 `json:"average_turnaround_hours"`
+	MedianTurnaroundHours   float64 `json:"median_turnaround_hours"`
+	P90TurnaroundHours      float64 `json:"p90_turnaround_hours"`
+	AverageFilesPerTask     float64 `json:"average_files_per_task"`
+	TurnaroundSampleCount   int64   `json:"turnaround_sample_count"`
+	DeadlineSampleCount     int64   `json:"deadline_sample_count"`
+	RejectedTaskCount       int64   `json:"rejected_task_count"`
+	AuditRejectEventCount   int64   `json:"audit_reject_event_count"`
+}
+
+type DesignDepartmentDashboardBreakdown struct {
+	Key             string  `json:"key"`
+	Label           string  `json:"label"`
+	TaskCount       int64   `json:"task_count"`
+	DesignFileCount int64   `json:"design_file_count"`
+	SKUCount        int64   `json:"sku_count"`
+	Share           float64 `json:"share"`
+}
+
+type DesignDepartmentDashboardTrendPoint struct {
+	Period          string `json:"period"`
+	TaskCount       int64  `json:"task_count"`
+	CompletedCount  int64  `json:"completed_count"`
+	DesignFileCount int64  `json:"design_file_count"`
+	SKUCount        int64  `json:"sku_count"`
+}
+
+type DesignDepartmentPersonMetric struct {
+	UserID                 int64                                `json:"user_id"`
+	DisplayName            string                               `json:"display_name"`
+	Username               string                               `json:"username"`
+	TeamID                 *int64                               `json:"team_id,omitempty"`
+	TeamName               string                               `json:"team_name"`
+	Status                 string                               `json:"status"`
+	TaskCount              int64                                `json:"task_count"`
+	CompletedTaskCount     int64                                `json:"completed_task_count"`
+	ActiveTaskCount        int64                                `json:"active_task_count"`
+	OverdueTaskCount       int64                                `json:"overdue_task_count"`
+	DesignFileCount        int64                                `json:"design_file_count"`
+	SourceFileCount        int64                                `json:"source_file_count"`
+	FinalFileCount         int64                                `json:"final_file_count"`
+	SKUCount               int64                                `json:"sku_count"`
+	DesignSubmissionCount  int64                                `json:"design_submission_count"`
+	RejectedTaskCount      int64                                `json:"rejected_task_count"`
+	AuditRejectEventCount  int64                                `json:"audit_reject_event_count"`
+	CompletionRate         float64                              `json:"completion_rate"`
+	FirstPassRate          float64                              `json:"first_pass_rate"`
+	OnTimeRate             float64                              `json:"on_time_rate"`
+	AverageTurnaroundHours float64                              `json:"average_turnaround_hours"`
+	WorkloadShare          float64                              `json:"workload_share"`
+	TaskTypes              []DesignDepartmentDashboardBreakdown `json:"task_types"`
+}
+
+type DesignDepartmentTaskRow struct {
+	TaskID           int64        `json:"task_id"`
+	TaskNo           string       `json:"task_no"`
+	ProductName      string       `json:"product_name"`
+	DesignerID       int64        `json:"designer_id"`
+	DesignerName     string       `json:"designer_name"`
+	TaskType         TaskType     `json:"task_type"`
+	TaskStatus       TaskStatus   `json:"task_status"`
+	Priority         TaskPriority `json:"priority"`
+	CreatedAt        time.Time    `json:"created_at"`
+	CompletedAt      *time.Time   `json:"completed_at,omitempty"`
+	DeadlineAt       *time.Time   `json:"deadline_at,omitempty"`
+	TurnaroundHours  *float64     `json:"turnaround_hours,omitempty"`
+	SourceFileCount  int64        `json:"source_file_count"`
+	FinalFileCount   int64        `json:"final_file_count"`
+	SKUCount         int64        `json:"sku_count"`
+	AuditRejectCount int64        `json:"audit_reject_count"`
+	Overdue          bool         `json:"overdue"`
+}
+
+type DesignDepartmentDashboardOptions struct {
+	Members       []DesignDepartmentMember `json:"members"`
+	TaskTypes     []string                 `json:"task_types"`
+	Statuses      []string                 `json:"statuses"`
+	Priorities    []string                 `json:"priorities"`
+	Teams         []DesignDepartmentOption `json:"teams"`
+	DateBases     []string                 `json:"date_bases"`
+	Granularities []string                 `json:"granularities"`
+}
+
+type DesignDepartmentOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+type DesignDepartmentDashboardDefinitions struct {
+	TaskCount       string `json:"task_count"`
+	DesignFileCount string `json:"design_file_count"`
+	FirstPassRate   string `json:"first_pass_rate"`
+	Turnaround      string `json:"turnaround"`
+	OnTimeRate      string `json:"on_time_rate"`
+}
+
+type DesignDepartmentDashboard struct {
+	GeneratedAt    time.Time                             `json:"generated_at"`
+	TimeZone       string                                `json:"time_zone"`
+	DepartmentID   int64                                 `json:"department_id"`
+	DepartmentName string                                `json:"department_name"`
+	PeriodStart    time.Time                             `json:"period_start"`
+	PeriodEnd      time.Time                             `json:"period_end"`
+	DateBasis      DesignDashboardDateBasis              `json:"date_basis"`
+	Granularity    DesignDashboardGranularity            `json:"granularity"`
+	Summary        DesignDepartmentDashboardSummary      `json:"summary"`
+	Trend          []DesignDepartmentDashboardTrendPoint `json:"trend"`
+	People         []DesignDepartmentPersonMetric        `json:"people"`
+	TaskTypes      []DesignDepartmentDashboardBreakdown  `json:"task_types"`
+	Statuses       []DesignDepartmentDashboardBreakdown  `json:"statuses"`
+	Priorities     []DesignDepartmentDashboardBreakdown  `json:"priorities"`
+	BusinessLanes  []DesignDepartmentDashboardBreakdown  `json:"business_lanes"`
+	FileTypes      []DesignDepartmentDashboardBreakdown  `json:"file_types"`
+	RecentTasks    []DesignDepartmentTaskRow             `json:"recent_tasks"`
+	Options        DesignDepartmentDashboardOptions      `json:"options"`
+	Definitions    DesignDepartmentDashboardDefinitions  `json:"definitions"`
+}

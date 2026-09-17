@@ -289,6 +289,35 @@ function getTaskOr404(taskId: string): MockTask | null {
 }
 
 export const tasksHandler: MockHandler = (request) => {
+  if (request.method === 'GET' && request.path === '/v1/task-board/design-department') {
+    const now = nowISO()
+    const people = [
+      ['228', '王亚琳', 42, 36, 126, 84.5, 92.1, 18.2],
+      ['257', '余谭圣', 35, 31, 98, 88.6, 90.3, 16.4],
+      ['263', '李晓雨', 29, 24, 87, 82.8, 87.5, 21.1],
+    ].map(([id, name, tasks, completed, files, completion, firstPass, hours]) => ({
+      user_id: Number(id), display_name: name, username: name, team_name: '默认组', status: 'active',
+      task_count: tasks, completed_task_count: completed, active_task_count: Number(tasks) - Number(completed), overdue_task_count: name === '王亚琳' ? 2 : 0,
+      design_file_count: files, source_file_count: Math.round(Number(files) * .4), final_file_count: Math.round(Number(files) * .6), sku_count: tasks,
+      design_submission_count: tasks, rejected_task_count: name === '李晓雨' ? 3 : 2, audit_reject_event_count: name === '李晓雨' ? 3 : 2,
+      completion_rate: completion, first_pass_rate: firstPass, on_time_rate: 91.2, average_turnaround_hours: hours,
+      workload_share: Math.round(Number(tasks) / 106 * 1000) / 10, task_types: [],
+    }))
+    const breakdown = (key: string, label: string, count: number, files: number) => ({ key, label, task_count: count, design_file_count: files, sku_count: count, share: Math.round(count / 106 * 1000) / 10 })
+    return { status: 200, data: { data: {
+      generated_at: now, time_zone: 'Asia/Shanghai', department_id: 14, department_name: '视觉研创部', period_start: '2026-08-19T16:00:00Z', period_end: now, date_basis: request.query?.date_basis || 'created', granularity: request.query?.granularity || 'day',
+      summary: { task_count: 106, completed_task_count: 91, active_task_count: 15, overdue_task_count: 2, due_soon_task_count: 4, design_submission_count: 112, source_file_count: 128, final_file_count: 183, design_file_count: 311, sku_count: 124, resource_unit_count: 124, member_count: 16, contributing_member_count: 13, completion_rate: 85.8, first_pass_rate: 90.1, on_time_rate: 91.2, average_turnaround_hours: 18.6, median_turnaround_hours: 13.7, p90_turnaround_hours: 39.2, average_files_per_task: 2.9, turnaround_sample_count: 91, deadline_sample_count: 68, rejected_task_count: 9, audit_reject_event_count: 11 },
+      trend: Array.from({ length: 14 }, (_, index) => ({ period: `09-${String(index + 1).padStart(2, '0')}`, task_count: 4 + index % 6, completed_count: 3 + index % 5, design_file_count: 12 + index * 2, sku_count: 5 + index % 7 })),
+      people, task_types: [breakdown('new_product_development', '新品开发', 72, 218), breakdown('original_product_development', '原品开发', 21, 63), breakdown('retouch_task', '修图任务', 13, 30)],
+      statuses: [breakdown('Completed', '已完成', 91, 267), breakdown('InProgress', '处理中', 9, 26), breakdown('PendingAudit', '待审核', 6, 18)],
+      priorities: [breakdown('normal', '普通', 76, 225), breakdown('high', '高', 22, 65), breakdown('drawing', '画图优先', 8, 21)],
+      business_lanes: [breakdown('normal', '常规', 92, 274), breakdown('customization', '定制', 14, 37)],
+      file_types: [{ key: 'source', label: '设计源文件', task_count: 128, design_file_count: 0, sku_count: 0, share: 0 }, { key: 'delivery', label: '最终成品文件', task_count: 183, design_file_count: 0, sku_count: 0, share: 0 }, { key: 'sku', label: 'SKU 数量', task_count: 124, design_file_count: 0, sku_count: 0, share: 0 }, { key: 'resource_unit', label: '资源单元', task_count: 124, design_file_count: 0, sku_count: 0, share: 0 }],
+      recent_tasks: [{ task_id: 1, task_no: 'RW-MOCK-DESIGN-001', product_name: '中秋设计任务', designer_id: 228, designer_name: '王亚琳', task_type: 'new_product_development', task_status: 'InProgress', priority: 'high', created_at: now, deadline_at: now, source_file_count: 1, final_file_count: 2, sku_count: 1, audit_reject_count: 0, overdue: true }],
+      options: { members: people, task_types: ['new_product_development', 'original_product_development', 'retouch_task'], statuses: ['Completed', 'InProgress', 'PendingAudit'], priorities: ['normal', 'high', 'drawing'], teams: [{ id: '31', label: '默认组' }], date_bases: ['created', 'completed', 'deadline'], granularities: ['day', 'week', 'month'] },
+      definitions: { task_count: '筛选范围内分配给本部门设计人员的去重任务数。', design_file_count: '有效源文件与成品文件，不含自动预览图。', first_pass_rate: '完成任务中没有审核打回事件的占比。', turnaround: '任务创建到结单的小时数。', on_time_rate: '在截止时间前完成的任务占比。' },
+    } } }
+  }
   if (request.method === 'GET' && request.path === '/v1/task-board/overview') {
     const now = nowISO()
     return {

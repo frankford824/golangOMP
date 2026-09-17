@@ -28,6 +28,15 @@
             </p>
           </div>
           <div class="board-header-aside" aria-live="polite">
+            <BaseButton
+              v-if="canOpenDepartmentDashboard"
+              type="button"
+              variant="primary"
+              size="sm"
+              @click="router.push('/design-dashboard')"
+            >
+              设计部看板
+            </BaseButton>
             <span>30 秒自动刷新</span>
             <strong>{{ summary.todayPendingCount }}</strong>
             <small>设计待办</small>
@@ -342,7 +351,7 @@ import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
 const DashboardTrendChart = defineAsyncComponent(() => import('@/components/dashboard/DashboardTrendChart.vue'))
 
 const router = useRouter()
-const { can } = usePermission()
+const { can, hasRole } = usePermission()
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
@@ -359,6 +368,9 @@ const BUSINESS_ACTIONS = [
 ] as const
 
 const hasBusinessAccess = computed(() => BUSINESS_ACTIONS.some((a) => can(a)))
+const canOpenDepartmentDashboard = computed(() =>
+  can('report.view') && hasRole('department_admin'),
+)
 
 const lastUpdatedLabel = computed(() =>
   overview.value?.generated_at ? formatDateBeijing(overview.value.generated_at) : '尚未更新',

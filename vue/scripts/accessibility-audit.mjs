@@ -13,6 +13,7 @@ const outputPath = path.join(rootDir, 'tests', 'a11y', 'latest.json')
 
 const pages = [
   { name: 'dashboard', path: '/', ready: '.dashboard-shell' },
+  { name: 'design-department-dashboard', path: '/design-dashboard', ready: '.design-board-page' },
   {
     name: 'avatar-dropdown-open',
     path: '/',

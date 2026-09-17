@@ -353,6 +353,7 @@ func NewRouter(
 	taskBoardGroup := v1.Group("/task-board")
 	{
 		taskBoardGroup.GET("/overview", capabilityAccess(taskBoardGroup, http.MethodGet, "/overview", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskBoardH.OperationalOverview)
+		taskBoardGroup.GET("/design-department", capabilityAccess(taskBoardGroup, http.MethodGet, "/design-department", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), taskBoardH.DesignDepartmentDashboard)
 	}
 
 	integrationGroup := v1.Group("/integration")

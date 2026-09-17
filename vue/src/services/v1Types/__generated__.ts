@@ -7058,6 +7058,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/task-board/design-department": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the caller's department design performance dashboard
+         * @description Returns a filterable, database-aggregated dashboard scoped to the authenticated
+         *     department administrator's stable department ID. Ordinary members and cross-department
+         *     callers are rejected. Task counts are distinct tasks; design-file counts include uploaded
+         *     source and delivery files but exclude references, previews and thumbnails. Calendar filters
+         *     use Asia/Shanghai boundaries and accept at most 366 days.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Inclusive Beijing date; defaults to 29 days before today. */
+                    start_date?: string;
+                    /** @description Inclusive Beijing date; defaults to today. */
+                    end_date?: string;
+                    date_basis?: "created" | "completed" | "deadline";
+                    granularity?: "day" | "week" | "month";
+                    /** @description Comma-separated department user IDs. */
+                    designer_ids?: string;
+                    /** @description Comma-separated stable team IDs. */
+                    team_ids?: string;
+                    /** @description Comma-separated task types. */
+                    task_types?: string;
+                    /** @description Comma-separated task statuses. */
+                    statuses?: string;
+                    /** @description Comma-separated priorities. */
+                    priorities?: string;
+                    /** @description Comma-separated business lanes. */
+                    business_lanes?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Department-scoped design dashboard */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DesignDepartmentDashboardResponse"];
+                    };
+                };
+                /** @description Invalid filter or date range */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Caller is not a department administrator with report.view */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/integration/asset-sync/finalized/manifest": {
         parameters: {
             query?: never;
@@ -21877,6 +21960,190 @@ export interface components {
         };
         TaskOperationalOverviewResponse: {
             data: components["schemas"]["TaskOperationalOverview"];
+        };
+        DesignDepartmentDashboardBreakdown: {
+            key: string;
+            label: string;
+            /** Format: int64 */
+            task_count: number;
+            /** Format: int64 */
+            design_file_count: number;
+            /** Format: int64 */
+            sku_count: number;
+            /** Format: double */
+            share: number;
+        };
+        DesignDepartmentDashboardSummary: {
+            /** Format: int64 */
+            task_count?: number;
+            /** Format: int64 */
+            completed_task_count?: number;
+            /** Format: int64 */
+            active_task_count?: number;
+            /** Format: int64 */
+            overdue_task_count?: number;
+            /** Format: int64 */
+            due_soon_task_count?: number;
+            /** Format: int64 */
+            design_submission_count?: number;
+            /** Format: int64 */
+            source_file_count?: number;
+            /** Format: int64 */
+            final_file_count?: number;
+            /** Format: int64 */
+            design_file_count?: number;
+            /** Format: int64 */
+            sku_count?: number;
+            /** Format: int64 */
+            resource_unit_count?: number;
+            /** Format: int64 */
+            member_count?: number;
+            /** Format: int64 */
+            contributing_member_count?: number;
+            /** Format: double */
+            completion_rate?: number;
+            /** Format: double */
+            first_pass_rate?: number;
+            /** Format: double */
+            on_time_rate?: number;
+            /** Format: double */
+            average_turnaround_hours?: number;
+            /** Format: double */
+            median_turnaround_hours?: number;
+            /** Format: double */
+            p90_turnaround_hours?: number;
+            /** Format: double */
+            average_files_per_task?: number;
+            /** Format: int64 */
+            turnaround_sample_count?: number;
+            /** Format: int64 */
+            deadline_sample_count?: number;
+            /** Format: int64 */
+            rejected_task_count?: number;
+            /** Format: int64 */
+            audit_reject_event_count?: number;
+        };
+        DesignDepartmentDashboardTrendPoint: {
+            period: string;
+            /** Format: int64 */
+            task_count: number;
+            /** Format: int64 */
+            completed_count: number;
+            /** Format: int64 */
+            design_file_count: number;
+            /** Format: int64 */
+            sku_count: number;
+        };
+        DesignDepartmentMember: {
+            /** Format: int64 */
+            user_id: number;
+            /** Format: int64 */
+            employee_no?: number | null;
+            display_name: string;
+            username: string;
+            /** Format: int64 */
+            team_id?: number | null;
+            team_name: string;
+            status: string;
+        };
+        DesignDepartmentPersonMetric: components["schemas"]["DesignDepartmentMember"] & {
+            /** Format: int64 */
+            task_count?: number;
+            /** Format: int64 */
+            completed_task_count?: number;
+            /** Format: int64 */
+            active_task_count?: number;
+            /** Format: int64 */
+            overdue_task_count?: number;
+            /** Format: int64 */
+            design_file_count?: number;
+            /** Format: int64 */
+            source_file_count?: number;
+            /** Format: int64 */
+            final_file_count?: number;
+            /** Format: int64 */
+            sku_count?: number;
+            /** Format: int64 */
+            design_submission_count?: number;
+            /** Format: int64 */
+            rejected_task_count?: number;
+            /** Format: int64 */
+            audit_reject_event_count?: number;
+            /** Format: double */
+            completion_rate?: number;
+            /** Format: double */
+            first_pass_rate?: number;
+            /** Format: double */
+            on_time_rate?: number;
+            /** Format: double */
+            average_turnaround_hours?: number;
+            /** Format: double */
+            workload_share?: number;
+            task_types?: components["schemas"]["DesignDepartmentDashboardBreakdown"][];
+        };
+        DesignDepartmentTaskRow: {
+            /** Format: int64 */
+            task_id: number;
+            task_no: string;
+            product_name: string;
+            /** Format: int64 */
+            designer_id: number;
+            designer_name: string;
+            task_type: string;
+            task_status: string;
+            priority: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at?: string | null;
+            /** Format: date-time */
+            deadline_at?: string | null;
+            /** Format: double */
+            turnaround_hours?: number | null;
+            /** Format: int64 */
+            source_file_count: number;
+            /** Format: int64 */
+            final_file_count: number;
+            /** Format: int64 */
+            sku_count: number;
+            /** Format: int64 */
+            audit_reject_count: number;
+            overdue: boolean;
+        };
+        DesignDepartmentDashboard: {
+            /** Format: date-time */
+            generated_at: string;
+            /** @enum {string} */
+            time_zone: "Asia/Shanghai";
+            /** Format: int64 */
+            department_id: number;
+            department_name: string;
+            /** Format: date-time */
+            period_start: string;
+            /** Format: date-time */
+            period_end: string;
+            /** @enum {string} */
+            date_basis: "created" | "completed" | "deadline";
+            /** @enum {string} */
+            granularity: "day" | "week" | "month";
+            summary: components["schemas"]["DesignDepartmentDashboardSummary"];
+            trend: components["schemas"]["DesignDepartmentDashboardTrendPoint"][];
+            people: components["schemas"]["DesignDepartmentPersonMetric"][];
+            task_types: components["schemas"]["DesignDepartmentDashboardBreakdown"][];
+            statuses: components["schemas"]["DesignDepartmentDashboardBreakdown"][];
+            priorities: components["schemas"]["DesignDepartmentDashboardBreakdown"][];
+            business_lanes: components["schemas"]["DesignDepartmentDashboardBreakdown"][];
+            file_types: components["schemas"]["DesignDepartmentDashboardBreakdown"][];
+            recent_tasks: components["schemas"]["DesignDepartmentTaskRow"][];
+            options: {
+                [key: string]: unknown;
+            };
+            definitions: {
+                [key: string]: string;
+            };
+        };
+        DesignDepartmentDashboardResponse: {
+            data: components["schemas"]["DesignDepartmentDashboard"];
         };
         /** @enum {string} */
         ExternalAssetFilesystemEventType: "upsert" | "delete";

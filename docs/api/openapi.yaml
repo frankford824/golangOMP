@@ -4562,6 +4562,154 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/TaskOperationalOverview'
+    DesignDepartmentDashboardBreakdown:
+      type: object
+      required: [key, label, task_count, design_file_count, sku_count, share]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        task_count: { type: integer, format: int64 }
+        design_file_count: { type: integer, format: int64 }
+        sku_count: { type: integer, format: int64 }
+        share: { type: number, format: double }
+    DesignDepartmentDashboardSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        task_count: { type: integer, format: int64 }
+        completed_task_count: { type: integer, format: int64 }
+        active_task_count: { type: integer, format: int64 }
+        overdue_task_count: { type: integer, format: int64 }
+        due_soon_task_count: { type: integer, format: int64 }
+        design_submission_count: { type: integer, format: int64 }
+        source_file_count: { type: integer, format: int64 }
+        final_file_count: { type: integer, format: int64 }
+        design_file_count: { type: integer, format: int64 }
+        sku_count: { type: integer, format: int64 }
+        resource_unit_count: { type: integer, format: int64 }
+        member_count: { type: integer, format: int64 }
+        contributing_member_count: { type: integer, format: int64 }
+        completion_rate: { type: number, format: double }
+        first_pass_rate: { type: number, format: double }
+        on_time_rate: { type: number, format: double }
+        average_turnaround_hours: { type: number, format: double }
+        median_turnaround_hours: { type: number, format: double }
+        p90_turnaround_hours: { type: number, format: double }
+        average_files_per_task: { type: number, format: double }
+        turnaround_sample_count: { type: integer, format: int64 }
+        deadline_sample_count: { type: integer, format: int64 }
+        rejected_task_count: { type: integer, format: int64 }
+        audit_reject_event_count: { type: integer, format: int64 }
+    DesignDepartmentDashboardTrendPoint:
+      type: object
+      required: [period, task_count, completed_count, design_file_count, sku_count]
+      properties:
+        period: { type: string }
+        task_count: { type: integer, format: int64 }
+        completed_count: { type: integer, format: int64 }
+        design_file_count: { type: integer, format: int64 }
+        sku_count: { type: integer, format: int64 }
+    DesignDepartmentMember:
+      type: object
+      required: [user_id, display_name, username, team_name, status]
+      properties:
+        user_id: { type: integer, format: int64 }
+        employee_no: { type: integer, format: int64, nullable: true }
+        display_name: { type: string }
+        username: { type: string }
+        team_id: { type: integer, format: int64, nullable: true }
+        team_name: { type: string }
+        status: { type: string }
+    DesignDepartmentPersonMetric:
+      allOf:
+        - $ref: '#/components/schemas/DesignDepartmentMember'
+        - type: object
+          properties:
+            task_count: { type: integer, format: int64 }
+            completed_task_count: { type: integer, format: int64 }
+            active_task_count: { type: integer, format: int64 }
+            overdue_task_count: { type: integer, format: int64 }
+            design_file_count: { type: integer, format: int64 }
+            source_file_count: { type: integer, format: int64 }
+            final_file_count: { type: integer, format: int64 }
+            sku_count: { type: integer, format: int64 }
+            design_submission_count: { type: integer, format: int64 }
+            rejected_task_count: { type: integer, format: int64 }
+            audit_reject_event_count: { type: integer, format: int64 }
+            completion_rate: { type: number, format: double }
+            first_pass_rate: { type: number, format: double }
+            on_time_rate: { type: number, format: double }
+            average_turnaround_hours: { type: number, format: double }
+            workload_share: { type: number, format: double }
+            task_types:
+              type: array
+              items: { $ref: '#/components/schemas/DesignDepartmentDashboardBreakdown' }
+    DesignDepartmentTaskRow:
+      type: object
+      required: [task_id, task_no, product_name, designer_id, designer_name, task_type, task_status, priority, created_at, source_file_count, final_file_count, sku_count, audit_reject_count, overdue]
+      properties:
+        task_id: { type: integer, format: int64 }
+        task_no: { type: string }
+        product_name: { type: string }
+        designer_id: { type: integer, format: int64 }
+        designer_name: { type: string }
+        task_type: { type: string }
+        task_status: { type: string }
+        priority: { type: string }
+        created_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
+        deadline_at: { type: string, format: date-time, nullable: true }
+        turnaround_hours: { type: number, format: double, nullable: true }
+        source_file_count: { type: integer, format: int64 }
+        final_file_count: { type: integer, format: int64 }
+        sku_count: { type: integer, format: int64 }
+        audit_reject_count: { type: integer, format: int64 }
+        overdue: { type: boolean }
+    DesignDepartmentDashboard:
+      type: object
+      required: [generated_at, time_zone, department_id, department_name, period_start, period_end, date_basis, granularity, summary, trend, people, task_types, statuses, priorities, business_lanes, file_types, recent_tasks, options, definitions]
+      properties:
+        generated_at: { type: string, format: date-time }
+        time_zone: { type: string, enum: [Asia/Shanghai] }
+        department_id: { type: integer, format: int64 }
+        department_name: { type: string }
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        date_basis: { type: string, enum: [created, completed, deadline] }
+        granularity: { type: string, enum: [day, week, month] }
+        summary: { $ref: '#/components/schemas/DesignDepartmentDashboardSummary' }
+        trend:
+          type: array
+          items: { $ref: '#/components/schemas/DesignDepartmentDashboardTrendPoint' }
+        people:
+          type: array
+          items: { $ref: '#/components/schemas/DesignDepartmentPersonMetric' }
+        task_types:
+          type: array
+          items: { $ref: '#/components/schemas/DesignDepartmentDashboardBreakdown' }
+        statuses:
+          type: array
+          items: { $ref: '#/components/schemas/DesignDepartmentDashboardBreakdown' }
+        priorities:
+          type: array
+          items: { $ref: '#/components/schemas/DesignDepartmentDashboardBreakdown' }
+        business_lanes:
+          type: array
+          items: { $ref: '#/components/schemas/DesignDepartmentDashboardBreakdown' }
+        file_types:
+          type: array
+          items: { $ref: '#/components/schemas/DesignDepartmentDashboardBreakdown' }
+        recent_tasks:
+          type: array
+          maxItems: 200
+          items: { $ref: '#/components/schemas/DesignDepartmentTaskRow' }
+        options: { type: object, additionalProperties: true }
+        definitions: { type: object, additionalProperties: { type: string } }
+    DesignDepartmentDashboardResponse:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/DesignDepartmentDashboard' }
     ExternalAssetFilesystemEventType:
       type: string
       enum: [upsert, delete]
@@ -11549,6 +11697,38 @@ paths:
           description: Unauthenticated
         '403':
           description: Caller lacks `task.view` or is outside the effective task scope
+  /v1/task-board/design-department:
+    get:
+      summary: Get the caller's department design performance dashboard
+      description: |
+        Returns a filterable, database-aggregated dashboard scoped to the authenticated
+        department administrator's stable department ID. Ordinary members and cross-department
+        callers are rejected. Task counts are distinct tasks; design-file counts include uploaded
+        source and delivery files but exclude references, previews and thumbnails. Calendar filters
+        use Asia/Shanghai boundaries and accept at most 366 days.
+      tags: [TaskBoard, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      parameters:
+        - { in: query, name: start_date, schema: { type: string, format: date }, description: Inclusive Beijing date; defaults to 29 days before today. }
+        - { in: query, name: end_date, schema: { type: string, format: date }, description: Inclusive Beijing date; defaults to today. }
+        - { in: query, name: date_basis, schema: { type: string, enum: [created, completed, deadline], default: created } }
+        - { in: query, name: granularity, schema: { type: string, enum: [day, week, month], default: day } }
+        - { in: query, name: designer_ids, schema: { type: string }, description: Comma-separated department user IDs. }
+        - { in: query, name: team_ids, schema: { type: string }, description: Comma-separated stable team IDs. }
+        - { in: query, name: task_types, schema: { type: string }, description: Comma-separated task types. }
+        - { in: query, name: statuses, schema: { type: string }, description: Comma-separated task statuses. }
+        - { in: query, name: priorities, schema: { type: string }, description: Comma-separated priorities. }
+        - { in: query, name: business_lanes, schema: { type: string }, description: Comma-separated business lanes. }
+      responses:
+        '200':
+          description: Department-scoped design dashboard
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignDepartmentDashboardResponse' }
+        '400': { description: Invalid filter or date range }
+        '401': { description: Unauthenticated }
+        '403': { description: Caller is not a department administrator with report.view }
   /v1/integration/asset-sync/finalized/manifest:
     get:
       operationId: getFinalizedAssetSyncManifest
