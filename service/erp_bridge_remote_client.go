@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -84,7 +85,11 @@ type remoteERPBridgeClient struct {
 	headerSignature          string
 	signatureIncludeBodyHash bool
 	logger                   *zap.Logger
+	historyCostRateMu        sync.Mutex
+	historyCostNextRequest   time.Time
 }
+
+const erpHistoryCostMinInterval = 150 * time.Millisecond
 
 type hybridERPBridgeClient struct {
 	localFallback  ERPBridgeClient
@@ -923,6 +928,11 @@ func (c *remoteERPBridgeClient) doOpenWebRequest(ctx context.Context, method, re
 	if !strings.EqualFold(strings.TrimSpace(method), http.MethodPost) {
 		return nil, fmt.Errorf("remote erp openweb mode only supports POST requests")
 	}
+	if strings.TrimSpace(operation) == "jst_history_cost_query" {
+		if err := c.waitForHistoryCostRateLimit(ctx); err != nil {
+			return nil, err
+		}
+	}
 	bizPayload, err := buildERPRemoteOpenWebBiz(operation, body)
 	if err != nil {
 		return nil, err
@@ -1022,7 +1032,7 @@ func (c *remoteERPBridgeClient) doOpenWebRequest(ctx context.Context, method, re
 			Body:      strings.TrimSpace(string(respBody)),
 			URL:       target.String(),
 			Duration:  duration,
-			Retryable: false,
+			Retryable: isERPRemoteOpenWebRateLimit(openWebCode, openWebMsg),
 		}
 		c.logger.Warn("remote_erp_openweb_business_error",
 			zap.Int("attempt", attempt),
@@ -1053,6 +1063,27 @@ func (c *remoteERPBridgeClient) doOpenWebRequest(ctx context.Context, method, re
 		zap.Duration("duration", duration),
 	)
 	return respBody, nil
+}
+
+// waitForHistoryCostRateLimit smooths concurrent public history requests before
+// they reach JST OpenWeb. Production evidence shows the upstream rejects short
+// bursts with business codes 199/200 even when the long-term request average is
+// low, so pacing must happen before every attempt, including retries.
+func (c *remoteERPBridgeClient) waitForHistoryCostRateLimit(ctx context.Context) error {
+	c.historyCostRateMu.Lock()
+	defer c.historyCostRateMu.Unlock()
+
+	if wait := time.Until(c.historyCostNextRequest); wait > 0 {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	c.historyCostNextRequest = time.Now().Add(erpHistoryCostMinInterval)
+	return nil
 }
 
 func (c *remoteERPBridgeClient) applyAuthHeaders(ctx context.Context, req *http.Request, method string, body []byte, requestPath string) error {
@@ -1163,6 +1194,20 @@ func isRetryableERPBridgeError(err error) bool {
 		return openWebErr.Retryable
 	}
 	return false
+}
+
+func isERPRemoteOpenWebRateLimit(code int, message string) bool {
+	message = strings.ToLower(strings.TrimSpace(message))
+	if strings.Contains(message, "调用频次超过限制") ||
+		strings.Contains(message, "调用太频繁") ||
+		strings.Contains(message, "rate limit") ||
+		strings.Contains(message, "too many requests") {
+		return true
+	}
+	// JST currently uses both 199 and 200 for throttling, but only treat those
+	// codes as transient when the message also identifies a frequency limit.
+	return (code == 199 || code == 200) &&
+		(strings.Contains(message, "频次") || strings.Contains(message, "频繁"))
 }
 
 func signERPRemoteOpenWeb(appSecret string, params map[string]string) string {
