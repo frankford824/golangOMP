@@ -10,6 +10,7 @@ import (
 
 const (
 	ossIMGPreviewWidth          = 1600
+	ossIMGThumbnailWidth        = 480
 	ossIMGDefaultMaxSourceBytes = int64(20 * 1024 * 1024)
 )
 
@@ -74,6 +75,27 @@ func OSSIMGPreviewProcessForSize(filename, mimeType string, fileSize int64) (str
 		return "", true
 	}
 	return buildOSSIMGPreviewProcessByExtension(ext), true
+}
+
+// OSSIMGThumbnailProcessForSize returns a low-bandwidth gallery rendition.
+// Oversized originals remain directly previewable until the asynchronous
+// design-thumb derivative is ready.
+func OSSIMGThumbnailProcessForSize(filename, mimeType string, fileSize int64) (string, bool) {
+	ext := sourceAssetFormatExtension(filename, mimeType)
+	if _, ok := ossIMGDirectSourceExtensions[ext]; !ok {
+		return "", false
+	}
+	if fileSize > ossIMGDefaultMaxSourceBytes {
+		return "", true
+	}
+	steps := []string{
+		"image/auto-orient,1",
+		"resize,w_" + intToString(ossIMGThumbnailWidth) + ",m_lfit",
+	}
+	if ext != ".gif" {
+		steps = append(steps, "format,webp", "quality,Q_75")
+	}
+	return strings.Join(steps, "/"), true
 }
 
 func buildOSSIMGPreviewProcessByExtension(ext string) string {

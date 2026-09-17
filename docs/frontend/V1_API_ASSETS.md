@@ -480,6 +480,7 @@ curl -X POST https://api.example.com/v1/assets/batch-download \
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
 | `asset_id` | path | string | 是 | Numeric system asset id or external resource id such as `ext-123`. |
+| `rendition` | query | enum(preview/thumbnail) | 否 | Use `thumbnail` for a low-bandwidth gallery rendition; defaults to the full preview rendition. |
 
 请求体: 无请求体。
 

@@ -352,6 +352,36 @@ backend full sync independently repair missed events.
 - If `curl` is installed, the helper also reports HTTP status codes for the auth/task checks.
 - `deploy/start-main.sh` requires `curl` plus either `ss` or `lsof`; it fails closed when listener ownership cannot be proven or `/health` cannot be confirmed as `200` within `START_MAIN_TIMEOUT_SECONDS` (default `30`).
 
+## Alibaba Cloud Internal OSS And Tailscale
+
+Tailscale's anti-spoof rule covers `100.64.0.0/10`, which overlaps the
+documented Alibaba Cloud internal OSS VIP ranges and the ECS metadata address.
+On a host running Tailscale, a same-region OSS request can therefore leave via
+`eth0` while its return packets are dropped by `ts-input`.
+
+Install the narrow, persistent return-traffic exception before setting the
+server endpoint to the OSS internal hostname:
+
+```bash
+sudo bash deploy/configure-aliyun-internal-return.sh --install
+curl -I https://<bucket>.oss-cn-hangzhou-internal.aliyuncs.com/
+```
+
+The curl response may be `403` for an unsigned private bucket, but it must
+include an OSS request ID and must not time out. Then configure:
+
+```dotenv
+OSS_ENDPOINT=oss-cn-hangzhou-internal.aliyuncs.com
+OSS_PUBLIC_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
+```
+
+The helper backs up the current iptables rules under
+`/root/ecommerce_ai/backups/network`, installs an idempotent systemd service,
+and reapplies the exception after `tailscaled` starts. It accepts only
+established return traffic from the official Hangzhou OSS VIP ranges on ports
+80/443 plus the ECS metadata response address; it does not expose a listening
+port.
+
 ## Deploy Process Guard Tests
 - Run `bash deploy/tests/deploy-process-guards.test.sh` locally.
 - The test covers occupied-port rejection, exact listener ownership, unhealthy startup cleanup, same-version parallel candidate cleanup, and foreign pidfile refusal. It uses temporary directories and local ephemeral ports only; it does not connect to or modify production.

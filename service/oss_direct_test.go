@@ -560,6 +560,35 @@ func TestOSSDirectServiceOpenObjectSuccess(t *testing.T) {
 	}
 }
 
+func TestOSSDirectServiceUploadDerivedPreviewSetsPrivateImmutableCache(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if got := r.Header.Get("Cache-Control"); got != "private,max-age=86400,immutable" {
+			t.Fatalf("Cache-Control = %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	svc := NewOSSDirectService(OSSDirectConfig{
+		Enabled: true, Endpoint: strings.TrimPrefix(server.URL, "https://"),
+		PublicEndpoint: strings.TrimPrefix(server.URL, "https://"), Bucket: "test-bucket",
+		AccessKeyID: "test-key", AccessKeySecret: "test-secret",
+	})
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpClient := server.Client()
+	httpClient.Transport = &rewriteHostTransport{base: baseURL, inner: httpClient.Transport}
+	svc.httpClient = httpClient
+	if err := svc.UploadDerivedPreviewObject(context.Background(), "derived/preview.webp", "image/webp", []byte("preview")); err != nil {
+		t.Fatalf("UploadDerivedPreviewObject() error = %v", err)
+	}
+}
+
 func TestOSSDirectServiceStatObjectReturnsETagAndCRC64(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {

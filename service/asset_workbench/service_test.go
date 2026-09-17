@@ -1154,10 +1154,12 @@ func (s *systemAssetDownloaderStub) DownloadLatest(_ context.Context, assetID in
 
 type systemAssetPreviewDownloaderStub struct {
 	systemAssetDownloaderStub
-	previewCalls int
-	previewIDs   []int64
-	previewInfo  *domain.AssetDownloadInfo
-	previewErr   *domain.AppError
+	previewCalls   int
+	previewIDs     []int64
+	previewInfo    *domain.AssetDownloadInfo
+	previewErr     *domain.AppError
+	thumbnailCalls int
+	thumbnailInfo  *domain.AssetDownloadInfo
 }
 
 type systemAssetPreviewerStub struct {
@@ -1189,6 +1191,23 @@ func (s *systemAssetPreviewDownloaderStub) GetAssetPreviewInfoByID(_ context.Con
 		DownloadURL:      &url,
 		Filename:         "preview.webp",
 		FileSize:         1024,
+		MimeType:         "image/webp",
+		PreviewAvailable: true,
+	}, nil
+}
+
+func (s *systemAssetPreviewDownloaderStub) GetAssetThumbnailInfoByID(_ context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.thumbnailCalls++
+	if s.thumbnailInfo != nil {
+		copyInfo := *s.thumbnailInfo
+		return &copyInfo, nil
+	}
+	url := "https://assets.example.com/system/thumbnail/" + strconv.FormatInt(assetID, 10)
+	return &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      &url,
+		Filename:         "design-thumb.webp",
+		FileSize:         256,
 		MimeType:         "image/webp",
 		PreviewAvailable: true,
 	}, nil
@@ -1855,7 +1874,7 @@ func (s *externalMaterialProviderStub) DownloadExternal(_ context.Context, exter
 	}, nil
 }
 
-func (s *externalMaterialProviderStub) PreviewExternal(_ context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+func (s *externalMaterialProviderStub) PreviewExternal(_ context.Context, externalID int64, _ ...string) (*domain.AssetDownloadInfo, *domain.AppError) {
 	s.previewCalls = append(s.previewCalls, externalID)
 	if s.previewInfo != nil {
 		info := *s.previewInfo
@@ -3862,6 +3881,25 @@ func TestSystemAssetPreviewUsesSharedPreviewerBeforeDownload(t *testing.T) {
 	}
 	if previewer.downloadCalls != 0 {
 		t.Fatalf("downloadCalls = %d, want 0", previewer.downloadCalls)
+	}
+}
+
+func TestSystemAssetPreviewUsesThumbnailRenditionWhenRequested(t *testing.T) {
+	url := "https://assets.example.com/system/design-thumb.webp"
+	previewer := &systemAssetPreviewDownloaderStub{thumbnailInfo: &domain.AssetDownloadInfo{
+		DownloadMode: domain.AssetDownloadModeDirect, DownloadURL: &url,
+		Filename: "design-thumb.webp", MimeType: "image/webp", PreviewAvailable: true,
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetDownloader(previewer))
+	meta, appErr := svc.SystemAssetPreview(context.Background(), assetCapabilityActor(1, domain.PermissionAssetView), 1001, "thumbnail")
+	if appErr != nil {
+		t.Fatalf("SystemAssetPreview(thumbnail) error = %+v", appErr)
+	}
+	if meta == nil || meta.PreviewURL != url || !meta.PreviewAvailable {
+		t.Fatalf("thumbnail meta = %+v", meta)
+	}
+	if previewer.thumbnailCalls != 1 || previewer.previewCalls != 0 {
+		t.Fatalf("thumbnail calls=%d preview calls=%d", previewer.thumbnailCalls, previewer.previewCalls)
 	}
 }
 

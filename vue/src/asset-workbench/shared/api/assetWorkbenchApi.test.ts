@@ -86,6 +86,22 @@ describe('assetWorkbenchApi material source discriminators', () => {
 
     expect(getMock).toHaveBeenCalledWith('/v1/assets/ext-42/download', { signal: undefined })
   })
+
+  it('requests low-bandwidth thumbnail renditions for system and external gallery rows', async () => {
+    const { assetWorkbenchApi } = await import('./assetWorkbenchApi')
+
+    await assetWorkbenchApi.previewMaterialAsset({ id: 7, source_type: 'system' }, undefined, 'thumbnail')
+    expect(getMock).toHaveBeenLastCalledWith('/v1/asset-workbench/system-assets/7/preview', {
+      params: { rendition: 'thumbnail' },
+      signal: undefined,
+    })
+
+    await assetWorkbenchApi.previewMaterialAsset({ id: 42, source_type: 'external_asset', resource_id: 'ext-42' }, undefined, 'thumbnail')
+    expect(getMock).toHaveBeenLastCalledWith('/v1/assets/ext-42/preview', {
+      params: { rendition: 'thumbnail' },
+      signal: undefined,
+    })
+  })
 })
 
 describe('assetWorkbenchApi resource-group downloads', () => {

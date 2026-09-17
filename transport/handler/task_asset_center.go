@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -404,13 +405,21 @@ func (h *TaskAssetCenterHandler) DownloadAssetResource(c *gin.Context) {
 }
 
 func (h *TaskAssetCenterHandler) PreviewAssetResource(c *gin.Context) {
+	rendition := strings.ToLower(strings.TrimSpace(c.Query("rendition")))
+	if rendition == "" {
+		rendition = "preview"
+	}
+	if rendition != "preview" && rendition != "thumbnail" {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "rendition must be preview or thumbnail", nil))
+		return
+	}
 	assetID, err := parseInt64(strings.TrimSpace(c.Param("asset_id")))
 	if externalID, ok := domain.ParseExternalAssetResourceID(c.Param("asset_id")); ok {
 		if h.globalSvc == nil {
 			respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
 			return
 		}
-		info, appErr := h.globalSvc.PreviewExternal(c.Request.Context(), externalID)
+		info, appErr := h.globalSvc.PreviewExternal(c.Request.Context(), externalID, rendition)
 		if appErr != nil {
 			respondAssetCenterError(c, appErr)
 			return
@@ -422,7 +431,19 @@ func (h *TaskAssetCenterHandler) PreviewAssetResource(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset id", nil))
 		return
 	}
-	info, appErr := h.svc.GetAssetPreviewInfoByID(c.Request.Context(), assetID)
+	var info *domain.AssetDownloadInfo
+	var appErr *domain.AppError
+	if rendition == "thumbnail" {
+		if thumbnailer, ok := h.svc.(interface {
+			GetAssetThumbnailInfoByID(context.Context, int64) (*domain.AssetDownloadInfo, *domain.AppError)
+		}); ok {
+			info, appErr = thumbnailer.GetAssetThumbnailInfoByID(c.Request.Context(), assetID)
+		} else {
+			info, appErr = h.svc.GetAssetPreviewInfoByID(c.Request.Context(), assetID)
+		}
+	} else {
+		info, appErr = h.svc.GetAssetPreviewInfoByID(c.Request.Context(), assetID)
+	}
 	if appErr != nil {
 		respondError(c, appErr)
 		return

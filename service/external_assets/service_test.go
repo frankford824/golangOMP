@@ -942,6 +942,10 @@ func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
 	if !strings.Contains(previewURL, "resize%2Cw_1600%2Cm_lfit") {
 		t.Fatalf("preview URL = %q, want bounded OSS image transform", previewURL)
 	}
+	thumbnailURL := svc.BrowserThumbnailURL(row)
+	if !strings.Contains(thumbnailURL, "resize%2Cw_480%2Cm_lfit") || !strings.Contains(thumbnailURL, "format%2Cwebp") {
+		t.Fatalf("thumbnail URL = %q, want low-bandwidth WebP transform", thumbnailURL)
+	}
 
 	downloadURL := svc.BrowserDownloadURL(row)
 	if downloadURL == "" {

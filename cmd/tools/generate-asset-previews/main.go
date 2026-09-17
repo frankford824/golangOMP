@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -41,11 +43,16 @@ func main() {
 	var timeout time.Duration
 	var dryRun bool
 	var onlyAssetID int64
+	var concurrency int
 	flag.IntVar(&limit, "limit", 0, "maximum source assets to process; 0 means no explicit limit")
 	flag.DurationVar(&timeout, "timeout", 30*time.Minute, "whole run timeout")
 	flag.BoolVar(&dryRun, "dry-run", false, "list jobs without generating previews")
 	flag.Int64Var(&onlyAssetID, "asset-id", 0, "process one source asset id only")
+	flag.IntVar(&concurrency, "concurrency", 4, "parallel preview jobs (1-8)")
 	flag.Parse()
+	if concurrency < 1 || concurrency > 8 {
+		log.Fatalf("concurrency must be between 1 and 8")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -59,8 +66,8 @@ func main() {
 		log.Fatalf("open mysql: %v", err)
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(2)
+	db.SetMaxOpenConns(concurrency + 2)
+	db.SetMaxIdleConns(concurrency)
 	db.SetConnMaxLifetime(cfg.MySQL.ConnMaxLifetime)
 	if err := db.PingContext(ctx); err != nil {
 		log.Fatalf("ping mysql: %v", err)
@@ -111,19 +118,49 @@ func main() {
 		service.WithOSSDirectService(ossDirect),
 	)
 
-	for _, job := range jobs {
-		if job.ActorID <= 0 {
-			summary.Skipped++
-			summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d skipped: actor_id is empty", job.SourceAssetID))
-			continue
-		}
-		if appErr := taskAssetCenterSvc.EnsureDerivedPreviewAssets(ctx, job.TaskID, job.SourceAssetID, job.ActorID); appErr != nil {
-			summary.Failed++
-			summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d task_id=%d: %s", job.SourceAssetID, job.TaskID, appErr.Message))
-			continue
-		}
-		summary.Succeeded++
+	jobCh := make(chan sourceAssetJob)
+	var wg sync.WaitGroup
+	var summaryMu sync.Mutex
+	for worker := 0; worker < concurrency; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				if job.ActorID <= 0 {
+					summaryMu.Lock()
+					summary.Skipped++
+					summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d skipped: actor_id is empty", job.SourceAssetID))
+					summaryMu.Unlock()
+					continue
+				}
+				if appErr := taskAssetCenterSvc.EnsureDerivedPreviewAssets(ctx, job.TaskID, job.SourceAssetID, job.ActorID); appErr != nil {
+					summaryMu.Lock()
+					summary.Failed++
+					summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d task_id=%d: %s", job.SourceAssetID, job.TaskID, appErr.Message))
+					summaryMu.Unlock()
+					continue
+				}
+				summaryMu.Lock()
+				summary.Succeeded++
+				summaryMu.Unlock()
+			}
+		}()
 	}
+sendJobs:
+	for _, job := range jobs {
+		select {
+		case <-ctx.Done():
+			break sendJobs
+		case jobCh <- job:
+		}
+	}
+	close(jobCh)
+	wg.Wait()
+	if ctx.Err() != nil {
+		summary.Failed++
+		summary.Failures = append(summary.Failures, "run context: "+ctx.Err().Error())
+	}
+	sort.Strings(summary.Failures)
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(summary); err != nil {
@@ -142,10 +179,10 @@ func listAsyncPreviewJobs(ctx context.Context, db *sql.DB, limit int, onlyAssetI
 		"COALESCE(ta.file_size, 0) >= 1024",
 		"ta.cleaned_at IS NULL",
 		"ta.deleted_at IS NULL",
-		`LOWER(COALESCE(ta.original_filename, ta.file_name, '')) NOT REGEXP '[.](jpe?g|png|bmp|gif|webp|tiff?|heic|heif|avif)$'`,
 		`(
-			LOWER(COALESCE(ta.original_filename, ta.file_name, '')) REGEXP '[.](psd|psb|pdf|ai|eps|ps)$'
-			OR LOWER(COALESCE(ta.mime_type, '')) IN ('image/vnd.adobe.photoshop', 'application/pdf', 'application/postscript', 'application/illustrator', 'application/vnd.adobe.illustrator')
+			LOWER(COALESCE(ta.original_filename, ta.file_name, '')) REGEXP '[.](jpe?g|png|bmp|gif|webp|tiff?|heic|heif|avif|psd|psb|pdf|ai|eps|ps)$'
+			OR LOWER(COALESCE(ta.mime_type, '')) LIKE 'image/%'
+			OR LOWER(COALESCE(ta.mime_type, '')) IN ('application/pdf', 'application/postscript', 'application/illustrator', 'application/vnd.adobe.illustrator')
 		)`,
 		`(
 			NOT EXISTS (

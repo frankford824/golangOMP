@@ -1630,7 +1630,8 @@ export interface paths {
          * @description Login endpoint for local session-token auth. Returns a bearer token backed by persisted
          *     `user_sessions` rows. This contract does not introduce SSO, org sync, or external identity
          *     providers. The response includes `session_id` plus the current frontend permission contract
-         *     under `user.frontend_access`.
+         *     under `user.frontend_access`. Session expiry is an idle timeout renewed after each successfully
+         *     authenticated request, so active operators are not interrupted mid-task.
          */
         post: {
             parameters: {
@@ -4930,7 +4931,7 @@ export interface paths {
         put?: never;
         /**
          * Batch download asset direct URL manifest
-         * @description Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; external resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
+         * @description Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; retouch source inputs without a current-version pointer may resolve their latest uploaded version only when attached to an active requirement in the same retouch task and the caller has task-scoped asset.download access. Removed or incomplete latest inputs do not fall back to older versions. External resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
          */
         post: {
             parameters: {
@@ -5048,7 +5049,10 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Use `thumbnail` for a low-bandwidth gallery rendition; defaults to the full preview rendition. */
+                    rendition?: "preview" | "thumbnail";
+                };
                 header?: never;
                 path: {
                     /** @description Numeric system asset id or external resource id such as `ext-123`. */
@@ -5149,7 +5153,7 @@ export interface paths {
         };
         /**
          * Get asset download info
-         * @description Returns backend-authorized download metadata for one asset resource. Canonical runtime prefers browser-direct byte access.
+         * @description Returns backend-authorized download metadata for one asset resource. Canonical runtime prefers browser-direct byte access. Retouch source inputs without a current-version pointer may resolve their latest uploaded version only for an active requirement in the same retouch task and a caller with task-scoped asset.download access; deleted, cleaned or incomplete latest inputs never fall back to older versions.
          */
         get: {
             parameters: {
@@ -18496,7 +18500,10 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Use `thumbnail` for a low-bandwidth gallery rendition; defaults to the full preview rendition. */
+                    rendition?: "preview" | "thumbnail";
+                };
                 header?: never;
                 path: {
                     asset_id: number;
@@ -18914,7 +18921,10 @@ export interface components {
             token?: string;
             /** @example Bearer */
             token_type?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Current idle-expiry deadline. Each successfully authenticated request renews this deadline by the configured session TTL.
+             */
             expires_at?: string;
         };
         AuthResult: {

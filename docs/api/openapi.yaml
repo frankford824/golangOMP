@@ -10230,6 +10230,14 @@ paths:
           schema:
             type: string
           description: Numeric system asset id or external resource id such as `ext-123`.
+        - in: query
+          name: rendition
+          required: false
+          description: Use `thumbnail` for a low-bandwidth gallery rendition; defaults to the full preview rendition.
+          schema:
+            type: string
+            enum: [preview, thumbnail]
+            default: preview
       responses:
         '200':
           description: Asset detail with version list
@@ -17790,6 +17798,14 @@ paths:
           name: asset_id
           required: true
           schema: { type: integer }
+        - in: query
+          name: rendition
+          required: false
+          description: Use `thumbnail` for a low-bandwidth gallery rendition; defaults to the full preview rendition.
+          schema:
+            type: string
+            enum: [preview, thumbnail]
+            default: preview
       responses:
         '200':
           description: System asset preview metadata

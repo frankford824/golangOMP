@@ -407,6 +407,14 @@ func (s *taskAssetCenterService) GetAssetDownloadInfoByID(ctx context.Context, a
 }
 
 func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return s.getAssetPreviewInfoByID(ctx, assetID, false)
+}
+
+func (s *taskAssetCenterService) GetAssetThumbnailInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return s.getAssetPreviewInfoByID(ctx, assetID, true)
+}
+
+func (s *taskAssetCenterService) getAssetPreviewInfoByID(ctx context.Context, assetID int64, thumbnail bool) (*domain.AssetDownloadInfo, *domain.AppError) {
 	asset, appErr := s.requireDesignAssetByID(ctx, assetID)
 	if appErr != nil {
 		return nil, appErr
@@ -454,7 +462,13 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 		return nil, appErr
 	}
 	if !asset.AssetType.IsPreview() && !asset.AssetType.IsDesignThumb() {
-		info, resolveErr := s.resolveDerivedPreviewInfo(ctx, asset)
+		var info *domain.AssetDownloadInfo
+		var resolveErr *domain.AppError
+		if thumbnail {
+			info, resolveErr = s.resolveDerivedThumbnailInfo(ctx, asset)
+		} else {
+			info, resolveErr = s.resolveDerivedPreviewInfo(ctx, asset)
+		}
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
@@ -476,6 +490,9 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 	}
 	if appErr := validateAssetVersionObjectAvailable(asset.CurrentVersion); appErr != nil {
 		return nil, appErr
+	}
+	if thumbnail {
+		return buildAssetThumbnailInfoWithOSS(asset.CurrentVersion, s.uploadClient, s.ossDirectService), nil
 	}
 	return buildAssetPreviewInfoWithOSS(asset.CurrentVersion, s.uploadClient, s.ossDirectService), nil
 }
@@ -1940,6 +1957,45 @@ func buildAssetDownloadInfoWithOSS(version *domain.DesignAssetVersion, uploadCli
 
 func buildAssetPreviewInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) *domain.AssetDownloadInfo {
 	return buildOSSOrFallback(version, uploadClient, ossDirect, true)
+}
+
+func buildAssetThumbnailInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) *domain.AssetDownloadInfo {
+	if version == nil {
+		return nil
+	}
+	filename := resolveDesignAssetDownloadFilename(version)
+	if ossDirect != nil && ossDirect.Enabled() && strings.TrimSpace(version.StorageKey) != "" {
+		fileSize := int64(0)
+		if version.FileSize != nil {
+			fileSize = *version.FileSize
+		}
+		key := strings.TrimSpace(version.StorageKey)
+		process, supported := OSSIMGThumbnailProcessForSize(version.OriginalFilename, version.MimeType, fileSize)
+		var info *OSSDirectDownloadInfo
+		mimeType := version.MimeType
+		if supported && process != "" {
+			info = ossDirect.PresignPreviewURLWithProcess(key, process)
+			if strings.Contains(process, "format,webp") {
+				mimeType = "image/webp"
+			}
+		} else {
+			info = ossDirect.PresignPreviewURL(key)
+		}
+		if info != nil && strings.TrimSpace(info.DownloadURL) != "" {
+			downloadURL := info.DownloadURL
+			return &domain.AssetDownloadInfo{
+				DownloadMode:     domain.AssetDownloadModeDirect,
+				DownloadURL:      &downloadURL,
+				AccessHint:       "oss_presigned_thumbnail",
+				PreviewAvailable: version.PreviewAvailable,
+				Filename:         filename,
+				FileSize:         fileSize,
+				MimeType:         mimeType,
+				ExpiresAt:        &info.ExpiresAt,
+			}
+		}
+	}
+	return buildAssetDownloadInfo(version, uploadClient)
 }
 
 func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService, preview bool) *domain.AssetDownloadInfo {

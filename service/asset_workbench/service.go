@@ -45,6 +45,7 @@ type objectStore interface {
 	CopyObject(context.Context, string, string) error
 	OpenObject(context.Context, string) (io.ReadCloser, error)
 	UploadObject(context.Context, string, string, []byte) error
+	UploadDerivedPreviewObject(context.Context, string, string, []byte) error
 	PresignDownloadURLWithFilename(string, string) *baseservice.OSSDirectDownloadInfo
 	PresignPreviewURL(string) *baseservice.OSSDirectDownloadInfo
 }
@@ -124,9 +125,13 @@ type SystemAssetPreviewer interface {
 	GetAssetPreviewInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 }
 
+type SystemAssetThumbnailer interface {
+	GetAssetThumbnailInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
+}
+
 type ExternalAssetDownloader interface {
 	DownloadExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError)
-	PreviewExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError)
+	PreviewExternal(ctx context.Context, externalID int64, renditions ...string) (*domain.AssetDownloadInfo, *domain.AppError)
 }
 
 func NewService(cfg Config, opts ...Option) *Service {
@@ -6550,19 +6555,30 @@ func (s *Service) SystemAssetDownload(ctx context.Context, actor domain.RequestA
 	return info, nil
 }
 
-func (s *Service) SystemAssetPreview(ctx context.Context, actor domain.RequestActor, assetID int64) (*SystemAssetPreviewMeta, *domain.AppError) {
+func (s *Service) SystemAssetPreview(ctx context.Context, actor domain.RequestActor, assetID int64, renditions ...string) (*SystemAssetPreviewMeta, *domain.AppError) {
 	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required.", nil)
 	}
 	if assetID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
 	}
-	return s.systemAssetPreviewMeta(ctx, assetID)
+	thumbnail := len(renditions) > 0 && strings.EqualFold(strings.TrimSpace(renditions[0]), "thumbnail")
+	return s.systemAssetPreviewMeta(ctx, assetID, thumbnail)
 }
 
-func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64) (*SystemAssetPreviewMeta, *domain.AppError) {
+func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64, thumbnail bool) (*SystemAssetPreviewMeta, *domain.AppError) {
 	if s.systemPreviews != nil {
-		info, appErr := s.systemPreviews.GetAssetPreviewInfoByID(ctx, assetID)
+		var info *domain.AssetDownloadInfo
+		var appErr *domain.AppError
+		if thumbnail {
+			if thumbnailer, ok := s.systemPreviews.(SystemAssetThumbnailer); ok {
+				info, appErr = thumbnailer.GetAssetThumbnailInfoByID(ctx, assetID)
+			} else {
+				info, appErr = s.systemPreviews.GetAssetPreviewInfoByID(ctx, assetID)
+			}
+		} else {
+			info, appErr = s.systemPreviews.GetAssetPreviewInfoByID(ctx, assetID)
+		}
 		if appErr == nil {
 			return systemAssetPreviewMetaFromDownloadInfo(assetID, string(domain.AssetResourceSourceSystem), strconv.FormatInt(assetID, 10), info), nil
 		}
@@ -7590,7 +7606,7 @@ func (s *Service) processPreviewFile(ctx context.Context, file *domain.AssetWork
 		return fmt.Errorf("render preview: %w", err)
 	}
 	previewKey := s.buildPreviewKey(s.nowFn().UTC(), file.ID)
-	if err := s.oss.UploadObject(ctx, previewKey, "image/webp", content); err != nil {
+	if err := s.oss.UploadDerivedPreviewObject(ctx, previewKey, "image/webp", content); err != nil {
 		return fmt.Errorf("upload preview object: %w", err)
 	}
 	return s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -10421,7 +10437,7 @@ func (s *Service) clientMaterialPreviewMeta(ctx context.Context, material *domai
 		return clientMaterialPreviewMetaFromDownloadInfo(material, info), nil
 	}
 	if domain.NormalizeAssetResourceSource(material.SourceType) != domain.AssetResourceSourceExternal {
-		meta, appErr := s.systemAssetPreviewMeta(ctx, material.AssetID)
+		meta, appErr := s.systemAssetPreviewMeta(ctx, material.AssetID, false)
 		if meta != nil {
 			meta.SourceType = material.SourceType
 			meta.SourceRef = material.SourceRef

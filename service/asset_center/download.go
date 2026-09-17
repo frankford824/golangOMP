@@ -41,11 +41,11 @@ func (s *Service) DownloadExternal(ctx context.Context, externalID int64) (*doma
 	return s.externalSvc.DownloadInfo(ctx, externalID)
 }
 
-func (s *Service) PreviewExternal(ctx context.Context, externalID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+func (s *Service) PreviewExternal(ctx context.Context, externalID int64, renditions ...string) (*domain.AssetDownloadInfo, *domain.AppError) {
 	if s.externalSvc == nil || !s.externalSvc.Enabled() {
 		return nil, domain.ErrNotFound
 	}
-	return s.externalSvc.PreviewInfo(ctx, externalID)
+	return s.externalSvc.PreviewInfo(ctx, externalID, renditions...)
 }
 
 func (s *Service) ResolveExternalStream(ctx context.Context, externalID int64) (*externalassets.NetdiskStreamTarget, *domain.AppError) {

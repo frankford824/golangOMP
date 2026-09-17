@@ -47,10 +47,29 @@ var sourceDerivedPreviewSpecs = []derivedPreviewSpec{
 }
 
 func (s *taskAssetCenterService) resolveDerivedPreviewInfo(ctx context.Context, sourceAsset *domain.DesignAsset) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return s.resolveDerivedRenditionInfo(ctx, sourceAsset,
+		[]domain.TaskAssetType{domain.TaskAssetTypePreview, domain.TaskAssetTypeDesignThumb},
+		buildAssetPreviewInfoWithOSS,
+	)
+}
+
+func (s *taskAssetCenterService) resolveDerivedThumbnailInfo(ctx context.Context, sourceAsset *domain.DesignAsset) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return s.resolveDerivedRenditionInfo(ctx, sourceAsset,
+		[]domain.TaskAssetType{domain.TaskAssetTypeDesignThumb, domain.TaskAssetTypePreview},
+		buildAssetThumbnailInfoWithOSS,
+	)
+}
+
+func (s *taskAssetCenterService) resolveDerivedRenditionInfo(
+	ctx context.Context,
+	sourceAsset *domain.DesignAsset,
+	assetTypes []domain.TaskAssetType,
+	build func(*domain.DesignAssetVersion, UploadServiceClient, *OSSDirectService) *domain.AssetDownloadInfo,
+) (*domain.AssetDownloadInfo, *domain.AppError) {
 	if sourceAsset == nil || sourceAsset.AssetType.IsPreview() || sourceAsset.AssetType.IsDesignThumb() {
 		return nil, nil
 	}
-	for _, assetType := range []domain.TaskAssetType{domain.TaskAssetTypePreview, domain.TaskAssetTypeDesignThumb} {
+	for _, assetType := range assetTypes {
 		sourceAssetID := sourceAsset.ID
 		filter := repo.DesignAssetListFilter{
 			TaskID:        &sourceAsset.TaskID,
@@ -75,7 +94,7 @@ func (s *taskAssetCenterService) resolveDerivedPreviewInfo(ctx context.Context, 
 			if appErr := validateAssetVersionObjectAvailable(hydrated.CurrentVersion); appErr != nil {
 				continue
 			}
-			return buildAssetPreviewInfoWithOSS(hydrated.CurrentVersion, s.uploadClient, s.ossDirectService), nil
+			return build(hydrated.CurrentVersion, s.uploadClient, s.ossDirectService), nil
 		}
 	}
 	return nil, nil
@@ -296,7 +315,7 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 	// that another transaction has already published.
 	taskRef := sanitizeOSSObjectKeySegment(task.TaskNo, fmt.Sprintf("TASK-%d", task.ID))
 	objectKey := fmt.Sprintf("tasks/%s/derived-previews/%d/%s/%s.webp", taskRef, sourceAsset.CurrentVersion.ID, spec.AssetType, uuid.NewString())
-	if err := s.ossDirectService.UploadObject(ctx, objectKey, spec.MimeType, content); err != nil {
+	if err := s.ossDirectService.UploadDerivedPreviewObject(ctx, objectKey, spec.MimeType, content); err != nil {
 		return err
 	}
 

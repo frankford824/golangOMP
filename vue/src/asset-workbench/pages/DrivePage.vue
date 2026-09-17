@@ -108,7 +108,6 @@ const UNASSIGNED_KEY = 'unassigned'
 const pageSize = 60
 const materialPageSize = 100
 const searchDebounceMs = 250
-const searchPreviewPrefetchLimit = 12
 const QUARK_VISIBLE_ROOTS = new Set(['电视投屏', '海报', 'kt板', '闲置kt板'].map((item) => item.toLowerCase()))
 const QUARK_VISIBLE_ACTUAL_BASE = '/quark/我的备份/来自：ASUS Administrator 电脑备份'
 
@@ -1796,7 +1795,6 @@ async function runUnifiedSearch() {
     const items = (Array.isArray(result.items) ? result.items : []).filter(includeUnifiedSearchHit)
     searchResults.value = items
     searchTotal.value = items.length
-    void prefetchSearchResultPreviews(items)
   } catch (err) {
     if (requestID !== searchRequestSeq || isAbortError(err)) return
     searchResults.value = []
@@ -1805,15 +1803,6 @@ async function runUnifiedSearch() {
   } finally {
     if (requestID === searchRequestSeq) searchLoading.value = false
   }
-}
-
-async function prefetchSearchResultPreviews(rows: OverviewSearchRow[]) {
-  const candidates = rows
-    .filter(isOperationalSearchHit)
-    .map(searchHitMaterial)
-    .filter((asset) => canAttemptSystemAssetPreview(asset))
-    .slice(0, searchPreviewPrefetchLimit)
-  await Promise.allSettled(candidates.map((asset) => ensureSearchResultMaterialPreview(asset)))
 }
 
 async function ensureSearchResultMaterialPreview(asset: SystemAssetRow) {
@@ -1830,7 +1819,7 @@ async function ensureSearchResultMaterialPreview(asset: SystemAssetRow) {
   loading.add(key)
   materialPreviewLoadingIds.value = loading
   try {
-    const meta = await previewMaterial(asset)
+    const meta = await previewMaterial(asset, 'thumbnail')
     const url = meta.preview_url || ''
     if (url) cacheMaterialPreview(key, url)
   } catch {
@@ -2605,9 +2594,9 @@ async function openMaterialPreview(asset: SystemAssetRow) {
   }
 }
 
-async function previewMaterial(asset: SystemAssetRow): Promise<SystemAssetPreviewMeta> {
+async function previewMaterial(asset: SystemAssetRow, rendition: 'preview' | 'thumbnail' = 'preview'): Promise<SystemAssetPreviewMeta> {
   if (asset.material_id) return assetWorkbenchApi.previewClientMaterial(asset.material_id)
-  return assetWorkbenchApi.previewMaterialAsset(asset)
+  return assetWorkbenchApi.previewMaterialAsset(asset, undefined, rendition)
 }
 
 function downloadMaterial(asset: SystemAssetRow) {

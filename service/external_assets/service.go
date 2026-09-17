@@ -1509,7 +1509,7 @@ func (s *Service) BatchDownloadInfo(ctx context.Context, id int64) (*domain.Asse
 	return prepareInfo(row, "external_batch_prepare_required"), nil
 }
 
-func (s *Service) PreviewInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+func (s *Service) PreviewInfo(ctx context.Context, id int64, renditions ...string) (*domain.AssetDownloadInfo, *domain.AppError) {
 	row, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
@@ -1520,7 +1520,12 @@ func (s *Service) PreviewInfo(ctx context.Context, id int64) (*domain.AssetDownl
 	if row.IsDir {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "文件夹暂不支持预览", nil)
 	}
-	if urlValue := s.BrowserPreviewURL(row); urlValue != "" {
+	thumbnail := len(renditions) > 0 && strings.EqualFold(strings.TrimSpace(renditions[0]), "thumbnail")
+	urlValue := s.BrowserPreviewURL(row)
+	if thumbnail {
+		urlValue = s.BrowserThumbnailURL(row)
+	}
+	if urlValue != "" {
 		return &domain.AssetDownloadInfo{
 			DownloadMode:     domain.AssetDownloadModeDirect,
 			DownloadURL:      &urlValue,
@@ -1536,6 +1541,27 @@ func (s *Service) PreviewInfo(ctx context.Context, id int64) (*domain.AssetDownl
 		return prepareInfo(row, "external_preview_prepare_required"), nil
 	}
 	return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该文件暂不支持在线预览，可直接下载原文件", nil)
+}
+
+func (s *Service) BrowserThumbnailURL(row *domain.ExternalAssetRecord) string {
+	if row == nil || row.IsDir {
+		return ""
+	}
+	if row.OSSPreviewKey != "" && row.PreviewStatus == domain.ExternalAssetPreviewStatusReady && s.ossDirect != nil && s.ossDirect.Enabled() {
+		process, _ := baseservice.OSSIMGThumbnailProcessForSize("preview.webp", "image/webp", 0)
+		if signed := s.ossDirect.PresignPreviewURLWithProcess(row.OSSPreviewKey, process); signed != nil {
+			return strings.TrimSpace(signed.DownloadURL)
+		}
+	}
+	if row.Kind == domain.ExternalAssetKindNASLocal && row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady && s.ossDirect != nil && s.ossDirect.Enabled() {
+		process, supported := baseservice.OSSIMGThumbnailProcessForSize(row.FileName, row.MimeType, row.FileSize)
+		if supported && process != "" {
+			if signed := s.ossDirect.PresignPreviewURLWithProcess(row.OSSOriginalKey, process); signed != nil {
+				return strings.TrimSpace(signed.DownloadURL)
+			}
+		}
+	}
+	return s.BrowserPreviewURL(row)
 }
 
 func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
@@ -2097,7 +2123,7 @@ func (s *Service) renderAndUploadPreview(ctx context.Context, row *domain.Extern
 		return err
 	}
 	key := s.BuildOSSPreviewKey(row)
-	if err := s.ossDirect.UploadObject(ctx, key, "image/webp", webp); err != nil {
+	if err := s.ossDirect.UploadDerivedPreviewObject(ctx, key, "image/webp", webp); err != nil {
 		return err
 	}
 	return s.repo.MarkPreviewReady(ctx, row.ID, key)

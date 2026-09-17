@@ -378,6 +378,14 @@ func (s *OSSDirectService) PresignPreviewURLWithProcess(objectKey, process strin
 }
 
 func (s *OSSDirectService) UploadObject(ctx context.Context, objectKey, contentType string, body []byte) error {
+	return s.uploadObject(ctx, objectKey, contentType, "", body)
+}
+
+func (s *OSSDirectService) UploadDerivedPreviewObject(ctx context.Context, objectKey, contentType string, body []byte) error {
+	return s.uploadObject(ctx, objectKey, contentType, "private,max-age=86400,immutable", body)
+}
+
+func (s *OSSDirectService) uploadObject(ctx context.Context, objectKey, contentType, cacheControl string, body []byte) error {
 	if !s.Enabled() {
 		return fmt.Errorf("oss direct service is not enabled")
 	}
@@ -398,6 +406,9 @@ func (s *OSSDirectService) UploadObject(ctx context.Context, objectKey, contentT
 	date := time.Now().UTC().Format(http.TimeFormat)
 	req.Header.Set("Date", date)
 	req.Header.Set("Content-Type", contentType)
+	if cacheControl = strings.TrimSpace(cacheControl); cacheControl != "" {
+		req.Header.Set("Cache-Control", cacheControl)
+	}
 
 	canonResource := "/" + s.cfg.Bucket + "/" + objectKey
 	sig := s.signV1(http.MethodPut, "", contentType, date, "", canonResource)

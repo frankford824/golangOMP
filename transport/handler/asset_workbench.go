@@ -1297,7 +1297,15 @@ func (h *AssetWorkbenchHandler) PreviewSystemAsset(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset_id", nil))
 		return
 	}
-	result, appErr := h.svc.SystemAssetPreview(c.Request.Context(), actor, assetID)
+	rendition := strings.ToLower(strings.TrimSpace(c.Query("rendition")))
+	if rendition == "" {
+		rendition = "preview"
+	}
+	if rendition != "preview" && rendition != "thumbnail" {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "rendition must be preview or thumbnail", nil))
+		return
+	}
+	result, appErr := h.svc.SystemAssetPreview(c.Request.Context(), actor, assetID, rendition)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

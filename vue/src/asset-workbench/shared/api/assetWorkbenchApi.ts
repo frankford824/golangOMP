@@ -1834,7 +1834,7 @@ export const assetWorkbenchApi = {
     return this.downloadSystemAsset(asset.id, signal)
   },
 
-  async previewMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal): Promise<SystemAssetPreviewMeta> {
+  async previewMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal, rendition: 'preview' | 'thumbnail' = 'preview'): Promise<SystemAssetPreviewMeta> {
     if (asset.resource_group_id) {
       const info = await this.downloadMaterialAsset(asset, signal)
       const ready = Boolean(asset.preview_available && asset.preview_url)
@@ -1853,7 +1853,10 @@ export const assetWorkbenchApi = {
     }
     if (isExternalMaterialSource(asset.source_type)) {
       const resourceId = asset.resource_id || `ext-${asset.id}`
-      const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/preview`, { signal })
+      const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/preview`, {
+        params: rendition === 'thumbnail' ? { rendition } : undefined,
+        signal,
+      })
       const info = unwrap(res.data)
       const downloadUrl = info.download_url
       const ready = Boolean(downloadUrl && info.preview_available)
@@ -1871,7 +1874,7 @@ export const assetWorkbenchApi = {
         preview_available: ready,
       }
     }
-    return this.previewSystemAsset(asset.id, signal)
+    return this.previewSystemAsset(asset.id, signal, rendition)
   },
 
   async overviewSearch(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<OverviewSearchResult> {
@@ -1960,8 +1963,11 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async previewSystemAsset(assetId: number, signal?: AbortSignal): Promise<SystemAssetPreviewMeta> {
-    const res = await http.get<ApiEnvelope<SystemAssetPreviewMeta>>(`/v1/asset-workbench/system-assets/${assetId}/preview`, { signal })
+  async previewSystemAsset(assetId: number, signal?: AbortSignal, rendition: 'preview' | 'thumbnail' = 'preview'): Promise<SystemAssetPreviewMeta> {
+    const res = await http.get<ApiEnvelope<SystemAssetPreviewMeta>>(`/v1/asset-workbench/system-assets/${assetId}/preview`, {
+      params: rendition === 'thumbnail' ? { rendition } : undefined,
+      signal,
+    })
     return unwrap(res.data)
   },
 
