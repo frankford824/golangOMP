@@ -177,6 +177,41 @@ func TestCostRulePreviewAppliesSurchargeTaxMultiplier(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewPricesPPStickyByAreaAndPunching(t *testing.T) {
+	rules := []*domain.CostRule{
+		{RuleID: 201, RuleVersion: 1, RuleName: "常规PP背胶面积成本", CategoryCode: "PP_STICKY", RuleType: domain.CostRuleTypeFixedUnitPrice, BasePrice: costRuleFloat64Ptr(8), Priority: 10, IsActive: true, Source: "test"},
+		{RuleID: 202, RuleVersion: 1, RuleName: "常规PP背胶打孔附加", CategoryCode: "PP_STICKY", RuleType: domain.CostRuleTypeSpecialProcessPrice, SpecialProcessKeyword: "打孔", SpecialProcessPrice: costRuleFloat64Ptr(1), Priority: 20, IsActive: true, Source: "test"},
+	}
+	for _, tt := range []struct {
+		name     string
+		area     *float64
+		quantity *int64
+		process  string
+		want     *float64
+		manual   bool
+	}{
+		{name: "100x10cm laminated", area: costRuleFloat64Ptr(0.1), want: costRuleFloat64Ptr(0.8)},
+		{name: "100x10cm punched", area: costRuleFloat64Ptr(0.1), process: "覆膜 四角打孔", want: costRuleFloat64Ptr(1.8)},
+		{name: "two punched pieces", area: costRuleFloat64Ptr(0.1), quantity: func() *int64 { v := int64(2); return &v }(), process: "打孔", want: costRuleFloat64Ptr(3.6)},
+		{name: "missing area", process: "覆膜", manual: true},
+		{name: "missing area with punch", process: "打孔", manual: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result := previewCostRules(domain.CostRulePreviewRequest{CategoryCode: "PP_STICKY", Area: tt.area, Quantity: tt.quantity, Process: tt.process}, rules).Response
+			if result.RequiresManualReview != tt.manual {
+				t.Fatalf("manual review = %v, want %v; result=%+v", result.RequiresManualReview, tt.manual, result)
+			}
+			if tt.want == nil {
+				if result.EstimatedCost != nil {
+					t.Fatalf("estimated cost = %v, want nil", *result.EstimatedCost)
+				}
+			} else if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-*tt.want) > 0.000001 {
+				t.Fatalf("estimated cost = %+v, want %.3f", result.EstimatedCost, *tt.want)
+			}
+		})
+	}
+}
+
 func TestCostRulePreviewAppliesSmallAreaSurchargeBySinglePieceArea(t *testing.T) {
 	tests := []struct {
 		name         string

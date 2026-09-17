@@ -141,7 +141,9 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 		explanations = append(explanations, fmt.Sprintf("试算金额 ¥%.3f 超过自动写入上限 ¥10,000，已转人工复核，未写入自动成本。", estimated))
 	}
 	var estimatedPtr *float64
-	if len(applied) > 0 && (!manualReview || estimated > 0) && !blockedByAmountGuard {
+	// A partial number is unsafe when a required input is missing. For example,
+	// a punched PP-sticker without area must not persist only the punching fee.
+	if len(applied) > 0 && !manualReview && !blockedByAmountGuard {
 		estimatedCopy := roundCostAmount(estimated)
 		estimatedPtr = &estimatedCopy
 	}

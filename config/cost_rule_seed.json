@@ -23,6 +23,8 @@
   { "rule_name": "定制喷绘布基础单价", "category_code": "SPRAY_CLOTH_CUSTOM", "product_family": "cloth", "rule_type": "fixed_unit_price", "base_price": 4, "tax_multiplier": 1.1, "priority": 10, "source": "phase_020_sample" },
   { "rule_name": "A3打印单双面规则", "category_code": "A3_PRINT", "product_family": "paper", "rule_type": "size_based_formula", "formula_expression": "print_side:single=0.5,double=0.6", "priority": 10, "source": "phase_020_sample" },
   { "rule_name": "A4打印单双面规则", "category_code": "A4_PRINT", "product_family": "paper", "rule_type": "size_based_formula", "formula_expression": "print_side:single=0.3,double=0.4", "priority": 10, "source": "phase_020_sample" },
+  { "rule_name": "常规PP背胶面积成本", "category_code": "PP_STICKY", "product_family": "paper", "rule_type": "fixed_unit_price", "base_price": 8, "priority": 10, "source": "production_verified_20260917" },
+  { "rule_name": "常规PP背胶打孔附加", "category_code": "PP_STICKY", "product_family": "paper", "rule_type": "special_process_surcharge", "special_process_keyword": "打孔", "special_process_price": 1, "priority": 20, "source": "production_verified_20260917" },
   { "rule_name": "铜版纸尺寸规则骨架", "category_code": "COPPER_PAPER", "product_family": "paper", "rule_type": "size_based_formula", "formula_expression": "size_lookup_required", "priority": 10, "source": "phase_020_sample" },
   { "rule_name": "白卡纸尺寸规则骨架", "category_code": "WHITE_CARD", "product_family": "paper", "rule_type": "size_based_formula", "formula_expression": "size_lookup_required", "priority": 10, "source": "phase_020_sample" },
   { "rule_name": "模切不干胶人工报价", "category_code": "DIECUT_STICKER", "product_family": "paper", "rule_type": "manual_quote", "priority": 10, "source": "phase_020_sample" },
