@@ -914,6 +914,12 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			want:         []string{"PP_PLAIN"},
 		},
 		{
+			name:         "explicit pp material outranks stale kt category",
+			categoryCode: "常规kt板",
+			notes:        "露余常规pp背胶/覆膜/中秋地贴/博饼游戏月亮桂花树/1*2.5m",
+			want:         []string{"PP_STICKY"},
+		},
+		{
 			name:         "legacy chinese acrylic category maps to acrylic rule",
 			categoryCode: "亚克力",
 			notes:        "CPT紫定制亚克力/教师节/24.5*17cm厚4.5cm",

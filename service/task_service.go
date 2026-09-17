@@ -3544,6 +3544,15 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 		return aliases
 	}
 
+	// A stale task category must not outrank an explicit material name in the
+	// current SKU/product text. This happened to PP adhesive records that still
+	// carried an old KT category and were consequently priced by KT minimums.
+	hasPPMaterial := containsCostAliasPPMaterial(combined)
+	if strings.Contains(combined, "无背胶") && hasPPMaterial {
+		return add("PP_PLAIN")
+	} else if strings.Contains(combined, "背胶") && hasPPMaterial {
+		return add("PP_STICKY")
+	}
 	if strings.Contains(combined, "kt") {
 		if alias := costKTCategoryAliasFromText(categoryCode, notes); alias != "" {
 			return add(alias)
@@ -3567,7 +3576,6 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 		}
 		return add("PHOTO_CLOTH_STANDARD")
 	}
-	hasPPMaterial := containsCostAliasPPMaterial(combined)
 	excludedPaperOrStickyPoster := hasPPMaterial ||
 		strings.Contains(combined, "背胶") ||
 		strings.Contains(combined, "铜版纸") ||
@@ -3592,11 +3600,6 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 	}
 	if strings.Contains(combined, "亚克力") || strings.Contains(combined, "acrylic") {
 		return add("ACRYLIC")
-	}
-	if strings.Contains(combined, "无背胶") && hasPPMaterial {
-		return add("PP_PLAIN")
-	} else if strings.Contains(combined, "背胶") && hasPPMaterial {
-		return add("PP_STICKY")
 	}
 	if strings.Contains(combined, "模切不干胶") || (strings.Contains(combined, "不干胶") && !hasPPMaterial) {
 		return add("DIECUT_STICKER")
