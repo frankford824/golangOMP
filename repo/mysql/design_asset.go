@@ -112,14 +112,18 @@ func (r *designAssetRepo) NextAssetNo(ctx context.Context, tx repo.Tx, taskID in
 	).Scan(&lockedTaskID); err != nil {
 		return "", fmt.Errorf("design_asset lock task before next asset_no: %w", err)
 	}
-	var count int64
+	var maxSequence int64
 	if err := sqlTx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM design_assets WHERE task_id = ? FOR UPDATE`,
+		`SELECT COALESCE(MAX(CASE
+			WHEN asset_no REGEXP '^AST-[0-9]+$' THEN CAST(SUBSTRING(asset_no, 5) AS UNSIGNED)
+			ELSE 0
+		END), 0)
+		FROM design_assets WHERE task_id = ? FOR UPDATE`,
 		taskID,
-	).Scan(&count); err != nil {
+	).Scan(&maxSequence); err != nil {
 		return "", fmt.Errorf("design_asset next asset_no: %w", err)
 	}
-	return fmt.Sprintf("AST-%04d", count+1), nil
+	return fmt.Sprintf("AST-%04d", maxSequence+1), nil
 }
 
 func (r *designAssetRepo) UpdateCurrentVersionID(ctx context.Context, tx repo.Tx, id int64, currentVersionID *int64) error {
