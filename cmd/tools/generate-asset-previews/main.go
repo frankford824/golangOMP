@@ -118,40 +118,45 @@ func main() {
 		service.WithOSSDirectService(ossDirect),
 	)
 
-	jobCh := make(chan sourceAssetJob)
+	taskBatches := groupPreviewJobsByTask(jobs)
+	jobCh := make(chan []sourceAssetJob)
 	var wg sync.WaitGroup
 	var summaryMu sync.Mutex
 	for worker := 0; worker < concurrency; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for job := range jobCh {
-				if job.ActorID <= 0 {
+			for batch := range jobCh {
+				// Asset numbering is task-scoped. Keep each task serial while
+				// allowing different tasks to render concurrently.
+				for _, job := range batch {
+					if job.ActorID <= 0 {
+						summaryMu.Lock()
+						summary.Skipped++
+						summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d skipped: actor_id is empty", job.SourceAssetID))
+						summaryMu.Unlock()
+						continue
+					}
+					if appErr := taskAssetCenterSvc.EnsureDerivedPreviewAssets(ctx, job.TaskID, job.SourceAssetID, job.ActorID); appErr != nil {
+						summaryMu.Lock()
+						summary.Failed++
+						summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d task_id=%d: %s", job.SourceAssetID, job.TaskID, appErr.Message))
+						summaryMu.Unlock()
+						continue
+					}
 					summaryMu.Lock()
-					summary.Skipped++
-					summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d skipped: actor_id is empty", job.SourceAssetID))
+					summary.Succeeded++
 					summaryMu.Unlock()
-					continue
 				}
-				if appErr := taskAssetCenterSvc.EnsureDerivedPreviewAssets(ctx, job.TaskID, job.SourceAssetID, job.ActorID); appErr != nil {
-					summaryMu.Lock()
-					summary.Failed++
-					summary.Failures = append(summary.Failures, fmt.Sprintf("asset_id=%d task_id=%d: %s", job.SourceAssetID, job.TaskID, appErr.Message))
-					summaryMu.Unlock()
-					continue
-				}
-				summaryMu.Lock()
-				summary.Succeeded++
-				summaryMu.Unlock()
 			}
 		}()
 	}
 sendJobs:
-	for _, job := range jobs {
+	for _, batch := range taskBatches {
 		select {
 		case <-ctx.Done():
 			break sendJobs
-		case jobCh <- job:
+		case jobCh <- batch:
 		}
 	}
 	close(jobCh)
@@ -169,6 +174,22 @@ sendJobs:
 	if summary.Failed > 0 {
 		os.Exit(1)
 	}
+}
+
+func groupPreviewJobsByTask(jobs []sourceAssetJob) [][]sourceAssetJob {
+	order := make([]int64, 0)
+	grouped := make(map[int64][]sourceAssetJob)
+	for _, job := range jobs {
+		if _, ok := grouped[job.TaskID]; !ok {
+			order = append(order, job.TaskID)
+		}
+		grouped[job.TaskID] = append(grouped[job.TaskID], job)
+	}
+	batches := make([][]sourceAssetJob, 0, len(order))
+	for _, taskID := range order {
+		batches = append(batches, grouped[taskID])
+	}
+	return batches
 }
 
 func listAsyncPreviewJobs(ctx context.Context, db *sql.DB, limit int, onlyAssetID int64) ([]sourceAssetJob, error) {
