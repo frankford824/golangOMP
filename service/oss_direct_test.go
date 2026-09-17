@@ -305,6 +305,31 @@ func TestCreateSingleUploadPlan(t *testing.T) {
 	}
 }
 
+func TestCreateServerUploadPlanUsesInternalEndpoint(t *testing.T) {
+	svc := NewOSSDirectService(OSSDirectConfig{
+		Enabled: true, Endpoint: "oss-cn-hangzhou-internal.aliyuncs.com",
+		PublicEndpoint: "oss-cn-hangzhou.aliyuncs.com", Bucket: "test-bucket",
+		AccessKeyID: "ak", AccessKeySecret: "secret", PartSize: 10 * 1024 * 1024,
+	})
+	plan, err := svc.CreateServerUploadPlan(context.Background(), "packages/test.zip", 1024, "application/zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.UploadURL, "test-bucket.oss-cn-hangzhou-internal.aliyuncs.com") {
+		t.Fatalf("server upload url = %q, want internal endpoint", plan.UploadURL)
+	}
+	if plan.Endpoint != "oss-cn-hangzhou-internal.aliyuncs.com" {
+		t.Fatalf("server upload endpoint = %q", plan.Endpoint)
+	}
+	browserPlan, err := svc.CreateUploadPlan(context.Background(), "packages/test.zip", 1024, "application/zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(browserPlan.UploadURL, "test-bucket.oss-cn-hangzhou.aliyuncs.com") {
+		t.Fatalf("browser upload url = %q, want public endpoint", browserPlan.UploadURL)
+	}
+}
+
 func TestBuildUploadSessionObjectKey_IsDeterministicAndSafe(t *testing.T) {
 	svc := newTestOSSDirectService()
 	key := svc.BuildUploadSessionObjectKey("RW-20260710-A-1", "session/unsafe", "参考图.PNG")
@@ -347,7 +372,7 @@ func TestCreateUploadPlan_UsesSinglePartAtConfiguredThreshold(t *testing.T) {
 
 func TestPresignPartUploadURL_SignsDeclaredContentType(t *testing.T) {
 	svc := newTestOSSDirectService()
-	part := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 7, "application/octet-stream")
+	part := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 7, "application/octet-stream", true)
 
 	u, err := url.Parse(part.UploadURL)
 	if err != nil {
@@ -395,7 +420,7 @@ func TestUploadPresignExpiryIsIndependentFromDownloadExpiry(t *testing.T) {
 	if download == nil || download.ExpiresAt.Sub(now) != 15*time.Minute {
 		t.Fatalf("download expiry = %+v, want 15m", download)
 	}
-	part := svc.presignPartUploadURL("tasks/T1/upload-sessions/S1/S1.tif", "UPLOAD1", 1, "image/tiff")
+	part := svc.presignPartUploadURL("tasks/T1/upload-sessions/S1/S1.tif", "UPLOAD1", 1, "image/tiff", true)
 	if part.ExpiresAt.Sub(now) != 2*time.Hour {
 		t.Fatalf("multipart part expiry = %s, want 2h", part.ExpiresAt.Sub(now))
 	}
@@ -403,8 +428,8 @@ func TestUploadPresignExpiryIsIndependentFromDownloadExpiry(t *testing.T) {
 
 func TestPresignPartUploadURL_BlankContentTypeDefaultsConsistently(t *testing.T) {
 	svc := newTestOSSDirectService()
-	withoutContentType := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 1, "")
-	withDefaultContentType := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 1, "application/octet-stream")
+	withoutContentType := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 1, "", true)
+	withDefaultContentType := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 1, "application/octet-stream", true)
 
 	withoutURL, err := url.Parse(withoutContentType.UploadURL)
 	if err != nil {

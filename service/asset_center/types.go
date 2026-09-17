@@ -48,6 +48,7 @@ type AssetDetail struct {
 	ArchiveStatus         domain.AssetArchiveStatus        `json:"archive_status,omitempty"`
 	UploadStatus          domain.DesignAssetUploadStatus   `json:"upload_status,omitempty"`
 	CurrentStorageKey     *string                          `json:"storage_key,omitempty"`
+	InternalObjectKey     string                           `json:"-"`
 	FileName              string                           `json:"file_name,omitempty"`
 	OriginalFilename      string                           `json:"original_filename,omitempty"`
 	FileSize              *int64                           `json:"file_size,omitempty"`

@@ -58,6 +58,7 @@ type ExcelPackageItem struct {
 	FileSize      int64      `json:"file_size"`
 	MimeType      string     `json:"mime_type,omitempty"`
 	DownloadURL   string     `json:"download_url"`
+	ObjectKey     string     `json:"-"`
 	Address       string     `json:"address,omitempty"`
 	OriginPath    string     `json:"origin_path,omitempty"`
 	PackageFolder string     `json:"package_folder,omitempty"`
@@ -682,7 +683,7 @@ func (s *Service) buildFinalizedExcelPackageItem(asset *repo.ProductionPackageAs
 		Quantity: req.Quantity, AssetID: asset.TaskAssetID, ResourceID: strconv.FormatInt(asset.TaskAssetID, 10),
 		SourceType: string(domain.AssetResourceSourceSystem), TaskID: asset.TaskID, TaskNo: asset.TaskNo,
 		Filename: sanitizeBatchFilename(filename), FileSize: asset.FileSize, MimeType: asset.MimeType,
-		DownloadURL: strings.TrimSpace(signed.DownloadURL), Address: req.Address, ExpiresAt: &expiresAt,
+		DownloadURL: strings.TrimSpace(signed.DownloadURL), ObjectKey: strings.TrimSpace(asset.StorageKey), Address: req.Address, ExpiresAt: &expiresAt,
 	}, nil
 }
 
@@ -739,6 +740,7 @@ func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req 
 		FileSize:    fileSize,
 		MimeType:    mimeType,
 		DownloadURL: strings.TrimSpace(signed.DownloadURL),
+		ObjectKey:   storageKey,
 		Address:     req.Address,
 		ExpiresAt:   &expiresAt,
 	}, nil
@@ -784,6 +786,7 @@ func (s *Service) buildExternalExcelPackageItem(ctx context.Context, asset *Asse
 		FileSize:    fileSize,
 		MimeType:    strings.TrimSpace(info.MimeType),
 		DownloadURL: strings.TrimSpace(*info.DownloadURL),
+		ObjectKey:   strings.TrimSpace(asset.InternalObjectKey),
 		Address:     req.Address,
 		OriginPath:  asset.OriginPath,
 		ExpiresAt:   expiresAt,

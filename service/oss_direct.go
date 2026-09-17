@@ -146,13 +146,24 @@ func (s *OSSDirectService) BuildUploadSessionObjectKey(taskRef, sessionID, filen
 }
 
 func (s *OSSDirectService) CreateUploadPlan(ctx context.Context, objectKey string, fileSize int64, contentType string) (*OSSDirectUploadPlan, error) {
+	return s.createUploadPlan(ctx, objectKey, fileSize, contentType, true)
+}
+
+// CreateServerUploadPlan signs an upload URL against the server endpoint.
+// Browser upload plans must continue to use CreateUploadPlan so internal OSS
+// hostnames are never exposed to clients.
+func (s *OSSDirectService) CreateServerUploadPlan(ctx context.Context, objectKey string, fileSize int64, contentType string) (*OSSDirectUploadPlan, error) {
+	return s.createUploadPlan(ctx, objectKey, fileSize, contentType, false)
+}
+
+func (s *OSSDirectService) createUploadPlan(ctx context.Context, objectKey string, fileSize int64, contentType string, browser bool) (*OSSDirectUploadPlan, error) {
 	if !s.Enabled() {
 		return nil, fmt.Errorf("oss direct service is not enabled")
 	}
 	if fileSize <= s.cfg.PartSize {
-		return s.CreateSingleUploadPlan(objectKey, contentType)
+		return s.createSingleUploadPlan(objectKey, contentType, browser)
 	}
-	return s.CreateMultipartUploadPlan(ctx, objectKey, fileSize, contentType)
+	return s.createMultipartUploadPlan(ctx, objectKey, fileSize, contentType, browser)
 }
 
 func (s *OSSDirectService) UsesMultipartUpload(fileSize int64) bool {
@@ -167,6 +178,10 @@ func normalizeRequiredUploadContentType(contentType string) string {
 }
 
 func (s *OSSDirectService) CreateMultipartUploadPlan(ctx context.Context, objectKey string, fileSize int64, contentType string) (*OSSDirectUploadPlan, error) {
+	return s.createMultipartUploadPlan(ctx, objectKey, fileSize, contentType, true)
+}
+
+func (s *OSSDirectService) createMultipartUploadPlan(ctx context.Context, objectKey string, fileSize int64, contentType string, browser bool) (*OSSDirectUploadPlan, error) {
 	if !s.Enabled() {
 		return nil, fmt.Errorf("oss direct service is not enabled")
 	}
@@ -190,7 +205,7 @@ func (s *OSSDirectService) CreateMultipartUploadPlan(ctx context.Context, object
 
 	parts := make([]OSSPresignedPart, partsTotal)
 	for i := 0; i < partsTotal; i++ {
-		parts[i] = s.presignPartUploadURL(objectKey, init.UploadID, i+1, contentType)
+		parts[i] = s.presignPartUploadURL(objectKey, init.UploadID, i+1, contentType, browser)
 	}
 
 	expires := s.now().Add(s.cfg.UploadPresignExpiry)
@@ -198,6 +213,10 @@ func (s *OSSDirectService) CreateMultipartUploadPlan(ctx context.Context, object
 	log.Printf("oss_direct_create_multipart_plan object_key=%s upload_id=%s parts_total=%d part_size=%d",
 		objectKey, init.UploadID, partsTotal, partSize)
 
+	endpoint := s.cfg.Endpoint
+	if browser {
+		endpoint = s.cfg.PublicEndpoint
+	}
 	return &OSSDirectUploadPlan{
 		Mode:                "multipart",
 		ObjectKey:           objectKey,
@@ -207,12 +226,16 @@ func (s *OSSDirectService) CreateMultipartUploadPlan(ctx context.Context, object
 		ExpiresAt:           expires,
 		Method:              http.MethodPut,
 		Bucket:              s.cfg.Bucket,
-		Endpoint:            s.cfg.PublicEndpoint,
+		Endpoint:            endpoint,
 		RequiredContentType: contentType,
 	}, nil
 }
 
 func (s *OSSDirectService) CreateSingleUploadPlan(objectKey, contentType string) (*OSSDirectUploadPlan, error) {
+	return s.createSingleUploadPlan(objectKey, contentType, true)
+}
+
+func (s *OSSDirectService) createSingleUploadPlan(objectKey, contentType string, browser bool) (*OSSDirectUploadPlan, error) {
 	if !s.Enabled() {
 		return nil, fmt.Errorf("oss direct service is not enabled")
 	}
@@ -224,7 +247,13 @@ func (s *OSSDirectService) CreateSingleUploadPlan(objectKey, contentType string)
 	canonResource := "/" + s.cfg.Bucket + "/" + objectKey
 	sig := s.signV1(http.MethodPut, "", contentType, expiresStr, "", canonResource)
 
-	presignURL := s.publicBucketURL() + "/" + ossEscapePath(objectKey) +
+	bucketURL := s.bucketURL()
+	endpoint := s.cfg.Endpoint
+	if browser {
+		bucketURL = s.publicBucketURL()
+		endpoint = s.cfg.PublicEndpoint
+	}
+	presignURL := bucketURL + "/" + ossEscapePath(objectKey) +
 		"?OSSAccessKeyId=" + url.QueryEscape(s.cfg.AccessKeyID) +
 		"&Expires=" + expiresStr +
 		"&Signature=" + url.QueryEscape(sig)
@@ -238,7 +267,7 @@ func (s *OSSDirectService) CreateSingleUploadPlan(objectKey, contentType string)
 		ExpiresAt:           expires,
 		Method:              http.MethodPut,
 		Bucket:              s.cfg.Bucket,
-		Endpoint:            s.cfg.PublicEndpoint,
+		Endpoint:            endpoint,
 		RequiredContentType: contentType,
 	}, nil
 }
@@ -673,7 +702,7 @@ func (s *OSSDirectService) initiateMultipartUpload(ctx context.Context, objectKe
 	}, nil
 }
 
-func (s *OSSDirectService) presignPartUploadURL(objectKey, uploadID string, partNumber int, contentType string) OSSPresignedPart {
+func (s *OSSDirectService) presignPartUploadURL(objectKey, uploadID string, partNumber int, contentType string, browser bool) OSSPresignedPart {
 	contentType = normalizeRequiredUploadContentType(contentType)
 	expires := s.now().Add(s.cfg.UploadPresignExpiry)
 	expiresStr := strconv.FormatInt(expires.Unix(), 10)
@@ -682,7 +711,11 @@ func (s *OSSDirectService) presignPartUploadURL(objectKey, uploadID string, part
 
 	sig := s.signV1(http.MethodPut, "", contentType, expiresStr, "", canonResource)
 
-	presignURL := s.publicBucketURL() + "/" + ossEscapePath(objectKey) +
+	bucketURL := s.bucketURL()
+	if browser {
+		bucketURL = s.publicBucketURL()
+	}
+	presignURL := bucketURL + "/" + ossEscapePath(objectKey) +
 		"?partNumber=" + strconv.Itoa(partNumber) +
 		"&uploadId=" + url.QueryEscape(uploadID) +
 		"&OSSAccessKeyId=" + url.QueryEscape(s.cfg.AccessKeyID) +

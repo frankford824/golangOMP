@@ -313,7 +313,15 @@ func (s *planningSKUService) GetResult(ctx context.Context, actor domain.Request
 		}
 		revision.ProductImageName = storageRef.FileName
 		if s.ossDirect != nil && s.ossDirect.Enabled() {
-			if signed := s.ossDirect.PresignPreviewURL(storageRef.RefKey); signed != nil {
+			signed := s.ossDirect.PresignPreviewURL(storageRef.RefKey)
+			fileSize := int64(0)
+			if storageRef.FileSize != nil {
+				fileSize = *storageRef.FileSize
+			}
+			if process, ok := OSSIMGPreviewProcessForSize(storageRef.FileName, storageRef.MimeType, fileSize); ok && process != "" {
+				signed = s.ossDirect.PresignPreviewURLWithProcess(storageRef.RefKey, process)
+			}
+			if signed != nil {
 				revision.ProductImageURL = signed.DownloadURL
 			}
 		}

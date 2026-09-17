@@ -1602,6 +1602,9 @@ func (s *Service) presignedOriginalPreviewURL(row *domain.ExternalAssetRecord) s
 		return ""
 	}
 	signed := s.ossDirect.PresignPreviewURL(row.OSSOriginalKey)
+	if process, ok := baseservice.OSSIMGPreviewProcessForSize(row.FileName, row.MimeType, row.FileSize); ok && process != "" {
+		signed = s.ossDirect.PresignPreviewURLWithProcess(row.OSSOriginalKey, process)
+	}
 	if signed == nil {
 		return ""
 	}
@@ -1745,6 +1748,9 @@ func (s *Service) ossDownloadInfo(row *domain.ExternalAssetRecord, objectKey str
 	var signed *baseservice.OSSDirectDownloadInfo
 	if preview {
 		signed = s.ossDirect.PresignPreviewURL(objectKey)
+		if process, ok := baseservice.OSSIMGPreviewProcessForSize(row.FileName, row.MimeType, row.FileSize); ok && process != "" {
+			signed = s.ossDirect.PresignPreviewURLWithProcess(objectKey, process)
+		}
 	} else {
 		signed = s.ossDirect.PresignDownloadURLWithFilename(objectKey, row.FileName)
 	}

@@ -41,6 +41,32 @@ func TestBuildAssetDetailUsesOSSImageProcessForTIFF(t *testing.T) {
 	}
 }
 
+func TestBuildAssetDetailUsesOSSImageProcessForJPEG(t *testing.T) {
+	svc := NewService(&fakeSearchRepo{}, testAssetCenterPreviewPresigner(), nil)
+	row := previewSearchRow("poster.jpg", "image/jpeg")
+	storageKey := "tasks/final/poster.jpg"
+	row.Asset.StorageKey = &storageKey
+
+	detail := svc.buildAssetDetail(row, nil)
+	if detail == nil || detail.PreviewURL == nil {
+		t.Fatalf("detail = %+v, want direct OSS image preview", detail)
+	}
+	if !strings.Contains(*detail.PreviewURL, "resize%2Cw_1600%2Cm_lfit") || !strings.Contains(*detail.PreviewURL, "quality%2CQ_82") {
+		t.Fatalf("preview_url = %q, want bounded compressed OSS image process", *detail.PreviewURL)
+	}
+}
+
+func TestBuildAssetDetailKeepsDirectSVGPreview(t *testing.T) {
+	svc := NewService(&fakeSearchRepo{}, testAssetCenterPreviewPresigner(), nil)
+	row := previewSearchRow("poster.svg", "image/svg+xml")
+	storageKey := "tasks/final/poster.svg"
+	row.Asset.StorageKey = &storageKey
+	detail := svc.buildAssetDetail(row, nil)
+	if detail == nil || detail.PreviewURL == nil || strings.Contains(*detail.PreviewURL, "x-oss-process") {
+		t.Fatalf("detail = %+v, want untransformed direct SVG preview", detail)
+	}
+}
+
 func previewSearchRow(filename, mimeType string) *repo.TaskAssetSearchRow {
 	now := time.Date(2026, 7, 10, 1, 2, 3, 0, time.UTC)
 	assetID := int64(42)

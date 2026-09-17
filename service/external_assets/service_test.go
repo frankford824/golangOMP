@@ -939,6 +939,9 @@ func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
 	if !strings.Contains(previewURL, row.OSSOriginalKey) || !strings.Contains(previewURL, "inline") {
 		t.Fatalf("preview URL = %q, want original OSS inline URL", previewURL)
 	}
+	if !strings.Contains(previewURL, "resize%2Cw_1600%2Cm_lfit") {
+		t.Fatalf("preview URL = %q, want bounded OSS image transform", previewURL)
+	}
 
 	downloadURL := svc.BrowserDownloadURL(row)
 	if downloadURL == "" {
@@ -946,6 +949,9 @@ func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
 	}
 	if !strings.Contains(downloadURL, row.OSSOriginalKey) || !strings.Contains(downloadURL, "attachment") {
 		t.Fatalf("download URL = %q, want original OSS attachment URL", downloadURL)
+	}
+	if strings.Contains(downloadURL, "x-oss-process") {
+		t.Fatalf("download URL = %q, original download must not be transformed", downloadURL)
 	}
 }
 

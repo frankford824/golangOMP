@@ -24,3 +24,15 @@ func TestEnvFlagAcceptsDeploymentBooleanValues(t *testing.T) {
 		})
 	}
 }
+
+func TestOSSServerEndpointUsesPublicNetwork(t *testing.T) {
+	if !ossServerEndpointUsesPublicNetwork("oss-cn-hangzhou.aliyuncs.com") {
+		t.Fatal("public OSS endpoint should be reported")
+	}
+	if ossServerEndpointUsesPublicNetwork("oss-cn-hangzhou-internal.aliyuncs.com") {
+		t.Fatal("internal OSS endpoint should not be reported")
+	}
+	if ossServerEndpointUsesPublicNetwork("minio.internal.example") {
+		t.Fatal("non-Aliyun compatible endpoint should not be reported")
+	}
+}

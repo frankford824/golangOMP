@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	ossIMGPreviewWidth = 1600
+	ossIMGPreviewWidth          = 1600
+	ossIMGDefaultMaxSourceBytes = int64(20 * 1024 * 1024)
 )
 
 var ossIMGDirectSourceExtensions = map[string]struct{}{
@@ -29,21 +30,8 @@ var ossIMGAlphaPreserveExtensions = map[string]struct{}{
 	".webp": {},
 }
 
-var ossIMGTransformRequiredExtensions = map[string]struct{}{
-	".tiff": {},
-	".heic": {},
-	".avif": {},
-}
-
 func isOSSIMGDirectPreviewSupportedSourceVersion(version *domain.DesignAssetVersion) bool {
 	if version == nil || !version.IsSourceFile {
-		return false
-	}
-	return isOSSIMGDirectPreviewSupported(version.OriginalFilename, version.MimeType)
-}
-
-func isOSSIMGDirectPreviewSupportedVersion(version *domain.DesignAssetVersion) bool {
-	if version == nil {
 		return false
 	}
 	return isOSSIMGDirectPreviewSupported(version.OriginalFilename, version.MimeType)
@@ -55,27 +43,35 @@ func isOSSIMGDirectPreviewSupported(filename, mimeType string) bool {
 	return ok
 }
 
-func buildOSSIMGPreviewProcessForSource(version *domain.DesignAssetVersion) (string, bool) {
-	if !isOSSIMGDirectPreviewSupportedSourceVersion(version) {
-		return "", false
-	}
-	ext := sourceAssetFormatExtension(version.OriginalFilename, version.MimeType)
-	return buildOSSIMGPreviewProcessByExtension(ext), true
-}
-
 func buildOSSIMGPreviewProcessForVersion(version *domain.DesignAssetVersion) (string, bool) {
 	if version == nil {
 		return "", false
 	}
-	if version.IsSourceFile {
-		return buildOSSIMGPreviewProcessForSource(version)
+	fileSize := int64(0)
+	if version.FileSize != nil {
+		fileSize = *version.FileSize
 	}
-	ext := sourceAssetFormatExtension(version.OriginalFilename, version.MimeType)
-	if _, ok := ossIMGTransformRequiredExtensions[ext]; !ok {
+	return OSSIMGPreviewProcessForSize(version.OriginalFilename, version.MimeType, fileSize)
+}
+
+// OSSIMGPreviewProcess returns the bounded OSS IMG transform used by every
+// browser preview of a directly processable raster image. Original downloads
+// never call this helper and therefore retain their exact bytes.
+func OSSIMGPreviewProcess(filename, mimeType string) (string, bool) {
+	return OSSIMGPreviewProcessForSize(filename, mimeType, 0)
+}
+
+// OSSIMGPreviewProcessForSize keeps directly previewable images available when
+// their known source size exceeds OSS IMG's default 20 MiB input limit. Those
+// oversized objects fall back to an untransformed signed preview instead of a
+// transform URL that OSS would reject.
+func OSSIMGPreviewProcessForSize(filename, mimeType string, fileSize int64) (string, bool) {
+	ext := sourceAssetFormatExtension(filename, mimeType)
+	if _, ok := ossIMGDirectSourceExtensions[ext]; !ok {
 		return "", false
 	}
-	if !isOSSIMGDirectPreviewSupportedVersion(version) {
-		return "", false
+	if fileSize > ossIMGDefaultMaxSourceBytes {
+		return "", true
 	}
 	return buildOSSIMGPreviewProcessByExtension(ext), true
 }
@@ -86,7 +82,7 @@ func buildOSSIMGPreviewProcessByExtension(ext string) string {
 		"resize,w_" + intToString(ossIMGPreviewWidth) + ",m_lfit",
 	}
 	if _, keep := ossIMGAlphaPreserveExtensions[ext]; !keep {
-		steps = append(steps, "quality,Q_85", "format,jpg")
+		steps = append(steps, "quality,Q_82", "format,jpg")
 	}
 	return strings.Join(steps, "/")
 }

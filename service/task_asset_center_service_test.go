@@ -2434,6 +2434,25 @@ func TestTaskAssetCenterServiceDeliveryTiffPreviewUsesOSSIMGProcess(t *testing.T
 	}
 }
 
+func TestTaskAssetCenterServiceDeliveryJPEGPreviewUsesOSSIMGProcess(t *testing.T) {
+	version := &domain.DesignAssetVersion{
+		AssetID: 77, FileName: "final.jpg", OriginalFilename: "final.jpg",
+		MimeType: "image/jpeg", StorageKey: "objects/design-assets/final.jpg",
+		PreviewAvailable: true,
+	}
+	previewInfo := buildAssetPreviewInfoWithOSS(version, nil, newTestOSSDirectService())
+	if previewInfo == nil || previewInfo.DownloadURL == nil {
+		t.Fatalf("preview info = %+v", previewInfo)
+	}
+	if !strings.Contains(*previewInfo.DownloadURL, "resize%2Cw_1600%2Cm_lfit") || !strings.Contains(*previewInfo.DownloadURL, "quality%2CQ_82") {
+		t.Fatalf("preview url = %q, want bounded compressed transform", *previewInfo.DownloadURL)
+	}
+	downloadInfo := buildAssetDownloadInfoWithOSS(version, nil, newTestOSSDirectService())
+	if downloadInfo == nil || downloadInfo.DownloadURL == nil || strings.Contains(*downloadInfo.DownloadURL, "x-oss-process=") {
+		t.Fatalf("download info = %+v, want exact original without transform", downloadInfo)
+	}
+}
+
 func TestTaskAssetCenterServiceSourcePreviewFallsBackToDerivedPreviewAsset(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2051, TaskNo: "T-2051", TaskStatus: domain.TaskStatusInProgress})
 	designAssetRepo := newStep67DesignAssetRepo()

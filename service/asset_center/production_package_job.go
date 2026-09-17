@@ -31,10 +31,11 @@ const (
 
 type ProductionPackageObjectStore interface {
 	Enabled() bool
-	CreateUploadPlan(context.Context, string, int64, string) (*baseservice.OSSDirectUploadPlan, error)
+	CreateServerUploadPlan(context.Context, string, int64, string) (*baseservice.OSSDirectUploadPlan, error)
 	CompleteMultipartUpload(context.Context, string, string, []baseservice.OSSCompletePart) error
 	AbortMultipartUpload(context.Context, string, string) error
 	PresignDownloadURLWithFilename(string, string) *baseservice.OSSDirectDownloadInfo
+	OpenObject(context.Context, string) (io.ReadCloser, error)
 }
 
 type ProductionPackageJobRequest struct {
@@ -194,7 +195,7 @@ func (s *Service) processProductionPackageJob(ctx context.Context, workerID stri
 	}
 	zipPath := zipFile.Name()
 	defer func() { _ = os.Remove(zipPath) }()
-	if err := writeProductionPackageZIP(ctx, zipFile, manifest); err != nil {
+	if err := writeProductionPackageZIP(ctx, zipFile, manifest, s.packageStore); err != nil {
 		_ = zipFile.Close()
 		return err
 	}
@@ -235,7 +236,7 @@ func uploadProductionPackageFile(ctx context.Context, store ProductionPackageObj
 	if err != nil {
 		return err
 	}
-	plan, err := store.CreateUploadPlan(ctx, objectKey, info.Size(), "application/zip")
+	plan, err := store.CreateServerUploadPlan(ctx, objectKey, info.Size(), "application/zip")
 	if err != nil {
 		return err
 	}
@@ -337,7 +338,7 @@ func uploadProductionPackageFile(ctx context.Context, store ProductionPackageObj
 	return nil
 }
 
-func writeProductionPackageZIP(ctx context.Context, output io.Writer, manifest *ExcelPackageManifest) error {
+func writeProductionPackageZIP(ctx context.Context, output io.Writer, manifest *ExcelPackageManifest, stores ...ProductionPackageObjectStore) error {
 	zw := zip.NewWriter(output)
 	client := &http.Client{Timeout: 30 * time.Minute}
 	addresses := map[string]string{}
@@ -352,7 +353,7 @@ func writeProductionPackageZIP(ctx context.Context, output io.Writer, manifest *
 		if strings.Contains(item.Address, "*") {
 			orderFolder += "（隐私号）"
 		}
-		body, err := downloadProductionPackageItem(ctx, client, item.DownloadURL)
+		body, err := openProductionPackageItem(ctx, client, item, stores...)
 		if err != nil {
 			failures = append(failures, ExcelPackageFailure{RowNumber: item.RowNumber, OrderNo: item.OrderNo, SKUCode: item.SKUCode, SKUName: item.SKUName, Reason: "download_failed", Message: err.Error()})
 			continue
@@ -440,6 +441,17 @@ func writeProductionPackageZIP(ctx context.Context, output io.Writer, manifest *
 		manifest.TotalSize += item.FileSize * int64(item.Quantity)
 	}
 	return zw.Close()
+}
+
+func openProductionPackageItem(ctx context.Context, client *http.Client, item ExcelPackageItem, stores ...ProductionPackageObjectStore) (io.ReadCloser, error) {
+	if strings.TrimSpace(item.ObjectKey) != "" && len(stores) > 0 && stores[0] != nil && stores[0].Enabled() {
+		body, err := stores[0].OpenObject(ctx, strings.TrimSpace(item.ObjectKey))
+		if err == nil {
+			return body, nil
+		}
+		return nil, fmt.Errorf("open internal object: %w", err)
+	}
+	return downloadProductionPackageItem(ctx, client, item.DownloadURL)
 }
 
 func downloadProductionPackageItem(ctx context.Context, client *http.Client, urlValue string) (io.ReadCloser, error) {

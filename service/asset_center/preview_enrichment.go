@@ -1,14 +1,11 @@
 package asset_center
 
 import (
-	"path/filepath"
 	"strings"
 
 	"workflow/repo"
 	baseservice "workflow/service"
 )
-
-const assetCenterPreviewProcess = "image/auto-orient,1/resize,w_1600,m_lfit/quality,Q_85/format,jpg"
 
 type previewPresigner interface {
 	PresignPreviewURL(objectKey string) *baseservice.OSSDirectDownloadInfo
@@ -32,8 +29,15 @@ func (s *Service) enrichSystemAssetPreview(detail *AssetDetail, row *repo.TaskAs
 	if key == "" {
 		key = stringPtrValue(row.Asset.StorageKey)
 		filename = firstNonEmptyAssetFilename(row.Asset.FileName, stringPtrValue(row.Asset.OriginalName))
+		fileSize := int64(0)
+		if row.Asset.FileSize != nil {
+			fileSize = *row.Asset.FileSize
+		}
 		var previewable bool
-		process, previewable = assetCenterDirectPreviewProcess(filename, stringPtrValue(row.Asset.MimeType))
+		process, previewable = baseservice.OSSIMGPreviewProcessForSize(filename, stringPtrValue(row.Asset.MimeType), fileSize)
+		if !previewable && assetCenterDirectSVGPreview(filename, stringPtrValue(row.Asset.MimeType)) {
+			previewable = true
+		}
 		if !previewable {
 			return
 		}
@@ -57,34 +61,9 @@ func (s *Service) enrichSystemAssetPreview(detail *AssetDetail, row *repo.TaskAs
 	detail.PreviewURL = &urlValue
 }
 
-func assetCenterDirectPreviewProcess(filename, mimeType string) (string, bool) {
-	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(filename)))
-	if ext == "" {
-		switch strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0])) {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/png":
-			ext = ".png"
-		case "image/webp":
-			ext = ".webp"
-		case "image/gif":
-			ext = ".gif"
-		case "image/tiff":
-			ext = ".tiff"
-		case "image/heic", "image/heif":
-			ext = ".heic"
-		case "image/avif":
-			ext = ".avif"
-		}
-	}
-	switch ext {
-	case ".tif", ".tiff", ".heic", ".heif", ".avif":
-		return assetCenterPreviewProcess, true
-	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg":
-		return "", true
-	default:
-		return "", false
-	}
+func assetCenterDirectSVGPreview(filename, mimeType string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(filename)), ".svg") ||
+		strings.EqualFold(strings.TrimSpace(strings.Split(mimeType, ";")[0]), "image/svg+xml")
 }
 
 func firstNonEmptyAssetFilename(values ...string) string {

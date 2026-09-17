@@ -65,6 +65,34 @@ func TestWriteProductionPackageZIPCreatesOrderAddressCopiesAndFailureManifest(t 
 	}
 }
 
+func TestWriteProductionPackageZIPPrefersInternalObjectRead(t *testing.T) {
+	store := &productionPackageStoreStub{objects: map[string]string{"tasks/final.jpg": "internal-image"}}
+	manifest := &ExcelPackageManifest{Items: []ExcelPackageItem{{
+		OrderNo: "ORDER-1", SKUCode: "SKU-1", SKUName: "商品", Quantity: 1,
+		Filename: "SKU-1.jpg", ObjectKey: "tasks/final.jpg", DownloadURL: "https://public.invalid/final.jpg",
+	}}}
+	var output bytes.Buffer
+	if err := writeProductionPackageZIP(context.Background(), &output, manifest, store); err != nil {
+		t.Fatalf("writeProductionPackageZIP() error = %v", err)
+	}
+	if strings.Join(store.openedKeys, ",") != "tasks/final.jpg" {
+		t.Fatalf("opened keys = %#v", store.openedKeys)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(output.Bytes()), int64(output.Len()))
+	if err != nil || len(reader.File) != 2 {
+		t.Fatalf("zip reader = %v files=%d", err, len(reader.File))
+	}
+	rc, err := reader.File[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	if string(raw) != "internal-image" {
+		t.Fatalf("zip payload = %q", string(raw))
+	}
+}
+
 func TestFinalizedPackageFilenameContainsSKUBoundaries(t *testing.T) {
 	item := productionPackageAssetForTest("成品-HSC34548-正面.tif")
 	if !finalizedPackageFilenameContainsSKU(item, "HSC34548") {
@@ -117,14 +145,25 @@ func TestUploadProductionPackageFileUsesMultipartAndCompletesETags(t *testing.T)
 
 type productionPackageStoreStub struct {
 	plan               *baseservice.OSSDirectUploadPlan
+	objects            map[string]string
+	openedKeys         []string
 	completedObjectKey string
 	completedUploadID  string
 	completedParts     []baseservice.OSSCompletePart
 }
 
 func (s *productionPackageStoreStub) Enabled() bool { return true }
-func (s *productionPackageStoreStub) CreateUploadPlan(context.Context, string, int64, string) (*baseservice.OSSDirectUploadPlan, error) {
+func (s *productionPackageStoreStub) CreateServerUploadPlan(context.Context, string, int64, string) (*baseservice.OSSDirectUploadPlan, error) {
 	return s.plan, nil
+}
+
+func (s *productionPackageStoreStub) OpenObject(_ context.Context, key string) (io.ReadCloser, error) {
+	s.openedKeys = append(s.openedKeys, key)
+	value, ok := s.objects[key]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return io.NopCloser(strings.NewReader(value)), nil
 }
 func (s *productionPackageStoreStub) CompleteMultipartUpload(_ context.Context, key, uploadID string, parts []baseservice.OSSCompletePart) error {
 	s.completedObjectKey, s.completedUploadID = key, uploadID

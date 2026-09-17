@@ -285,6 +285,11 @@ func main() {
 		logger.Info("OSS direct presign service enabled",
 			zap.String("bucket", cfg.OSSDirect.Bucket),
 			zap.String("endpoint", cfg.OSSDirect.Endpoint))
+		if ossServerEndpointUsesPublicNetwork(cfg.OSSDirect.Endpoint) {
+			logger.Warn("OSS server endpoint uses public network; backend object reads may incur NetworkOut",
+				zap.String("endpoint", cfg.OSSDirect.Endpoint),
+				zap.String("recommended_suffix", "-internal.aliyuncs.com"))
+		}
 	}
 	erpImageProxySigner := service.NewERPImageProxySigner(service.ERPImageProxyConfig{
 		PublicBaseURL: cfg.ERPImageProxy.PublicBaseURL,
@@ -1074,4 +1079,9 @@ func sortedTaskOrgDepartmentKeys(departmentTeams map[string][]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func ossServerEndpointUsesPublicNetwork(endpoint string) bool {
+	endpoint = strings.ToLower(strings.TrimSpace(endpoint))
+	return strings.HasSuffix(endpoint, ".aliyuncs.com") && !strings.Contains(endpoint, "-internal.aliyuncs.com")
 }

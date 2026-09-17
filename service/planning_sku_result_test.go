@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +113,9 @@ func TestPlanningSKUGetResultPresignsRevisionImage(t *testing.T) {
 	revision := got.Items[0].Revision
 	if revision.ProductImageName != "image.png" || revision.ProductImageURL == "" {
 		t.Fatalf("revision image projection = %+v", revision)
+	}
+	if !strings.Contains(revision.ProductImageURL, "resize%2Cw_1600%2Cm_lfit") {
+		t.Fatalf("revision image URL = %q, want bounded OSS image transform", revision.ProductImageURL)
 	}
 }
 

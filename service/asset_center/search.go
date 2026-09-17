@@ -484,6 +484,10 @@ func (s *Service) buildExternalAssetDetail(row *domain.ExternalAssetRecord) *Ass
 			downloadURL = url
 		}
 	}
+	internalObjectKey := ""
+	if row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
+		internalObjectKey = strings.TrimSpace(row.OSSOriginalKey)
+	}
 	return &AssetDetail{
 		ID:                    row.ID,
 		ResourceID:            row.ResourceID,
@@ -494,6 +498,7 @@ func (s *Service) buildExternalAssetDetail(row *domain.ExternalAssetRecord) *Ass
 		SourceModuleKey:       "external_assets",
 		LifecycleState:        domain.AssetLifecycleStateActive,
 		ArchiveStatus:         domain.AssetArchiveStatusActive,
+		InternalObjectKey:     internalObjectKey,
 		FileName:              row.FileName,
 		OriginalFilename:      row.FileName,
 		FileSize:              &row.FileSize,
