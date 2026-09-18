@@ -2485,7 +2485,7 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 	}
 	dimensionText := taskCostDimensionText(taskCostDetailDimensionText(detail), ruleMatchText)
 	width, height, area := taskCostPreviewDimensions(detail, dimensionText)
-	result := previewCostRules(domain.CostRulePreviewRequest{
+	result := previewCostRulesResolvedDimensions(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
 		CategoryCode: firstNonEmptyString(matchMeta.RuleGroup, ruleCategoryCode),
 		Width:        width,
@@ -3082,7 +3082,9 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	}
 	primaryDimensionText := firstCostDimensionText(
 		taskSKUItemVariantCostNotes(item),
-		item.DesignRequirement,
+		item.ProductNameSnapshot,
+		item.ProductShortName,
+		billableDesignRequirementDimensionText(item.DesignRequirement),
 		taskCostDetailDimensionText(detail),
 	)
 	dimensionText := taskCostDimensionText(primaryDimensionText, ruleMatchText)
@@ -3094,7 +3096,7 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	if quantity == nil {
 		quantity = cloneInt64Ptr(detail.Quantity)
 	}
-	result := previewCostRules(domain.CostRulePreviewRequest{
+	result := previewCostRulesResolvedDimensions(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
 		CategoryCode: firstNonEmptyString(matchMeta.RuleGroup, categoryCode),
 		Width:        width,
@@ -3109,7 +3111,7 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 
 func taskSKUItemCostPreviewDimensions(detail *domain.TaskDetail, item *domain.TaskSKUItem, text string) (*float64, *float64, *float64) {
 	width, height, area := taskSKUItemVariantDimensions(item)
-	itemDimensions := withTextDerivedCostRuleDimensions(domain.CostRulePreviewRequest{
+	itemDimensions := withMissingTextDerivedCostRuleDimensions(domain.CostRulePreviewRequest{
 		Width:  costDimensionCentimetersToMeters(width),
 		Height: costDimensionCentimetersToMeters(height),
 		Area:   area,
@@ -3128,6 +3130,16 @@ func taskSKUItemCostPreviewDimensions(detail *domain.TaskDetail, item *domain.Ta
 		area = detailArea
 	}
 	return width, height, area
+}
+
+func billableDesignRequirementDimensionText(text string) string {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	for _, keyword := range []string{"源文件", "参考图", "原图", "底图", "来图"} {
+		if strings.Contains(normalized, strings.ToLower(keyword)) {
+			return ""
+		}
+	}
+	return text
 }
 
 func setTaskSKUItemSpecInVariantJSON(raw json.RawMessage, p UpdateTaskSKUItemInfoParams) (json.RawMessage, *domain.AppError) {

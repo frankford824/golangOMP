@@ -1428,7 +1428,7 @@ func TestTaskServiceUpdateBusinessInfoCategoryChangeRecomputesSystemCostAndSyncs
 			TaxMultiplier: float64Ptr(1.1),
 			Priority:      10,
 			IsActive:      true,
-			Source:        "phase_020_sample",
+			Source:        "production_verified_test",
 		},
 	}
 	taskRepo := &prdTaskRepo{

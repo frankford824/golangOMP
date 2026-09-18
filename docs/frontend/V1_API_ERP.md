@@ -1843,7 +1843,7 @@ curl -X GET https://api.example.com/v1/cost-rules/<id>/history \
 ### 简介
 支持方法: POST。
 
-- `POST`: Read-only preview contract available to every authenticated account so task and asset viewers can verify the governed calculation without changing rules or persisted business data. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, and unsupported size-based formulas return `requires_manual_review=true`. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
+- `POST`: Read-only preview contract available to every authenticated account so task and asset viewers can verify the governed calculation without changing rules or persisted business data. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, unsupported size-based formulas, and rules whose source is an uncertified `*_sample` seed return `requires_manual_review=true` without an automatic estimate. Task-side SKU prefill treats structured width, height, and area as authoritative; free-text dimensions only fill missing structured values, and source/reference-image dimensions do not override the final product size. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

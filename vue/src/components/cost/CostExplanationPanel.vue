@@ -152,6 +152,7 @@ const diagnosis = computed(() => {
   const previewResult = result.value
   if (!previewResult) return ''
   if (!previewResult.matched_rule_id) return '未匹配成本规则：优先核对 ERP 商品编码是否绑定规则，再核对规则分组或类目编码。'
+  if (isSampleRuleSource(previewResult.rule_source)) return '当前命中的是未核定样例规则，系统已阻止自动写入成本；请人工确认成本或由管理员配置正式生产规则。'
   if (previewResult.requires_manual_review) return '规则已经匹配，但当前输入或规则类型要求人工复核；请核对尺寸、面积、数量与特殊工艺。'
   if (typeof props.seed.currentCost === 'number' && typeof previewResult.estimated_cost === 'number') {
     const delta = previewResult.estimated_cost - props.seed.currentCost
@@ -159,6 +160,11 @@ const diagnosis = computed(() => {
   }
   return '试算规则已匹配，结果与当前记录未发现明显冲突。'
 })
+
+function isSampleRuleSource(value: unknown) {
+  const source = String(value ?? '').trim().toLowerCase()
+  return source.endsWith('_sample') || source.startsWith('sample_')
+}
 
 function text(value: unknown) {
   return value == null ? '' : String(value)

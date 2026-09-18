@@ -39,7 +39,12 @@ export const costManagementHandler: MockHandler = (request) => {
   }
   if (request.method === 'POST' && request.path === '/v1/cost-rules') return { status: 201, data: { data: request.body } }
   if (request.method === 'PATCH' && /^\/v1\/cost-rules\/\d+$/.test(request.path)) return { status: 200, data: { data: request.body } }
-  if (request.method === 'POST' && request.path === '/v1/cost-rules/preview') return { status: 200, data: { data: { matched_rule_id: 1, matched_rule_version: 3, estimated_cost: 24, explanation: '按当前规则试算，未修改任何业务数据。' } } }
+  if (request.method === 'POST' && request.path === '/v1/cost-rules/preview') {
+    if (String(request.body?.category_code ?? '') === 'KT_STANDARD') {
+      return { status: 200, data: { data: { matched_rule_id: 1, matched_rule_version: 1, estimated_cost: null, rule_source: 'phase_020_sample', rule_group: 'KT_STANDARD', match_mode: 'legacy_alias', requires_manual_review: true, explanation: '当前命中的是未核定样例规则，系统已阻止自动写入成本。' } } }
+    }
+    return { status: 200, data: { data: { matched_rule_id: 1, matched_rule_version: 3, estimated_cost: 24, rule_source: 'governed', requires_manual_review: false, explanation: '按当前规则试算，未修改任何业务数据。' } } }
+  }
   if (request.method === 'GET' && request.path === '/v1/cost-rule-bindings') return { status: 200, data: { data: [{ id: 1, i_id_raw: 'STYLE-MOCK-001', normalized_i_id: 'STYLE-MOCK-001', rule_group: 'KT_BOARD', display_name: '标准 KT 板', is_active: true }], pagination: { page: 1, page_size: 500, total: 1 } } }
   if (request.method === 'POST' && request.path === '/v1/cost-rule-bindings') return { status: 201, data: { data: { id: 2, ...request.body } } }
   if (request.method === 'GET' && request.path === '/v1/cost-rule-bindings/unbound-candidates') return { status: 200, data: { data: [{ normalized_i_id: 'STYLE-MOCK-002', display_i_id: 'STYLE-MOCK-002', suggested_display_name: '待绑定款式', sku_count: 2, task_count: 1 }] } }

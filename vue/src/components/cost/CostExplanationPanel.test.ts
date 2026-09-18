@@ -114,6 +114,29 @@ describe('CostExplanationPanel', () => {
     )
   })
 
+  it('clearly identifies an uncertified sample rule instead of blaming the dimensions', async () => {
+    mocks.preview.mockResolvedValueOnce({
+      matched_rule_id: 1,
+      matched_rule_version: 1,
+      estimated_cost: null,
+      rule_source: 'phase_020_sample',
+      rule_group: 'KT_STANDARD',
+      match_mode: 'legacy_alias',
+      requires_manual_review: true,
+      explanation: '当前命中的是未核定样例规则，系统已阻止自动写入成本。',
+    })
+    const wrapper = mount(CostExplanationPanel, {
+      props: { open: true, title: '成本解释', seed: { categoryCode: 'KT_STANDARD', area: 1 } },
+    })
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('当前命中的是未核定样例规则')
+    expect(wrapper.text()).toContain('系统已阻止自动写入成本')
+    expect(wrapper.text()).not.toContain('请核对尺寸、面积、数量与特殊工艺')
+  })
+
   it('uses the persisted rule id to recover the governed group from historical display text', async () => {
     const wrapper = mount(CostExplanationPanel, {
       props: {

@@ -20,22 +20,46 @@ const maxAutomaticEstimatedCost = 9999.999
 
 func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
 	req = withTextDerivedCostRuleDimensions(req)
+	return previewCostRulesResolvedDimensions(req, rules)
+}
+
+func previewCostRulesResolvedDimensions(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
 	sortedRules := make([]*domain.CostRule, 0, len(rules))
+	sampleRules := make([]*domain.CostRule, 0, len(rules))
 	for _, rule := range rules {
 		if rule == nil {
 			continue
 		}
+		if isUncertifiedSampleCostRule(rule) {
+			sampleRules = append(sampleRules, rule)
+			continue
+		}
 		sortedRules = append(sortedRules, rule)
 	}
-	sort.SliceStable(sortedRules, func(i, j int) bool {
-		if sortedRules[i].Priority == sortedRules[j].Priority {
-			if sortedRules[i].RuleVersion == sortedRules[j].RuleVersion {
-				return sortedRules[i].RuleID < sortedRules[j].RuleID
-			}
-			return sortedRules[i].RuleVersion > sortedRules[j].RuleVersion
+	if len(sortedRules) == 0 && len(sampleRules) > 0 {
+		sortCostRules(sampleRules)
+		matched := sampleRules[0]
+		applied := make([]domain.CostRulePreviewMatch, 0, len(sampleRules))
+		for _, rule := range sampleRules {
+			applied = append(applied, *previewMatchFromRule(rule))
 		}
-		return sortedRules[i].Priority < sortedRules[j].Priority
-	})
+		return costPreviewComputation{
+			Response: &domain.CostRulePreviewResponse{
+				MatchedRule:          previewMatchFromRule(matched),
+				MatchedRuleID:        previewMatchRuleID(matched),
+				MatchedRuleVersion:   previewMatchRuleVersion(matched),
+				AppliedRules:         applied,
+				RuleSource:           matched.Source,
+				GovernanceStatus:     previewGovernanceStatus(matched),
+				RequiresManualReview: true,
+				Explanation:          fmt.Sprintf("%s：当前命中的是未核定样例规则（来源 %s），系统已阻止自动写入成本；请人工确认成本或配置正式生产规则。", matched.RuleName, matched.Source),
+				ERPIID:               strings.TrimSpace(req.ERPIID),
+				ProductIID:           strings.TrimSpace(req.ProductIID),
+			},
+			MatchedRule: matched,
+		}
+	}
+	sortCostRules(sortedRules)
 
 	area := previewArea(req)
 	areaThresholdBasis := previewAreaThresholdBasis(req, area)
@@ -134,7 +158,6 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			explanations = append(explanations, fmt.Sprintf("%s：此规则要求人工报价。", rule.RuleName))
 		}
 	}
-
 	blockedByAmountGuard := estimated > maxAutomaticEstimatedCost
 	if blockedByAmountGuard {
 		manualReview = true
@@ -170,6 +193,26 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 	}
 }
 
+func sortCostRules(rules []*domain.CostRule) {
+	sort.SliceStable(rules, func(i, j int) bool {
+		if rules[i].Priority == rules[j].Priority {
+			if rules[i].RuleVersion == rules[j].RuleVersion {
+				return rules[i].RuleID < rules[j].RuleID
+			}
+			return rules[i].RuleVersion > rules[j].RuleVersion
+		}
+		return rules[i].Priority < rules[j].Priority
+	})
+}
+
+func isUncertifiedSampleCostRule(rule *domain.CostRule) bool {
+	if rule == nil {
+		return false
+	}
+	source := strings.ToLower(strings.TrimSpace(rule.Source))
+	return strings.HasSuffix(source, "_sample") || strings.HasPrefix(source, "sample_")
+}
+
 func roundCostAmount(value float64) float64 {
 	return math.Round(value*1000) / 1000
 }
@@ -198,6 +241,20 @@ func withTextDerivedCostRuleDimensions(req domain.CostRulePreviewRequest) domain
 		if req.Area == nil || *req.Area <= 0 || !costPreviewUsesBillableAreaForThreshold(req) {
 			req.Area = cloneFloat64Ptr(extracted.AreaM2)
 		}
+	}
+	return req
+}
+
+func withMissingTextDerivedCostRuleDimensions(req domain.CostRulePreviewRequest) domain.CostRulePreviewRequest {
+	extracted := extractCostDimensionsFromText(req.Notes)
+	if (req.Width == nil || *req.Width <= 0) && extracted.WidthM != nil {
+		req.Width = cloneFloat64Ptr(extracted.WidthM)
+	}
+	if (req.Height == nil || *req.Height <= 0) && extracted.HeightM != nil {
+		req.Height = cloneFloat64Ptr(extracted.HeightM)
+	}
+	if (req.Area == nil || *req.Area <= 0) && extracted.AreaM2 != nil {
+		req.Area = cloneFloat64Ptr(extracted.AreaM2)
 	}
 	return req
 }
