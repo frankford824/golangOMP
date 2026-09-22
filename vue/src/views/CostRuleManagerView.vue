@@ -403,7 +403,7 @@ async function loadAll() {
 function openRuleEditor(rule?: CostRuleRow, group = '') {
  if(!rule)void categoriesApi.list({page:1,page_size:100,is_active:true}).then(response=>{materialOptions.value=(response.data.data||[]).filter(c=>c.category_code).map(c=>({code:c.category_code!,name:c.display_name||c.category_name||c.category_code!}))}).catch(()=>{})
  replaceDraft(rule ? { ...rule, is_active: rule.is_active !== false, priority: rule.priority ?? 100 } : {...emptyRuleDraft(group||selectedGroupCode.value),rule_type:group?'fixed_unit_price':'cost_model'})
- newModelJSON.value=rule?.formula_expression||JSON.stringify(emptyCostModel());confirmedPrice.value=false
+ newModelJSON.value=rule?.rule_type==='cost_model' ? (rule.formula_expression||JSON.stringify(emptyCostModel())) : JSON.stringify(emptyCostModel());confirmedPrice.value=false
  const print=printPrices(rule?.formula_expression),keyword=keywordPrice(rule?.formula_expression)
  formulaKind.value=print?'print':keyword?'keyword':rule?.formula_expression?'other':'print'
  Object.assign(printDraft,print||{single:0,double:0});Object.assign(keywordDraft,keyword||{keyword:'',price:0})
@@ -414,6 +414,7 @@ async function saveRule() {
   savingRule.value = true; error.value = ''; notice.value = ''
   try {
     if(!ruleDraft.rule_id&&ruleDraft.rule_type==='cost_model'&&rules.value.some(r=>r.category_code===ruleDraft.category_code&&isEffectiveModel(r)))throw new Error('此材质已有计价方案，请关闭窗口后直接编辑现有方案，避免重复收费。')
+    if(ruleDraft.rule_type==='cost_model'&&ruleDraft.source?.endsWith('_sample')&&!confirmedPrice.value)throw new Error('请先核对价格并勾选确认，再改为按用料和工艺收费。')
     if(ruleDraft.rule_type==='cost_model'){const model=JSON.parse(newModelJSON.value);model.material=availableCategories.value.find(g=>g.code===ruleDraft.category_code)?.name||model.material;ruleDraft.formula_expression=JSON.stringify(model)}
     if(ruleDraft.rule_type==='size_based_formula'&&formulaKind.value==='print')ruleDraft.formula_expression=`print_side:single=${printDraft.single},double=${printDraft.double}`
     if(ruleDraft.rule_type==='size_based_formula'&&formulaKind.value==='keyword')ruleDraft.formula_expression=`keyword_area_unit_price:${keywordDraft.keyword}=${keywordDraft.price}`
