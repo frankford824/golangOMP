@@ -26,6 +26,15 @@ func (h *CostRuleBindingHandler) List(c *gin.Context) {
 	respondOKWithPagination(c, items, meta)
 }
 
+func (h *CostRuleBindingHandler) ListBoundSKUs(c *gin.Context) {
+	items, meta, appErr := h.svc.ListBoundSKUs(c.Request.Context(), parseCostRuleBindingFilter(c))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOKWithPagination(c, items, meta)
+}
+
 type createCostRuleBindingReq struct {
 	IIDRaw      string `json:"i_id_raw"`
 	RuleGroup   string `json:"rule_group"`

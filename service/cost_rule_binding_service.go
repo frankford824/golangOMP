@@ -43,10 +43,36 @@ type UnboundCostRuleCandidateFilter struct {
 }
 
 type CostRuleBindingService interface {
+	ListBoundSKUs(ctx context.Context, filter CostRuleBindingFilter) ([]*domain.CostBoundSKU, domain.PaginationMeta, *domain.AppError)
 	List(ctx context.Context, filter CostRuleBindingFilter) ([]*domain.CostRuleBinding, domain.PaginationMeta, *domain.AppError)
 	Create(ctx context.Context, p CreateCostRuleBindingParams) (*domain.CostRuleBinding, *domain.AppError)
 	Patch(ctx context.Context, p PatchCostRuleBindingParams) (*domain.CostRuleBinding, *domain.AppError)
 	ListUnboundCandidates(ctx context.Context, filter UnboundCostRuleCandidateFilter) ([]*domain.UnboundCostRuleCandidate, domain.PaginationMeta, *domain.AppError)
+}
+
+func (s *costRuleBindingService) ListBoundSKUs(ctx context.Context, filter CostRuleBindingFilter) ([]*domain.CostBoundSKU, domain.PaginationMeta, *domain.AppError) {
+	filter.RuleGroup = strings.TrimSpace(filter.RuleGroup)
+	if filter.RuleGroup == "" {
+		return nil, domain.PaginationMeta{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "请先选择计价方案", nil)
+	}
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 {
+		filter.PageSize = 20
+	}
+	if filter.PageSize > 100 {
+		filter.PageSize = 100
+	}
+	reader, ok := s.bindings.(repo.CostBoundSKUReader)
+	if !ok {
+		return nil, domain.PaginationMeta{}, domain.NewAppError(domain.ErrCodeInternalError, "关联SKU查询未配置", nil)
+	}
+	items, total, err := reader.ListBoundSKUs(ctx, repo.CostRuleBindingListFilter{RuleGroup: filter.RuleGroup, Keyword: strings.TrimSpace(filter.Keyword), Page: filter.Page, PageSize: filter.PageSize})
+	if err != nil {
+		return nil, domain.PaginationMeta{}, infraError("list current bound skus", err)
+	}
+	return items, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
 
 type costRuleBindingService struct {

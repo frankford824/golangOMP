@@ -2510,6 +2510,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cost-rule-bindings/skus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browse SKUs by current active style binding
+         * @description Reads task SKU identities including pending ERP filing. Uses active ERP style binding first, then active product style binding, and requires a currently effective rule in the selected group. Does not use historical cost matches or product-name inference. Catalog administrators only.
+         */
+        get: {
+            parameters: {
+                query: {
+                    rule_group: string;
+                    keyword?: string;
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current bound task SKUs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                /** Format: int64 */
+                                id?: number;
+                                sku_code?: string;
+                                product_name?: string;
+                                style_code?: string;
+                                cost_price?: number | null;
+                                status?: string;
+                            }[];
+                            pagination?: components["schemas"]["PaginationMeta"];
+                        };
+                    };
+                };
+                /** @description Missing rule group */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Requires catalog.manage */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/cost-rule-bindings": {
         parameters: {
             query?: never;

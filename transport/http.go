@@ -224,6 +224,7 @@ func NewRouter(
 	if costRuleBindingH != nil {
 		costRuleBindingGroup := v1.Group("/cost-rule-bindings")
 		{
+			costRuleBindingGroup.GET("/skus", capabilityAccess(costRuleBindingGroup, http.MethodGet, "/skus", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), costRuleBindingH.ListBoundSKUs)
 			costRuleBindingGroup.GET("", capabilityAccess(costRuleBindingGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), costRuleBindingH.List)
 			costRuleBindingGroup.POST("", capabilityAccess(costRuleBindingGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), costRuleBindingH.Create)
 			costRuleBindingGroup.GET("/unbound-candidates", capabilityAccess(costRuleBindingGroup, http.MethodGet, "/unbound-candidates", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), costRuleBindingH.ListUnboundCandidates)

@@ -2,83 +2,84 @@
   <main class="cost-manager-page">
     <header class="yb-page-surface yb-page-header-row">
       <div class="yb-page-heading-copy">
-        <p class="eyebrow">统一成本口径</p>
         <h1 class="yb-page-title">成本规则</h1>
-        <p class="yb-page-subtitle">维护款式使用哪组计价规则，并在应用前用真实尺寸试算影响；资产中心与任务详情读取同一份成本结果。</p>
+        <p class="yb-page-subtitle">选择方案，维护价格与款式，查看关联 SKU。</p>
       </div>
       <div class="header-actions">
         <button class="secondary" :disabled="loading" @click="loadAll">{{ loading ? '刷新中…' : '刷新数据' }}</button>
-        <button class="primary" @click="openRuleEditor()">新增规则</button>
+        <button class="primary" @click="openRuleEditor()">新增方案</button>
       </div>
     </header>
 
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
     <div v-if="notice" class="message notice" role="status">{{ notice }}</div>
 
-    <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','命中诊断','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab">{{tab}}</button></nav>
+    <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','绑定检查','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab">{{tab}}</button></nav>
     <section v-show="workspaceTab==='方案与绑定'" class="cost-layout">
       <aside class="rule-groups" aria-label="成本规则分组">
         <label class="group-search">搜索材质 / 款式编码<input v-model.trim="groupSearch" placeholder="输入编码或名称" /></label>
-        <header><span>当前规则组</span><b>{{ ruleGroups.length }}</b></header>
+        <label class="group-search">显示范围<select v-model="groupScope"><option value="bound">已绑定款式的方案</option><option value="all">全部方案（含未绑定）</option></select></label>
+        <header><span>计价方案</span><b>{{ filteredGroups.length }}</b></header>
         <button
           v-for="group in filteredGroups"
           :key="group.code"
           :class="{ active: selectedGroupCode === group.code }"
           @click="selectedGroupCode = group.code"
         >
-          <span><strong>{{ group.name }}</strong><small>{{ group.code }}</small></span>
-          <b>{{ group.rules.length }}</b>
+          <span><strong>{{ group.name }}</strong><small>{{ activeBindingCount(group.code) }} 个款式</small></span>
         </button>
-        <div v-if="!loading && !ruleGroups.length" class="empty-small">尚未配置成本规则。</div>
+        <div v-if="!loading && !filteredGroups.length" class="empty-small">没有匹配的方案。可切换“全部方案”查看未绑定项。</div>
       </aside>
 
       <section class="rule-workspace">
         <header class="workspace-heading">
           <div>
-            <p class="eyebrow">{{ selectedGroup?.code || '请选择规则组' }}</p>
             <h2>{{ selectedGroup?.name || '成本计算规则' }}</h2>
-            <p>{{ selectedGroup ? `${selectedBindings.length} 个绑定款式 · ${selectedGroup.rules.length} 条配置（含历史）` : '从左侧选择一组规则查看。' }}</p>
+            <p>{{ selectedGroup ? `${selectedBindings.length} 个款式已绑定此方案` : '从左侧选择方案查看。' }}</p>
           </div>
-          <button v-if="selectedGroup" class="secondary" @click="openRuleEditor(undefined, selectedGroup.code)">在此组新增</button>
+          <button v-if="selectedGroup && !selectedModel" class="secondary" @click="openRuleEditor(undefined, selectedGroup.code)">添加收费项</button>
         </header>
 
-        <section v-if="selectedGroup" class="model-workspace">
-          <button class="secondary" @click="startModel()">{{ selectedModel ? '编辑统一计价方案' : '从现有参数建立统一方案' }}</button>
+        <section v-if="selectedModel || modelEditing" class="model-workspace">
+          <button class="secondary" @click="startModel()">编辑方案价格</button>
           <template v-if="modelEditing">
             <label>方案名称<input v-model.trim="modelName" /></label>
             <CostModelEditor v-model="modelJSON" />
             <p>保存后供明确绑定的款式使用；历史金额须通过更新记录单独重算。</p>
-            <button class="primary" :disabled="savingModel" @click="saveModel">{{ savingModel?'保存中…':'保存统一方案' }}</button>
+            <button class="primary" :disabled="savingModel" @click="saveModel">{{ savingModel?'保存中…':'保存方案' }}</button>
           </template>
         </section>
         <div v-if="selectedGroup" class="rule-list">
-          <article v-for="rule in selectedGroup.rules" :key="rule.rule_id" class="rule-card" :class="{ inactive: !rule.is_active }">
+          <article v-for="rule in currentRules" :key="rule.rule_id" class="rule-card">
             <div class="rule-icon" aria-hidden="true">{{ ruleTypeIcon(rule.rule_type) }}</div>
             <div class="rule-copy">
               <div><strong>{{ rule.rule_name || '未命名规则' }}</strong><span>{{ ruleStateLabel(rule) }}</span></div>
               <p>{{ ruleSummary(rule) }}</p>
-              <small>优先级 {{ rule.priority ?? 0 }} · 第 {{ rule.rule_version || 1 }} 版</small>
             </div>
             <button class="text-button" @click="rule.rule_type==='cost_model'?startModel(rule):openRuleEditor(rule)">编辑</button>
           </article>
-          <div v-if="!selectedGroup.rules.length" class="empty-large">这个规则组还没有计算条目。</div>
+          <div v-if="!currentRules.length" class="empty-large">此方案暂无启用的价格。</div>
+          <details v-if="historicalRules.length"><summary>已停用或历史价格（{{historicalRules.length}}）</summary><p v-for="rule in historicalRules" :key="rule.rule_id">{{rule.rule_name}}：{{ruleSummary(rule)}}</p></details>
         </div>
 
         <section v-if="selectedGroup" class="binding-panel">
           <header>
-            <div><h3>已绑定款式</h3><p>以下款式编码会优先使用“{{ selectedGroup.name }}”。</p></div>
+            <div><h3>绑定款式</h3><p>绑定后，新计价使用本方案；已有金额不会自动改变。</p></div>
             <button class="secondary" @click="bindingDialogOpen = true">绑定新款式</button>
           </header>
+          <label class="binding-search">查找已绑定款式<input v-model.trim="bindingSearch" placeholder="款式编码或名称" /></label>
           <div class="binding-chips">
-            <span v-for="binding in selectedBindings" :key="binding.id"><b>{{ binding.i_id_raw || binding.normalized_i_id }}</b><small>{{ binding.display_name || '已绑定' }}</small></span>
+            <span v-for="binding in filteredBindings" :key="binding.id"><b>{{ binding.i_id_raw || binding.normalized_i_id }}</b><small>{{ binding.display_name || '已绑定' }}</small><button class="text-button" :disabled="savingBinding" @click="unbind(binding)">{{unbindID===binding.id?'确认解除':'解除绑定'}}</button></span>
             <span v-if="!selectedBindings.length" class="empty-inline">还没有款式绑定到此组。</span>
           </div>
         </section>
       </section>
 
-      <aside class="calculator" aria-label="成本试算器">
-        <header><p class="eyebrow">不会保存数据</p><h2>成本试算器</h2><span>用实际尺寸验证当前规则。</span></header>
-        <label>规则组<select v-model="calculator.rule_group"><option value="">请选择</option><option v-for="group in ruleGroups" :key="group.code" :value="group.code">{{ group.name }}</option></select></label>
+      <CostBoundSKUList :group="selectedGroupCode" :revision="dataRevision" />
+      <aside v-if="calculatorOpen" id="cost-calculator" class="calculator floating-calculator" aria-label="成本试算器" @keydown.esc="calculatorOpen=false">
+        <header><h2>成本试算</h2><button class="text-button" @click="calculatorOpen=false">收起试算</button><span>只试算，不保存或修改成本。</span></header>
+        <label>试算方案<select v-model="calculator.rule_group" :disabled="modelEditing"><option value="">请选择</option><option v-for="group in ruleGroups" :key="group.code" :value="group.code">{{ group.name }}</option></select></label>
+        <small v-if="modelEditing">正在试算中间栏尚未保存的价格。</small>
         <CostInputFields v-if="calculatorUsesModel || modelEditing" v-model="modelInput" />
         <template v-else>
         <div class="field-pair"><label>宽（米）<input v-model.number="calculator.width" type="number" min="0" step="0.01" /></label><label>高（米）<input v-model.number="calculator.height" type="number" min="0" step="0.01" /></label></div>
@@ -95,19 +96,19 @@
       </aside>
     </section>
 
-    <section v-show="workspaceTab==='命中诊断'" class="mapping-diagnostics" aria-labelledby="mapping-diagnostics-title">
+    <section v-show="workspaceTab==='绑定检查'" class="mapping-diagnostics" aria-labelledby="mapping-diagnostics-title">
       <header>
         <div>
           <p class="eyebrow">款式编码与计价规则</p>
-          <h2 id="mapping-diagnostics-title">成本规则命中诊断</h2>
-          <p>明确绑定优先；只有唯一历史规则的款式才可作为建议。存在多个历史规则时必须人工选择，系统不会猜。</p>
+          <h2 id="mapping-diagnostics-title">检查款式绑定</h2>
+          <p>检查哪些款式还没有选定计价方案。历史价格仅供参考，绑定前请核对。</p>
         </div>
         <button class="secondary" @click="bindingDialogOpen = true">处理未绑定款式</button>
       </header>
       <div class="diagnostic-grid">
         <article><span>已明确绑定</span><strong>{{ bindings.filter((item) => item.is_active).length }}</strong><small>款式编码直接命中规则组</small></article>
         <article><span>当前加载的唯一建议</span><strong>{{ candidateStats.unique }}</strong><small>可核对后绑定</small></article>
-        <article class="warning"><span>当前加载的规则冲突</span><strong>{{ candidateStats.conflict }}</strong><small>不能自动决定规则组</small></article>
+        <article class="warning"><span>需要选择方案</span><strong>{{ candidateStats.conflict }}</strong><small>曾使用过不同价格，请核对后选择</small></article>
         <article class="danger"><span>当前加载的无证据项</span><strong>{{ candidateStats.unmatched }}</strong><small>需补充明确规则</small></article>
       </div>
     </section>
@@ -152,6 +153,7 @@
       </div>
     </section>
 
+    <button class="calculator-toggle" :aria-expanded="calculatorOpen" aria-controls="cost-calculator" @click="calculatorOpen=!calculatorOpen">{{calculatorOpen?'收起':'试算'}}</button>
     <Teleport to="body">
       <div v-if="ruleDialogOpen" class="modal-layer" @keydown.esc="closeRuleEditor">
         <button class="modal-mask" aria-label="关闭规则编辑" @click="closeRuleEditor" />
@@ -159,22 +161,23 @@
           <header><div><p class="eyebrow">{{ ruleDraft.rule_id ? '调整现有规则' : '新增计算规则' }}</p><h2>{{ ruleDraft.rule_id ? '编辑规则' : '新建规则' }}</h2></div><button type="button" class="close" @click="closeRuleEditor">×</button></header>
           <div class="form-grid">
             <label class="span-2">规则名称<input v-model.trim="ruleDraft.rule_name" required placeholder="例如：KT 板面积计价" /></label>
-            <label>规则组<input v-model.trim="ruleDraft.category_code" required placeholder="例如：KT_BOARD" /></label>
-            <label>计算方式<select v-model="ruleDraft.rule_type"><option v-for="item in ruleTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-            <label>基础单价<input v-model.number="ruleDraft.base_price" type="number" min="0" step="0.01" /></label>
-            <label>含税倍率<input v-model.number="ruleDraft.tax_multiplier" type="number" min="0" step="0.01" /></label>
-            <label>最低计价面积<input v-model.number="ruleDraft.min_area" type="number" min="0" step="0.001" /></label>
-            <label>面积阈值<input v-model.number="ruleDraft.area_threshold" type="number" min="0" step="0.001" /></label>
-            <label>附加金额<input v-model.number="ruleDraft.surcharge_amount" type="number" min="0" step="0.01" /></label>
-            <label>工艺关键字<input v-model.trim="ruleDraft.special_process_keyword" placeholder="选填" /></label>
-            <label>工艺加价<input v-model.number="ruleDraft.special_process_price" type="number" min="0" step="0.01" /></label>
-            <label>优先级<input v-model.number="ruleDraft.priority" type="number" step="1" /></label>
-            <label v-if="ruleDraft.rule_type === 'size_based_formula'" class="span-2">尺寸公式<input v-model.trim="ruleDraft.formula_expression" placeholder="例如：keyword_area_unit_price:教师节=264" /></label>
-            <label v-if="!ruleDraft.rule_id">替代规则 ID<input v-model.number="ruleDraft.supersedes_rule_id" type="number" min="1" step="1" placeholder="新版本可填写" /></label>
+            <label>适用材质 / 方案<select v-model="ruleDraft.category_code" required :disabled="!!ruleDraft.rule_id"><option value="">请选择</option><option v-for="group in availableCategories" :key="group.code" :value="group.code">{{group.name}}</option></select></label>
+            <label v-if="ruleDraft.rule_type!=='cost_model'">计算方式<select v-model="ruleDraft.rule_type"><option v-for="item in ruleTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+            <CostModelEditor v-if="ruleDraft.rule_type==='cost_model'" v-model="newModelJSON" hide-material class="span-2" />
+            <template v-if="ruleDraft.rule_type==='fixed_unit_price'"><label>每平方米价格（元）<input v-model.number="ruleDraft.base_price" required type="number" min="0" step="0.01" /></label><label>价格调整倍数<input v-model.number="ruleDraft.tax_multiplier" type="number" min="0.0001" step="0.01" placeholder="不调整填 1" /></label></template>
+            <label v-if="ruleDraft.rule_type==='minimum_billable_area'">不足多少平方米按此面积收费<input v-model.number="ruleDraft.min_area" required type="number" min="0" step="0.001" /></label>
+            <template v-if="ruleDraft.rule_type==='area_threshold_surcharge'"><label>面积小于（平方米）<input v-model.number="ruleDraft.area_threshold" required type="number" min="0" step="0.001" /></label><label>每平方米另加（元）<input v-model.number="ruleDraft.surcharge_amount" required type="number" min="0" step="0.01" /></label></template>
+            <template v-if="ruleDraft.rule_type==='special_process_surcharge'"><label>收费工艺名称<input v-model.trim="ruleDraft.special_process_keyword" required placeholder="例如：开槽" /></label><label>该工艺另加（元）<input v-model.number="ruleDraft.special_process_price" required type="number" min="0" step="0.01" /></label></template>
+            <template v-if="ruleDraft.rule_type==='size_based_formula'">
+              <template v-if="formulaKind==='print'"><label>单面价格（元/张）<input v-model.number="printDraft.single" required type="number" min="0" step="0.001" /></label><label>双面价格（元/张）<input v-model.number="printDraft.double" required type="number" min="0" step="0.001" /></label></template>
+              <template v-else-if="formulaKind==='keyword'"><label>适用产品关键词<input v-model.trim="keywordDraft.keyword" required /></label><label>每平方米价格（元）<input v-model.number="keywordDraft.price" required type="number" min="0" step="0.001" /></label></template>
+              <p v-else class="span-2">{{ruleDescription(ruleDraft)}}。此特殊计价方式暂不支持修改价格；可维护名称与启用状态，或另建明确单价的方案。</p>
+            </template>
             <label class="switch-row"><input v-model="ruleDraft.is_active" type="checkbox" /> 当前启用</label>
+            <label v-if="ruleDraft.source?.endsWith('_sample')" class="switch-row span-2"><input v-model="confirmedPrice" type="checkbox" /> 已核对价格，允许用于新 SKU 自动计价</label>
             <label class="span-2">维护说明<textarea v-model.trim="ruleDraft.governance_note" rows="3" placeholder="说明本次调整原因，方便后续追溯。" /></label>
           </div>
-          <footer><button type="button" class="secondary" @click="closeRuleEditor">取消</button><button class="primary" :disabled="savingRule">{{ savingRule ? '保存中…' : '保存并生成影响预览' }}</button></footer>
+          <footer><button type="button" class="secondary" @click="closeRuleEditor">取消</button><button class="primary" :disabled="savingRule">{{ savingRule ? '保存中…' : '保存价格' }}</button></footer>
         </form>
       </div>
 
@@ -182,8 +185,9 @@
         <button class="modal-mask" aria-label="关闭款式绑定" @click="bindingDialogOpen = false" />
         <section class="modal-card binding-dialog" role="dialog" aria-modal="true" aria-labelledby="binding-title">
           <header><div><p class="eyebrow">款式与规则</p><h2 id="binding-title">绑定到“{{ selectedGroup?.name }}”</h2></div><button class="close" @click="bindingDialogOpen = false">×</button></header>
-          <label class="dialog-search">搜索未绑定款式<input v-model.trim="candidateKeyword" placeholder="输入款式编码或名称" @keyup.enter="loadCandidates" /><button class="secondary" @click="loadCandidates">搜索</button></label>
+          <label class="dialog-search">搜索款式编码<input v-model.trim="candidateKeyword" placeholder="输入款式编码或名称" @keyup.enter="loadCandidates" /><button class="secondary" @click="loadCandidates">搜索</button></label>
           <div class="candidate-list">
+            <article v-for="style in erpStyles" :key="`erp-${style.i_id}`"><span><strong>{{style.i_id}}</strong><small>{{style.label||style.category_name||'ERP 款式'}} · {{boundStyleName(style.i_id)}}</small></span><button class="primary" :disabled="savingBinding || bindingForStyle(style.i_id)?.rule_group===selectedGroupCode" @click="bindStyle(style.i_id)">{{pendingStyle===style.i_id?'确认改绑到本方案':bindingForStyle(style.i_id)?'改绑':'绑定'}}</button></article>
             <article v-for="candidate in candidates" :key="candidate.normalized_i_id">
               <span>
                 <strong>{{ candidate.i_id_raw || candidate.display_i_id || candidate.erp_i_id || candidate.product_i_id || candidate.normalized_i_id }}</strong>
@@ -192,7 +196,7 @@
               </span>
               <button class="primary" :disabled="savingBinding" @click="bindCandidate(candidate)">{{ candidateConfidence(candidate) === 'conflict' ? '确认绑定此组' : '绑定' }}</button>
             </article>
-            <div v-if="!candidates.length" class="empty-large">没有找到待绑定款式。</div>
+            <div v-if="!candidates.length && !erpStyles.length" class="empty-large">没有找到待绑定款式。</div>
           </div>
         </section>
       </div>
@@ -225,8 +229,12 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import CostModelEditor from '@/components/cost/CostModelEditor.vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
+import CostBoundSKUList from '@/components/cost/CostBoundSKUList.vue'
+import '@/components/cost/cost-manager-workspace.css'
+import {ruleDescription,printPrices,keywordPrice} from '@/domain/cost-rule-presentation'
 import {emptyCostModel,emptyCostInput} from '@/domain/cost-model'
 import { categoriesApi } from '@/services/api/categoriesApi'
+import { erpApi } from '@/services/api/erpApi'
 import {
   costManagementApi,
   type CostRecalculationRun,
@@ -262,17 +270,18 @@ interface CostRuleRow {
 interface RuleDraft extends Partial<CostRuleRow> { rule_name: string; category_code: string; rule_type: string; is_active: boolean; priority: number }
 
 const ruleTypes = [
-  { value: 'cost_model', label: '统一计价方案' },
-  { value: 'fixed_unit_price', label: '固定单价' },
-  { value: 'area_threshold_surcharge', label: '面积阈值加价' },
-  { value: 'minimum_billable_area', label: '最低计价面积' },
-  { value: 'size_based_formula', label: '尺寸公式' },
+  { value: 'cost_model', label: '按用料和工艺收费' },
+  { value: 'fixed_unit_price', label: '按平方米收费' },
+  { value: 'area_threshold_surcharge', label: '小面积另加费用' },
+  { value: 'minimum_billable_area', label: '设置最低收费面积' },
+  { value: 'size_based_formula', label: '单双面 / 特定规格价格' },
   { value: 'special_process_surcharge', label: '特殊工艺加价' },
   { value: 'manual_quote', label: '人工报价' },
 ]
 const rules = ref<CostRuleRow[]>([])
 const bindings = ref<CostRuleBinding[]>([])
 const candidates = ref<UnboundCostRuleCandidate[]>([])
+const erpStyles=ref<Array<{i_id:string;label?:string;category_name?:string}>>([]),pendingStyle=ref(''),unbindID=ref<number|null>(null)
 const runs = ref<CostRecalculationRun[]>([])
 const costDashboard = ref<ProductCostDashboardResponse>({ total_count: 0, groups: [], tags: [] })
 const selectedRun = ref<CostRecalculationRun | null>(null)
@@ -295,15 +304,26 @@ const ruleDraft = reactive<RuleDraft>(emptyRuleDraft())
 const calculator = reactive({ rule_group: '', width: 1, height: 1, area: null as number | null, quantity: 1, process: '' })
 const workspaceTab=ref('方案与绑定')
 const groupSearch=ref('')
+const groupScope=ref('bound'),bindingSearch=ref(''),calculatorOpen=ref(false),dataRevision=ref(0)
+const newModelJSON=ref(JSON.stringify(emptyCostModel())),confirmedPrice=ref(false)
+const materialOptions=ref<Array<{code:string;name:string}>>([])
+const availableCategories=computed(()=>[...new Map([...ruleGroups.value.map(g=>({code:g.code,name:g.name})),...materialOptions.value].map(g=>[g.code,g])).values()])
+const formulaKind=ref('print'),printDraft=reactive({single:0,double:0}),keywordDraft=reactive({keyword:'',price:0})
 const modelEditing=ref(false),savingModel=ref(false),modelName=ref(''),modelJSON=ref(JSON.stringify(emptyCostModel()))
 const modelInput=ref(emptyCostInput())
 const modelRuleID=ref<number|undefined>()
 const isEffectiveModel=(r:CostRuleRow)=>r.rule_type==='cost_model'&&r.is_active&&(!r.governance_status||r.governance_status==='effective')
 const selectedModel=computed(()=>selectedGroup.value?.rules.filter(isEffectiveModel).sort((a,b)=>(b.rule_version||1)-(a.rule_version||1))[0])
 const calculatorUsesModel=computed(()=>rules.value.some(r=>r.category_code===calculator.rule_group&&isEffectiveModel(r)))
-const filteredGroups=computed(()=>ruleGroups.value.filter(g=>!groupSearch.value||`${g.name} ${g.code} ${bindings.value.filter(b=>b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase())))
+function activeBindingCount(code:string){return bindings.value.filter(b=>b.rule_group===code&&b.is_active).length}
+function effectiveRules(items:CostRuleRow[]){const active=items.filter(r=>r.is_active!==false&&(!r.governance_status||r.governance_status==='effective'));const replaced=new Set(active.map(r=>r.supersedes_rule_id).filter(Boolean));return active.filter(r=>!replaced.has(r.rule_id))}
+const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(groupScope.value==='all'||(activeBindingCount(g.code)>0&&effectiveRules(g.rules).length>0))&&(!groupSearch.value||`${g.name} ${g.code} ${bindings.value.filter(b=>b.is_active&&b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase()))))
+const currentRules=computed(()=>effectiveRules(selectedGroup.value?.rules||[]))
+const historicalRules=computed(()=>selectedGroup.value?.rules.filter(r=>!currentRules.value.includes(r))||[])
+const filteredBindings=computed(()=>selectedBindings.value.filter(b=>`${b.i_id_raw} ${b.display_name}`.toLowerCase().includes(bindingSearch.value.toLowerCase())))
 watch(selectedGroupCode,()=>{modelEditing.value=false;preview.value=null})
-function ruleStateLabel(rule:CostRuleRow){if(!rule.is_active)return '已停用';if(rule.governance_status==='expired'||rule.governance_status==='scheduled')return '不在生效期';if(rule.rule_type==='cost_model')return '统一方案';if(rule.source?.endsWith('_sample'))return '旧参数 · 自动计算受限';return '启用 · 以试算为准'}
+watch([modelJSON,modelInput,calculator],()=>{preview.value=null},{deep:true})
+function ruleStateLabel(rule:CostRuleRow){if(!rule.is_active)return '已停用';if(rule.governance_status==='expired'||rule.governance_status==='scheduled')return '暂未使用';if(rule.source?.endsWith('_sample'))return '价格待核定';return '使用中'}
 function startModel(rule?:CostRuleRow){
   const existing=rule||selectedModel.value;modelRuleID.value=existing?.rule_id;modelName.value=existing?.rule_name||`${selectedGroup.value?.name||''}计价方案`
   const m=emptyCostModel();m.material=selectedGroup.value?.name||''
@@ -331,6 +351,7 @@ const ruleGroups = computed(() => {
 })
 const selectedGroup = computed(() => ruleGroups.value.find((group) => group.code === selectedGroupCode.value) || ruleGroups.value[0] || null)
 const selectedBindings = computed(() => bindings.value.filter((binding) => binding.rule_group === selectedGroup.value?.code && binding.is_active))
+watch(filteredGroups,groups=>{if(!groups.some(g=>g.code===selectedGroupCode.value))selectedGroupCode.value=groups[0]?.code||''})
 const candidateStats = computed(() => candidates.value.reduce((result, candidate) => {
   result[candidateConfidence(candidate)] += 1
   return result
@@ -354,25 +375,15 @@ function groupDisplayName(groupRules: CostRuleRow[], code: string) {
   const ruleLabel = groupRules.map((rule) => String(rule.rule_name || '').replace(/(?:基础单价|最低计价面积|面积加价|小面积附加|工艺加价)$/u, '').trim()).find(Boolean)
   return ruleLabel || familyLabel || code
 }
-function ruleTypeLabel(type: string) { return ruleTypes.find((item) => item.value === type)?.label || '其他计价方式' }
 function ruleTypeIcon(type: string) { return ({ fixed_unit_price: '¥', area_threshold_surcharge: '㎡', minimum_billable_area: '▣', size_based_formula: '×', special_process_surcharge: '+', manual_quote: '人' } as Record<string, string>)[type] || '•' }
-function money(value?: number | null) { return typeof value === 'number' ? `¥${value.toFixed(2)}` : '未填写' }
-function ruleSummary(rule: CostRuleRow) {
-  if(rule.rule_type==='cost_model'){try{const m=JSON.parse(rule.formula_expression||'{}');const basis=({area:'按面积',piece:'按件',set:'按套',manual:'人工报价'} as Record<string,string>)[m.basis]||'待检查';return `${m.material} · ${basis} · 单价 ${m.unit_price} × ${m.multiplier} · ${(m.processes||[]).length}项工艺`}catch{return '方案配置需要检查'}}
-  if (rule.rule_type === 'fixed_unit_price') return `${ruleTypeLabel(rule.rule_type)} · ${money(rule.base_price)}${rule.tax_multiplier ? ` × ${rule.tax_multiplier} 含税倍率` : ''}`
-  if (rule.rule_type === 'minimum_billable_area') return `${ruleTypeLabel(rule.rule_type)} · 最低 ${rule.min_area ?? '未填写'} ㎡`
-  if (rule.rule_type === 'area_threshold_surcharge') return `${ruleTypeLabel(rule.rule_type)} · ${rule.area_threshold ?? '未填写'} ㎡以内加 ${money(rule.surcharge_amount)}`
-  if (rule.rule_type === 'special_process_surcharge') return `${ruleTypeLabel(rule.rule_type)} · “${rule.special_process_keyword || '未填写工艺'}”加 ${money(rule.special_process_price)}`
-  if (rule.rule_type === 'size_based_formula') return `${ruleTypeLabel(rule.rule_type)} · ${rule.formula_expression || '公式待配置'}`
-  return ruleTypeLabel(rule.rule_type)
-}
+function ruleSummary(rule: CostRuleRow) {return ruleDescription(rule)}
 
 async function loadAll() {
   loading.value = true; error.value = ''; notice.value = ''
   try {
     const [ruleResponse, bindingResponse, runResponse, dashboardResponse, candidateResponse] = await Promise.all([
-      categoriesApi.listCostRules({ page: 1, page_size: 500 }),
-      costManagementApi.listCostRuleBindings({ page: 1, page_size: 500 }),
+      loadRulePages(),
+      loadBindingPages(),
       costManagementApi.listCostRecalculationRuns({ page: 1, page_size: 20 }),
       costManagementApi.getCostDashboard(),
       costManagementApi.listUnboundCostRuleCandidates({ page: 1, page_size: 100 }),
@@ -383,20 +394,35 @@ async function loadAll() {
     runs.value = runResponse.data || []
     costDashboard.value = dashboardResponse
     candidates.value = candidateResponse.data || []
-    if (!selectedGroupCode.value || !ruleGroups.value.some((group) => group.code === selectedGroupCode.value)) selectedGroupCode.value = ruleGroups.value[0]?.code || ''
+    dataRevision.value++
+    if (!selectedGroupCode.value || !filteredGroups.value.some((group) => group.code === selectedGroupCode.value)) selectedGroupCode.value = filteredGroups.value[0]?.code || ''
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '成本规则加载失败。' }
   finally { loading.value = false }
 }
 
-function openRuleEditor(rule?: CostRuleRow, group = '') { replaceDraft(rule ? { ...rule, is_active: rule.is_active !== false, priority: rule.priority ?? 100 } : emptyRuleDraft(group)); ruleDialogOpen.value = true }
+function openRuleEditor(rule?: CostRuleRow, group = '') {
+ if(!rule)void categoriesApi.list({page:1,page_size:100,is_active:true}).then(response=>{materialOptions.value=(response.data.data||[]).filter(c=>c.category_code).map(c=>({code:c.category_code!,name:c.display_name||c.category_name||c.category_code!}))}).catch(()=>{})
+ replaceDraft(rule ? { ...rule, is_active: rule.is_active !== false, priority: rule.priority ?? 100 } : {...emptyRuleDraft(group||selectedGroupCode.value),rule_type:group?'fixed_unit_price':'cost_model'})
+ newModelJSON.value=rule?.formula_expression||JSON.stringify(emptyCostModel());confirmedPrice.value=false
+ const print=printPrices(rule?.formula_expression),keyword=keywordPrice(rule?.formula_expression)
+ formulaKind.value=print?'print':keyword?'keyword':rule?.formula_expression?'other':'print'
+ Object.assign(printDraft,print||{single:0,double:0});Object.assign(keywordDraft,keyword||{keyword:'',price:0})
+ ruleDialogOpen.value = true
+}
 function closeRuleEditor() { if (!savingRule.value) ruleDialogOpen.value = false }
 async function saveRule() {
   savingRule.value = true; error.value = ''; notice.value = ''
   try {
+    if(!ruleDraft.rule_id&&ruleDraft.rule_type==='cost_model'&&rules.value.some(r=>r.category_code===ruleDraft.category_code&&isEffectiveModel(r)))throw new Error('此材质已有计价方案，请关闭窗口后直接编辑现有方案，避免重复收费。')
+    if(ruleDraft.rule_type==='cost_model'){const model=JSON.parse(newModelJSON.value);model.material=availableCategories.value.find(g=>g.code===ruleDraft.category_code)?.name||model.material;ruleDraft.formula_expression=JSON.stringify(model)}
+    if(ruleDraft.rule_type==='size_based_formula'&&formulaKind.value==='print')ruleDraft.formula_expression=`print_side:single=${printDraft.single},double=${printDraft.double}`
+    if(ruleDraft.rule_type==='size_based_formula'&&formulaKind.value==='keyword')ruleDraft.formula_expression=`keyword_area_unit_price:${keywordDraft.keyword}=${keywordDraft.price}`
+    if(confirmedPrice.value)ruleDraft.source='admin_manual'
     const payload = Object.fromEntries(Object.entries(ruleDraft).filter(([, value]) => value !== '' && value != null))
     if (ruleDraft.rule_id) await categoriesApi.updateCostRule(ruleDraft.rule_id, payload)
     else await categoriesApi.createCostRule(payload)
     const group = ruleDraft.category_code
+    groupScope.value='all'
     ruleDialogOpen.value = false
     await loadAll()
     selectedGroupCode.value = group
@@ -411,13 +437,27 @@ async function saveRule() {
 }
 
 async function loadCandidates() {
-  try { candidates.value = (await costManagementApi.listUnboundCostRuleCandidates({ keyword: candidateKeyword.value, page: 1, page_size: 100 })).data || [] }
+  try {
+    const [old,erp]=await Promise.all([costManagementApi.listUnboundCostRuleCandidates({ keyword: candidateKeyword.value, page: 1, page_size: 100 }),erpApi.getIids({q:candidateKeyword.value,page:1,page_size:100})])
+    candidates.value=old.data||[];erpStyles.value=erp.data?.data||[];pendingStyle.value=''
+  }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '待绑定款式加载失败。' }
 }
+function bindingForStyle(iid:string){const normalized=iid.normalize('NFKC').replace(/\s/g,'').toUpperCase();return bindings.value.find(b=>b.is_active&&b.normalized_i_id===normalized)}
+function boundStyleName(iid:string){const binding=bindingForStyle(iid);return binding?`已绑定：${ruleGroups.value.find(g=>g.code===binding.rule_group)?.name||binding.display_name}`:'尚未绑定'}
+async function bindStyle(iid:string){
+ const existing=bindingForStyle(iid);if(existing&&pendingStyle.value!==iid){pendingStyle.value=iid;return}
+ if(!selectedGroup.value)return;savingBinding.value=true
+ try{if(existing)await costManagementApi.updateCostRuleBinding(existing.id,{rule_group:selectedGroupCode.value});else await costManagementApi.createCostRuleBinding({i_id_raw:iid,rule_group:selectedGroupCode.value,display_name:iid,is_active:true,source:'manual'})
+ await loadAll();pendingStyle.value='';notice.value='款式绑定已保存，右侧 SKU 列表已刷新。'}catch(e){error.value=e instanceof Error?e.message:'绑定失败'}finally{savingBinding.value=false}
+}
+async function unbind(binding:CostRuleBinding){if(unbindID.value!==binding.id){unbindID.value=binding.id;return}savingBinding.value=true;try{await costManagementApi.updateCostRuleBinding(binding.id,{is_active:false});groupScope.value='all';await loadAll();notice.value='已解除绑定，历史成本未修改。';unbindID.value=null}catch(e){error.value=e instanceof Error?e.message:'解除失败'}finally{savingBinding.value=false}}
+async function loadRulePages(){let page=1;const rows:CostRuleRow[]=[];while(true){const response=await categoriesApi.listCostRules({page,page_size:100});const body=response.data as {data?:CostRuleRow[];pagination?:{total:number}};const batch=body.data||[];rows.push(...batch);if(batch.length<100||rows.length>=(body.pagination?.total??Infinity))break;page++}return {data:{data:rows}}}
+async function loadBindingPages(){let page=1;const rows:CostRuleBinding[]=[];while(true){const response=await costManagementApi.listCostRuleBindings({page,page_size:100});const batch=response.data||[];rows.push(...batch);if(batch.length<100||rows.length>=(response.pagination?.total??Infinity))break;page++}return {data:rows}}
 function candidateEvidence(candidate: UnboundCostRuleCandidate) {
-  if (candidateConfidence(candidate) === 'unique') return `历史唯一建议：${candidate.suggested_rule_group || candidate.suggested_rule_groups?.[0] || '待核对'}`
-  if (candidateConfidence(candidate) === 'conflict') return `冲突：历史曾命中 ${candidate.suggested_rule_groups?.join('、') || '多个规则组'}`
-  return '没有可证明的历史规则，请根据实际业务选择'
+  if (candidateConfidence(candidate) === 'unique') {const code=candidate.suggested_rule_group||candidate.suggested_rule_groups?.[0];return `历史使用方案：${ruleGroups.value.find(g=>g.code===code)?.name||'待核对'}`}
+  if (candidateConfidence(candidate) === 'conflict') return '历史使用过多个方案，请核对后选择'
+  return '尚无历史价格参考，请按实际材质选择方案'
 }
 function candidateConfidence(candidate: UnboundCostRuleCandidate): 'unique' | 'conflict' | 'unmatched' {
   if (candidate.mapping_confidence) return candidate.mapping_confidence

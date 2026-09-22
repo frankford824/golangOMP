@@ -305,6 +305,10 @@ export interface CostRulePreviewResponse {
 }
 
 export const costManagementApi = {
+  async listBoundSKUs(params: {rule_group:string;keyword?:string;page?:number;page_size?:number}) {
+    const {data}=await http.get<{data:Array<{id:number;sku_code:string;product_name:string;style_code:string;cost_price:number|null;status:string}>;pagination:ProductManagementPagination}>('/v1/cost-rule-bindings/skus',{params})
+    return data
+  },
   async getCostDashboard(params?: Record<string, unknown>, signal?: AbortSignal): Promise<ProductCostDashboardResponse> {
     const { data } = await http.get<{ data?: ProductCostDashboardResponse } | ProductCostDashboardResponse>(
       '/v1/cost-management/dashboard',

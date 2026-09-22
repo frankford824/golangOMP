@@ -1,0 +1,22 @@
+#app .cost-manager-page .cost-layout{display:grid;grid-template-columns:minmax(180px,220px) minmax(300px,1fr) minmax(330px,1.1fr);height:calc(100dvh - 235px);min-height:450px;gap:12px;align-items:stretch}
+#app .cost-manager-page .rule-groups,#app .cost-manager-page .rule-workspace{position:static;display:block;grid-row:auto;grid-column:auto;max-height:100%;overflow:auto;min-height:0}
+#app .cost-manager-page .rule-workspace{padding:18px}
+#app .cost-manager-page .workspace-heading{position:static;padding:0 0 14px;align-items:start}
+#app .cost-manager-page .workspace-heading h2{font-size:17px}
+#app .cost-manager-page .group-search{position:static;font-size:12px}
+#app .cost-manager-page .group-search select,#app .cost-manager-page .binding-search input{width:100%;box-sizing:border-box;padding:9px;border:1px solid rgb(var(--yb-border));border-radius:8px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}
+#app .cost-manager-page .binding-search{display:grid;gap:7px;font-size:12px;margin:12px 0}
+#app .cost-manager-page .binding-chips>span{flex-wrap:wrap}
+#app .cost-manager-page .rule-card{padding:12px 0;border:0;border-bottom:1px solid rgb(var(--yb-border));border-radius:0;align-items:start;background:transparent}
+#app .cost-manager-page .rule-icon{display:none}
+#app .cost-manager-page .rule-card{grid-template-columns:minmax(0,1fr) auto}
+#app .cost-manager-page .rule-copy p{font-size:13px;line-height:1.7;margin:7px 0}
+#app .cost-manager-page .rule-copy>div>span{font-size:11px}
+#app .cost-manager-page .calculator-toggle{position:fixed;right:24px;bottom:24px;z-index:91;width:58px;height:58px;border:0;border-radius:50%;background:rgb(var(--yb-brand));color:white;box-shadow:0 5px 18px rgb(var(--yb-shadow)/.22);font-size:14px;font-weight:700;cursor:pointer}
+#app .cost-manager-page .calculator.floating-calculator{position:fixed;right:24px;bottom:94px;z-index:90;display:flex;flex-direction:column;gap:12px;width:min(380px,calc(100vw - 32px));box-sizing:border-box;max-height:calc(100dvh - 125px);grid-column:auto;padding:18px;overflow:auto;box-shadow:0 10px 40px rgb(var(--yb-shadow)/.2);background:rgb(var(--yb-surface));border-radius:14px}
+#app .cost-manager-page .floating-calculator>header{position:static;display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0}
+#app .cost-manager-page .floating-calculator>header h2{font-size:16px;flex:1}#app .cost-manager-page .floating-calculator>header span{width:100%;font-size:12px}
+#app .cost-manager-page .floating-calculator>*{flex-shrink:0;grid-column:auto}
+@media(max-width:1150px){#app .cost-manager-page .cost-layout{grid-template-columns:160px minmax(260px,1fr) minmax(280px,1fr);gap:8px}#app .cost-manager-page .rule-workspace{padding:12px}#app .cost-manager-page .workspace-heading{display:grid}#app .cost-manager-page .binding-panel>header{display:grid}}
+@media(max-width:900px){#app .cost-manager-page .cost-layout{grid-template-columns:180px minmax(0,1fr);height:auto;min-height:0}#app .cost-manager-page .rule-groups{grid-row:span 2;max-height:70vh;position:sticky;top:12px}#app .cost-manager-page .bound-skus{grid-column:2;max-height:520px}#app .cost-manager-page .rule-workspace{max-height:none}}
+@media(max-width:600px){#app .cost-manager-page .cost-layout{display:flex;flex-direction:column}#app .cost-manager-page .rule-groups{position:static;max-height:220px}#app .cost-manager-page .bound-skus{max-height:520px}#app .cost-manager-page .calculator-toggle{right:16px;bottom:16px}#app .cost-manager-page .calculator.floating-calculator{right:16px;bottom:84px}#app .cost-manager-page .rule-groups>button{width:100%}}

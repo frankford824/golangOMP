@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount,enableAutoUnmount } from '@vue/test-utils'
+import { beforeEach,afterEach, describe, expect, it, vi } from 'vitest'
+enableAutoUnmount(afterEach)
 
 const mocks = vi.hoisted(() => ({
   listCostRules: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   cancelRun: vi.fn(),
   preview: vi.fn(),
   dashboard: vi.fn(),
+  boundSKUs:vi.fn(),updateBinding:vi.fn(),erp:vi.fn(),
 }))
 
 vi.mock('@/services/api/categoriesApi', () => ({
@@ -28,6 +30,7 @@ vi.mock('@/services/api/categoriesApi', () => ({
 }))
 vi.mock('@/services/api/costManagementApi', () => ({
   costManagementApi: {
+    listBoundSKUs:mocks.boundSKUs,updateCostRuleBinding:mocks.updateBinding,
     listCostRuleBindings: mocks.listBindings,
     listUnboundCostRuleCandidates: mocks.listCandidates,
     createCostRuleBinding: mocks.createBinding,
@@ -41,9 +44,10 @@ vi.mock('@/services/api/costManagementApi', () => ({
     previewCostRule: mocks.preview,
   },
 }))
+vi.mock('@/services/api/erpApi',()=>({erpApi:{getIids:mocks.erp}}))
 
 import CostRuleManagerView from './CostRuleManagerView.vue'
-import {emptyCostInput} from '@/domain/cost-model'
+import {emptyCostInput,emptyCostModel} from '@/domain/cost-model'
 
 const previewRun = {
   id: 7,
@@ -55,13 +59,26 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('renders print prices as two editable business fields without exposing internal configuration',async()=>{
+    mocks.listCostRules.mockResolvedValue({data:{data:[{rule_id:11,rule_name:'A4打印',category_code:'KT_BOARD',rule_type:'size_based_formula',formula_expression:'print_side:single=0.3,double=0.4',priority:10,is_active:true,source:'phase_020_sample'}]}})
+    const wrapper=mount(CostRuleManagerView,{attachTo:document.body});await flushPromises()
+    expect(wrapper.text()).toContain('单面 0.3 元/张，双面 0.4 元/张')
+    expect(wrapper.text()).not.toContain('print_side:')
+    await wrapper.findAll('button').find(b=>b.text()==='编辑')!.trigger('click');await flushPromises()
+    const form=document.querySelector('form.modal-card')!
+    expect(form.textContent).toContain('单面价格（元/张）');expect(form.textContent).not.toMatch(/优先级|面积阈值|含税倍率|替代规则 ID|尺寸公式|旧参数/)
+    form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await flushPromises()
+    expect(mocks.updateCostRule).toHaveBeenCalledWith(11,expect.objectContaining({formula_expression:'print_side:single=0.3,double=0.4',priority:10,source:'phase_020_sample'}))
+  })
   it('previews an unsaved unified model with structured input without saving it', async () => {
+    mocks.listCostRules.mockResolvedValue({data:{data:[{rule_id:11,rule_name:'KT方案',category_code:'KT_BOARD',rule_type:'cost_model',is_active:true,formula_expression:JSON.stringify({...emptyCostModel(),material:'KT',unit_price:12.5})}]}})
     const wrapper=mount(CostRuleManagerView)
     await flushPromises()
-    await wrapper.findAll('button').find(b=>b.text()==='从现有参数建立统一方案')?.trigger('click')
+    await wrapper.findAll('button').find(b=>b.text()==='编辑方案价格')?.trigger('click')
     await flushPromises()
     // The editor seeds the current rate; no write happens until explicit save.
     expect(wrapper.find('[aria-label="统一计价方案"]').exists()).toBe(true)
+    await wrapper.get('.calculator-toggle').trigger('click')
     await wrapper.get('.calculate-button').trigger('click')
     await flushPromises()
     expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({model:expect.objectContaining({basis:'area',unit_price:12.5}),input:emptyCostInput()}))
@@ -83,6 +100,8 @@ describe('CostRuleManagerView', () => {
     mocks.createRun.mockResolvedValue({ id: 8, run_no: 'CR-008', status: 'previewed' })
     mocks.createCostRule.mockResolvedValue({})
     mocks.updateCostRule.mockResolvedValue({})
+    mocks.boundSKUs.mockResolvedValue({data:[{id:1,sku_code:'CGK001',product_name:'测试产品',style_code:'STYLE-01',cost_price:1.2,status:'generated'}],pagination:{total:1,page:1,page_size:20}})
+    mocks.erp.mockResolvedValue({data:{data:[]}})
   })
 
   it('shows rule bindings, ERP differences, and previews cost without writing data', async () => {
@@ -92,11 +111,16 @@ describe('CostRuleManagerView', () => {
     expect(wrapper.text()).toContain('KT 板')
     expect(wrapper.text()).toContain('STYLE-01')
     expect(wrapper.text()).toContain('2 个 ERP 差异')
+    expect(wrapper.find('.calculator').exists()).toBe(false)
+    expect(wrapper.text()).toContain('CGK001')
+    await wrapper.get('.calculator-toggle').trigger('click')
     await wrapper.get('.calculate-button').trigger('click')
     await flushPromises()
     expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({ rule_group: 'KT_BOARD', quantity: 1 }))
     expect(wrapper.text()).toContain('¥ 25.00')
     expect(mocks.applyRun).not.toHaveBeenCalled()
+    await wrapper.get('.calculator-toggle').trigger('click')
+    expect(wrapper.find('.calculator').exists()).toBe(false)
   })
 
   it('keeps the calculator aligned with the selected rule group', async () => {
@@ -111,9 +135,11 @@ describe('CostRuleManagerView', () => {
     const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
     await flushPromises()
 
+    await wrapper.get('.group-search select').setValue('all')
     await wrapper.findAll('.rule-groups > button').find((button) => button.text().includes('写真布'))?.trigger('click')
     await flushPromises()
 
+    await wrapper.get('.calculator-toggle').trigger('click')
     expect((wrapper.get('.calculator select').element as HTMLSelectElement).value).toBe('PHOTO_CLOTH')
   })
 
@@ -130,11 +156,11 @@ describe('CostRuleManagerView', () => {
     const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('当前加载的规则冲突')
+    expect(wrapper.text()).toContain('需要选择方案')
     expect(wrapper.text()).toContain('1')
     await wrapper.findAll('button').find((button) => button.text() === '处理未绑定款式')?.trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('历史曾命中 KT_BOARD、PHOTO_CLOTH')
+    expect(document.body.textContent).toContain('历史使用过多个方案')
     expect(document.body.textContent).toContain('确认绑定此组')
   })
 
@@ -169,7 +195,7 @@ describe('CostRuleManagerView', () => {
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '编辑')?.trigger('click')
     await flushPromises()
-    const form = document.body.querySelector('form')
+    const form = document.body.querySelector('form.modal-card')
     expect(form).not.toBeNull()
     form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await flushPromises()
@@ -195,6 +221,7 @@ describe('CostRuleManagerView', () => {
   })
 
   it('preserves governed formula and supersession fields when editing a rule', async () => {
+    mocks.listBindings.mockResolvedValue({data:[{id:2,i_id_raw:'AC',normalized_i_id:'AC',rule_group:'ACRYLIC',is_active:true}]})
     mocks.listCostRules.mockResolvedValue({ data: { data: [{
       rule_id: 26,
       rule_name: '教师节亚克力面积成本',
@@ -210,8 +237,10 @@ describe('CostRuleManagerView', () => {
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '编辑')?.trigger('click')
     await flushPromises()
-    expect((document.body.querySelector('input[placeholder*="keyword_area_unit_price"]') as HTMLInputElement).value).toBe('keyword_area_unit_price:教师节=264')
-    document.body.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    expect(document.body.textContent).toContain('适用产品关键词')
+    expect(document.body.textContent).not.toContain('keyword_area_unit_price:')
+    expect(document.body.textContent).not.toContain('优先级')
+    document.body.querySelector('form.modal-card')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await flushPromises()
 
     expect(mocks.updateCostRule).toHaveBeenCalledWith(26, expect.objectContaining({

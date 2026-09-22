@@ -10,7 +10,7 @@ remain authoritative in `transport/http.go` and `docs/api/openapi.yaml`.
    area, piece, set, or manual quote. Optional thickness tiers use exact matching.
    Slotting, punching, lamination and double-sided work have explicit prices and
    units; the engine does not infer them from a product name.
-3. Use the right panel to test the unsaved configuration with known examples.
+3. Use the bottom-right floating calculator to test the unsaved configuration with known examples.
    Save the reviewed scheme and bind exact ERP/style codes. Unbound names cannot
    activate a unified model on a task.
 4. For each SKU supply one sales unit's material usage: single-piece dimensions,
@@ -23,6 +23,14 @@ remain authoritative in `transport/http.go` and `docs/api/openapi.yaml`.
 Formula: billed quantity × material price × coefficient, plus individually
 priced process lines and optional small-area surcharge. Output includes input,
 line items, rule/version and missing-field reasons. Draft previews do not write.
+
+The left rail defaults to schemes with active style bindings; the middle panel
+contains editable prices and binding search. The right panel paginates current
+task SKUs under those active bindings (not historical cost matches), including
+SKUs whose ERP filing is still pending. Its costs are stored amounts, not live
+recalculations of an unsaved scheme. Catalog administration permission is required.
+Legacy print prices are edited as single/double-sided prices, never raw formulas.
+Internal priority and version identifiers are not operator form fields.
 
 ## Safety and rollout boundaries
 

@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `183` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `184` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/access/permissions
 
@@ -3071,6 +3071,78 @@ curl -X POST https://api.example.com/v1/cost-management/recalculation-runs/<run_
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/cost-management/recalculation-runs/<run_id>/cancel \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/cost-rule-bindings/skus
+
+### 简介
+支持方法: GET。
+
+- `GET`: Reads task SKU identities including pending ERP filing. Uses active ERP style binding first, then active product style binding, and requires a currently effective rule in the selected group. Does not use historical cost matches or product-name inference. Catalog administrators only.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `rule_group` | query | string | 是 | - |
+| `keyword` | query | string | 否 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "sku_code": "...",
+      "product_name": "...",
+      "style_code": "..."
+    }
+  ],
+  "pagination": {
+    "page": 123,
+    "page_size": 123,
+    "total": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<object> | 否 | - |
+| `pagination` | PaginationMeta | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Missing rule group |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Requires catalog.manage |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/cost-rule-bindings/skus \
   -H "Authorization: Bearer $TOKEN"
 ```
 
