@@ -1780,7 +1780,23 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 	}
 	if filter.Keyword != "" {
 		kw := normalizeSearchKeyword(filter.Keyword)
-		if options.UseSearchDocumentKeyword {
+		if codes := taskListKeywordCodes(filter.Keyword); len(codes) > 0 {
+			// A pasted list is a union of exact identities, not a full-text
+			// phrase. Use source tables so child SKUs do not wait for indexing.
+			placeholders := strings.TrimRight(strings.Repeat("?,", len(codes)), ",")
+			branches := []string{
+				"SELECT id FROM tasks WHERE task_no IN (" + placeholders + ")",
+				"SELECT id FROM tasks WHERE sku_code IN (" + placeholders + ")",
+				"SELECT id FROM tasks WHERE primary_sku_code IN (" + placeholders + ")",
+				"SELECT task_id FROM task_sku_items WHERE sku_code IN (" + placeholders + ")",
+			}
+			where = append(where, "t.id IN ("+strings.Join(branches, " UNION ALL ")+")")
+			for range branches {
+				for _, code := range codes {
+					args = append(args, code)
+				}
+			}
+		} else if options.UseSearchDocumentKeyword {
 			// Recall matching task ids from the search-document read model via a
 			// UNION ALL of indexed lookups, then semi-join with t.id IN (...).
 			// Keeping the union inside an IN subquery lets each branch use its own

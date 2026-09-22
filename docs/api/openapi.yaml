@@ -11075,7 +11075,7 @@ paths:
         - { in: query, name: date_to, schema: { type: string } }
         - in: query
           name: keyword
-          description: Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document.
+          description: Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Multiple task/SKU codes separated by whitespace (including newlines), commas (English or Chinese), semicolons (English or Chinese), or Chinese enumeration commas match any listed code exactly, including child SKUs; duplicate codes and matching tasks are deduplicated, and data scope, filters and pagination still apply. List mode requires every token to contain ASCII letters and digits with optional hyphens, underscores or dots; other input retains phrase search. Single full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document.
           schema: { type: string }
         - in: query
           name: sort
