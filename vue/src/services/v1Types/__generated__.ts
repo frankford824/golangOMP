@@ -6143,6 +6143,7 @@ export interface paths {
                          * @description Task billable area in square metres.
                          */
                         area?: number | null;
+                        cost_input?: components["schemas"]["CostInput"];
                         /** Format: int64 */
                         quantity?: number | null;
                         design_requirement?: string | null;
@@ -19530,7 +19531,7 @@ export interface components {
             updated_at?: string;
         };
         /** @enum {string} */
-        CostRuleType: "fixed_unit_price" | "area_threshold_surcharge" | "minimum_billable_area" | "size_based_formula" | "manual_quote" | "special_process_surcharge";
+        CostRuleType: "cost_model" | "fixed_unit_price" | "area_threshold_surcharge" | "minimum_billable_area" | "size_based_formula" | "manual_quote" | "special_process_surcharge";
         /**
          * @description Governance/effective-window status for one persisted cost-rule row. This is not an approval-state machine.
          * @enum {string}
@@ -21161,7 +21162,74 @@ export interface components {
             source?: string;
             remark?: string;
         };
+        CostFace: {
+            width_m: number;
+            height_m: number;
+            count: number;
+        };
+        /** @description Structured inputs for one SKU sales unit. Total/layout/face-list areas already include all pieces. Order quantity never multiplies the resulting SKU unit cost. Stored in SKU variant_json.cost_input; patch via cost_input. */
+        CostInput: {
+            /** @enum {string} */
+            area_mode?: "flat" | "faces" | "layout" | "total";
+            width_m?: number;
+            height_m?: number;
+            depth_m?: number;
+            area_m2?: number;
+            thickness_mm?: number;
+            pieces?: number;
+            faces?: components["schemas"]["CostFace"][];
+            /** @description Explicit slot, punch, laminate, double_sided choices. Missing configured choices require confirmation; prose is never used to guess these values. */
+            processes?: {
+                [key: string]: boolean;
+            };
+            hole_count?: number;
+            process_length_m?: number;
+        };
+        /** @description Bounded model configuration, persisted as JSON in formula_expression when rule_type=cost_model. One active model per matched group is allowed at evaluation; multiple models fail closed. Model replaces legacy components in that group. Source names are provenance, not approval. */
+        CostModel: {
+            /** @enum {integer} */
+            version: 1;
+            material: string;
+            /** @enum {string} */
+            basis: "area" | "piece" | "set" | "manual";
+            unit_price: number;
+            multiplier: number;
+            minimum?: number;
+            small_area_threshold?: number;
+            small_area_surcharge?: number;
+            thickness_prices?: {
+                thickness_mm: number;
+                unit_price: number;
+            }[];
+            processes?: {
+                /** @enum {string} */
+                code: "slot" | "punch" | "laminate" | "double_sided";
+                /** @enum {string} */
+                unit: "sku" | "piece" | "hole" | "metre" | "area";
+                unit_price: number;
+                multiplier: number;
+            }[];
+        };
+        CostCalculation: {
+            /** @enum {string} */
+            status?: "calculated" | "missing_input" | "manual_quote" | "rule_conflict";
+            input?: components["schemas"]["CostInput"];
+            area_m2?: number;
+            billable_quantity?: number;
+            missing?: string[];
+            lines?: {
+                name?: string;
+                quantity?: number;
+                unit?: string;
+                unit_price?: number;
+                multiplier?: number;
+                amount?: number;
+            }[];
+        };
         CostRulePreviewRequest: {
+            /** @description Optional unsaved model for read-only simulation. Never saved or bound by this operation. */
+            model?: components["schemas"]["CostModel"];
+            input?: components["schemas"]["CostInput"];
             category_id?: number | null;
             category_code?: string;
             /**
@@ -21198,6 +21266,7 @@ export interface components {
             governance_status?: components["schemas"]["CostRuleGovernanceStatus"];
         };
         CostRulePreviewResponse: {
+            calculation?: components["schemas"]["CostCalculation"];
             matched_rule?: components["schemas"]["CostRulePreviewMatch"] | null;
             matched_rule_id?: number | null;
             matched_rule_version?: number | null;

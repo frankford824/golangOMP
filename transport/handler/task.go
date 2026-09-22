@@ -145,6 +145,7 @@ type createTaskBatchItemReq struct {
 }
 
 type patchTaskSKUItemInfoReq struct {
+	CostInput         *domain.CostInput         `json:"cost_input"`
 	ProductName       *string                   `json:"product_name"`
 	IID               *string                   `json:"i_id"`
 	ProductIID        *string                   `json:"product_i_id"`
@@ -1656,6 +1657,7 @@ func (h *TaskHandler) PatchSKUItemInfo(c *gin.Context) {
 		remark = strings.TrimSpace(*req.Remark)
 	}
 	updated, appErr := updater.UpdateSKUItemInfo(c.Request.Context(), service.UpdateTaskSKUItemInfoParams{
+		CostInput:            req.CostInput,
 		TaskID:               taskID,
 		SKUItemID:            skuItemID,
 		OperatorID:           operatorID,

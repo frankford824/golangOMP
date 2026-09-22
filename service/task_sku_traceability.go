@@ -236,6 +236,7 @@ func buildOMPSKUCostSnapshotFromTask(task *domain.Task, detail *domain.TaskDetai
 		}
 	}
 	inputSnapshot := marshalJSONBestEffort(map[string]interface{}{
+		"cost_input":         skuCostInput(item),
 		"task_id":            task.ID,
 		"task_no":            task.TaskNo,
 		"task_type":          task.TaskType,
@@ -259,6 +260,7 @@ func buildOMPSKUCostSnapshotFromTask(task *domain.Task, detail *domain.TaskDetai
 		"normalized_i_id":    matchTrace.NormalizedIID,
 	})
 	calculationSnapshot := marshalJSONBestEffort(map[string]interface{}{
+		"calculation":                 skuCostCalculationSnapshot(item),
 		"cost_price":                  record.CostPrice,
 		"estimated_cost":              record.EstimatedCost,
 		"cost_rule_id":                record.CostRuleID,

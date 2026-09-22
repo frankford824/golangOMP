@@ -43,6 +43,7 @@ vi.mock('@/services/api/costManagementApi', () => ({
 }))
 
 import CostRuleManagerView from './CostRuleManagerView.vue'
+import {emptyCostInput} from '@/domain/cost-model'
 
 const previewRun = {
   id: 7,
@@ -54,6 +55,19 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('previews an unsaved unified model with structured input without saving it', async () => {
+    const wrapper=mount(CostRuleManagerView)
+    await flushPromises()
+    await wrapper.findAll('button').find(b=>b.text()==='从现有参数建立统一方案')?.trigger('click')
+    await flushPromises()
+    // The editor seeds the current rate; no write happens until explicit save.
+    expect(wrapper.find('[aria-label="统一计价方案"]').exists()).toBe(true)
+    await wrapper.get('.calculate-button').trigger('click')
+    await flushPromises()
+    expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({model:expect.objectContaining({basis:'area',unit_price:12.5}),input:emptyCostInput()}))
+    expect(mocks.createCostRule).not.toHaveBeenCalled()
+    expect(mocks.updateCostRule).not.toHaveBeenCalled()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.listCostRules.mockResolvedValue({ data: { data: [{ rule_id: 11, rule_name: 'KT 板基础单价', category_code: 'KT_BOARD', product_family: 'KT 板', rule_type: 'fixed_unit_price', base_price: 12.5, priority: 100, is_active: true }] } })

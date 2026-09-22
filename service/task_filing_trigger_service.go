@@ -261,6 +261,9 @@ func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task
 		}
 		payloads := make([]taskFilingPayload, 0, len(targetItems))
 		for _, item := range targetItems {
+			if !costReadyForFiling(item.CostPrice, item.RequiresManualReview, item.ManualCostOverride) {
+				return nil, []string{"cost_price"}, "待确认成本：" + item.SKUCode + "，请补充计价规格或人工报价", nil
+			}
 			payload, appErr := buildBatchSKUItemERPBridgeProductUpsertPayload(task, detail, item, operatorID, remark, source)
 			if appErr != nil {
 				return nil, nil, "", appErr
@@ -304,6 +307,9 @@ func (s *taskService) buildTaskERPBridgeFilingPayloads(ctx context.Context, task
 		}
 	} else if err != nil {
 		return nil, nil, "", infraError("list sku item for filing cost projection", err)
+	}
+	if task.TaskType == domain.TaskTypeNewProductDevelopment && !costReadyForFiling(detailForFiling.CostPrice, detailForFiling.RequiresManualReview, detailForFiling.ManualCostOverride) {
+		return nil, []string{"cost_price"}, "待确认成本：请补充计价规格或人工报价", nil
 	}
 	payload, appErr := buildTaskERPBridgeProductUpsertPayload(task, detailForFiling, operatorID, remark, source)
 	if appErr != nil {

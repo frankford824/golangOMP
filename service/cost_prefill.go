@@ -19,11 +19,17 @@ type costPreviewComputation struct {
 const maxAutomaticEstimatedCost = 9999.999
 
 func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
+	if result, ok := costModelPreview(req, rules); ok {
+		return result
+	}
 	req = withTextDerivedCostRuleDimensions(req)
 	return previewCostRulesResolvedDimensions(req, rules)
 }
 
 func previewCostRulesResolvedDimensions(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
+	if result, ok := costModelPreview(req, rules); ok {
+		return result
+	}
 	sortedRules := make([]*domain.CostRule, 0, len(rules))
 	sampleRules := make([]*domain.CostRule, 0, len(rules))
 	for _, rule := range rules {
@@ -156,6 +162,18 @@ func previewCostRulesResolvedDimensions(req domain.CostRulePreviewRequest, rules
 			manualReview = true
 			applied = append(applied, match)
 			explanations = append(explanations, fmt.Sprintf("%s：此规则要求人工报价。", rule.RuleName))
+		}
+	}
+	if !hasFixedUnitPrice {
+		onlyExtras := true
+		for _, r := range sortedRules {
+			if r.RuleType == domain.CostRuleTypeSizeBasedFormula {
+				onlyExtras = false
+			}
+		}
+		if onlyExtras {
+			manualReview = true
+			explanations = append(explanations, "缺少基础计价规则，不能只把工艺附加费当作完整成本")
 		}
 	}
 	blockedByAmountGuard := estimated > maxAutomaticEstimatedCost

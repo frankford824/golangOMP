@@ -12,8 +12,16 @@ vi.mock('@/services/api/workflowTelemetryApi', () => ({
 }))
 
 import CostExplanationPanel from './CostExplanationPanel.vue'
+import { emptyCostInput } from '@/domain/cost-model'
 
 describe('CostExplanationPanel', () => {
+  it('replays the persisted structured input without reconstructing it from reference text', async () => {
+    const input = {...emptyCostInput(), area_m2:.58, pieces:6, processes:{punch:false}}
+    const wrapper = mount(CostExplanationPanel,{props:{title:'统一模型',seed:{categoryCode:'KT',productIID:'KT-1',costInput:input,notes:'参考70*70cm'}}})
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({input}))
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getRule.mockResolvedValue({ id: 17, category_code: 'KT_STANDARD' })

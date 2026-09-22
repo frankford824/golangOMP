@@ -20,12 +20,15 @@
       <form class="preview-form" @submit.prevent="preview">
         <label>ERP 商品编码<input v-model.trim="draft.productIID" placeholder="用于精确匹配规则绑定" /></label>
         <label>规则分组 / 类目编码<input v-model.trim="draft.categoryCode" placeholder="未绑定 i_id 时用于兜底匹配" /></label>
+        <CostInputFields v-if="modelInput" v-model="modelInput" class="wide" />
+        <template v-else>
         <label>宽（m）<input v-model.trim="draft.width" inputmode="decimal" /></label>
         <label>高（m）<input v-model.trim="draft.height" inputmode="decimal" /></label>
         <label>面积（㎡）<input v-model.trim="draft.area" inputmode="decimal" /></label>
         <label>数量<input v-model.trim="draft.quantity" inputmode="numeric" /></label>
         <label>工艺<input v-model.trim="draft.process" /></label>
         <label class="wide">补充说明<input v-model.trim="draft.notes" placeholder="例如材质、特殊工艺或尺寸来源" /></label>
+        </template>
         <div class="form-actions">
           <p>这里只做只读试算，不会修改任务、资产、成本规则或 ERP 数据。</p>
           <button type="submit" :disabled="previewing">{{ previewing ? '试算中…' : '重新试算并解释' }}</button>
@@ -44,6 +47,7 @@
           <div><dt>规则分组</dt><dd>{{ result.rule_group || draft.categoryCode || '—' }}</dd></div>
         </dl>
         <p class="explanation">{{ result.explanation || '服务未返回额外解释。' }}</p>
+        <p v-for="(line,index) in result.calculation?.lines" :key="index">{{ line.name }}：{{ line.quantity }} {{ line.unit }} × {{ line.unit_price }} × {{ line.multiplier }} = {{ money(line.amount) }}</p>
         <p class="diagnosis">{{ diagnosis }}</p>
 
         <div class="feedback">
@@ -68,8 +72,11 @@ import {
   type CostRulePreviewResponse,
 } from '@/services/api/costManagementApi'
 import { workflowTelemetryApi } from '@/services/api/workflowTelemetryApi'
+import CostInputFields from './CostInputFields.vue'
+import type { CostInput } from '@/domain/cost-model'
 
 interface CostPreviewSeed {
+  costInput?: CostInput
   categoryCode?: string
   productIID?: string
   erpIID?: string
@@ -115,10 +122,12 @@ const feedbackNote = ref('')
 const feedbackMessage = ref('')
 const feedbackFailed = ref(false)
 const error = ref('')
+const modelInput = ref<CostInput | undefined>()
 
 watch(
   () => props.seed,
   (seed) => {
+    modelInput.value = seed.costInput ? JSON.parse(JSON.stringify(seed.costInput)) : undefined
     const dimensions = seedDimensionsInMeters(seed)
     draft.categoryCode = text(seed.categoryCode)
     draft.productIID = text(seed.productIID)
@@ -236,6 +245,7 @@ async function preview() {
       quantity,
       process: draft.process || undefined,
       notes: draft.notes || undefined,
+      input: modelInput.value,
     })
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '成本试算失败，请稍后重试。'

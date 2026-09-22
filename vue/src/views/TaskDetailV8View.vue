@@ -408,6 +408,7 @@ import TaskDetailAtmosphere from '@/components/task/TaskDetailAtmosphere.vue'
 import TaskSkuItemEditor from '@/components/task/TaskSkuItemEditor.vue'
 import TaskBusinessInfoEditor from '@/components/task/TaskBusinessInfoEditor.vue'
 import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
+import type { CostInput } from '@/domain/cost-model'
 import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { planningSkuApi, type PlanningSKUCreateResult } from '@/services/api/planningSkuApi'
@@ -634,6 +635,7 @@ function numberValue(value: unknown) {
 function skuCostPreviewSeed(item: Record<string, unknown>) {
   const trace = item.cost_trace && typeof item.cost_trace === 'object' ? item.cost_trace as Record<string, unknown> : {}
   return {
+    costInput: itemValue(item, 'cost_input') as CostInput | undefined,
     categoryCode: String(itemValue(item, 'category_code') || ''),
     productIID: String(item.product_i_id || ''),
     erpIID: String(item.erp_i_id || ''),

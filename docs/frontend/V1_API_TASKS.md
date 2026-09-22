@@ -4382,6 +4382,7 @@ Content-Type: `application/json`
 | `width` | number | 否 | Task width in centimetres; converted server-side before rule evaluation. |
 | `height` | number | 否 | Task height in centimetres; converted server-side before rule evaluation. |
 | `area` | number | 否 | Task billable area in square metres. |
+| `cost_input` | CostInput | 否 | Structured inputs for one SKU sales unit. Total/layout/face-list areas already include all pieces. Order quantity never multiplies the resulting SKU unit cost. Stored in SKU variant_json.cost_input; patch via cost_input. |
 | `quantity` | integer | 否 | - |
 | `design_requirement` | string | 否 | - |
 | `reference_file_refs` | array<ReferenceFileRef> | 否 | - |
@@ -4537,12 +4538,15 @@ Content-Type: `application/json`
 ```json
 {
   "data": {
+    "calculation": {
+      "status": "...",
+      "input": "...",
+      "area_m2": "...",
+      "billable_quantity": "..."
+    },
     "matched_rule": {},
     "matched_rule_id": 123,
-    "matched_rule_version": 123,
-    "applied_rules": [
-      "..."
-    ]
+    "matched_rule_version": 123
   }
 }
 ```

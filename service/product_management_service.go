@@ -805,6 +805,14 @@ func (s *productManagementService) syncBaseRecordToERP(ctx context.Context, reco
 	if strings.TrimSpace(record.SKUCode) == "" {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "SKU is required for ERP product sync", nil)
 	}
+	review, manual := false, false
+	if record.CostTrace != nil {
+		review = record.CostTrace.RequiresManualReview
+		manual = record.CostTrace.ManualCostOverride
+	}
+	if record.TaskID > 0 && !costReadyForFiling(record.CostPrice, review, manual) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "待确认成本：请完成计价或人工报价后同步ERP", nil)
+	}
 	productName := truncateERPShortName(
 		firstNonEmptyString(strings.TrimSpace(record.ProductName), strings.TrimSpace(record.SKUCode)),
 		ERPProductNameMaxLength,

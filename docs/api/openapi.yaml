@@ -1208,7 +1208,7 @@ components:
         updated_at: { type: string, format: date-time }
     CostRuleType:
       type: string
-      enum: [fixed_unit_price, area_threshold_surcharge, minimum_billable_area, size_based_formula, manual_quote, special_process_surcharge]
+      enum: [cost_model, fixed_unit_price, area_threshold_surcharge, minimum_billable_area, size_based_formula, manual_quote, special_process_surcharge]
     CostRuleGovernanceStatus:
       type: string
       description: Governance/effective-window status for one persisted cost-rule row. This is not an approval-state machine.
@@ -3550,9 +3550,93 @@ components:
         governance_note: { type: string }
         source: { type: string }
         remark: { type: string }
+    CostFace:
+      type: object
+      required: [width_m, height_m, count]
+      properties:
+        width_m: { type: number, minimum: 0, exclusiveMinimum: true }
+        height_m: { type: number, minimum: 0, exclusiveMinimum: true }
+        count: { type: integer, minimum: 1, maximum: 100000 }
+    CostInput:
+      type: object
+      description: Structured inputs for one SKU sales unit. Total/layout/face-list areas already include all pieces. Order quantity never multiplies the resulting SKU unit cost. Stored in SKU variant_json.cost_input; patch via cost_input.
+      properties:
+        area_mode: { type: string, enum: [flat, faces, layout, total] }
+        width_m: { type: number, minimum: 0 }
+        height_m: { type: number, minimum: 0 }
+        depth_m: { type: number, minimum: 0 }
+        area_m2: { type: number, minimum: 0 }
+        thickness_mm: { type: number, minimum: 0 }
+        pieces: { type: integer, minimum: 1, maximum: 100000 }
+        faces:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/CostFace' }
+        processes:
+          type: object
+          description: Explicit slot, punch, laminate, double_sided choices. Missing configured choices require confirmation; prose is never used to guess these values.
+          additionalProperties: { type: boolean }
+        hole_count: { type: integer, minimum: 0, maximum: 100000 }
+        process_length_m: { type: number, minimum: 0 }
+    CostModel:
+      type: object
+      description: Bounded model configuration, persisted as JSON in formula_expression when rule_type=cost_model. One active model per matched group is allowed at evaluation; multiple models fail closed. Model replaces legacy components in that group. Source names are provenance, not approval.
+      required: [version, material, basis, unit_price, multiplier]
+      properties:
+        version: { type: integer, enum: [1] }
+        material: { type: string, minLength: 1 }
+        basis: { type: string, enum: [area, piece, set, manual] }
+        unit_price: { type: number, minimum: 0 }
+        multiplier: { type: number, minimum: 0, exclusiveMinimum: true }
+        minimum: { type: number, minimum: 0 }
+        small_area_threshold: { type: number, minimum: 0 }
+        small_area_surcharge: { type: number, minimum: 0 }
+        thickness_prices:
+          type: array
+          maxItems: 32
+          items:
+            type: object
+            required: [thickness_mm, unit_price]
+            properties:
+              thickness_mm: { type: number, minimum: 0, exclusiveMinimum: true }
+              unit_price: { type: number, minimum: 0 }
+        processes:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [code, unit, unit_price, multiplier]
+            properties:
+              code: { type: string, enum: [slot, punch, laminate, double_sided] }
+              unit: { type: string, enum: [sku, piece, hole, metre, area] }
+              unit_price: { type: number, minimum: 0 }
+              multiplier: { type: number, minimum: 0, exclusiveMinimum: true }
+    CostCalculation:
+      type: object
+      properties:
+        status: { type: string, enum: [calculated, missing_input, manual_quote, rule_conflict] }
+        input: { $ref: '#/components/schemas/CostInput' }
+        area_m2: { type: number }
+        billable_quantity: { type: number }
+        missing: { type: array, items: { type: string } }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              quantity: { type: number }
+              unit: { type: string }
+              unit_price: { type: number }
+              multiplier: { type: number }
+              amount: { type: number }
     CostRulePreviewRequest:
       type: object
       properties:
+        model:
+          allOf: [{ $ref: '#/components/schemas/CostModel' }]
+          description: Optional unsaved model for read-only simulation. Never saved or bound by this operation.
+        input: { $ref: '#/components/schemas/CostInput' }
         category_id:
           type: integer
           nullable: true
@@ -3599,6 +3683,7 @@ components:
     CostRulePreviewResponse:
       type: object
       properties:
+        calculation: { $ref: '#/components/schemas/CostCalculation' }
         matched_rule:
           allOf: [{ $ref: '#/components/schemas/CostRulePreviewMatch' }]
           nullable: true
@@ -11143,6 +11228,7 @@ paths:
                 width: { type: number, format: double, nullable: true, description: "Task width in centimetres; converted server-side before rule evaluation." }
                 height: { type: number, format: double, nullable: true, description: "Task height in centimetres; converted server-side before rule evaluation." }
                 area: { type: number, format: double, nullable: true, description: "Task billable area in square metres." }
+                cost_input: { $ref: '#/components/schemas/CostInput' }
                 quantity: { type: integer, format: int64, nullable: true }
                 design_requirement: { type: string, nullable: true }
                 reference_file_refs:

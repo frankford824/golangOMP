@@ -1526,7 +1526,7 @@ curl -X PATCH https://api.example.com/v1/category-mappings/<id> \
 | `category_id` | query | integer | 否 | - |
 | `category_code` | query | string | 否 | - |
 | `product_family` | query | string | 否 | - |
-| `rule_type` | query | enum(fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 否 | - |
+| `rule_type` | query | enum(cost_model/fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 否 | - |
 | `is_active` | query | boolean | 否 | - |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
@@ -1590,7 +1590,7 @@ Content-Type: `application/json`
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |
 | `product_family` | string | 否 | - |
-| `rule_type` | enum(fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 是 | - |
+| `rule_type` | enum(cost_model/fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 是 | - |
 | `base_price` | number | 否 | - |
 | `tax_multiplier` | number | 否 | - |
 | `min_area` | number | 否 | - |
@@ -1718,7 +1718,7 @@ Content-Type: `application/json`
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |
 | `product_family` | string | 否 | - |
-| `rule_type` | enum(fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 否 | - |
+| `rule_type` | enum(cost_model/fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 否 | - |
 | `base_price` | number | 否 | - |
 | `tax_multiplier` | number | 否 | - |
 | `min_area` | number | 否 | - |
@@ -1859,6 +1859,8 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
+| `model` | any | 否 | Optional unsaved model for read-only simulation. Never saved or bound by this operation. |
+| `input` | CostInput | 否 | Structured inputs for one SKU sales unit. Total/layout/face-list areas already include all pieces. Order quantity never multiplies the resulting SKU unit cost. Stored in SKU variant_json.cost_input; patch via cost_input. |
 | `category_id` | integer | 否 | - |
 | `category_code` | string | 否 | - |
 | `width` | number | 否 | Width in metres for rule-preview calculations. |
@@ -1876,12 +1878,15 @@ Content-Type: `application/json`
 ```json
 {
   "data": {
+    "calculation": {
+      "status": "...",
+      "input": "...",
+      "area_m2": "...",
+      "billable_quantity": "..."
+    },
     "matched_rule": {},
     "matched_rule_id": 123,
-    "matched_rule_version": 123,
-    "applied_rules": [
-      "..."
-    ]
+    "matched_rule_version": 123
   }
 }
 ```

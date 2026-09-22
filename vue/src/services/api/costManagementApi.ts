@@ -262,6 +262,8 @@ export interface SyncCostRecalculationRunERPResponse {
 }
 
 export interface CostRulePreviewRequest {
+  model?: import('@/domain/cost-model').CostModel
+  input?: import('@/domain/cost-model').CostInput
   category_id?: number | null
   category_code?: string
   rule_group?: string
@@ -276,6 +278,7 @@ export interface CostRulePreviewRequest {
 }
 
 export interface CostRulePreviewResponse {
+  calculation?: {status:string;area_m2:number;billable_quantity:number;missing:string[];lines:Array<{name:string;quantity:number;unit:string;unit_price:number;multiplier:number;amount:number}>}
   matched_rule?: {
     rule_id?: number
     rule_name?: string

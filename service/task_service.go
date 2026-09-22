@@ -202,6 +202,7 @@ type UpdateTaskSKUItemCostInfoParams struct {
 }
 
 type UpdateTaskSKUItemInfoParams struct {
+	CostInput            *domain.CostInput
 	TaskID               int64
 	SKUItemID            int64
 	OperatorID           int64
@@ -2484,6 +2485,9 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 		return costPreviewComputation{MatchTrace: matchMeta.Clone()}, nil
 	}
 	dimensionText := taskCostDimensionText(taskCostDetailDimensionText(detail), ruleMatchText)
+	if result, ok := costModelPreview(domain.CostRulePreviewRequest{CategoryCode: matchMeta.RuleGroup, Width: costDimensionCentimetersToMeters(detail.Width), Height: costDimensionCentimetersToMeters(detail.Height), Area: detail.Area, Quantity: detail.Quantity}, rules); ok {
+		return applyCostRuleMatchMetadata(result, matchMeta), nil
+	}
 	width, height, area := taskCostPreviewDimensions(detail, dimensionText)
 	result := previewCostRulesResolvedDimensions(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
@@ -2587,7 +2591,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 		item.VariantJSON = variantJSON
 		productIIDChanged = previousProductIID != productIID
 	}
-	specInputSubmitted := p.SpecText != nil || p.SizeText != nil || p.Width != nil || p.Height != nil || p.Area != nil || p.Quantity != nil
+	specInputSubmitted := p.CostInput != nil || p.SpecText != nil || p.SizeText != nil || p.Width != nil || p.Height != nil || p.Area != nil || p.Quantity != nil
 	if specInputSubmitted {
 		variantJSON, appErr := setTaskSKUItemSpecInVariantJSON(item.VariantJSON, p)
 		if appErr != nil {
@@ -3009,6 +3013,16 @@ func (s *taskService) applyTaskSKUItemCostPreview(ctx context.Context, detail *d
 	if item == nil {
 		return prefill, nil
 	}
+	if prefill.Response != nil && prefill.Response.Calculation != nil {
+		obj := taskSKUItemVariantObject(item.VariantJSON)
+		if obj == nil {
+			obj = map[string]interface{}{}
+		}
+		obj["cost_calculation"] = prefill.Response.Calculation
+		if raw, err := json.Marshal(obj); err == nil {
+			item.VariantJSON = raw
+		}
+	}
 	item.EstimatedCost = nil
 	item.RequiresManualReview = false
 	item.CostRuleID = nil
@@ -3087,6 +3101,10 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		billableDesignRequirementDimensionText(item.DesignRequirement),
 		taskCostDetailDimensionText(detail),
 	)
+	rawWidth, rawHeight, rawArea := taskSKUItemVariantDimensions(item)
+	if result, ok := costModelPreview(domain.CostRulePreviewRequest{CategoryCode: matchMeta.RuleGroup, Width: costDimensionCentimetersToMeters(rawWidth), Height: costDimensionCentimetersToMeters(rawHeight), Area: rawArea, Quantity: item.Quantity, Input: skuCostInput(item)}, rules); ok {
+		return applyCostRuleMatchMetadata(result, matchMeta), nil
+	}
 	dimensionText := taskCostDimensionText(primaryDimensionText, ruleMatchText)
 	width, height, area := taskSKUItemCostPreviewDimensions(detail, item, dimensionText)
 	quantity := cloneInt64Ptr(item.Quantity)
@@ -3154,11 +3172,25 @@ func setTaskSKUItemSpecInVariantJSON(raw json.RawMessage, p UpdateTaskSKUItemInf
 		}
 	}
 	setVariantStringValue(obj, "spec_text", p.SpecText)
+	if p.CostInput == nil && obj["cost_input"] != nil {
+		for key, value := range map[string]*float64{"width": p.Width, "height": p.Height, "area": p.Area} {
+			if value == nil {
+				continue
+			}
+			old, _ := obj[key].(float64)
+			if old != *value {
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "此SKU已使用结构化计价规格，请在“计价规格”中修改用料尺寸，避免旧尺寸覆盖新模型", nil)
+			}
+		}
+	}
 	setVariantStringValue(obj, "size_text", p.SizeText)
 	setVariantFloatValue(obj, "width", p.Width)
 	setVariantFloatValue(obj, "height", p.Height)
 	setVariantFloatValue(obj, "area", p.Area)
 	setVariantInt64Value(obj, "quantity", p.Quantity)
+	if p.CostInput != nil {
+		obj["cost_input"] = p.CostInput
+	}
 	if len(obj) == 0 {
 		return nil, nil
 	}
@@ -3502,6 +3534,12 @@ func (s *taskService) listActiveCostRulesForTextWithTrace(ctx context.Context, c
 }
 
 func applyCostRuleMatchMetadata(result costPreviewComputation, trace domain.CostRuleMatchTrace) costPreviewComputation {
+	if result.MatchedRule != nil && result.MatchedRule.RuleType == domain.CostRuleTypeModel && trace.MatchMode != domain.CostRuleMatchModeBindingERPIID && trace.MatchMode != domain.CostRuleMatchModeBindingProductIID && result.Response != nil {
+		result.Response.EstimatedCost = nil
+		result.Response.RequiresManualReview = true
+		result.Response.Explanation = "统一计价方案必须先精确绑定款式编码，不使用商品名称或类目文字猜测"
+		result.Response.Calculation = &domain.CostCalculation{Status: "missing_input", Lines: []domain.CostLine{}, Missing: []string{result.Response.Explanation}}
+	}
 	if trace.RuleGroup == "" && result.MatchedRule != nil {
 		trace.RuleGroup = strings.TrimSpace(result.MatchedRule.CategoryCode)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -84,13 +85,18 @@ type CostRuleService interface {
 }
 
 type costRuleService struct {
+	bindings     repo.CostRuleBindingRepo
 	costRuleRepo repo.CostRuleRepo
 	categoryRepo repo.CategoryRepo
 	txRunner     repo.TxRunner
 }
 
-func NewCostRuleService(costRuleRepo repo.CostRuleRepo, categoryRepo repo.CategoryRepo, txRunner repo.TxRunner) CostRuleService {
-	return &costRuleService{costRuleRepo: costRuleRepo, categoryRepo: categoryRepo, txRunner: txRunner}
+func NewCostRuleService(costRuleRepo repo.CostRuleRepo, categoryRepo repo.CategoryRepo, txRunner repo.TxRunner, bindings ...repo.CostRuleBindingRepo) CostRuleService {
+	s := &costRuleService{costRuleRepo: costRuleRepo, categoryRepo: categoryRepo, txRunner: txRunner}
+	if len(bindings) > 0 {
+		s.bindings = bindings[0]
+	}
+	return s
 }
 
 func (s *costRuleService) List(ctx context.Context, filter CostRuleFilter) ([]*domain.CostRule, domain.PaginationMeta, *domain.AppError) {
@@ -267,6 +273,17 @@ func (s *costRuleService) Patch(ctx context.Context, p PatchCostRuleParams) (*do
 		return nil, appErr
 	}
 	rule.RuleID = p.RuleID
+	if current.RuleType == domain.CostRuleTypeModel && rule.FormulaExpression != current.FormulaExpression {
+		// Keep the formula referenced by historical snapshots immutable.
+		rule.RuleID = 0
+		rule.RuleVersion = current.RuleVersion + 1
+		rule.SupersedesRuleID = &current.RuleID
+		var id int64
+		if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error { var err error; id, err = s.costRuleRepo.Create(ctx, tx, rule); return err }); err != nil {
+			return nil, infraError("create model revision", err)
+		}
+		return s.GetByID(ctx, id)
+	}
 
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		return s.costRuleRepo.Update(ctx, tx, rule)
@@ -277,6 +294,28 @@ func (s *costRuleService) Patch(ctx context.Context, p PatchCostRuleParams) (*do
 }
 
 func (s *costRuleService) Preview(ctx context.Context, req domain.CostRulePreviewRequest) (*domain.CostRulePreviewResponse, *domain.AppError) {
+	if req.Model != nil {
+		raw, err := json.Marshal(req.Model)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "计价方案格式错误", nil)
+		}
+		if _, err := parseCostModel(string(raw)); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil)
+		}
+		return previewCostRules(req, []*domain.CostRule{{RuleName: "未保存方案试算", RuleType: domain.CostRuleTypeModel, RuleVersion: 1, FormulaExpression: string(raw), Source: "draft_preview"}}).Response, nil
+	}
+	if s.bindings != nil && (strings.TrimSpace(req.ERPIID) != "" || strings.TrimSpace(req.ProductIID) != "") {
+		resolver := &taskService{costRuleRepo: s.costRuleRepo, costRuleBindingRepo: s.bindings, costLegacyAliasFallbackEnabled: false}
+		rules, trace, err := resolver.listActiveCostRulesForBindingOrText(ctx, req.CategoryID, req.CategoryCode, req.ERPIID, req.ProductIID, "")
+		if err != nil {
+			return nil, infraError("resolve preview binding", err)
+		}
+		if trace.MatchMode == domain.CostRuleMatchModeBindingERPIID || trace.MatchMode == domain.CostRuleMatchModeBindingProductIID {
+			req.CategoryCode = trace.RuleGroup
+			return applyCostRuleMatchMetadata(previewCostRules(req, rules), trace).Response, nil
+		}
+		return &domain.CostRulePreviewResponse{RequiresManualReview: true, AppliedRules: []domain.CostRulePreviewMatch{}, Explanation: "款式编码尚未明确绑定计价方案", MatchMode: "no_match"}, nil
+	}
 	category, categoryCode, appErr := s.resolveCategoryLink(ctx, req.CategoryID, req.CategoryCode)
 	if appErr != nil {
 		return nil, appErr
@@ -308,6 +347,11 @@ func (s *costRuleService) buildCostRuleDraft(ctx context.Context, ruleID int64, 
 	}
 	if !ruleType.Valid() {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "rule_type is required and must be supported", nil)
+	}
+	if ruleType == domain.CostRuleTypeModel {
+		if _, err := parseCostModel(formulaExpression); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil)
+		}
 	}
 
 	category, normalizedCode, appErr := s.resolveCategoryLink(ctx, categoryID, categoryCode)

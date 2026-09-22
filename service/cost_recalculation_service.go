@@ -31,6 +31,7 @@ type CostRecalculationService interface {
 type CostRecalculationServiceOption func(*costRecalculationService)
 
 type costRecalculationService struct {
+	bindings                   repo.CostRuleBindingRepo
 	records                    repo.ProductManagementRepo
 	runs                       repo.CostRecalculationRunRepo
 	tasks                      repo.TaskRepo
@@ -59,6 +60,10 @@ func NewCostRecalculationService(records repo.ProductManagementRepo, runs repo.C
 		}
 	}
 	return svc
+}
+
+func WithCostRecalculationBindings(bindings repo.CostRuleBindingRepo) CostRecalculationServiceOption {
+	return func(s *costRecalculationService) { s.bindings = bindings }
 }
 
 func WithCostRecalculationLegacyAliasFallbackEnabled(enabled bool) CostRecalculationServiceOption {
@@ -514,6 +519,10 @@ func (s *costRecalculationService) previewRecordCost(ctx context.Context, task *
 }
 
 func (s *costRecalculationService) previewRunTaskCost(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, record *domain.ProductManagementRecord) (costPreviewComputation, *domain.AppError) {
+	if s.bindings != nil {
+		resolver := &taskService{costRuleRepo: s.costRules, costRuleBindingRepo: s.bindings, costLegacyAliasFallbackEnabled: s.legacyAliasFallbackEnabled}
+		return resolver.previewTaskCost(ctx, task, detail)
+	}
 	categoryID := cloneInt64Ptr(detail.CategoryID)
 	categoryCode := firstNonEmptyString(strings.TrimSpace(detail.CategoryCode), categoryCodeFromRecordTrace(record))
 	if categoryID == nil && categoryCode == "" {
@@ -544,6 +553,10 @@ func (s *costRecalculationService) previewRunTaskCost(ctx context.Context, task 
 }
 
 func (s *costRecalculationService) previewRunSKUItemCost(ctx context.Context, detail *domain.TaskDetail, item *domain.TaskSKUItem, record *domain.ProductManagementRecord) (costPreviewComputation, *domain.AppError) {
+	if s.bindings != nil {
+		resolver := &taskService{costRuleRepo: s.costRules, costRuleBindingRepo: s.bindings, costLegacyAliasFallbackEnabled: s.legacyAliasFallbackEnabled}
+		return resolver.previewTaskSKUItemCost(ctx, detail, item)
+	}
 	categoryID := cloneInt64Ptr(detail.CategoryID)
 	categoryCode := firstNonEmptyString(strings.TrimSpace(item.CategoryCode), strings.TrimSpace(detail.CategoryCode), categoryCodeFromRecordTrace(record))
 	if categoryID == nil && categoryCode == "" {

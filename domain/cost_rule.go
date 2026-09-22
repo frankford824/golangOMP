@@ -5,6 +5,7 @@ import "time"
 type CostRuleType string
 
 const (
+	CostRuleTypeModel                  CostRuleType = "cost_model"
 	CostRuleTypeFixedUnitPrice         CostRuleType = "fixed_unit_price"
 	CostRuleTypeAreaThresholdSurcharge CostRuleType = "area_threshold_surcharge"
 	CostRuleTypeMinimumBillableArea    CostRuleType = "minimum_billable_area"
@@ -15,7 +16,7 @@ const (
 
 func (t CostRuleType) Valid() bool {
 	switch t {
-	case CostRuleTypeFixedUnitPrice,
+	case CostRuleTypeModel, CostRuleTypeFixedUnitPrice,
 		CostRuleTypeAreaThresholdSurcharge,
 		CostRuleTypeMinimumBillableArea,
 		CostRuleTypeSizeBasedFormula,
@@ -114,16 +115,18 @@ func (r *CostRule) GovernanceStatusAt(asOf time.Time) CostRuleGovernanceStatus {
 }
 
 type CostRulePreviewRequest struct {
-	CategoryID   *int64   `json:"category_id,omitempty"`
-	CategoryCode string   `json:"category_code,omitempty"`
-	Width        *float64 `json:"width,omitempty"`
-	Height       *float64 `json:"height,omitempty"`
-	Area         *float64 `json:"area,omitempty"`
-	Quantity     *int64   `json:"quantity,omitempty"`
-	Process      string   `json:"process,omitempty"`
-	Notes        string   `json:"notes,omitempty"`
-	ERPIID       string   `json:"erp_i_id,omitempty"`
-	ProductIID   string   `json:"product_i_id,omitempty"`
+	Model        *CostModel `json:"model,omitempty"`
+	Input        *CostInput `json:"input,omitempty"`
+	CategoryID   *int64     `json:"category_id,omitempty"`
+	CategoryCode string     `json:"category_code,omitempty"`
+	Width        *float64   `json:"width,omitempty"`
+	Height       *float64   `json:"height,omitempty"`
+	Area         *float64   `json:"area,omitempty"`
+	Quantity     *int64     `json:"quantity,omitempty"`
+	Process      string     `json:"process,omitempty"`
+	Notes        string     `json:"notes,omitempty"`
+	ERPIID       string     `json:"erp_i_id,omitempty"`
+	ProductIID   string     `json:"product_i_id,omitempty"`
 }
 
 type CostRulePreviewMatch struct {
@@ -137,6 +140,7 @@ type CostRulePreviewMatch struct {
 }
 
 type CostRulePreviewResponse struct {
+	Calculation          *CostCalculation         `json:"calculation,omitempty"`
 	MatchedRule          *CostRulePreviewMatch    `json:"matched_rule,omitempty"`
 	MatchedRuleID        *int64                   `json:"matched_rule_id,omitempty"`
 	MatchedRuleVersion   *int                     `json:"matched_rule_version,omitempty"`

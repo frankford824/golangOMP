@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>成本工作台本地验收样例</title><div id="app"></div><script type="module">
+import {createApp} from 'vue'
+import View from '/src/views/CostRuleManagerView.vue'
+import '/src/assets/main.css'
+import {categoriesApi} from '/src/services/api/categoriesApi.ts'
+import {costManagementApi} from '/src/services/api/costManagementApi.ts'
+const model={version:1,material:'KT 板（验收样例，非生产价格）',basis:'area',unit_price:10,multiplier:1.1,minimum:0,small_area_threshold:0,small_area_surcharge:0,thickness_prices:[],processes:[]}
+categoriesApi.listCostRules=async()=>({data:{data:[{rule_id:1,rule_name:'KT 板计价方案',category_code:'QA_KT',rule_type:'cost_model',formula_expression:JSON.stringify(model),is_active:true,rule_version:1,governance_status:'effective',source:'admin_manual'},{rule_id:2,rule_name:'PP 背胶（验收样例）',category_code:'QA_PP',rule_type:'fixed_unit_price',base_price:8,is_active:true}]}})
+costManagementApi.listCostRuleBindings=async()=>({data:[{id:1,i_id_raw:'测试款式-001',rule_group:'QA_KT',is_active:true}]})
+costManagementApi.listUnboundCostRuleCandidates=async()=>({data:[]})
+costManagementApi.listCostRecalculationRuns=async()=>({data:[]})
+costManagementApi.getCostDashboard=async()=>({total_count:0,groups:[],tags:[]})
+costManagementApi.previewCostRule=async()=>({requires_manual_review:true,explanation:'这是布局验收样例。实际计算由后端测试和正式试算接口验证。'})
+categoriesApi.createCostRule=categoriesApi.updateCostRule=async()=>{throw new Error('验收样例禁止保存')}
+createApp(View).mount('#app')
+</script></html>

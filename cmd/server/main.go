@@ -168,7 +168,7 @@ func main() {
 	blueprintRules := blueprint.NewRuleEngine(blueprintRegistry, taskModuleRepo, taskModuleEventRepo, taskRepo)
 	categorySvc := service.NewCategoryService(categoryRepo, mdb)
 	categoryMappingSvc := service.NewCategoryERPMappingService(categoryERPMappingRepo, categoryRepo, mdb)
-	costRuleSvc := service.NewCostRuleService(costRuleRepo, categoryRepo, mdb)
+	costRuleSvc := service.NewCostRuleService(costRuleRepo, categoryRepo, mdb, costRuleBindingRepo)
 	costRuleBindingSvc := service.NewCostRuleBindingService(costRuleBindingRepo, costRuleRepo, mdb)
 	var erpBridgeClient service.ERPBridgeClient
 	localERPBridgeClient := service.NewLocalERPBridgeClient(productRepo, categoryRepo, mdb, integrationCallLogRepo)
@@ -347,6 +347,7 @@ func main() {
 		service.WithProductManagementRedis(rdb),
 		service.WithProductManagementNotificationService(notificationSvc))
 	costRecalculationSvc := service.NewCostRecalculationService(productManagementRepo, costRecalculationRunRepo, taskRepo, costRuleRepo, skuTraceRepo, mdb,
+		service.WithCostRecalculationBindings(costRuleBindingRepo),
 		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
 		service.WithCostRecalculationProductManagementRedis(rdb))
 	skuComboSyncSvc := service.NewSKUComboSyncService(productManagementERPBridgeSvc, skuComboRepo, mdb)
