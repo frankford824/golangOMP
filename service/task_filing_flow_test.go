@@ -387,7 +387,7 @@ func TestBatchSKUItemInfoCanBeUpdatedAfterAuditStarted(t *testing.T) {
 	}
 }
 
-func TestBatchNewProductCreateKeepsMissingCostPending(t *testing.T) {
+func TestBatchNewProductCreateFilesMissingCostWithoutPrice(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions: []*domain.ERPIIDOption{
 			{IID: "I-1001", Label: "I-1001"},
@@ -432,12 +432,14 @@ func TestBatchNewProductCreateKeepsMissingCostPending(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusPending {
-		t.Fatalf("unknown cost must leave filing pending")
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatalf("unknown cost must not block SKU filing: %s", taskRepo.details[task.ID].FilingStatus)
 	}
-	if bridgeStub.upsertCalls != 0 {
-		t.Fatal("batch with unknown cost must not reach ERP")
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("both SKUs must reach ERP, calls=%d", bridgeStub.upsertCalls)
 	}
+	assertFilingCost(t, *bridgeStub.upsertPayload, nil)
+	assertFilingCost(t, bridgeStub.upsertPayloads[0], float64Ptr(5.1))
 }
 
 func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) {
@@ -1303,7 +1305,7 @@ func TestRetryFilingBatchMultiSKURecordsPerSKUResultAndContinuesAfterFailure(t *
 	}
 }
 
-func TestNewProductFilingWaitsForCostThenResumesAfterManualQuote(t *testing.T) {
+func TestNewProductFilesImmediatelyThenSyncsManualQuote(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "KT_STANDARD", Label: "KT_STANDARD"}},
 		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
@@ -1335,12 +1337,13 @@ func TestNewProductFilingWaitsForCostThenResumesAfterManualQuote(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusPending {
-		t.Fatal("missing cost must wait")
+	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
+		t.Fatal("missing cost must not block SKU filing")
 	}
-	if bridgeStub.upsertCalls != 0 {
-		t.Fatal("missing cost must not create ERP product")
+	if bridgeStub.upsertCalls != 1 {
+		t.Fatal("SKU must be created in ERP before cost is ready")
 	}
+	assertFilingCost(t, *bridgeStub.upsertPayload, nil)
 
 	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
 		TaskID:             task.ID,
@@ -1358,11 +1361,11 @@ func TestNewProductFilingWaitsForCostThenResumesAfterManualQuote(t *testing.T) {
 	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
 		t.Fatalf("filing_status after business-info patch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
 	}
-	if bridgeStub.upsertCalls != 1 {
-		t.Fatalf("upsert calls = %d, want 1", bridgeStub.upsertCalls)
-	}
 	if got := bridgeStub.upsertPayload.CostPrice; got == nil || *got != 5.69 {
 		t.Fatalf("erp cost_price = %v, want 5.69", got)
+	}
+	if bridgeStub.upsertCalls != 2 {
+		t.Fatalf("upsert calls = %d, want identity creation plus cost update", bridgeStub.upsertCalls)
 	}
 	if got := bridgeStub.upsertPayload.BusinessInfo.CostPrice; got == nil || *got != 5.69 {
 		t.Fatalf("erp business_info.cost_price = %v, want 5.69", got)

@@ -74,6 +74,15 @@ func costReadyForFiling(cost *float64, review, manual bool) bool {
 	return cost != nil && validCostNumber(*cost) && (!review || manual)
 }
 
+// SKU identity can be filed before pricing is ready. Omit unconfirmed costs
+// so a base-data sync cannot publish a provisional price or clear an ERP price.
+func confirmedERPCostPrice(cost *float64, review, manual bool) *float64 {
+	if !costReadyForFiling(cost, review, manual) {
+		return nil
+	}
+	return cloneFloat64Ptr(cost)
+}
+
 func calculateCostModel(m *domain.CostModel, in domain.CostInput) (*domain.CostCalculation, *float64) {
 	c := &domain.CostCalculation{Status: "missing_input", Input: in, Lines: []domain.CostLine{}, Missing: []string{}}
 	missing := func(s string) { c.Missing = append(c.Missing, s) }
