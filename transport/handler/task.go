@@ -1587,6 +1587,7 @@ func (h *TaskHandler) PatchCostInfo(c *gin.Context) {
 		return
 	}
 	params := buildBusinessInfoUpdateParamsFromAggregate(taskID, operatorID, aggregate)
+	params.CostOnly = true
 	if req.CostPrice != nil {
 		params.CostPrice = req.CostPrice
 		params.CostPriceSet = true

@@ -10,7 +10,47 @@ import (
 )
 
 type CostRuleBindingHandler struct {
-	svc service.CostRuleBindingService
+	svc      service.CostRuleBindingService
+	costSync *service.CostSyncService
+}
+
+func (h *CostRuleBindingHandler) SetCostSyncService(s *service.CostSyncService) { h.costSync = s }
+func (h *CostRuleBindingHandler) ListCostSyncStates(c *gin.Context) {
+	if h.costSync == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "成本同步服务未启用", nil))
+		return
+	}
+	f := parseCostRuleBindingFilter(c)
+	rows, meta, err := h.costSync.List(c.Request.Context(), strings.TrimSpace(c.Query("status")), f.Keyword, f.Page, f.PageSize)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	coverage, appErr := h.costSync.Coverage(c.Request.Context())
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, domain.CostSyncListResult{Data: rows, Pagination: meta, Coverage: coverage})
+}
+func (h *CostRuleBindingHandler) ResolveCostSync(c *gin.Context) {
+	if h.costSync == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "成本同步服务未启用", nil))
+		return
+	}
+	var p domain.CostSyncResolution
+	if err := c.ShouldBindJSON(&p); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "请填写确认内容", nil))
+		return
+	}
+	p.SKUCode = strings.TrimSpace(c.Param("sku"))
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	p.ActorID = actor.ID
+	if err := h.costSync.Resolve(c.Request.Context(), p); err != nil {
+		respondError(c, err)
+		return
+	}
+	respondOK(c, domain.CostSyncDecisionResult{Accepted: true, SKUCode: p.SKUCode})
 }
 
 func NewCostRuleBindingHandler(svc service.CostRuleBindingService) *CostRuleBindingHandler {

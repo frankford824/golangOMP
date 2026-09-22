@@ -117,6 +117,7 @@ type CreateTaskParams struct {
 }
 
 type UpdateTaskBusinessInfoParams struct {
+	CostOnly                 bool // Internal marker for the dedicated cost-info endpoint.
 	TaskID                   int64
 	OperatorID               int64
 	ProductName              string
@@ -249,6 +250,7 @@ type taskResourceGroupInitializer interface {
 }
 
 type taskService struct {
+	costSyncNotify                 func()
 	taskRepo                       repo.TaskRepo
 	taskAssetRepo                  repo.TaskAssetRepo
 	designAssetRepo                repo.DesignAssetRepo
@@ -314,6 +316,9 @@ func WithTaskSKUTraceRepo(skuTraceRepo repo.SKUTraceRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.skuTraceRepo = skuTraceRepo
 	}
+}
+func WithTaskCostSyncNotifier(notify func()) TaskServiceOption {
+	return func(s *taskService) { s.costSyncNotify = notify }
 }
 
 func WithTaskCostRuleBindingRepo(bindingRepo repo.CostRuleBindingRepo) TaskServiceOption {
@@ -2289,6 +2294,12 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		autoTriggerFiling = false
 	}
 	baseSyncQueuedByFiling := false
+	costOnlySync := p.CostOnly && s.costSyncNotify != nil
+	if costOnlySync {
+		s.costSyncNotify()
+		autoTriggerFiling = false
+		forceTrigger = false
+	}
 	if autoTriggerFiling || forceTrigger {
 		_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
 			TaskID:     p.TaskID,
@@ -2306,7 +2317,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 			baseSyncQueuedByFiling = true
 		}
 	}
-	if productBaseChanged && !baseSyncQueuedByFiling {
+	if productBaseChanged && !baseSyncQueuedByFiling && !costOnlySync {
 		s.queueProductManagementBaseSyncAfterBusinessEdit(ctx, p.TaskID, "business_info")
 	}
 
@@ -2941,6 +2952,12 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 	})
 	if txErr != nil {
 		return nil, infraError("update sku item cost info tx", txErr)
+	}
+	if s.costSyncNotify != nil {
+		// This transaction already captured a durable cost revision. Never use
+		// a whole product-profile write just to change its price.
+		s.costSyncNotify()
+		return item, nil
 	}
 	_, filingErr := s.TriggerFiling(ctx, TriggerTaskFilingParams{
 		TaskID:           p.TaskID,

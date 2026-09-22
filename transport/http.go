@@ -222,6 +222,9 @@ func NewRouter(
 	}
 
 	if costRuleBindingH != nil {
+		costSyncGroup := v1.Group("/cost-management/sync-states")
+		costSyncGroup.GET("", capabilityAccess(costSyncGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), costRuleBindingH.ListCostSyncStates)
+		costSyncGroup.POST("/:sku/resolve", capabilityAccess(costSyncGroup, http.MethodPost, "/{sku}/resolve", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), costRuleBindingH.ResolveCostSync)
 		costRuleBindingGroup := v1.Group("/cost-rule-bindings")
 		{
 			costRuleBindingGroup.GET("/skus", capabilityAccess(costRuleBindingGroup, http.MethodGet, "/skus", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), costRuleBindingH.ListBoundSKUs)

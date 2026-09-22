@@ -61,6 +61,7 @@ type ERPBridgeService interface {
 }
 
 type erpBridgeService struct {
+	costGuard   CostWriteGuard
 	client      ERPBridgeClient
 	productRepo repo.ProductRepo
 	txRunner    repo.TxRunner
@@ -411,6 +412,14 @@ func (s *erpBridgeService) EnsureLocalProduct(ctx context.Context, tx repo.Tx, s
 }
 
 func (s *erpBridgeService) UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError) {
+	payload = normalizeERPProductUpsertPayload(payload)
+	if s.costGuard != nil && payload.CostPrice != nil {
+		return s.costGuard.Protect(ctx, payload, s.upsertProductUnchecked)
+	}
+	return s.upsertProductUnchecked(ctx, payload)
+}
+
+func (s *erpBridgeService) upsertProductUnchecked(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError) {
 	if s.client == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
 	}
@@ -1426,6 +1435,10 @@ func isERPBridgeSkuLikeKeyword(value string) bool {
 }
 
 func normalizeERPProductUpsertPayload(payload domain.ERPProductUpsertPayload) domain.ERPProductUpsertPayload {
+	if strings.TrimSpace(payload.Operation) == "cost_sync" {
+		sku := strings.TrimSpace(firstNonEmptyString(payload.SKUID, payload.SKUCode, payload.ProductID))
+		return domain.ERPProductUpsertPayload{ProductID: sku, SKUID: sku, SKUCode: sku, CostPrice: payload.CostPrice, Operation: "cost_sync"}
+	}
 	payload.ProductID = strings.TrimSpace(payload.ProductID)
 	payload.SKUID = strings.TrimSpace(payload.SKUID)
 	payload.IID = strings.TrimSpace(payload.IID)

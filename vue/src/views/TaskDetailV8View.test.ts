@@ -538,7 +538,8 @@ describe('TaskDetailV8View business context', () => {
     expect(wrapper.findAll('button').some((item) => item.text() === '编辑任务信息')).toBe(false)
     expect(dialog().querySelector('.task-business-editor')).toBeNull()
     expect(dialog().textContent).toContain('当前账号只读')
-    expect([...dialog().querySelectorAll<HTMLInputElement>('.sku-editor input')].every((input) => input.disabled)).toBe(true)
+    // Native fieldset disabling also disables its nested pricing inputs.
+    expect([...dialog().querySelectorAll<HTMLInputElement>('.sku-editor input')].every((input) => input.matches(':disabled'))).toBe(true)
   })
 
   it('shows all batch SKU codes without opening the details workspace', async () => {

@@ -14,7 +14,8 @@
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
     <div v-if="notice" class="message notice" role="status">{{ notice }}</div>
 
-    <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','绑定检查','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab">{{tab}}</button></nav>
+    <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','绑定检查','成本同步','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab">{{tab}}</button></nav>
+    <CostSyncPanel v-if="workspaceTab==='成本同步'" />
     <section v-show="workspaceTab==='方案与绑定'" class="cost-layout">
       <aside class="rule-groups" aria-label="成本规则分组">
         <label class="group-search">搜索材质 / 款式编码<input v-model.trim="groupSearch" placeholder="输入编码或名称" /></label>
@@ -55,11 +56,13 @@
             <div class="rule-copy">
               <div><strong>{{ rule.rule_name || '未命名规则' }}</strong><span>{{ ruleStateLabel(rule) }}</span></div>
               <p>{{ ruleSummary(rule) }}</p>
+              <small>{{pricingWindowLabel(rule)}}</small>
             </div>
-            <button class="text-button" @click="rule.rule_type==='cost_model'?startModel(rule):openRuleEditor(rule)">编辑</button>
+            <div class="price-actions"><button class="text-button" @click="openRuleEditor(rule)">编辑名称 / 价格 / 时间</button><button class="text-button" :disabled="savingRule" @click="retireRule(rule)">{{retiringRule===rule.rule_id?'确认停用（保留历史）':'停用此计价'}}</button></div>
           </article>
           <div v-if="!currentRules.length" class="empty-large">此方案暂无启用的价格。</div>
-          <details v-if="historicalRules.length"><summary>已停用或历史价格（{{historicalRules.length}}）</summary><p v-for="rule in historicalRules" :key="rule.rule_id">{{rule.rule_name}}：{{ruleSummary(rule)}}</p></details>
+          <section v-if="scheduledRules.length" class="scheduled-prices"><h3>即将生效</h3><article v-for="rule in scheduledRules" :key="rule.rule_id"><strong>{{rule.rule_name}}</strong><p>{{ruleSummary(rule)}}</p><small>{{pricingWindowLabel(rule)}}</small><button class="text-button" @click="openRuleEditor(rule)">调整计划</button></article></section>
+          <details v-if="historicalRules.length"><summary>已停用、到期或历史价格（{{historicalRules.length}}）</summary><article v-for="rule in historicalRules" :key="rule.rule_id"><p>{{rule.rule_name}}：{{ruleSummary(rule)}}</p><small>{{pricingWindowLabel(rule)}}</small><button class="text-button" @click="openRuleEditor(rule)">查看 / 调整</button></article></details>
         </div>
 
         <section v-if="selectedGroup" class="binding-panel">
@@ -174,6 +177,13 @@
               <p v-else class="span-2">{{ruleDescription(ruleDraft)}}。此特殊计价方式暂不支持修改价格；可维护名称与启用状态，或另建明确单价的方案。</p>
             </template>
             <label class="switch-row"><input v-model="ruleDraft.is_active" type="checkbox" /> 当前启用</label>
+            <details class="price-timing span-2" :open="!!ruleDraft.effective_from || !!ruleDraft.effective_to"><summary>生效时间：{{startMode==='now'?'立即':'指定时间'}} · {{endMode==='never'?'长期有效':'指定结束时间'}}（点击调整）</summary><div class="price-timing-fields">
+              <label>开始使用<select v-model="startMode" @change="timingEdited=true"><option value="now">立即</option><option value="scheduled">指定时间</option></select></label>
+              <label v-if="startMode==='scheduled'">开始时间（北京时间）<input v-model="startsAt" required type="datetime-local" @input="timingEdited=true" /></label>
+              <label>结束使用<select v-model="endMode" @change="timingEdited=true"><option value="never">长期有效</option><option value="scheduled">指定时间</option></select></label>
+              <label v-if="endMode==='scheduled'">结束时间（北京时间）<input v-model="endsAt" required type="datetime-local" @input="timingEdited=true" /></label>
+              <small>时间仅控制本项价格何时参与计算，不会自动重算历史 SKU。没有有效价格时需人工确认。</small>
+            </div></details>
             <label v-if="ruleDraft.source?.endsWith('_sample')" class="switch-row span-2"><input v-model="confirmedPrice" type="checkbox" /> 已核对价格，允许用于新 SKU 自动计价</label>
             <label class="span-2">维护说明<textarea v-model.trim="ruleDraft.governance_note" rows="3" placeholder="说明本次调整原因，方便后续追溯。" /></label>
           </div>
@@ -230,8 +240,10 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import CostModelEditor from '@/components/cost/CostModelEditor.vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
 import CostBoundSKUList from '@/components/cost/CostBoundSKUList.vue'
+import CostSyncPanel from '@/components/cost/CostSyncPanel.vue'
 import '@/components/cost/cost-manager-workspace.css'
 import {ruleDescription,printPrices,keywordPrice} from '@/domain/cost-rule-presentation'
+import {chinaDateInput,pricingWindow,pricingWindowLabel} from '@/domain/cost-rule-timing'
 import {emptyCostModel,emptyCostInput} from '@/domain/cost-model'
 import { categoriesApi } from '@/services/api/categoriesApi'
 import { erpApi } from '@/services/api/erpApi'
@@ -245,6 +257,8 @@ import {
 } from '@/services/api/costManagementApi'
 
 interface CostRuleRow {
+  effective_from?:string|null
+  effective_to?:string|null
   source?: string
   governance_status?: string
   rule_id: number
@@ -306,6 +320,7 @@ const workspaceTab=ref('方案与绑定')
 const groupSearch=ref('')
 const groupScope=ref('bound'),bindingSearch=ref(''),calculatorOpen=ref(false),dataRevision=ref(0)
 const newModelJSON=ref(JSON.stringify(emptyCostModel())),confirmedPrice=ref(false)
+const startMode=ref('now'),endMode=ref('never'),startsAt=ref(''),endsAt=ref(''),timingEdited=ref(false),retiringRule=ref<number|null>(null)
 const materialOptions=ref<Array<{code:string;name:string}>>([])
 const availableCategories=computed(()=>[...new Map([...ruleGroups.value.map(g=>({code:g.code,name:g.name})),...materialOptions.value].map(g=>[g.code,g])).values()])
 const formulaKind=ref('print'),printDraft=reactive({single:0,double:0}),keywordDraft=reactive({keyword:'',price:0})
@@ -319,7 +334,8 @@ function activeBindingCount(code:string){return bindings.value.filter(b=>b.rule_
 function effectiveRules(items:CostRuleRow[]){const active=items.filter(r=>r.is_active!==false&&(!r.governance_status||r.governance_status==='effective'));const replaced=new Set(active.map(r=>r.supersedes_rule_id).filter(Boolean));return active.filter(r=>!replaced.has(r.rule_id))}
 const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(groupScope.value==='all'||(activeBindingCount(g.code)>0&&effectiveRules(g.rules).length>0))&&(!groupSearch.value||`${g.name} ${g.code} ${bindings.value.filter(b=>b.is_active&&b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase()))))
 const currentRules=computed(()=>effectiveRules(selectedGroup.value?.rules||[]))
-const historicalRules=computed(()=>selectedGroup.value?.rules.filter(r=>!currentRules.value.includes(r))||[])
+const scheduledRules=computed(()=>selectedGroup.value?.rules.filter(r=>r.is_active&&r.governance_status==='scheduled')||[])
+const historicalRules=computed(()=>selectedGroup.value?.rules.filter(r=>!currentRules.value.includes(r)&&!scheduledRules.value.includes(r))||[])
 const filteredBindings=computed(()=>selectedBindings.value.filter(b=>`${b.i_id_raw} ${b.display_name}`.toLowerCase().includes(bindingSearch.value.toLowerCase())))
 watch(selectedGroupCode,()=>{modelEditing.value=false;preview.value=null})
 watch([modelJSON,modelInput,calculator],()=>{preview.value=null},{deep:true})
@@ -401,6 +417,8 @@ async function loadAll() {
 }
 
 function openRuleEditor(rule?: CostRuleRow, group = '') {
+ startsAt.value=chinaDateInput(rule?.effective_from);endsAt.value=chinaDateInput(rule?.effective_to)
+ startMode.value=startsAt.value?'scheduled':'now';endMode.value=endsAt.value?'scheduled':'never';timingEdited.value=false
  if(!rule)void categoriesApi.list({page:1,page_size:100,is_active:true}).then(response=>{materialOptions.value=(response.data.data||[]).filter(c=>c.category_code).map(c=>({code:c.category_code!,name:c.display_name||c.category_name||c.category_code!}))}).catch(()=>{})
  replaceDraft(rule ? { ...rule, is_active: rule.is_active !== false, priority: rule.priority ?? 100 } : {...emptyRuleDraft(group||selectedGroupCode.value),rule_type:group?'fixed_unit_price':'cost_model'})
  newModelJSON.value=rule?.rule_type==='cost_model' ? (rule.formula_expression||JSON.stringify(emptyCostModel())) : JSON.stringify(emptyCostModel());confirmedPrice.value=false
@@ -420,6 +438,7 @@ async function saveRule() {
     if(ruleDraft.rule_type==='size_based_formula'&&formulaKind.value==='keyword')ruleDraft.formula_expression=`keyword_area_unit_price:${keywordDraft.keyword}=${keywordDraft.price}`
     if(confirmedPrice.value)ruleDraft.source='admin_manual'
     const payload = Object.fromEntries(Object.entries(ruleDraft).filter(([, value]) => value !== '' && value != null))
+    if(timingEdited.value||!ruleDraft.rule_id)Object.assign(payload,pricingWindow(startMode.value==='scheduled'?startsAt.value:'',endMode.value==='scheduled'?endsAt.value:''))
     if (ruleDraft.rule_id) await categoriesApi.updateCostRule(ruleDraft.rule_id, payload)
     else await categoriesApi.createCostRule(payload)
     const group = ruleDraft.category_code
@@ -427,6 +446,7 @@ async function saveRule() {
     ruleDialogOpen.value = false
     await loadAll()
     selectedGroupCode.value = group
+    if(typeof payload.effective_from==='string'&&Date.parse(payload.effective_from)>Date.now()){notice.value='价格已安排在指定时间生效；尚未重算历史 SKU。';return}
     try {
       const run = await costManagementApi.createCostRecalculationRun({ mode: 'all_matching', filters: { rule_group: group }, reason: '成本规则维护后的影响预览' })
       notice.value = `规则已保存，并已生成影响预览${run.run_no ? `（${run.run_no}）` : ''}。系统不会在未确认时覆盖现有任务成本。`
@@ -443,6 +463,11 @@ async function loadCandidates() {
     candidates.value=old.data||[];erpStyles.value=erp.data?.data||[];pendingStyle.value=''
   }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '待绑定款式加载失败。' }
+}
+async function retireRule(rule:CostRuleRow){
+ if(retiringRule.value!==rule.rule_id){retiringRule.value=rule.rule_id;return}
+ savingRule.value=true;error.value=''
+ try{await categoriesApi.updateCostRule(rule.rule_id,{is_active:false,governance_note:'管理员停用计价，保留历史成本'});groupScope.value='all';await loadAll();retiringRule.value=null;notice.value='已停用此计价及其旧版本，历史金额与记录保持不变。'}catch(e){error.value=e instanceof Error?e.message:'停用失败'}finally{savingRule.value=false}
 }
 function bindingForStyle(iid:string){const normalized=iid.normalize('NFKC').replace(/\s/g,'').toUpperCase();return bindings.value.find(b=>b.is_active&&b.normalized_i_id===normalized)}
 function boundStyleName(iid:string){const binding=bindingForStyle(iid);return binding?`已绑定：${ruleGroups.value.find(g=>g.code===binding.rule_group)?.name||binding.display_name}`:'尚未绑定'}

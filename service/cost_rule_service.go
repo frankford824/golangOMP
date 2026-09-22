@@ -50,6 +50,8 @@ type CreateCostRuleParams struct {
 }
 
 type PatchCostRuleParams struct {
+	EffectiveFromSet      bool
+	EffectiveToSet        bool
 	RuleID                int64
 	RuleName              *string
 	RuleVersion           *int
@@ -244,11 +246,11 @@ func (s *costRuleService) Patch(ctx context.Context, p PatchCostRuleParams) (*do
 		isActive = *p.IsActive
 	}
 	effectiveFrom := current.EffectiveFrom
-	if p.EffectiveFrom != nil {
+	if p.EffectiveFromSet || p.EffectiveFrom != nil {
 		effectiveFrom = p.EffectiveFrom
 	}
 	effectiveTo := current.EffectiveTo
-	if p.EffectiveTo != nil {
+	if p.EffectiveToSet || p.EffectiveTo != nil {
 		effectiveTo = p.EffectiveTo
 	}
 	supersedesRuleID := current.SupersedesRuleID
@@ -273,20 +275,70 @@ func (s *costRuleService) Patch(ctx context.Context, p PatchCostRuleParams) (*do
 		return nil, appErr
 	}
 	rule.RuleID = p.RuleID
+	// Retiring a price must not silently reactivate an older price in its lineage.
+	retiredAncestors := []*domain.CostRule{}
+	if !isActive {
+		seen := map[int64]bool{current.RuleID: true}
+		parentID := current.SupersedesRuleID
+		for parentID != nil {
+			if seen[*parentID] || len(seen) > 100 {
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "规则历史关系异常，请先核对后再停用", nil)
+			}
+			seen[*parentID] = true
+			parent, err := s.costRuleRepo.GetByID(ctx, *parentID)
+			if err != nil {
+				return nil, infraError("read retiring rule lineage", err)
+			}
+			if parent == nil {
+				break
+			}
+			copyParent := *parent
+			copyParent.IsActive = false
+			retiredAncestors = append(retiredAncestors, &copyParent)
+			parentID = parent.SupersedesRuleID
+		}
+	}
 	if current.RuleType == domain.CostRuleTypeModel && rule.FormulaExpression != current.FormulaExpression {
 		// Keep the formula referenced by historical snapshots immutable.
 		rule.RuleID = 0
 		rule.RuleVersion = current.RuleVersion + 1
 		rule.SupersedesRuleID = &current.RuleID
 		var id int64
-		if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error { var err error; id, err = s.costRuleRepo.Create(ctx, tx, rule); return err }); err != nil {
+		if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+			var err error
+			id, err = s.costRuleRepo.Create(ctx, tx, rule)
+			if err != nil {
+				return err
+			}
+			if !isActive {
+				old := *current
+				old.IsActive = false
+				if err := s.costRuleRepo.Update(ctx, tx, &old); err != nil {
+					return err
+				}
+			}
+			for _, old := range retiredAncestors {
+				if err := s.costRuleRepo.Update(ctx, tx, old); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
 			return nil, infraError("create model revision", err)
 		}
 		return s.GetByID(ctx, id)
 	}
 
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		return s.costRuleRepo.Update(ctx, tx, rule)
+		if err := s.costRuleRepo.Update(ctx, tx, rule); err != nil {
+			return err
+		}
+		for _, old := range retiredAncestors {
+			if err := s.costRuleRepo.Update(ctx, tx, old); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return nil, infraError("patch cost rule tx", err)
 	}

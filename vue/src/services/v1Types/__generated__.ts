@@ -2152,6 +2152,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cost-management/sync-states": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List current SKU cost synchronization and conflicts */
+        get: {
+            parameters: {
+                query?: {
+                    status?: "baseline" | "observe" | "pending" | "retry" | "conflict" | "synced" | "no_price";
+                    keyword?: string;
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current states, not a claim that ERP upstream delivery is real-time */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["CostSyncState"][];
+                            pagination?: components["schemas"]["PaginationMeta"];
+                            coverage?: {
+                                /** Format: int64 */
+                                total?: number;
+                                /** Format: int64 */
+                                tracked?: number;
+                                /** Format: int64 */
+                                verified?: number;
+                                /** Format: int64 */
+                                conflicts?: number;
+                                /** Format: int64 */
+                                unpriced?: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cost-management/sync-states/{sku}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm which cost to retain after fresh ERP verification
+         * @description Manual decisions use both local revision and ERP revision. A newer price returns 409. ERP choice updates canonical SKU and local mirrors atomically without echoing the price outbound. Local choice queues a cost-only write and remains pending until ERP readback agrees. Historical amounts are not bulk overwritten.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    sku: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        revision: number;
+                        /** Format: int64 */
+                        erp_revision: number;
+                        /** @enum {string} */
+                        choice: "local" | "erp";
+                        reason: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Decision accepted; local choice is not yet an ERP acknowledgement */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                accepted?: boolean;
+                                sku_code?: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid decision */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Requires ERP management permission */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A price changed; refresh before resolving */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/cost-management/dashboard": {
         parameters: {
             query?: never;
@@ -21206,6 +21362,7 @@ export interface components {
             source?: string;
             remark?: string;
         };
+        /** @description Omitted effective_from/effective_to preserve the existing bounds; explicit null clears the corresponding bound. Dates are RFC3339 instants. Disabling a rule also disables its superseded ancestors atomically to prevent older prices resurfacing. Historical references and previously calculated costs are retained. */
         PatchCostRuleRequest: {
             rule_name?: string;
             rule_version?: number | null;
@@ -21237,6 +21394,30 @@ export interface components {
             governance_note?: string;
             source?: string;
             remark?: string;
+        };
+        /** @description One synchronization state per system-generated SKU. baseline means replica equality only, not fresh ERP verification. A local manual lock blocks conflicting inbound prices; ERP-origin protection permits subsequent ERP-only changes but prevents rule recomputation overwriting that price. */
+        CostSyncState: {
+            sku_code?: string;
+            local_cost?: number | null;
+            erp_cost?: number | null;
+            /** Format: int64 */
+            revision?: number;
+            /** Format: int64 */
+            ack_revision?: number;
+            /** Format: int64 */
+            projected_revision?: number;
+            /** Format: int64 */
+            erp_revision?: number;
+            manual_lock?: boolean;
+            /** @enum {string} */
+            manual_origin?: "" | "local" | "erp";
+            local_confirmed?: boolean;
+            /** @enum {string} */
+            status?: "baseline" | "observe" | "pending" | "retry" | "conflict" | "synced" | "no_price";
+            needs_check?: boolean;
+            reason?: string;
+            /** Format: date-time */
+            checked_at?: string | null;
         };
         CostFace: {
             width_m: number;

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,8 @@ type createCostRuleReq struct {
 }
 
 type patchCostRuleReq struct {
+	EffectiveFromSet      bool     `json:"-"`
+	EffectiveToSet        bool     `json:"-"`
 	RuleName              *string  `json:"rule_name"`
 	RuleVersion           *int     `json:"rule_version"`
 	CategoryID            *int64   `json:"category_id"`
@@ -65,6 +68,22 @@ type patchCostRuleReq struct {
 	GovernanceNote        *string  `json:"governance_note"`
 	Source                *string  `json:"source"`
 	Remark                *string  `json:"remark"`
+}
+
+func (r *patchCostRuleReq) UnmarshalJSON(data []byte) error {
+	type plain patchCostRuleReq
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = patchCostRuleReq(decoded)
+	_, r.EffectiveFromSet = fields["effective_from"]
+	_, r.EffectiveToSet = fields["effective_to"]
+	return nil
 }
 
 func (h *CostRuleHandler) List(c *gin.Context) {
@@ -186,6 +205,8 @@ func (h *CostRuleHandler) Patch(c *gin.Context) {
 	}
 
 	item, appErr := h.svc.Patch(c.Request.Context(), service.PatchCostRuleParams{
+		EffectiveFromSet:      req.EffectiveFromSet,
+		EffectiveToSet:        req.EffectiveToSet,
 		RuleID:                id,
 		RuleName:              req.RuleName,
 		RuleVersion:           req.RuleVersion,

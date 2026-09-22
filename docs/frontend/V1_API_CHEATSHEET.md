@@ -1,10 +1,10 @@
-# V1 API 速查表(263 path · 一行一条)
+# V1 API 速查表(265 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 263 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 265 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -71,6 +71,8 @@
 | POST | `/v1/tasks/{id}/planning-skus/erp-retry` | Queue retry for failed planning-SKU ERP projections | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/planning-skus/erp-resync` | Explicitly queue ERP overwrite after a completed-SKU correction | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/trace-events` | Record frontend business trace event | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/cost-management/sync-states` | List current SKU cost synchronization and conflicts | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/cost-management/sync-states/{sku}/resolve` | Confirm which cost to retain after fresh ERP verification | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/cost-management/dashboard` | Get current SKU cost issue dashboard | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/cost-management/recalculation-runs` | List SKU cost recalculation runs；Create a SKU cost recalculation run | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/cost-management/recalculation-runs/{run_id}` | Get a SKU cost recalculation run with preview items | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

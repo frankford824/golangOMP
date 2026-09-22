@@ -247,6 +247,16 @@ func main() {
 		}
 	}
 	var erpProvider service.ERPProductProvider
+	var costSyncSvc *service.CostSyncService
+	if cfg.Server.Port != "8081" && !strings.EqualFold(os.Getenv("COST_SYNC_ENABLED"), "false") {
+		costObserver, observerErr := service.NewRemoteERPBridgeClient(erpRemoteServiceConfig(cfg, logger.Named("cost_sync_observer")))
+		if observerErr != nil {
+			logger.Fatal("cost sync requires direct ERP observer", zap.Error(observerErr))
+		}
+		costSyncSvc = service.NewCostSyncService(mysqlrepo.NewCostSyncRepo(mdb), costObserver)
+		service.AttachCostWriteGuard(erpBridgeSvc, costSyncSvc)
+		service.AttachCostWriteGuard(productManagementERPBridgeSvc, costSyncSvc)
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.ERP.SourceMode)) {
 	case "jst", "jst_openweb", "remote_jst":
 		erpProvider = service.NewJSTOpenWebProductProvider(erpRemoteServiceConfig(cfg, logger.Named("erp_sync_jst")))
@@ -351,7 +361,12 @@ func main() {
 		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
 		service.WithCostRecalculationProductManagementRedis(rdb))
 	skuComboSyncSvc := service.NewSKUComboSyncService(productManagementERPBridgeSvc, skuComboRepo, mdb)
+	var costNotify func()
+	if costSyncSvc != nil {
+		costNotify = costSyncSvc.Notify
+	}
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
+		service.WithTaskCostSyncNotifier(costNotify),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
 		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
 		service.WithTaskSKUTraceRepo(skuTraceRepo),
@@ -545,6 +560,7 @@ func main() {
 	categoryMappingH := handler.NewCategoryERPMappingHandler(categoryMappingSvc)
 	costRuleH := handler.NewCostRuleHandler(costRuleSvc)
 	costRuleBindingH := handler.NewCostRuleBindingHandler(costRuleBindingSvc)
+	costRuleBindingH.SetCostSyncService(costSyncSvc)
 	taskH := handler.NewTaskHandler(taskSvc, costRuleSvc, taskDetailSvc)
 	taskH.SetR3Services(r3ClaimSvc, r3ModuleSvc, r3CancelSvc)
 	taskH.SetPlanningSKUService(planningSKUSvc)
@@ -637,6 +653,9 @@ func main() {
 		go workers.RunAIConversationPurgeWorker(workerCtx, aiChatService, cfg.AIChat.PurgeInterval, cfg.AIChat.PurgeLimit, logger.Named("ai_chat_purge"))
 	}
 	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
+	if costSyncSvc != nil {
+		go workers.RunCostSyncWorker(workerCtx, costSyncSvc, logger.Named("cost_sync"))
+	}
 	startAssetObjectDeletionWorker(workerCtx, assetObjectDeletionWorker, logger.Named("asset_object_deletion_worker"))
 	startProductionPackageWorker(workerCtx, globalAssetCenterSvc, logger.Named("production_package_worker"))
 	if wecomSender.Start(workerCtx) {

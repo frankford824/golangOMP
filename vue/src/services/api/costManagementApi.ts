@@ -1,5 +1,10 @@
 import http from '@/services/http'
 
+export interface CostSyncState {
+ sku_code:string;local_cost:number|null;erp_cost:number|null;revision:number;ack_revision:number;erp_revision:number
+ manual_lock:boolean;manual_origin:string;status:string;needs_check:boolean;reason:string;checked_at:string|null
+}
+
 export interface ProductManagementPagination {
   page: number
   page_size: number
@@ -305,6 +310,12 @@ export interface CostRulePreviewResponse {
 }
 
 export const costManagementApi = {
+  async listCostSyncStates(params:{status?:string;keyword?:string;page?:number;page_size?:number}) {
+    const {data}=await http.get<{data:CostSyncState[];pagination:ProductManagementPagination;coverage?:{total:number;tracked:number;verified:number;conflicts:number;unpriced:number}}>('/v1/cost-management/sync-states',{params});return data
+  },
+  async resolveCostSync(sku:string,payload:{revision:number;erp_revision:number;choice:'local'|'erp';reason:string}) {
+    return http.post(`/v1/cost-management/sync-states/${encodeURIComponent(sku)}/resolve`,payload)
+  },
   async listBoundSKUs(params: {rule_group:string;keyword?:string;page?:number;page_size?:number}) {
     const {data}=await http.get<{data:Array<{id:number;sku_code:string;product_name:string;style_code:string;cost_price:number|null;status:string}>;pagination:ProductManagementPagination}>('/v1/cost-rule-bindings/skus',{params})
     return data

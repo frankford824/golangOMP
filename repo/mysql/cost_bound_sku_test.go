@@ -28,8 +28,8 @@ func TestBoundSKUQueryUsesLiveBindingAndIncludesUnfiledSKUs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("count").WithArgs("KT", "%CGK%", "%CGK%", "%CGK%").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(21))
-	mock.ExpectQuery("rows").WithArgs("KT", "%CGK%", "%CGK%", "%CGK%", 20, 20).WillReturnRows(sqlmock.NewRows([]string{"id", "sku_code", "product_name_snapshot", "style", "cost_price", "sku_status"}).AddRow(4, "CGK4", "测试", "款式", nil, "generated"))
+	mock.ExpectQuery("count").WithArgs("KT", sqlmock.AnyArg(), sqlmock.AnyArg(), "%CGK%", "%CGK%", "%CGK%").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(21))
+	mock.ExpectQuery("rows").WithArgs("KT", sqlmock.AnyArg(), sqlmock.AnyArg(), "%CGK%", "%CGK%", "%CGK%", 20, 20).WillReturnRows(sqlmock.NewRows([]string{"id", "sku_code", "product_name_snapshot", "style", "cost_price", "sku_status"}).AddRow(4, "CGK4", "测试", "款式", nil, "generated"))
 	r := &costRuleBindingRepo{db: &DB{db: db}}
 	rows, total, err := r.ListBoundSKUs(context.Background(), repo.CostRuleBindingListFilter{RuleGroup: "KT", Keyword: "CGK", Page: 2, PageSize: 20})
 	if err != nil || total != 21 || len(rows) != 1 || rows[0].CostPrice != nil {

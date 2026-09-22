@@ -709,7 +709,7 @@ const contentDetailItems = computed(() => [
   { label: '风格关键词', value: detailValue('style_keywords') },
   { label: '参考链接', value: detailValue('reference_link') },
   { label: 'ERP 建档', value: detailValue('filing_status') },
-  { label: 'ERP 同步', value: task.value?.erp_sync_required === true ? taskDetailDisplayValue('erp_sync_status', task.value?.erp_sync_status, '等待同步') : task.value?.erp_sync_required === false ? '无需同步' : taskDetailDisplayValue('erp_sync_status', task.value?.erp_sync_status) },
+  { label: '商品资料同步（成本另行核对）', value: task.value?.erp_sync_required === true ? taskDetailDisplayValue('erp_sync_status', task.value?.erp_sync_status, '等待同步') : task.value?.erp_sync_required === false ? '无需同步' : taskDetailDisplayValue('erp_sync_status', task.value?.erp_sync_status) },
 ])
 const resourceSKUProfiles = computed(() => (bundle.value?.groups || []).map((group) => {
   const profile = group.sku_profile

@@ -5,6 +5,9 @@ import '/src/assets/main.css'
 import {categoriesApi} from '/src/services/api/categoriesApi.ts'
 import {costManagementApi} from '/src/services/api/costManagementApi.ts'
 import {erpApi} from '/src/services/api/erpApi.ts'
+import {createPinia,setActivePinia} from 'pinia'
+import {usePermissionsStore} from '/src/stores/permissions.ts'
+const pinia=createPinia();setActivePinia(pinia);const permissions=usePermissionsStore();permissions.hasPermission=()=>true;permissions.hasAction=()=>true
 const model={version:1,material:'KT 板（验收样例，非生产价格）',basis:'area',unit_price:10,multiplier:1.1,minimum:0,small_area_threshold:0,small_area_surcharge:0,thickness_prices:[],processes:[]}
 categoriesApi.listCostRules=async()=>({data:{data:[{rule_id:1,rule_name:'KT 板计价方案',category_code:'QA_KT',rule_type:'cost_model',formula_expression:JSON.stringify(model),is_active:true,rule_version:1,governance_status:'effective',source:'admin_manual'},{rule_id:2,rule_name:'PP 背胶（验收样例）',category_code:'QA_PP',rule_type:'fixed_unit_price',base_price:8,is_active:true}]}})
 categoriesApi.list=async()=>({data:{data:[{category_code:'QA_NEW',category_name:'新材质（样例）'}]}})
@@ -16,8 +19,10 @@ erpApi.getIids=async()=>({data:{data:[{i_id:'A4纸',label:'纸张打印'},{i_id:
 costManagementApi.listUnboundCostRuleCandidates=async()=>({data:[]})
 costManagementApi.listCostRecalculationRuns=async()=>({data:[]})
 costManagementApi.getCostDashboard=async()=>({total_count:0,groups:[],tags:[]})
+costManagementApi.listCostSyncStates=async()=>({data:[{sku_code:'QA-COST-1',local_cost:1.2,erp_cost:1.5,revision:2,ack_revision:1,erp_revision:3,manual_lock:true,manual_origin:'local',status:'conflict',reason:'本地与ERP价格不同（隔离验收样例）',checked_at:null}],pagination:{page:1,page_size:20,total:1},coverage:{total:25,tracked:25,verified:20,conflicts:1,unpriced:4}})
+costManagementApi.resolveCostSync=async()=>({data:{accepted:true}})
 costManagementApi.previewCostRule=async()=>({requires_manual_review:true,explanation:'这是布局验收样例。实际计算由后端测试和正式试算接口验证。'})
 categoriesApi.createCostRule=categoriesApi.updateCostRule=async()=>{throw new Error('验收样例禁止保存')}
 costManagementApi.createCostRuleBinding=costManagementApi.updateCostRuleBinding=async()=>{throw new Error('验收样例禁止保存')}
-createApp(View).mount('#app')
+createApp(View).use(pinia).mount('#app')
 </script></html>

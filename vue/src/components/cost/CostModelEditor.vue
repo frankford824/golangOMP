@@ -19,13 +19,13 @@
       <button type="button" @click="draft.thickness_prices.push({thickness_mm:0,unit_price:0});update()">添加厚度档位</button>
       </details><details :open="draft.processes.length>0"><summary>开槽、打孔等另收费（选填）</summary>
       <div v-for="(p,i) in draft.processes" :key="i" class="fields process">
-        <label>工艺<select v-model="p.code" @change="update"><option v-for="(name,code) in processNames" :key="code" :value="code">{{name}}</option></select></label>
+        <label>工艺<select v-model="p.code" @change="update"><option v-for="(name,code) in processNames" :key="code" :value="code" :disabled="draft.processes.some((other,index)=>index!==i&&other.code===code)">{{name}}</option></select></label>
         <label>计费单位<select v-model="p.unit" @change="update"><option value="sku">每SKU</option><option value="piece">每片</option><option value="hole">每孔</option><option value="metre">每米</option><option value="area">每㎡</option></select></label>
         <label>工艺单价<input v-model.number="p.unit_price" type="number" min="0" step="any" @input="update" /></label>
         <label>工艺系数<input v-model.number="p.multiplier" type="number" min="0.0001" step="any" @input="update" /></label>
         <button type="button" @click="draft.processes.splice(i,1);update()">移除此工艺</button>
       </div>
-      <button type="button" @click="draft.processes.push({code:'slot',unit:'sku',unit_price:0,multiplier:1});update()">添加工艺</button>
+      <button type="button" :disabled="draft.processes.length>=Object.keys(processNames).length" @click="addProcess">添加工艺</button>
       </details>
     </template>
   </section>
@@ -37,6 +37,7 @@ const props=defineProps<{modelValue:string;hideMaterial?:boolean}>();const emit=
 const draft=ref<CostModel>(emptyCostModel())
 watch(()=>props.modelValue,v=>{try {draft.value={...emptyCostModel(),...JSON.parse(v)}}catch{draft.value=emptyCostModel()}},{immediate:true})
 function update(){emit('update:modelValue',JSON.stringify(draft.value))}
+function addProcess(){const code=Object.keys(processNames).find(code=>!draft.value.processes.some(p=>p.code===code));if(!code)return;draft.value.processes.push({code,unit:'sku',unit_price:0,multiplier:1});update()}
 </script>
 <style scoped>
 .extras{grid-column:1/-1}.model-editor details{padding:10px 0;border-top:1px solid rgb(var(--yb-border))}.model-editor summary{font-size:13px;cursor:pointer;padding:4px 0 8px}

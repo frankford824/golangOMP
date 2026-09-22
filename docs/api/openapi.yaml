@@ -3494,6 +3494,7 @@ components:
         remark: { type: string }
     PatchCostRuleRequest:
       type: object
+      description: Omitted effective_from/effective_to preserve the existing bounds; explicit null clears the corresponding bound. Dates are RFC3339 instants. Disabling a rule also disables its superseded ancestors atomically to prevent older prices resurfacing. Historical references and previously calculated costs are retained.
       properties:
         rule_name: { type: string }
         rule_version:
@@ -3550,6 +3551,24 @@ components:
         governance_note: { type: string }
         source: { type: string }
         remark: { type: string }
+    CostSyncState:
+      type: object
+      description: One synchronization state per system-generated SKU. baseline means replica equality only, not fresh ERP verification. A local manual lock blocks conflicting inbound prices; ERP-origin protection permits subsequent ERP-only changes but prevents rule recomputation overwriting that price.
+      properties:
+        sku_code: { type: string }
+        local_cost: { type: number, nullable: true }
+        erp_cost: { type: number, nullable: true }
+        revision: { type: integer, format: int64 }
+        ack_revision: { type: integer, format: int64 }
+        projected_revision: { type: integer, format: int64 }
+        erp_revision: { type: integer, format: int64 }
+        manual_lock: { type: boolean }
+        manual_origin: { type: string, enum: ['', local, erp] }
+        local_confirmed: { type: boolean }
+        status: { type: string, enum: [baseline, observe, pending, retry, conflict, synced, no_price] }
+        needs_check: { type: boolean }
+        reason: { type: string }
+        checked_at: { type: string, format: date-time, nullable: true }
     CostFace:
       type: object
       required: [width_m, height_m, count]
@@ -8576,6 +8595,88 @@ paths:
                 properties:
                   data:
                     $ref: '#/components/schemas/WorkflowTraceEvent'
+  /v1/cost-management/sync-states:
+    get:
+      summary: List current SKU cost synchronization and conflicts
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [catalog.view]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [baseline, observe, pending, retry, conflict, synced, no_price] }
+        - in: query
+          name: keyword
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Current states, not a claim that ERP upstream delivery is real-time
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CostSyncState' } }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+                  coverage:
+                    type: object
+                    properties:
+                      total: { type: integer, format: int64 }
+                      tracked: { type: integer, format: int64 }
+                      verified: { type: integer, format: int64 }
+                      conflicts: { type: integer, format: int64 }
+                      unpriced: { type: integer, format: int64 }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/cost-management/sync-states/{sku}/resolve:
+    post:
+      summary: Confirm which cost to retain after fresh ERP verification
+      description: Manual decisions use both local revision and ERP revision. A newer price returns 409. ERP choice updates canonical SKU and local mirrors atomically without echoing the price outbound. Local choice queues a cost-only write and remains pending until ERP readback agrees. Historical amounts are not bulk overwritten.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [erp.manage]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      parameters:
+        - in: path
+          name: sku
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision, erp_revision, choice, reason]
+              properties:
+                revision: { type: integer, format: int64, minimum: 1 }
+                erp_revision: { type: integer, format: int64, minimum: 0 }
+                choice: { type: string, enum: [local, erp] }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: Decision accepted; local choice is not yet an ERP acknowledgement
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      accepted: { type: boolean }
+                      sku_code: { type: string }
+        '400': { description: Invalid decision }
+        '409': { description: A price changed; refresh before resolving }
+        '401': { description: Unauthenticated }
+        '403': { description: Requires ERP management permission }
   /v1/cost-management/dashboard:
     get:
       summary: Get current SKU cost issue dashboard

@@ -151,6 +151,9 @@ func (s *taskService) TriggerFiling(ctx context.Context, p TriggerTaskFilingPara
 	}
 	payloadHash := sha256Hex(hashPayloadJSON)
 	previousHash := strings.TrimSpace(detail.LastFilingPayloadHash)
+	if s.costSyncNotify != nil && sameFilingBusinessIgnoringCost(detail.LastFilingPayloadJSON, payloads) {
+		previousHash = payloadHash
+	}
 	detail.FilingTriggerSource = string(p.Source)
 	detail.LastFilingPayloadHash = payloadHash
 	detail.LastFilingPayloadJSON = string(payloadJSON)
@@ -768,11 +771,19 @@ func (s *taskService) persistTaskFilingState(
 	skippedReason string,
 ) error {
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
-			return err
-		}
-		if err := s.syncSingleSKUItemCostProjectionFromDetail(ctx, tx, task, detail); err != nil {
-			return err
+		if writer, ok := s.taskRepo.(interface {
+			UpdateDetailFilingOnly(context.Context, repo.Tx, *domain.TaskDetail) error
+		}); ok {
+			if err := writer.UpdateDetailFilingOnly(ctx, tx, detail); err != nil {
+				return err
+			}
+		} else {
+			if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
+				return err
+			}
+			if err := s.syncSingleSKUItemCostProjectionFromDetail(ctx, tx, task, detail); err != nil {
+				return err
+			}
 		}
 		if len(itemResults) > 0 && isBatchNewProductTask(task) {
 			if updater, ok := s.taskRepo.(taskSKUItemSingleFilingProjectionUpdater); ok {
@@ -1044,6 +1055,36 @@ func normalizeTaskFilingPayloadForHash(payload taskFilingPayload) domain.ERPProd
 		normalized.TaskContext = &ctxCopy
 	}
 	return normalized
+}
+func sameFilingBusinessIgnoringCost(previous string, current []taskFilingPayload) bool {
+	if strings.TrimSpace(previous) == "" {
+		return false
+	}
+	var envelope struct {
+		Items []domain.ERPProductUpsertPayload `json:"items"`
+	}
+	if json.Unmarshal([]byte(previous), &envelope) != nil {
+		return false
+	}
+	old := envelope.Items
+	if old == nil {
+		var item domain.ERPProductUpsertPayload
+		if json.Unmarshal([]byte(previous), &item) != nil {
+			return false
+		}
+		old = []domain.ERPProductUpsertPayload{item}
+	}
+	if len(old) != len(current) {
+		return false
+	}
+	for i, p := range current {
+		a, _ := json.Marshal(omitCost(normalizeTaskFilingPayloadForHash(taskFilingPayload{Payload: old[i]})))
+		b, _ := json.Marshal(omitCost(normalizeTaskFilingPayloadForHash(p)))
+		if !bytes.Equal(a, b) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeTaskFilingPayloadsForHash(payloads []taskFilingPayload) interface{} {

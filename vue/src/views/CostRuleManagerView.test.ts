@@ -59,12 +59,28 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('requires confirmation to retire a price without repricing old SKUs',async()=>{
+    const wrapper=mount(CostRuleManagerView);await flushPromises()
+    await wrapper.findAll('button').find(b=>b.text()==='停用此计价')!.trigger('click');expect(mocks.updateCostRule).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(b=>b.text()==='确认停用（保留历史）')!.trigger('click');await flushPromises()
+    expect(mocks.updateCostRule).toHaveBeenCalledWith(11,expect.objectContaining({is_active:false}))
+    expect(mocks.applyRun).not.toHaveBeenCalled();expect(mocks.syncRun).not.toHaveBeenCalled()
+  })
+  it('clears a previous end date explicitly when choosing long term validity',async()=>{
+    mocks.listCostRules.mockResolvedValue({data:{data:[{rule_id:11,rule_name:'KT',category_code:'KT_BOARD',rule_type:'fixed_unit_price',base_price:12,is_active:true,effective_to:'2027-01-01T00:00:00Z'}]}})
+    const wrapper=mount(CostRuleManagerView,{attachTo:document.body});await flushPromises()
+    await wrapper.findAll('button').find(b=>b.text()==='编辑名称 / 价格 / 时间')!.trigger('click');await flushPromises()
+    const end=document.querySelectorAll<HTMLSelectElement>('.price-timing select')[1]!
+    end.value='never';end.dispatchEvent(new Event('change',{bubbles:true}));await flushPromises()
+    document.querySelector('form.modal-card')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await flushPromises()
+    expect(mocks.updateCostRule).toHaveBeenCalledWith(11,expect.objectContaining({effective_to:null}))
+  })
   it('renders print prices as two editable business fields without exposing internal configuration',async()=>{
     mocks.listCostRules.mockResolvedValue({data:{data:[{rule_id:11,rule_name:'A4打印',category_code:'KT_BOARD',rule_type:'size_based_formula',formula_expression:'print_side:single=0.3,double=0.4',priority:10,is_active:true,source:'phase_020_sample'}]}})
     const wrapper=mount(CostRuleManagerView,{attachTo:document.body});await flushPromises()
     expect(wrapper.text()).toContain('单面 0.3 元/张，双面 0.4 元/张')
     expect(wrapper.text()).not.toContain('print_side:')
-    await wrapper.findAll('button').find(b=>b.text()==='编辑')!.trigger('click');await flushPromises()
+    await wrapper.findAll('button').find(b=>b.text()==='编辑名称 / 价格 / 时间')!.trigger('click');await flushPromises()
     const form=document.querySelector('form.modal-card')!
     expect(form.textContent).toContain('单面价格（元/张）');expect(form.textContent).not.toMatch(/优先级|面积阈值|含税倍率|替代规则 ID|尺寸公式|旧参数/)
     form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));await flushPromises()
@@ -193,7 +209,7 @@ describe('CostRuleManagerView', () => {
   it('saves a rule and creates only an impact preview', async () => {
     const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
     await flushPromises()
-    await wrapper.findAll('button').find((button) => button.text() === '编辑')?.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === '编辑名称 / 价格 / 时间')?.trigger('click')
     await flushPromises()
     const form = document.body.querySelector('form.modal-card')
     expect(form).not.toBeNull()
@@ -235,7 +251,7 @@ describe('CostRuleManagerView', () => {
     }] } })
     const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
     await flushPromises()
-    await wrapper.findAll('button').find((button) => button.text() === '编辑')?.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === '编辑名称 / 价格 / 时间')?.trigger('click')
     await flushPromises()
     expect(document.body.textContent).toContain('适用产品关键词')
     expect(document.body.textContent).not.toContain('keyword_area_unit_price:')

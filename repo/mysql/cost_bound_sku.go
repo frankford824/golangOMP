@@ -3,6 +3,7 @@ package mysqlrepo
 import (
 	"context"
 	"strings"
+	"time"
 	"workflow/domain"
 	"workflow/repo"
 )
@@ -16,14 +17,15 @@ const costBoundSKUFrom = ` FROM task_sku_items s
  UPPER(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(s.product_i_id,''),NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.variant_json,'$.product_i_id')),''),NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.variant_json,'$.i_id')),''),'')),' ',''),'　',''))
  WHERE COALESCE(eb.rule_group,pb.rule_group) = ? AND s.sku_code <> ''
  AND EXISTS (SELECT 1 FROM cost_rules cr WHERE cr.category_code = COALESCE(eb.rule_group,pb.rule_group)
- AND cr.is_active = 1 AND (cr.effective_from IS NULL OR cr.effective_from <= NOW())
- AND (cr.effective_to IS NULL OR cr.effective_to >= NOW()))`
+ AND cr.is_active = 1 AND (cr.effective_from IS NULL OR cr.effective_from <= ?)
+ AND (cr.effective_to IS NULL OR cr.effective_to >= ?))`
 
 func (r *costRuleBindingRepo) ListBoundSKUs(ctx context.Context, f repo.CostRuleBindingListFilter) ([]*domain.CostBoundSKU, int64, error) {
 	ctx, cancel := mysqlReadQueryContext(ctx)
 	defer cancel()
 	from := costBoundSKUFrom
-	args := []interface{}{strings.TrimSpace(f.RuleGroup)}
+	now := time.Now().UTC()
+	args := []interface{}{strings.TrimSpace(f.RuleGroup), now, now}
 	if q := strings.TrimSpace(f.Keyword); q != "" {
 		from += ` AND (s.sku_code LIKE ? OR s.product_name_snapshot LIKE ? OR COALESCE(eb.i_id_raw,pb.i_id_raw) LIKE ?)`
 		like := "%" + q + "%"

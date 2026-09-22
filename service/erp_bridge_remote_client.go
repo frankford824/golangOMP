@@ -684,6 +684,28 @@ func (c *remoteERPBridgeClient) GetProductByID(ctx context.Context, id string) (
 	return nil, &erpBridgeRemoteProductNotFoundError{QueryID: id}
 }
 
+// A bounded read-only baseline pass avoids thousands of one-SKU API calls.
+func (c *remoteERPBridgeClient) BatchCostProducts(ctx context.Context, ids []string) ([]*domain.ERPProduct, error) {
+	if len(ids) == 0 || len(ids) > 50 {
+		return nil, fmt.Errorf("cost batch must contain 1-50 SKUs")
+	}
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "" || strings.Contains(id, ",") {
+			return nil, fmt.Errorf("invalid SKU in cost batch")
+		}
+	}
+	raw, _ := json.Marshal(map[string]string{"id": strings.Join(ids, ",")})
+	body, err := c.doRequestWithRetry(ctx, http.MethodPost, c.skuQueryPath, nil, raw, "jst_sku_query_by_id")
+	if err != nil {
+		return nil, err
+	}
+	rows, _, err := jstExtractSkuRows(body)
+	if err != nil {
+		return nil, err
+	}
+	return jstMapsToERPProducts(rows, ""), nil
+}
+
 func (c *remoteERPBridgeClient) QueryCombineSKUs(ctx context.Context, filter domain.JSTCombineSKUFilter) (*domain.JSTCombineSKUListResponse, error) {
 	if !strings.EqualFold(strings.TrimSpace(c.authMode), "openweb") {
 		return nil, fmt.Errorf("%w: remote erp combine sku query requires ERP_REMOTE_AUTH_MODE=openweb", ErrERPRemoteOpenWebAuthRequired)
@@ -1291,6 +1313,12 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 		}
 		payload = normalizeERPProductUpsertPayload(payload)
 		skuID := firstNonEmptyString(payload.SKUID, payload.SKUCode)
+		if payload.Operation == "cost_sync" {
+			if payload.CostPrice == nil {
+				return nil, fmt.Errorf("cost-only update requires cost_price")
+			}
+			return map[string]interface{}{"items": []map[string]interface{}{{"sku_id": skuID, "c_price": *payload.CostPrice, "cost_price": *payload.CostPrice}}}, nil
+		}
 		item := map[string]interface{}{
 			"sku_id": skuID,
 			"name":   firstNonEmptyString(payload.Name, payload.ProductName, payload.ProductShortName, payload.SKUCode),
