@@ -427,6 +427,8 @@ describe('TaskDetailV8View business context', () => {
       manual_cost_override: true,
       manual_cost_override_reason: '供应商报价调整',
     }))
+    expect(dialog().textContent).toContain('任务成本已保存；ERP 价格仍需核对')
+    expect(dialog().textContent).toContain('ERP 如有不同价格，需管理员在“成本规则 → 成本同步”确认')
   })
 
   it('lets the creator update business fields and audited manual cost on their own active batch task', async () => {

@@ -53,6 +53,7 @@
         <details class="cost-specification" :open="!!variant(item).cost_input"><summary>计价规格：平面 / 多面 / 展开 / 工艺</summary><p v-if="variant(item).cost_input">本 SKU 按以下计价规格计算，上方尺寸仅保留历史参考。</p><CostInputFields v-model="drafts[itemKey(item)].costInput" :disabled="!canEdit || isSaving(item)" @update:model-value="drafts[itemKey(item)].costInputEdited=true" /></details>
         <label>当前/人工成本<input v-model.trim="drafts[itemKey(item)].costPrice" :disabled="!canEditCost || isSaving(item)" inputmode="decimal" :placeholder="canEditCost ? '修改后按人工成本保存' : '当前账号不可修改成本'" /></label>
         <label>成本调整原因<input v-model.trim="drafts[itemKey(item)].costReason" :disabled="!canEditCost || isSaving(item)" :required="costChanged(item)" placeholder="人工改成本时必填" /></label>
+        <p v-if="canEditCost" class="cost-sync-hint">人工成本先保存到任务。ERP 如有不同价格，需管理员在“成本规则 → 成本同步”确认后才会更新。</p>
         <div class="row-actions">
           <p v-if="messages[itemKey(item)]" :class="{ error: failures[itemKey(item)] }" role="status">{{ messages[itemKey(item)] }}</p>
           <button v-if="canEdit" type="submit" :disabled="isSaving(item)">{{ isSaving(item) ? '保存中…' : '保存该 SKU' }}</button>
@@ -248,8 +249,8 @@ watch(
   () => props.items,
   (items) => {
     drafts.value = Object.fromEntries(items.map((item) => [itemKey(item), createDraft(item)]))
-    messages.value = {}
-    failures.value = {}
+    messages.value = Object.fromEntries(items.map((item) => [itemKey(item), messages.value[itemKey(item)] || '']))
+    failures.value = Object.fromEntries(items.map((item) => [itemKey(item), failures.value[itemKey(item)] || false]))
   },
   { immediate: true },
 )
@@ -303,7 +304,9 @@ async function save(item: SKUItem) {
         remark: '任务详情逐 SKU 成本维护',
       })
     }
-    messages.value[key] = '已保存。'
+    messages.value[key] = shouldUpdateCost
+      ? '任务成本已保存；ERP 价格仍需核对。如两端不同，请联系管理员在“成本规则 → 成本同步”确认。'
+      : '已保存。'
     emit('saved')
   } catch (cause) {
     failures.value[key] = true
@@ -315,7 +318,7 @@ async function save(item: SKUItem) {
 </script>
 
 <style scoped>
-.cost-specification{grid-column:1/-1}.cost-specification summary{padding:10px 0;cursor:pointer;font-weight:700}
+.cost-specification{grid-column:1/-1}.cost-specification summary{padding:10px 0;cursor:pointer;font-weight:700}.cost-sync-hint{grid-column:1/-1;margin:0;color:rgb(var(--yb-text-muted));font-size:11px;line-height:1.5}
 .sku-editor{display:grid;gap:12px;margin-top:10px}.sku-editor-row{overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:13px;background:rgb(var(--yb-surface))}.sku-editor-row>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.sku-editor-row header div{min-width:0;display:grid;gap:3px}.sku-editor-row header strong{color:rgb(var(--yb-brand));font:800 12px var(--yb-font-data)}.sku-editor-row header span:not(.edit-state){overflow:hidden;color:rgb(var(--yb-text-muted));font-size:12px;text-overflow:ellipsis;white-space:nowrap}.edit-state{flex:0 0 auto;padding:3px 8px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-size:10px;font-weight:750}.sku-reference-strip{display:grid;gap:9px;padding:11px 14px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-brand-soft)/.28)}.reference-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.reference-heading strong{color:rgb(var(--yb-text));font-size:12px}.reference-heading span{color:rgb(var(--yb-text-muted));font-size:11px}.reference-list{display:flex;flex-wrap:wrap;gap:8px}.reference-list a{display:flex;max-width:280px;align-items:center;gap:8px;padding:6px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-body));font-size:11px;text-decoration:none}.reference-list a>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-list img,.reference-file-mark{width:34px;height:34px;flex:0 0 34px;border-radius:7px;object-fit:cover}.reference-file-mark{display:grid;place-items:center;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text-muted));font-size:9px;font-weight:800}.sku-editor-row form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}.sku-editor-row label{min-width:0;display:grid;gap:5px;color:rgb(var(--yb-text-muted));font-size:11px;font-weight:700}.sku-editor-row label.wide{grid-column:span 2}.sku-editor-row input,.sku-editor-row textarea{width:100%;min-height:36px;padding:8px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font:500 12px var(--yb-font-sans);box-sizing:border-box}.sku-editor-row textarea{resize:vertical}.sku-editor-row input:disabled,.sku-editor-row textarea:disabled{background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text-muted))}.row-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:12px}.row-actions p{margin:0;color:rgb(var(--yb-success-strong));font-size:11px}.row-actions p.error{color:rgb(var(--yb-danger-text))}.row-actions button{min-height:36px;padding:0 13px;border:0;border-radius:9px;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));font-size:12px;font-weight:750;cursor:pointer}.row-actions button:disabled{opacity:.55;cursor:wait}@media(max-width:900px){.sku-editor-row form{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.reference-heading{align-items:flex-start;flex-direction:column}.reference-list a{max-width:100%}.sku-editor-row form{grid-template-columns:1fr}.sku-editor-row label.wide{grid-column:auto}}
 .reference-list button{display:flex;max-width:280px;align-items:center;gap:8px;padding:6px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-body));font:inherit;font-size:11px;text-align:left;cursor:zoom-in}.reference-list button>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:560px){.reference-list button{max-width:100%}}
 </style>
