@@ -11,9 +11,9 @@ import (
 // Same precedence as pricing: ERP style binding first, then product style.
 // Do not join historical calculation snapshots or require ERP filing success.
 const costBoundSKUFrom = ` FROM task_sku_items s
- LEFT JOIN cost_rule_bindings eb ON eb.is_active = 1 AND eb.normalized_i_id =
+ LEFT JOIN cost_rule_bindings eb ON eb.normalized_i_id_active =
  UPPER(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.variant_json,'$.erp_i_id')),''),NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.variant_json,'$.erp_product_i_id')),''),'')),' ',''),'　',''))
- LEFT JOIN cost_rule_bindings pb ON pb.is_active = 1 AND pb.normalized_i_id =
+ LEFT JOIN cost_rule_bindings pb ON pb.normalized_i_id_active =
  UPPER(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(s.product_i_id,''),NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.variant_json,'$.product_i_id')),''),NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.variant_json,'$.i_id')),''),'')),' ',''),'　',''))
  WHERE COALESCE(eb.rule_group,pb.rule_group) = ? AND s.sku_code <> ''
  AND EXISTS (SELECT 1 FROM cost_rules cr WHERE cr.category_code = COALESCE(eb.rule_group,pb.rule_group)

@@ -14,7 +14,7 @@ func TestBoundSKUQueryUsesLiveBindingAndIncludesUnfiledSKUs(t *testing.T) {
 		t.Fatal("unbalanced query parentheses")
 	}
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(_, query string) error {
-		for _, required := range []string{"FROM task_sku_items s", "eb.is_active = 1", "pb.is_active = 1", "COALESCE(eb.rule_group,pb.rule_group) = ?", "cr.effective_from", "cr.effective_to", "s.sku_code LIKE ?"} {
+		for _, required := range []string{"FROM task_sku_items s", "eb.normalized_i_id_active =", "pb.normalized_i_id_active =", "COALESCE(eb.rule_group,pb.rule_group) = ?", "cr.effective_from", "cr.effective_to", "s.sku_code LIKE ?"} {
 			if !strings.Contains(query, required) {
 				return fmt.Errorf("missing %s", required)
 			}
