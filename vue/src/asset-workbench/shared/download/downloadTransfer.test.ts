@@ -1,80 +1,34 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
+import { transferDownload } from './downloadTransfer'
 
-import { transferDownload, type DownloadTransferProgress } from './downloadTransfer'
-
-describe('asset workbench streamed download transfer', () => {
-  it('reports real byte progress and speed before saving the file', async () => {
-    let nowValue = 0
-    const chunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5, 6])]
-    let chunkIndex = 0
-    const body = {
-      getReader: () => ({
-        read: async () => {
-          nowValue += 500
-          if (chunkIndex >= chunks.length) return { done: true, value: undefined }
-          return { done: false, value: chunks[chunkIndex++] }
-        },
-      }),
-    }
-    const response = {
-      ok: true,
-      status: 200,
-      headers: { get: (name: string) => name.toLowerCase() === 'content-length' ? '6' : 'application/octet-stream' },
-      body,
-    } as unknown as Response
-    const progress: DownloadTransferProgress[] = []
-    const saveBlob = vi.fn()
-    const fetcher = vi.fn().mockResolvedValue(response)
-
-    const result = await transferDownload(
-      { downloadUrl: 'https://oss.example.com/file.psd', filename: 'file.psd', fileSize: 6 },
-      new AbortController().signal,
-      (value) => progress.push(value),
-      {
-        fetcher,
-        now: () => nowValue,
-        progressIntervalMs: 250,
-        saveBlob,
-      },
-    )
-
-    expect(result.mode).toBe('tracked')
-    expect(result.receivedBytes).toBe(6)
-    expect(result.speedBytesPerSecond).toBeGreaterThan(0)
-    expect(progress.map((item) => item.progress)).toEqual([50, 99, 100])
-    expect(saveBlob).toHaveBeenCalledOnce()
-    expect(saveBlob.mock.calls[0][0]).toBeInstanceOf(Blob)
-    expect(fetcher).toHaveBeenCalledWith('https://oss.example.com/file.psd', expect.objectContaining({ credentials: 'same-origin' }))
+describe('native asset download handoff', () => {
+  it.each([0, 1024, 197_000_000, 5 * 1024 ** 3])('hands off %s bytes without fetching the body', async (size) => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('must not fetch'))
+    const handoff = vi.fn()
+    const progress = vi.fn()
+    try {
+      const result = await transferDownload(
+        { downloadUrl: 'https://oss.example.com/file.psd', filename: '设计源文件.psd', fileSize: size },
+        new AbortController().signal, progress, { handoff },
+      )
+      expect(result).toEqual({ mode: 'browser', receivedBytes: 0, totalBytes: size, speedBytesPerSecond: 0 })
+      expect(handoff).toHaveBeenCalledOnce()
+      expect(progress).not.toHaveBeenCalled()
+      expect(fetcher).not.toHaveBeenCalled()
+    } finally { fetcher.mockRestore() }
   })
 
-  it('hands the URL to the browser when cross-origin streaming is unavailable', async () => {
+  it('does not initiate an already cancelled download', async () => {
+    const controller = new AbortController(); controller.abort()
     const handoff = vi.fn()
-    const result = await transferDownload(
-      { downloadUrl: 'https://oss.example.com/file.psd', filename: 'file.psd', fileSize: 1024 },
-      new AbortController().signal,
-      vi.fn(),
-      {
-        fetcher: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
-        handoff,
-      },
-    )
-
-    expect(result.mode).toBe('browser')
-    expect(handoff).toHaveBeenCalledOnce()
+    await expect(transferDownload({ downloadUrl: 'https://oss.example.com/file', filename: 'a', fileSize: 1 }, controller.signal, vi.fn(), { handoff })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(handoff).not.toHaveBeenCalled()
   })
 
-  it('does not buffer oversized files in browser memory', async () => {
+  it('rejects executable URL schemes', async () => {
     const handoff = vi.fn()
-    const fetcher = vi.fn()
-    const result = await transferDownload(
-      { downloadUrl: 'https://oss.example.com/large.zip', filename: 'large.zip', fileSize: 2048 },
-      new AbortController().signal,
-      vi.fn(),
-      { fetcher, handoff, maxBufferedBytes: 1024 },
-    )
-
-    expect(result.mode).toBe('browser')
-    expect(fetcher).not.toHaveBeenCalled()
-    expect(handoff).toHaveBeenCalledOnce()
+    await expect(transferDownload({ downloadUrl: 'javascript:void(0)', filename: 'a', fileSize: 1 }, new AbortController().signal, vi.fn(), { handoff })).rejects.toThrow('协议无效')
+    expect(handoff).not.toHaveBeenCalled()
   })
 })

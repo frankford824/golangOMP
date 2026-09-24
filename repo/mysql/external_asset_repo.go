@@ -925,6 +925,37 @@ func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain
 	if err != nil {
 		return err
 	}
+	if next := item.MediaFingerprint; next != nil {
+		if err = checkMediaEpoch(ctx, tx, next); err != nil {
+			return err
+		}
+		old, e := mediaFingerprintForUpdate(ctx, tx, hash)
+		if e != nil {
+			return e
+		}
+		if next.ScanID != "" && old != nil && old.SourceVersion != "" && old.Size == next.Size && old.ModifiedNS == next.ModifiedNS && old.ChangedNS == next.ChangedNS && old.FileIdentity == next.FileIdentity && old.RootIdentity == next.RootIdentity {
+			next.SourceVersion = old.SourceVersion
+		}
+		if mediaEventIsStale(old, next) {
+			if next.ScanID != "" {
+				if _, e = tx.ExecContext(ctx, `UPDATE external_asset_source_fingerprints SET scan_id=? WHERE origin_path_hash=?`, next.ScanID, hash); e != nil {
+					return e
+				}
+			}
+			return tx.Commit()
+		}
+		changed := old != nil && old.SourceVersion != "" && old.SourceVersion != next.SourceVersion
+		if (old == nil || old.SourceVersion == "") && externalAssetNeedsOSSRealignment(existing, sourceFingerprint, item) {
+			changed = true
+		}
+		if changed {
+			// Preserve old object references as evidence, but exclude them from
+			// current-ready exports until the new source has a verified copy.
+			if _, e = tx.ExecContext(ctx, `UPDATE external_asset_records SET oss_sync_status='pending',preview_status='pending' WHERE origin_path_hash=?`, hash); e != nil {
+				return e
+			}
+		}
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO external_asset_records (
 		  provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
@@ -956,13 +987,18 @@ func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain
 	if err := maintainExternalAssetDirectoryIndex(ctx, tx, existing, item); err != nil {
 		return err
 	}
-	if externalAssetNeedsOSSRealignment(existing, sourceFingerprint, item) {
+	if item.MediaFingerprint == nil && externalAssetNeedsOSSRealignment(existing, sourceFingerprint, item) {
 		if err := resetExternalAssetOSSStateForRealignment(ctx, tx, hash); err != nil {
 			return err
 		}
 	}
 	if err := upsertExternalAssetSourceFingerprint(ctx, tx, hash, item); err != nil {
 		return err
+	}
+	if item.MediaFingerprint != nil {
+		if err = writeMediaFingerprint(ctx, tx, hash, item.MediaFingerprint); err != nil {
+			return err
+		}
 	}
 	if r.embeddingVersion != "" && r.embeddingVersion != "disabled" && !item.IsDir {
 		if err := upsertAIExternalAssetProjection(ctx, tx, hash, r.embeddingVersion); err != nil {

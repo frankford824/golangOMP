@@ -4,6 +4,1348 @@
  */
 
 export interface paths {
+    "/v1/assets/media/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discover enabled company LAN delivery without probing private networks */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Currently enabled delivery capability; no credentials are returned. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                lan_available: boolean;
+                                gateway_id: string;
+                                gateway_url: string;
+                                strict_previews: boolean;
+                            };
+                        };
+                    };
+                };
+                /** @description Login required */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Asset access denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/media/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare an immutable external selection ZIP */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetMediaPackageRequest"];
+                };
+            };
+            responses: {
+                /** @description Authorized media operation result. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetDownloadInfo"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Selection contains unavailable or changed members; no partial ZIP is silently generated. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                code: string;
+                                message: string;
+                                trace_id?: string;
+                                details?: {
+                                    available_items?: components["schemas"]["AssetMediaSelection"][];
+                                    failures?: {
+                                        resource_id?: string;
+                                        error_code?: string;
+                                    }[];
+                                };
+                            };
+                        };
+                    };
+                };
+                /** @description Source disabled or missing */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-media/workers/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Claim NAS jobs with fenced leases */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        worker_id: string;
+                        limit?: number;
+                        /**
+                         * @description Reserve one renderer slot separately from two transfer slots.
+                         * @enum {string}
+                         */
+                        class?: "render" | "transfer";
+                    };
+                };
+            };
+            responses: {
+                /** @description Authorized media operation result. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaWorkerClaim"][];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Lease or source version conflict; ZIP failures include explicit available_items */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or missing */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-media/workers/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Renew NAS lease and report actual phase progress */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetMediaWorkerRequest"];
+                };
+            };
+            responses: {
+                /** @description Authorized media operation result. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaAccepted"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Lease or source version conflict; ZIP failures include explicit available_items */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or missing */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-media/workers/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Obtain or resume scoped multipart upload authorization */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetMediaUploadRequest"];
+                };
+            };
+            responses: {
+                /** @description Authorized media operation result. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaUploadResponse"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Lease or source version conflict; ZIP failures include explicit available_items */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or missing */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-media/workers/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit a version-checked NAS result or failure */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetMediaWorkerRequest"];
+                };
+            };
+            responses: {
+                /** @description Authorized media operation result. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaAccepted"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid credential */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource permission denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Lease or source version conflict; ZIP failures include explicit available_items */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or missing */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/media/delivery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve authorized version-bound cloud or LAN media delivery */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AssetMediaAccessRequest"];
+                };
+            };
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetDownloadInfo"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/media/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List current actor preparation requests from the last 24 hours and unfinished work */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaRequest"][];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/media/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Cancel only the current actor waiting subscription */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    request_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Own waiting subscription cancelled; shared work continues. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/media/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read owned preparation task after current authorization */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    job_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaJob"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/assets/media/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry transient preparation failure with cooldown and deduplication */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    job_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaJob"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/asset-media/validate-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reauthorize a signed gateway ticket against current user and source state */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        ticket: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaReadTarget"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/external-assets/scans/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register a complete NAS scan */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ExternalMediaScan"];
+                };
+            };
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaScanResponse"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/external-assets/scans/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Store immutable part of a complete NAS scan */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ExternalMediaScanPart"];
+                };
+            };
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaScanResponse"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/integration/external-assets/scans/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate and queue a complete NAS scan */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ExternalMediaScan"];
+                };
+            };
+            responses: {
+                /** @description Authorized media response. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["AssetMediaScanResponse"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid identity */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Current permission or resource scope denied */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Resource or owned request not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source version changed or operation conflicts with current state */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Source disabled or source file unavailable */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Media capability temporarily unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cost/skus": {
         parameters: {
             query?: never;
@@ -21548,6 +22890,22 @@ export interface components {
             legacy_alias_fallback?: boolean;
         };
         AssetDownloadInfo: {
+            /** @description Immutable source version selected after authorization. */
+            source_version?: string;
+            /** @description Stable representation identity independent of expiring URL signatures. */
+            content_id?: string;
+            /** @enum {string} */
+            rendition?: "thumbnail" | "preview" | "original";
+            /** @enum {string} */
+            state?: "ready" | "queued" | "processing" | "failed" | "unsupported" | "missing" | "source_disabled" | "temporarily_unavailable";
+            job_id?: string;
+            request_id?: string;
+            /** @description Suggested preparation polling delay in seconds. */
+            retry_after?: number;
+            error_code?: string;
+            retryable?: boolean;
+            lan_delivery?: components["schemas"]["AssetMediaDelivery"];
+            cloud_delivery?: components["schemas"]["AssetMediaDelivery"];
             /** @description Current OSS-only business runtime prefers `direct`; `proxy` is compatibility-only fallback. */
             download_mode?: string;
             download_url?: string | null;
@@ -21565,6 +22923,14 @@ export interface components {
             expires_at?: string | null;
             /** @description Ordered set files when a fixed finalized resource revision contains multiple products. */
             items?: components["schemas"]["AssetDownloadInfo"][];
+        };
+        AssetMediaDelivery: {
+            state: string;
+            /** @description Short-lived authorized delivery URL; absent while unavailable. */
+            url?: string;
+            gateway_id?: string;
+            /** Format: date-time */
+            expires_at?: string;
         };
         /** @description Provide at least one system asset ID in `asset_ids` or resource ID in `resource_ids`. External resources use `ext-{id}` or `external:{id}` resource IDs. */
         AssetBatchDownloadRequest: {
@@ -22475,6 +23841,16 @@ export interface components {
         /** @enum {string} */
         ExternalAssetFilesystemEventType: "upsert" | "delete";
         ExternalAssetFilesystemEvent: {
+            root_identity?: string;
+            file_identity?: string;
+            /** Format: int64 */
+            modified_ns?: number;
+            /** Format: int64 */
+            changed_ns?: number;
+            agent_epoch?: string;
+            /** Format: int64 */
+            sequence?: number;
+            scan_id?: string;
             /** @description Stable id generated from operation, normalized origin path, size, and source mtime. Replays are safe. */
             event_id: string;
             type: components["schemas"]["ExternalAssetFilesystemEventType"];
@@ -24019,6 +25395,231 @@ export interface components {
             watermark: number;
             snapshot_version: string;
         };
+        AssetMediaAccessRequest: {
+            /** @enum {string} */
+            resource_kind: "asset" | "task_asset" | "external_asset" | "client_material" | "package";
+            resource_id: string;
+            /**
+             * Format: int64
+             * @description Optional immutable file within an authorized published set.
+             */
+            item_id?: number;
+            /** @enum {string} */
+            purpose: "preview" | "download";
+            /** @enum {string} */
+            rendition?: "thumbnail" | "preview" | "original";
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            delivery: "auto" | "lan" | "cloud";
+            expected_source_version?: string;
+        };
+        AssetMediaJob: {
+            job_id: string;
+            kind: string;
+            /** @enum {string} */
+            pool: "ecs" | "nas" | "scan";
+            resource_id: string;
+            /** @description Frozen user-facing source name or package label. */
+            filename?: string;
+            source_version: string;
+            recipe: string;
+            /** @enum {string} */
+            state: "queued" | "processing" | "retry_wait" | "succeeded" | "failed" | "stale";
+            phase: string;
+            priority: number;
+            attempts: number;
+            /** Format: date-time */
+            next_run_at: string;
+            /** Format: int64 */
+            lease_epoch?: number;
+            /** Format: int64 */
+            processed_bytes: number;
+            /** Format: int64 */
+            total_bytes: number;
+            result?: {
+                [key: string]: unknown;
+            };
+            error_code?: string;
+            retryable: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AssetMediaRequest: {
+            request_id: string;
+            access_reference?: components["schemas"]["AssetMediaAccessReference"];
+            job: components["schemas"]["AssetMediaJob"];
+            cancelled: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AssetMediaReadTarget: {
+            /** @enum {string} */
+            source: "nas" | "oss" | "artifact";
+            content_id: string;
+            source_version: string;
+            relative_path?: string;
+            /** @description Transient scoped origin URL for the trusted gateway; never persist or log. */
+            origin_url?: string;
+            filename: string;
+            mime_type: string;
+            /** Format: int64 */
+            size: number;
+            sha256?: string;
+            crc64?: string;
+            /** Format: int64 */
+            modified_ns?: number;
+            /** Format: int64 */
+            changed_ns?: number;
+            file_identity?: string;
+            root_identity?: string;
+        };
+        ExternalMediaScan: {
+            /** Format: uuid */
+            scan_id: string;
+            agent_id: string;
+            agent_epoch: string;
+            root_identity: string;
+            /** @enum {string} */
+            origin_root: "/p3";
+            /** Format: int64 */
+            start_sequence: number;
+            /** Format: int64 */
+            end_sequence: number;
+            shard_index: number;
+            /** @enum {integer} */
+            shard_count: 2;
+            parts: number;
+            /** Format: int64 */
+            files: number;
+            manifest_sha256: string;
+            read_errors: number;
+        };
+        ExternalMediaScanPart: {
+            /** Format: uuid */
+            scan_id: string;
+            part: number;
+            sha256: string;
+            items: components["schemas"]["ExternalAssetFilesystemEvent"][];
+        };
+        AssetMediaAccessReference: {
+            resource_kind: string;
+            resource_id: string;
+            /** Format: int64 */
+            item_id?: number;
+            /** @enum {string} */
+            purpose: "preview" | "download";
+            /** @enum {string} */
+            rendition: "thumbnail" | "preview" | "original";
+            expected_source_version: string;
+        };
+        AssetMediaSelection: {
+            resource_id: string;
+            source_version: string;
+            filename: string;
+            /** Format: int64 */
+            size: number;
+        };
+        AssetMediaPackageRequest: {
+            items: {
+                resource_id: string;
+                /** @description Optional expected version. When absent the currently authorized version is frozen at creation. */
+                source_version?: string;
+            }[];
+        };
+        AssetMediaObject: {
+            key: string;
+            filename: string;
+            mime_type: string;
+            /** Format: int64 */
+            size: number;
+            sha256: string;
+            crc64?: string;
+            source_version: string;
+            recipe: string;
+        };
+        ExternalMediaResult: {
+            original?: components["schemas"]["AssetMediaObject"];
+            thumbnail?: components["schemas"]["AssetMediaObject"];
+            preview?: components["schemas"]["AssetMediaObject"];
+            package?: components["schemas"]["AssetMediaObject"];
+            source_sha256?: string;
+        };
+        AssetMediaUploadCheckpoint: {
+            object_key: string;
+            upload_id: string;
+            /** Format: int64 */
+            part_size: number;
+            /** Format: int64 */
+            size: number;
+            mime_type: string;
+            sha256: string;
+            crc64: string;
+            complete: boolean;
+            parts?: {
+                part_number: number;
+                etag: string;
+            }[];
+        };
+        AssetMediaWorkerCheckpoint: {
+            uploads: {
+                [key: string]: components["schemas"]["AssetMediaUploadCheckpoint"];
+            };
+        };
+        AssetMediaWorkerClaim: {
+            job: components["schemas"]["AssetMediaJob"];
+            source: components["schemas"]["AssetMediaReadTarget"];
+            inputs?: components["schemas"]["AssetMediaReadTarget"][];
+            checkpoint: components["schemas"]["AssetMediaWorkerCheckpoint"];
+        };
+        AssetMediaWorkerRequest: {
+            job_id: string;
+            worker_id: string;
+            /** Format: int64 */
+            lease_epoch: number;
+            phase?: string;
+            /** Format: int64 */
+            processed_bytes?: number;
+            /** Format: int64 */
+            total_bytes?: number;
+            error_code?: string;
+            retryable?: boolean;
+            result?: components["schemas"]["ExternalMediaResult"];
+        };
+        AssetMediaUploadRequest: components["schemas"]["AssetMediaWorkerRequest"] & {
+            /** @enum {string} */
+            rendition: "thumbnail" | "preview" | "original" | "zip";
+            /** Format: int64 */
+            size: number;
+            sha256: string;
+            crc64: string;
+            complete?: boolean;
+            parts?: {
+                part_number: number;
+                etag: string;
+            }[];
+        };
+        AssetMediaUploadResponse: {
+            /** @description Legacy copy is being verified through the ECS internal endpoint; poll again without uploading. */
+            pending?: boolean;
+            plan?: components["schemas"]["OSSDirectUploadPlan"];
+            checkpoint: components["schemas"]["AssetMediaUploadCheckpoint"];
+        };
+        AssetMediaAccepted: {
+            accepted: boolean;
+        };
+        AssetMediaScanResponse: {
+            scan_id: string;
+            part?: number;
+            job_id?: string;
+            /** @enum {string} */
+            state?: "queued";
+        };
     };
     responses: {
         /** @description Invalid request or business validation failure. */
@@ -25249,7 +26850,9 @@ export interface operations {
     };
     previewTaskAssetRevisionFile: {
         parameters: {
-            query?: never;
+            query?: {
+                rendition?: "preview" | "thumbnail";
+            };
             header?: never;
             path: {
                 task_asset_id: number;
@@ -25308,7 +26911,7 @@ export interface operations {
                 operational_bucket?: "active_tasks" | "design_pending" | "pending_audit" | "handover" | "customization_in_progress" | "overdue" | "due_today" | "today_created";
                 date_from?: string;
                 date_to?: string;
-                /** @description Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document. */
+                /** @description Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Multiple task/SKU codes separated by whitespace (including newlines), commas (English or Chinese), semicolons (English or Chinese), or Chinese enumeration commas match any listed code exactly, including child SKUs; duplicate codes and matching tasks are deduplicated, and data scope, filters and pagination still apply. List mode requires every token to contain ASCII letters and digits with optional hyphens, underscores or dots; other input retains phrase search. Single full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document. */
                 keyword?: string;
                 /** @description Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker. */
                 sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at" | "due_at" | "-due_at" | "task_no" | "-task_no";

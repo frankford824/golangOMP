@@ -1,5 +1,8 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { MediaPreparationPending } from './preparedDownload'
+import http from '@/services/http'
+import { resolveMediaAccess, type MediaAccess } from '@/services/mediaDelivery'
 
 import {
   transferDownload,
@@ -8,7 +11,7 @@ import {
   type DownloadTransferResult,
 } from './downloadTransfer'
 
-export type DownloadCenterStatus = 'queued' | 'preparing' | 'downloading' | 'completed' | 'handed_off' | 'failed' | 'cancelled'
+export type DownloadCenterStatus = 'queued' | 'preparing' | 'waiting' | 'ready' | 'downloading' | 'completed' | 'handed_off' | 'failed' | 'cancelled'
 
 export interface DownloadCenterItem {
   id: string
@@ -22,6 +25,8 @@ export interface DownloadCenterItem {
   progress: number
   status: DownloadCenterStatus
   error?: string
+  requestId?: string
+  jobId?: string
   createdAt: number
   updatedAt: number
 }
@@ -47,12 +52,59 @@ export interface DownloadCenterEnqueueResult {
 const MAX_CONCURRENT_DOWNLOADS = 2
 const MAX_VISIBLE_HISTORY = 60
 
+interface PreparedRequestRow {
+  request_id: string
+  cancelled: boolean
+  access_reference?: MediaAccess
+  created_at: string
+  updated_at: string
+  job: { job_id: string; resource_id: string; filename?: string; state: string; phase: string; processed_bytes: number; total_bytes: number; error_code?: string }
+}
+
 export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter', () => {
   const items = ref<DownloadCenterItem[]>([])
   const panelOpen = ref(false)
   const resolvers = new Map<string, DownloadCenterRequest['resolve']>()
   const transfers = new Map<string, NonNullable<DownloadCenterRequest['transfer']>>()
   const controllers = new Map<string, AbortController>()
+  const preparationNotice = ref('')
+  let restoring = false
+  let sessionEpoch = 0
+  if (typeof window !== 'undefined') window.addEventListener('asset-media-session-reset', () => {
+    sessionEpoch += 1
+    for (const controller of controllers.values()) controller.abort()
+    items.value = []; resolvers.clear(); transfers.clear(); controllers.clear(); panelOpen.value = false
+  })
+
+  async function refreshPreparationRequests() {
+    if (restoring) return
+    restoring = true
+    const epoch = sessionEpoch
+    try {
+      const response = await http.get<{ data: PreparedRequestRow[] }>('/v1/assets/media/requests')
+      if (epoch !== sessionEpoch) return
+      for (const row of response.data.data || []) {
+        const access = row.access_reference
+        if (row.cancelled || !access || access.purpose !== 'download' || access.rendition !== 'original') continue
+        let item = items.value.find((entry) => entry.requestId === row.request_id)
+        if (item && (isActiveStatus(item.status) || item.status === 'handed_off')) continue
+        const status: DownloadCenterStatus = row.job.state === 'succeeded' ? 'ready' : ['failed', 'stale'].includes(row.job.state) ? 'failed' : 'waiting'
+        if (!item) {
+          item = { id: `prepared:${row.request_id}`, key: `prepared:${row.request_id}`, requestId: row.request_id, jobId: row.job.job_id, displayName: row.job.filename || row.job.resource_id, sourceLabel: '后台准备', fileSize: 0, receivedBytes: 0, totalBytes: 0, speedBytesPerSecond: 0, progress: 0, status, createdAt: Date.parse(row.created_at), updatedAt: Date.parse(row.updated_at) }
+          items.value.push(item)
+        }
+        updateItem(item, { status, error: status === 'failed' ? row.job.error_code || '准备失败' : status === 'ready' ? '文件已就绪，点击下载' : `${row.job.phase || '排队'}${row.job.total_bytes > 0 ? ` · ${row.job.processed_bytes}/${row.job.total_bytes} 字节` : ''}` })
+        resolvers.set(item.id, async (signal) => {
+          const info = await resolveMediaAccess(access, signal)
+          if (!info.download_url && (info.state === 'queued' || info.state === 'processing')) throw new MediaPreparationPending(info.request_id || row.request_id, info.job_id || row.job.job_id)
+          if (!info.download_url) throw new Error('文件尚不可下载，请刷新准备状态')
+          return { downloadUrl: info.download_url, filename: info.filename, fileSize: info.file_size, mimeType: info.mime_type }
+        })
+      }
+      preparationNotice.value = ''
+    } catch { preparationNotice.value = '准备记录暂时无法刷新，可稍后重试' }
+    finally { restoring = false }
+  }
 
   const activeItems = computed(() => items.value.filter((item) => isActiveStatus(item.status)))
   const failedItems = computed(() => items.value.filter((item) => item.status === 'failed'))
@@ -70,7 +122,7 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
       .slice(0, MAX_VISIBLE_HISTORY),
   )
   const overallProgress = computed(() => {
-    if (!activeItems.value.length) return completedItems.value.length || handedOffItems.value.length ? 100 : 0
+    if (!activeItems.value.length) return completedItems.value.length && !handedOffItems.value.length ? 100 : 0
     return Math.round(activeItems.value.reduce((sum, item) => sum + item.progress, 0) / activeItems.value.length)
   })
   const summaryText = computed(() => {
@@ -83,6 +135,7 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
 
   function openPanel() {
     panelOpen.value = true
+    void refreshPreparationRequests()
   }
 
   function closePanel() {
@@ -96,7 +149,7 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
       return { item: existing, duplicate: true }
     }
 
-    const retryable = items.value.find((item) => item.key === request.key && (item.status === 'failed' || item.status === 'cancelled'))
+    const retryable = items.value.find((item) => item.key === request.key && (item.status === 'failed' || item.status === 'cancelled' || item.status === 'waiting'))
     if (retryable) {
       resolvers.set(retryable.id, request.resolve)
       if (request.transfer) transfers.set(retryable.id, request.transfer)
@@ -188,7 +241,7 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
 
     const controller = new AbortController()
     controllers.set(id, controller)
-    updateItem(item, { status: 'preparing', progress: 2, error: undefined })
+    updateItem(item, { status: 'preparing', progress: 0, error: undefined })
     try {
       const meta = await resolve(controller.signal)
       if (controller.signal.aborted) throw new DOMException('下载已取消', 'AbortError')
@@ -226,7 +279,9 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
         })
       }
     } catch (error) {
-      if (controller.signal.aborted || isAbortError(error)) {
+      if (error instanceof MediaPreparationPending) {
+        updateItem(item, { status: 'waiting', progress: 0, speedBytesPerSecond: 0, requestId: error.requestId, jobId: error.jobId, error: error.message })
+      } else if (controller.signal.aborted || isAbortError(error)) {
         updateItem(item, { status: 'cancelled', speedBytesPerSecond: 0, error: undefined })
       } else {
         updateItem(item, {
@@ -247,7 +302,7 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
     pumpScheduled = true
     queueMicrotask(() => {
       pumpScheduled = false
-      while (activeItems.value.length < MAX_CONCURRENT_DOWNLOADS) {
+      while (controllers.size < MAX_CONCURRENT_DOWNLOADS) {
         const next = items.value.find((item) => item.status === 'queued')
         if (!next) break
         void runTask(next.id)
@@ -275,6 +330,8 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
     hasActive,
     overallProgress,
     summaryText,
+    preparationNotice,
+    refreshPreparationRequests,
     openPanel,
     closePanel,
     enqueue,

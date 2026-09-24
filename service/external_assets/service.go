@@ -127,6 +127,31 @@ type Service struct {
 	keywordRefreshAsyncFn  func(func())
 	previewPrepareAsyncFn  func(func())
 	ossPrepareWake         chan struct{}
+	mediaJobs              repo.AssetMediaJobRepo
+	mediaConfig            config.AssetMediaConfig
+}
+
+// ConfigureMedia changes this application's source policy only. AList and BFF
+// configuration belongs to their other consumers and is not changed here.
+func (s *Service) ConfigureMedia(jobs repo.AssetMediaJobRepo, cfg config.AssetMediaConfig) {
+	s.mediaJobs = jobs
+	s.mediaConfig = cfg
+	if cfg.QuarkDisabled {
+		s.cfg.Mounts = []MountConfig{{Path: "/p3", Kind: domain.ExternalAssetKindNASLocal, Driver: "Local"}}
+		s.cfg.VisibleRoots = []string{"/p3"}
+		s.cfg.PrepareMounts = []string{"/p3"}
+	}
+	if cfg.NASScanEnabled {
+		s.cfg.EventRoots = []string{"/p3"}
+		s.cfg.FullSyncEnabled = false
+	}
+}
+
+func (s *Service) sourcePolicyError(row *domain.ExternalAssetRecord) *domain.AppError {
+	if row != nil && s.mediaConfig.QuarkDisabled && (row.MountPath != "/p3" || !(row.OriginPath == "/p3" || strings.HasPrefix(row.OriginPath, "/p3/"))) {
+		return domain.NewAppError("source_disabled", "该资源来源已停用，请返回素材库选择当前资源", nil)
+	}
+	return nil
 }
 
 func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
@@ -734,6 +759,25 @@ func (s *Service) schedulePreviewPrepare(rows []*domain.ExternalAssetRecord) {
 	if s == nil || s.repo == nil || len(rows) == 0 {
 		return
 	}
+	if s.versionedMediaEnabled() {
+		ids := []int64{}
+		for _, row := range rows {
+			if row != nil && !row.IsDir && row.Status == domain.ExternalAssetStatusIndexed && canRenderDerivedPreview(row.FileName, row.MimeType) {
+				ids = append(ids, row.ID)
+				if len(ids) == 20 {
+					break
+				}
+			}
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			for _, id := range ids {
+				_, _ = s.ExternalMediaInfo(ctx, id, "thumbnail", "cloud")
+			}
+		}()
+		return
+	}
 	ids := make([]int64, 0, len(rows))
 	seen := map[int64]struct{}{}
 	for _, row := range rows {
@@ -1312,6 +1356,9 @@ func (s *Service) finishSyncRun(ctx context.Context, id int64, status string, sc
 }
 
 func (s *Service) searchBackendReady() bool {
+	if s != nil && s.mediaConfig.NASScanEnabled {
+		return false
+	}
 	return s != nil && ((s.bff != nil && s.bff.Enabled()) || (s.alist != nil && s.alist.Enabled()))
 }
 
@@ -1444,16 +1491,31 @@ func (s *Service) Get(ctx context.Context, id int64) (*domain.ExternalAssetRecor
 	if err != nil || row == nil {
 		return row, err
 	}
+	if appErr := s.sourcePolicyError(row); appErr != nil {
+		return nil, appErr
+	}
 	if !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, nil
+	}
+	if err = s.attachMedia(ctx, row); err != nil {
+		return nil, err
 	}
 	return row, nil
 }
 
 func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.versionedMediaEnabled() {
+		return s.ExternalMediaInfo(ctx, id, "original", domain.AssetMediaOptionsFromContext(ctx).Delivery)
+	}
 	row, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if appErr := s.sourcePolicyError(row); appErr != nil {
+		return nil, appErr
+	}
+	if s.mediaConfig.QuarkDisabled && row != nil && row.Status == domain.ExternalAssetStatusMissing {
+		return nil, domain.ErrNotFound
 	}
 	if row == nil || !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, domain.ErrNotFound
@@ -1487,9 +1549,15 @@ func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDown
 }
 
 func (s *Service) BatchDownloadInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.versionedMediaEnabled() {
+		return s.ExternalMediaInfo(ctx, id, "original", domain.AssetMediaOptionsFromContext(ctx).Delivery)
+	}
 	row, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if appErr := s.sourcePolicyError(row); appErr != nil {
+		return nil, appErr
 	}
 	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, domain.ErrNotFound
@@ -1510,9 +1578,19 @@ func (s *Service) BatchDownloadInfo(ctx context.Context, id int64) (*domain.Asse
 }
 
 func (s *Service) PreviewInfo(ctx context.Context, id int64, renditions ...string) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if s.versionedMediaEnabled() {
+		rendition := "preview"
+		if len(renditions) > 0 && renditions[0] == "thumbnail" {
+			rendition = "thumbnail"
+		}
+		return s.ExternalMediaInfo(ctx, id, rendition, domain.AssetMediaOptionsFromContext(ctx).Delivery)
+	}
 	row, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if appErr := s.sourcePolicyError(row); appErr != nil {
+		return nil, appErr
 	}
 	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, domain.ErrNotFound
@@ -1547,6 +1625,19 @@ func (s *Service) BrowserThumbnailURL(row *domain.ExternalAssetRecord) string {
 	if row == nil || row.IsDir {
 		return ""
 	}
+	if s.sourcePolicyError(row) != nil {
+		return ""
+	}
+	if s.versionedMediaEnabled() {
+		object := s.mediaObjects(row).Thumbnail
+		if object == nil || row.Media == nil || object.SourceVersion != row.Media.SourceVersion {
+			return ""
+		}
+		if signed := s.ossDirect.PresignPreviewURL(object.Key); signed != nil {
+			return signed.DownloadURL
+		}
+		return ""
+	}
 	if row.OSSPreviewKey != "" && row.PreviewStatus == domain.ExternalAssetPreviewStatusReady && s.ossDirect != nil && s.ossDirect.Enabled() {
 		process, _ := baseservice.OSSIMGThumbnailProcessForSize("preview.webp", "image/webp", 0)
 		if signed := s.ossDirect.PresignPreviewURLWithProcess(row.OSSPreviewKey, process); signed != nil {
@@ -1568,10 +1659,26 @@ func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
 	if row == nil || row.IsDir {
 		return ""
 	}
+	if s.sourcePolicyError(row) != nil {
+		return ""
+	}
+	if s.versionedMediaEnabled() {
+		object := s.mediaObjects(row).Preview
+		if object == nil || row.Media == nil || object.SourceVersion != row.Media.SourceVersion {
+			return ""
+		}
+		if signed := s.ossDirect.PresignPreviewURL(object.Key); signed != nil {
+			return signed.DownloadURL
+		}
+		return ""
+	}
 	if row.OSSPreviewKey != "" && row.PreviewStatus == domain.ExternalAssetPreviewStatusReady {
 		if urlValue := s.presignedPreviewURL(row); urlValue != "" {
 			return urlValue
 		}
+	}
+	if s.mediaConfig.StrictPreviews {
+		return ""
 	}
 	if !canDirectBrowserPreview(row.FileName, row.MimeType) {
 		return ""
@@ -1595,6 +1702,19 @@ func (s *Service) BrowserPreviewURL(row *domain.ExternalAssetRecord) string {
 
 func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
 	if row == nil || row.IsDir {
+		return ""
+	}
+	if s.sourcePolicyError(row) != nil {
+		return ""
+	}
+	if s.versionedMediaEnabled() {
+		object := s.mediaObjects(row).Original
+		if object == nil || row.Media == nil || object.SourceVersion != row.Media.SourceVersion {
+			return ""
+		}
+		if signed := s.ossDirect.PresignDownloadURLWithFilename(object.Key, row.FileName); signed != nil {
+			return signed.DownloadURL
+		}
 		return ""
 	}
 	if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
@@ -1625,6 +1745,9 @@ func (s *Service) presignedPreviewURL(row *domain.ExternalAssetRecord) string {
 
 func (s *Service) presignedOriginalPreviewURL(row *domain.ExternalAssetRecord) string {
 	if s == nil || s.ossDirect == nil || !s.ossDirect.Enabled() || row == nil || strings.TrimSpace(row.OSSOriginalKey) == "" {
+		return ""
+	}
+	if row.FileSize > 20<<20 {
 		return ""
 	}
 	signed := s.ossDirect.PresignPreviewURL(row.OSSOriginalKey)
@@ -1679,6 +1802,9 @@ func (s *Service) ResolveNetdiskStream(ctx context.Context, id int64) (*NetdiskS
 	row, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if appErr := s.sourcePolicyError(row); appErr != nil {
+		return nil, appErr
 	}
 	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, domain.ErrNotFound
@@ -1913,6 +2039,29 @@ func (s *Service) mountPathForOrigin(origin string) string {
 }
 
 func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error) {
+	if s.versionedMediaEnabled() {
+		if !s.mediaConfig.NASWorkerEnabled {
+			return 0, nil
+		}
+		r, ok := s.repo.(repo.ExternalAssetMediaRepo)
+		if !ok {
+			return 0, fmt.Errorf("media repository unavailable")
+		}
+		prefixes := []string{}
+		for _, prefix := range s.ossRequiredOriginPrefixes() {
+			prefixes = append(prefixes, prefix.OriginPath)
+		}
+		ids, err := r.PendingRequiredMediaIDs(ctx, prefixes, limit)
+		if err != nil {
+			return 0, err
+		}
+		for _, id := range ids {
+			if _, appErr := s.ExternalMediaInfo(ctx, id, "original", "cloud"); appErr != nil {
+				return 0, appErr
+			}
+		}
+		return len(ids), nil
+	}
 	prepareMounts := s.PrepareMountPaths()
 	if len(prepareMounts) == 0 {
 		return 0, nil
@@ -1949,6 +2098,9 @@ func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error)
 }
 
 func (s *Service) ProcessPendingPreview(ctx context.Context, limit int) (int, error) {
+	if s.versionedMediaEnabled() {
+		return 0, nil
+	}
 	prepareMounts := s.PrepareMountPaths()
 	if len(prepareMounts) == 0 {
 		return 0, nil

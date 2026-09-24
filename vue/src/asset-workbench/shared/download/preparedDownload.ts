@@ -9,7 +9,14 @@ export interface PreparedDownloadWaitOptions {
 }
 
 export function downloadIsPreparing(info: SystemAssetDownloadInfo | null | undefined): boolean {
-  return Boolean(info && !info.download_url && String(info.access_hint ?? '').includes('prepare_required'))
+  return Boolean(info && !info.download_url && (info.state ? info.state === 'queued' || info.state === 'processing' : String(info.access_hint ?? '').includes('prepare_required')))
+}
+
+export class MediaPreparationPending extends Error {
+  constructor(readonly requestId: string, readonly jobId: string) {
+    super('文件正在后台准备；准备好后请点击下载，不会自动启动第二份下载')
+    this.name = 'MediaPreparationPending'
+  }
 }
 
 export async function waitForPreparedDownload(
@@ -19,6 +26,7 @@ export async function waitForPreparedDownload(
 ): Promise<SystemAssetDownloadInfo> {
   if (initial.download_url) return initial
   if (!downloadIsPreparing(initial)) throw new Error('当前文件暂时无法下载，请稍后重试')
+  if (initial.request_id && initial.job_id) throw new MediaPreparationPending(initial.request_id, initial.job_id)
 
   const attempts = Math.max(1, options.attempts ?? 90)
   const intervalMs = Math.max(0, options.intervalMs ?? 2_000)

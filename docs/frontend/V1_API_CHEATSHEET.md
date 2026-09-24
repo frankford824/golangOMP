@@ -1,10 +1,10 @@
-# V1 API 速查表(265 path · 一行一条)
+# V1 API 速查表(280 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 265 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 280 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -33,6 +33,14 @@
 | POST | `/v1/org/teams` | Create organization team | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | PUT, DELETE | `/v1/org/teams/{id}` | Update organization team；Hard-delete organization team | PUT:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org/teams/{id}/merge` | Merge organization team into another team | POST:已登录 / scope-aware | [V1_API_ORG.md](V1_API_ORG.md) |
+| POST | `/v1/integration/asset-media/workers/claim` | Claim NAS jobs with fenced leases | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/asset-media/workers/heartbeat` | Renew NAS lease and report actual phase progress | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/asset-media/workers/uploads` | Obtain or resume scoped multipart upload authorization | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/asset-media/workers/complete` | Commit a version-checked NAS result or failure | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/asset-media/validate-ticket` | Reauthorize a signed gateway ticket against current user and source state | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/external-assets/scans/start` | Register a complete NAS scan | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/external-assets/scans/parts` | Store immutable part of a complete NAS scan | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/external-assets/scans/complete` | Validate and queue a complete NAS scan | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/access/permissions` | List the code-maintained capability catalog | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/access/roles` | List administrator-managed business roles；Create a business role | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/access/roles/{id}` | Update role display metadata | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -220,6 +228,13 @@
 | POST | `/v1/asset-workbench/client-materials/batch-download` | Batch download client materials | POST:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/system-assets/{asset_id}/preview` | Get asset workbench system asset preview | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/reference-upload` | Upload task-create reference file through backend compatibility proxy | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| GET | `/v1/assets/media/capabilities` | Discover enabled company LAN delivery without probing private networks | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/media/packages` | Prepare an immutable external selection ZIP | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/media/delivery` | Resolve authorized version-bound cloud or LAN media delivery | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/media/requests` | List current actor preparation requests from the last 24 hours and unfinished work | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| DELETE | `/v1/assets/media/requests/{request_id}` | Cancel only the current actor waiting subscription | DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/media/jobs/{job_id}` | Read owned preparation task after current authorization | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/media/jobs/{job_id}/retry` | Retry transient preparation failure with cooldown and deduplication | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/search/batch` | Batch search production assets | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/excel-package/preview` | Build a production package manifest from normalized Excel rows | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/excel-package/preview-file` | Parse XLS or XLSX and build a production package manifest | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |

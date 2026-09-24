@@ -181,6 +181,26 @@ func (s *OSSDirectService) CreateMultipartUploadPlan(ctx context.Context, object
 	return s.createMultipartUploadPlan(ctx, objectKey, fileSize, contentType, true)
 }
 
+// ResumeMultipartUploadPlan only signs parts for an already authorized upload.
+// The media coordinator checks the lease and persisted object/upload binding.
+func (s *OSSDirectService) ResumeMultipartUploadPlan(objectKey, uploadID string, fileSize, partSize int64, contentType string) (*OSSDirectUploadPlan, error) {
+	if !s.Enabled() || objectKey == "" || uploadID == "" || partSize <= 0 || fileSize < 0 {
+		return nil, fmt.Errorf("invalid multipart resume")
+	}
+	count := int((fileSize + partSize - 1) / partSize)
+	if count == 0 {
+		count = 1
+	}
+	if count > 10000 {
+		return nil, fmt.Errorf("too many multipart parts")
+	}
+	parts := make([]OSSPresignedPart, count)
+	for i := range parts {
+		parts[i] = s.presignPartUploadURL(objectKey, uploadID, i+1, contentType, true)
+	}
+	return &OSSDirectUploadPlan{Mode: "multipart", ObjectKey: objectKey, UploadID: uploadID, Parts: parts, PartSize: partSize, ExpiresAt: s.now().Add(s.cfg.UploadPresignExpiry), Method: http.MethodPut, RequiredContentType: normalizeRequiredUploadContentType(contentType)}, nil
+}
+
 func (s *OSSDirectService) createMultipartUploadPlan(ctx context.Context, objectKey string, fileSize int64, contentType string, browser bool) (*OSSDirectUploadPlan, error) {
 	if !s.Enabled() {
 		return nil, fmt.Errorf("oss direct service is not enabled")
@@ -363,7 +383,18 @@ func (s *OSSDirectService) PresignDownloadURLWithFilename(objectKey, filename st
 }
 
 func (s *OSSDirectService) PresignPreviewURL(objectKey string) *OSSDirectDownloadInfo {
-	return s.presignGetURL(objectKey, "inline")
+	return s.presignGetURLWithQuery(objectKey, map[string]string{"response-content-disposition": "inline", "response-cache-control": s.previewCacheControl()}, true)
+}
+
+func (s *OSSDirectService) previewCacheControl() string {
+	seconds := int64(s.cfg.PresignExpiry/time.Second) / 2
+	if seconds > 120 {
+		seconds = 120
+	}
+	if seconds < 0 {
+		seconds = 0
+	}
+	return fmt.Sprintf("private,max-age=%d", seconds)
 }
 
 func (s *OSSDirectService) PresignPreviewURLWithProcess(objectKey, process string) *OSSDirectDownloadInfo {
@@ -373,8 +404,9 @@ func (s *OSSDirectService) PresignPreviewURLWithProcess(objectKey, process strin
 	}
 	return s.presignGetURLWithQuery(objectKey, map[string]string{
 		"response-content-disposition": "inline",
+		"response-cache-control":       s.previewCacheControl(),
 		"x-oss-process":                process,
-	})
+	}, true)
 }
 
 func (s *OSSDirectService) UploadObject(ctx context.Context, objectKey, contentType string, body []byte) error {
@@ -622,12 +654,21 @@ func (s *OSSDirectService) presignGetURL(objectKey, disposition string) *OSSDire
 	})
 }
 
-func (s *OSSDirectService) presignGetURLWithQuery(objectKey string, subresources map[string]string) *OSSDirectDownloadInfo {
+func (s *OSSDirectService) presignGetURLWithQuery(objectKey string, subresources map[string]string, stablePreview ...bool) *OSSDirectDownloadInfo {
 	if !s.Enabled() || strings.TrimSpace(objectKey) == "" {
 		return nil
 	}
 
 	expires := s.now().Add(s.cfg.PresignExpiry)
+	if len(stablePreview) > 0 && stablePreview[0] {
+		bucket := 5 * time.Minute
+		if s.cfg.PresignExpiry < 2*bucket {
+			bucket = s.cfg.PresignExpiry / 2
+		}
+		if bucket >= time.Second {
+			expires = s.now().Truncate(bucket).Add(s.cfg.PresignExpiry)
+		}
+	}
 	expiresStr := strconv.FormatInt(expires.Unix(), 10)
 
 	keys := make([]string, 0, len(subresources))

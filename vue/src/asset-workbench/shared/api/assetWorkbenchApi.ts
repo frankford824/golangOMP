@@ -1,4 +1,5 @@
 import http from '@/services/http'
+import { lanMediaEnabled, resolveMediaAccess, resolveMediaPreview, type MediaDeliveryInfo } from '@/services/mediaDelivery'
 import type { WorkbenchResourceDownloadManifest, WorkbenchResourceGroup } from '@aw/shared/resource-groups/types'
 import type { BackendUser } from '@/services/apiTypes'
 
@@ -9,6 +10,16 @@ interface ApiEnvelope<T> {
     page?: number
     page_size?: number
   }
+}
+
+function mediaDownloadInfo(info: MediaDeliveryInfo): SystemAssetDownloadInfo {
+  return { ...info, download_url: info.download_url || undefined, items: info.items?.filter((item) => Boolean(item.download_url)).map((item) => ({ download_url: item.download_url!, filename: item.filename, file_size: item.file_size, mime_type: item.mime_type })) }
+}
+
+function mediaPreviewInfo(assetId: number, info: MediaDeliveryInfo): SystemAssetPreviewMeta {
+  const ready = info.state === 'ready' && Boolean(info.download_url) && Boolean(info.preview_available)
+  const preparing = info.state === 'queued' || info.state === 'processing'
+  return { asset_id: assetId, status: ready ? 'ready' : preparing ? 'pending' : 'not_applicable', preparing, preview_available: ready, preview_url: ready ? info.download_url! : undefined, filename: info.filename, mime_type: info.mime_type, expires_at: info.expires_at }
 }
 
 export interface AssetWorkbenchProfile {
@@ -628,6 +639,14 @@ export interface SubmissionItemQCImportResult {
 }
 
 export interface SystemAssetDownloadInfo {
+  state?: string
+  source_version?: string
+  content_id?: string
+  job_id?: string
+  request_id?: string
+  retryable?: boolean
+  retry_after?: number
+  error_code?: string
   download_mode: string
   download_url?: string
   access_hint?: string
@@ -1819,6 +1838,13 @@ export const assetWorkbenchApi = {
       const files = [...(manifest.items || [])].sort((a, b) => a.sort_order - b.sort_order)
       if (!files.length) throw new Error('该资源组没有可下载的最终成品。')
       const cover = files.find((item) => item.revision_item_id === asset.cover_revision_item_id) || files[0]
+      if (lanMediaEnabled.value && files.length === 1) {
+        const group = await this.getResourceGroup(asset.resource_group_id, signal)
+        const revision = group.finalized_revision
+        const member = revision?.items.find((item) => item.id === cover.revision_item_id)
+        if (!revision || revision.id !== cover.revision_id || !member?.task_asset_id) throw new Error('资源版本已变化，请刷新后重新下载')
+        return mediaDownloadInfo(await resolveMediaAccess({ resource_kind: 'task_asset', resource_id: String(member.task_asset_id), purpose: 'download', rendition: 'original' }, signal))
+      }
       return {
         download_mode: 'direct', download_url: cover.download_url, filename: cover.filename,
         file_size: Number(cover.file_size || 0), mime_type: cover.mime_type,
@@ -1828,24 +1854,43 @@ export const assetWorkbenchApi = {
     }
     if (isExternalMaterialSource(asset.source_type)) {
       const resourceId = asset.resource_id || `ext-${asset.id}`
+      if (lanMediaEnabled.value) return mediaDownloadInfo(await resolveMediaAccess({ resource_kind: 'external_asset', resource_id: resourceId, purpose: 'download', rendition: 'original' }, signal))
       const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/download`, { signal })
       return unwrap(res.data)
     }
     return this.downloadSystemAsset(asset.id, signal)
   },
 
+  async createExternalPackage(items: Array<{ resource_id: string; source_version?: string }>): Promise<SystemAssetDownloadInfo> {
+    const response = await http.post<ApiEnvelope<SystemAssetDownloadInfo>>('/v1/assets/media/packages', { items })
+    return unwrap(response.data)
+  },
+
   async previewMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal, rendition: 'preview' | 'thumbnail' = 'preview'): Promise<SystemAssetPreviewMeta> {
     if (asset.resource_group_id) {
-      const info = await this.downloadMaterialAsset(asset, signal)
-      const ready = Boolean(asset.preview_available && asset.preview_url)
+      const group = await this.getResourceGroup(asset.resource_group_id, signal)
+      const revision = group.finalized_revision
+      if (!revision || (asset.finalized_revision_id && revision.id !== asset.finalized_revision_id)) {
+        throw new Error('资源版本已变化，请刷新后重新查看')
+      }
+      const cover = asset.cover_revision_item_id
+        ? revision.items.find((item) => item.id === asset.cover_revision_item_id)
+        : [...revision.items].sort((a, b) => a.sort_order - b.sort_order)[0]
+      if (!cover?.task_asset_id) throw new Error('资源封面已不可用，请刷新后重新选择')
+      const response = await http.post<ApiEnvelope<SystemAssetDownloadInfo>>('/v1/assets/media/delivery', {
+        resource_kind: 'task_asset', resource_id: String(cover.task_asset_id), purpose: 'preview', rendition, delivery: 'cloud',
+      }, { signal })
+      const info = unwrap(response.data)
+      const ready = Boolean(info.download_url && info.preview_available && (!info.state || info.state === 'ready'))
+      const preparing = info.state === 'queued' || info.state === 'processing'
       return {
         asset_id: asset.id,
         source_type: 'task_resource_group',
         source_ref: `group:${asset.resource_group_id}`,
-        status: ready ? 'ready' : 'not_applicable',
-        preparing: false,
-        preview_url: ready ? asset.preview_url : undefined,
-        download_url: info.download_url,
+        status: ready ? 'ready' : preparing ? 'pending' : 'not_applicable',
+        preparing,
+        preview_url: ready ? info.download_url : undefined,
+        download_url: ready ? info.download_url : undefined,
         mime_type: info.mime_type,
         filename: info.filename,
         preview_available: ready,
@@ -1853,6 +1898,7 @@ export const assetWorkbenchApi = {
     }
     if (isExternalMaterialSource(asset.source_type)) {
       const resourceId = asset.resource_id || `ext-${asset.id}`
+      if (lanMediaEnabled.value) return mediaPreviewInfo(asset.id, await resolveMediaPreview({ resource_kind: 'external_asset', resource_id: resourceId, rendition }, signal))
       const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/preview`, {
         params: rendition === 'thumbnail' ? { rendition } : undefined,
         signal,
@@ -1860,12 +1906,13 @@ export const assetWorkbenchApi = {
       const info = unwrap(res.data)
       const downloadUrl = info.download_url
       const ready = Boolean(downloadUrl && info.preview_available)
+      const preparing = info.state ? info.state === 'queued' || info.state === 'processing' : Boolean(info.access_hint?.includes('prepare_required'))
       return {
         asset_id: asset.id,
         source_type: 'external',
         source_ref: resourceId,
-        status: ready ? 'ready' : info.download_url ? 'not_applicable' : 'pending',
-        preparing: !info.download_url,
+        status: ready ? 'ready' : preparing ? 'pending' : 'not_applicable',
+        preparing,
         preview_url: ready ? downloadUrl : undefined,
         download_url: downloadUrl,
         expires_at: info.expires_at,
@@ -1959,11 +2006,13 @@ export const assetWorkbenchApi = {
   },
 
   async downloadSystemAsset(assetId: number, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
+    if (lanMediaEnabled.value) return mediaDownloadInfo(await resolveMediaAccess({ resource_kind: 'asset', resource_id: String(assetId), purpose: 'download', rendition: 'original' }, signal))
     const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/asset-workbench/system-assets/${assetId}/download`, { signal })
     return unwrap(res.data)
   },
 
   async previewSystemAsset(assetId: number, signal?: AbortSignal, rendition: 'preview' | 'thumbnail' = 'preview'): Promise<SystemAssetPreviewMeta> {
+    if (lanMediaEnabled.value) return mediaPreviewInfo(assetId, await resolveMediaPreview({ resource_kind: 'asset', resource_id: String(assetId), rendition }, signal))
     const res = await http.get<ApiEnvelope<SystemAssetPreviewMeta>>(`/v1/asset-workbench/system-assets/${assetId}/preview`, {
       params: rendition === 'thumbnail' ? { rendition } : undefined,
       signal,
@@ -2025,7 +2074,8 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async downloadClientMaterial(materialId: number, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
+  async downloadClientMaterial(materialId: number, signal?: AbortSignal, singleFile = false): Promise<SystemAssetDownloadInfo> {
+    if (singleFile && lanMediaEnabled.value) return mediaDownloadInfo(await resolveMediaAccess({ resource_kind: 'client_material', resource_id: String(materialId), purpose: 'download', rendition: 'original' }, signal))
     const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/asset-workbench/client-materials/${materialId}/download`, { signal })
     return unwrap(res.data)
   },

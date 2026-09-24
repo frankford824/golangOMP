@@ -32,6 +32,12 @@ func respondError(c *gin.Context, err *domain.AppError) {
 
 func httpStatusFromCode(code string) int {
 	switch code {
+	case "source_disabled", "source_missing":
+		return http.StatusGone
+	case "source_version_changed", "media_lease_lost", "media_integrity_failed":
+		return http.StatusConflict
+	case "media_temporarily_unavailable":
+		return http.StatusServiceUnavailable
 	case "invalid_query", "invalid_date_range":
 		return http.StatusBadRequest
 	case "draft_not_owner", "notification_not_owner":

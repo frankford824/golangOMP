@@ -93,6 +93,7 @@ type ExternalAssetRecord struct {
 	SearchableText    string                     `json:"-"`
 	CreatedAt         time.Time                  `json:"created_at"`
 	UpdatedAt         time.Time                  `json:"updated_at"`
+	Media             *ExternalMediaFingerprint  `json:"-"`
 }
 
 type ExternalAssetDirectoryEntry struct {
@@ -179,6 +180,7 @@ type ExternalAssetUpsert struct {
 	RawURL           string
 	SearchableText   string
 	ScannedAt        time.Time
+	MediaFingerprint *ExternalMediaFingerprint
 }
 
 func (u ExternalAssetUpsert) Normalized() ExternalAssetUpsert {

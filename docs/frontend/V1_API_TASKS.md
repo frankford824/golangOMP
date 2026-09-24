@@ -14,7 +14,596 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `186` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `194` 个 `/v1` path；同一路径多 method 合并在同一节。
+
+## POST /v1/integration/asset-media/workers/claim
+
+### 简介
+支持方法: POST。
+
+- `POST`: Claim NAS jobs with fenced leases
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `worker_id` | string | 是 | - |
+| `limit` | integer | 否 | - |
+| `class` | enum(render/transfer) | 否 | Reserve one renderer slot separately from two transfer slots. |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "job": "...",
+      "source": "...",
+      "checkpoint": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<AssetMediaWorkerClaim> | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid credential |
+| 403 | 见 `error.code` | 见 `deny_code` | Resource permission denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Lease or source version conflict; ZIP failures include explicit available_items |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or missing |
+| 503 | 见 `error.code` | 见 `deny_code` | Service temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/asset-media/workers/claim \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/asset-media/workers/heartbeat
+
+### 简介
+支持方法: POST。
+
+- `POST`: Renew NAS lease and report actual phase progress
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `job_id` | string | 是 | - |
+| `worker_id` | string | 是 | - |
+| `lease_epoch` | integer | 是 | - |
+| `phase` | string | 否 | - |
+| `processed_bytes` | integer | 否 | - |
+| `total_bytes` | integer | 否 | - |
+| `error_code` | string | 否 | - |
+| `retryable` | boolean | 否 | - |
+| `result` | ExternalMediaResult | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "accepted": true
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaAccepted | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid credential |
+| 403 | 见 `error.code` | 见 `deny_code` | Resource permission denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Lease or source version conflict; ZIP failures include explicit available_items |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or missing |
+| 503 | 见 `error.code` | 见 `deny_code` | Service temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/asset-media/workers/heartbeat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/asset-media/workers/uploads
+
+### 简介
+支持方法: POST。
+
+- `POST`: Obtain or resume scoped multipart upload authorization
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | AssetMediaUploadRequest | 视接口 | OpenAPI 声明的整体对象。 |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "checkpoint": {
+      "object_key": "...",
+      "upload_id": "...",
+      "part_size": "...",
+      "size": "...",
+      "mime_type": "...",
+      "sha256": "..."
+    }
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaUploadResponse | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid credential |
+| 403 | 见 `error.code` | 见 `deny_code` | Resource permission denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Lease or source version conflict; ZIP failures include explicit available_items |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or missing |
+| 503 | 见 `error.code` | 见 `deny_code` | Service temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/asset-media/workers/uploads \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/asset-media/workers/complete
+
+### 简介
+支持方法: POST。
+
+- `POST`: Commit a version-checked NAS result or failure
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `job_id` | string | 是 | - |
+| `worker_id` | string | 是 | - |
+| `lease_epoch` | integer | 是 | - |
+| `phase` | string | 否 | - |
+| `processed_bytes` | integer | 否 | - |
+| `total_bytes` | integer | 否 | - |
+| `error_code` | string | 否 | - |
+| `retryable` | boolean | 否 | - |
+| `result` | ExternalMediaResult | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "accepted": true
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaAccepted | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid credential |
+| 403 | 见 `error.code` | 见 `deny_code` | Resource permission denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Lease or source version conflict; ZIP failures include explicit available_items |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or missing |
+| 503 | 见 `error.code` | 见 `deny_code` | Service temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/asset-media/workers/complete \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/asset-media/validate-ticket
+
+### 简介
+支持方法: POST。
+
+- `POST`: Reauthorize a signed gateway ticket against current user and source state
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `ticket` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "source": "nas",
+    "content_id": "string",
+    "source_version": "string",
+    "filename": "string",
+    "mime_type": "string",
+    "size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaReadTarget | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/asset-media/validate-ticket \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/external-assets/scans/start
+
+### 简介
+支持方法: POST。
+
+- `POST`: Register a complete NAS scan
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `scan_id` | string | 是 | - |
+| `agent_id` | string | 是 | - |
+| `agent_epoch` | string | 是 | - |
+| `root_identity` | string | 是 | - |
+| `origin_root` | enum(/p3) | 是 | - |
+| `start_sequence` | integer | 是 | - |
+| `end_sequence` | integer | 是 | - |
+| `shard_index` | integer | 是 | - |
+| `shard_count` | enum(2) | 是 | - |
+| `parts` | integer | 是 | - |
+| `files` | integer | 是 | - |
+| `manifest_sha256` | string | 是 | - |
+| `read_errors` | integer | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "scan_id": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaScanResponse | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/external-assets/scans/start \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/external-assets/scans/parts
+
+### 简介
+支持方法: POST。
+
+- `POST`: Store immutable part of a complete NAS scan
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `scan_id` | string | 是 | - |
+| `part` | integer | 是 | - |
+| `sha256` | string | 是 | - |
+| `items` | array<ExternalAssetFilesystemEvent> | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "scan_id": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaScanResponse | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/external-assets/scans/parts \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/integration/external-assets/scans/complete
+
+### 简介
+支持方法: POST。
+
+- `POST`: Validate and queue a complete NAS scan
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `scan_id` | string | 是 | - |
+| `agent_id` | string | 是 | - |
+| `agent_epoch` | string | 是 | - |
+| `root_identity` | string | 是 | - |
+| `origin_root` | enum(/p3) | 是 | - |
+| `start_sequence` | integer | 是 | - |
+| `end_sequence` | integer | 是 | - |
+| `shard_index` | integer | 是 | - |
+| `shard_count` | enum(2) | 是 | - |
+| `parts` | integer | 是 | - |
+| `files` | integer | 是 | - |
+| `manifest_sha256` | string | 是 | - |
+| `read_errors` | integer | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "scan_id": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaScanResponse | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/integration/external-assets/scans/complete \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/access/permissions
 
@@ -3901,10 +4490,10 @@ curl -X POST https://api.example.com/v1/tasks/reference-upload-sessions/<session
 ```json
 {
   "data": {
-    "download_mode": "string",
-    "download_url": "string",
-    "access_hint": "string",
-    "preview_available": true
+    "source_version": "string",
+    "content_id": "string",
+    "rendition": "thumbnail",
+    "state": "ready"
   }
 }
 ```
@@ -3952,6 +4541,7 @@ curl -X GET https://api.example.com/v1/task-assets/<task_asset_id>/download \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
+| `rendition` | query | enum(preview/thumbnail) | 否 | - |
 | `task_asset_id` | path | integer | 是 | - |
 
 请求体: 无请求体。
@@ -3962,10 +4552,10 @@ curl -X GET https://api.example.com/v1/task-assets/<task_asset_id>/download \
 ```json
 {
   "data": {
-    "download_mode": "string",
-    "download_url": "string",
-    "access_hint": "string",
-    "preview_available": true
+    "source_version": "string",
+    "content_id": "string",
+    "rendition": "thumbnail",
+    "state": "ready"
   }
 }
 ```

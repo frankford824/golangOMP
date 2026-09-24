@@ -1,0 +1,55 @@
+services:
+  gateway:
+    stop_grace_period: 45s
+    user: "1026:100"
+    image: yongbo-media-renderer:${MEDIA_IMAGE_TAG:?reviewed image tag required}
+    entrypoint: ["/app/bin/asset_media_gateway"]
+    network_mode: host
+    read_only: true
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpuset: ${MEDIA_GATEWAY_CPUSET:-0}
+    ulimits:
+      nproc: 128
+    env_file: [gateway.env]
+    environment:
+      MEDIA_GATEWAY_LISTEN: 127.0.0.1:18089
+      MEDIA_SOURCE_ROOT: /data/image_lib
+      MEDIA_ARTIFACT_DIR: /artifacts
+      MEDIA_CACHE_DIR: /cache
+      MEDIA_PUBLIC_KEYS_FILE: /keys/public-keys.json
+    volumes:
+      - /volume1/image_lib:/data/image_lib:ro
+      - ${MEDIA_HOME:?dedicated media directory required}/bin:/app/bin:ro
+      - ${MEDIA_HOME}/keys:/keys:ro
+      - ${MEDIA_HOME}/cache:/cache
+      - ${MEDIA_HOME}/artifacts:/artifacts:ro
+  worker:
+    stop_grace_period: 45s
+    user: "1026:100"
+    image: yongbo-media-renderer:${MEDIA_IMAGE_TAG}
+    read_only: true
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+    # Synology kernel lacks CFS quota support; affinity enforces one logical CPU.
+    cpuset: ${MEDIA_WORKER_CPUSET:-1}
+    ulimits:
+      nproc: 128
+    env_file: [worker.env]
+    environment:
+      MEDIA_SOURCE_ROOT: /data/image_lib
+      MEDIA_WORK_DIR: /work
+      MEDIA_ARTIFACT_DIR: /artifacts
+      TMPDIR: /work
+      MAGICK_TEMPORARY_PATH: /work
+      MEDIA_DAY_MBPS: 30
+      MEDIA_NIGHT_MBPS: 60
+    volumes:
+      - /volume1/image_lib:/data/image_lib:ro
+      - ${MEDIA_HOME}/bin:/app/bin:ro
+      - ${MEDIA_HOME}/work:/work
+      - ${MEDIA_HOME}/artifacts:/artifacts

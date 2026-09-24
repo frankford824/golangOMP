@@ -22,6 +22,7 @@ import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import IconfontActionIcon from '../shared/icons/IconfontActionIcon.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
 import { V1SocketClient } from '@/services/ws/v1Socket'
+import { lanMediaEnabled, lanMediaBusy, lanMediaNotice, toggleLANMedia } from '@/services/mediaDelivery'
 
 const SETTLEMENT_HUB_TAB_KEY = 'aw-settlement-hub-tab'
 
@@ -297,6 +298,9 @@ watch(commandQuery, () => {
           <h1>{{ activeLabel }}</h1>
         </div>
         <div class="aw-page-bar__actions">
+          <button class="aw-secondary-button" type="button" :disabled="lanMediaBusy" :aria-pressed="lanMediaEnabled" :title="lanMediaNotice" @click="toggleLANMedia">
+            {{ lanMediaBusy ? '连接中…' : lanMediaEnabled ? '内网加速已启用' : '启用公司内网加速' }}
+          </button>
           <button class="aw-command-button" type="button" @click="toggleCommand">
             <IconfontActionIcon name="search" :size="16" />
             <span>搜索或执行动作</span>
@@ -325,6 +329,7 @@ watch(commandQuery, () => {
           </button>
         </div>
       </header>
+      <p v-if="lanMediaNotice" class="aw-inline-note" role="status">{{ lanMediaNotice }}</p>
 
       <main class="aw-shell__content">
         <div v-if="error" class="aw-inline-alert">{{ error }}</div>

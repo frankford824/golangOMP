@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, watch, onMounted } from 'vue'
 import { useAutoAnimate } from '@formkit/auto-animate/vue'
 import {
   AlertCircle,
@@ -18,6 +18,7 @@ import { useUploadCenterStore } from '@aw/shared/drive/uploadCenter.store'
 import { useDownloadCenterStore, type DownloadCenterItem, type DownloadCenterStatus } from './downloadCenter.store'
 
 const downloadCenter = useDownloadCenterStore()
+onMounted(() => { void downloadCenter.refreshPreparationRequests() })
 const uploadCenter = useUploadCenterStore()
 const [listRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' })
 
@@ -50,7 +51,9 @@ function statusLabel(status: DownloadCenterStatus) {
     preparing: '正在准备',
     downloading: '下载中',
     completed: '已完成',
-    handed_off: '浏览器下载',
+    handed_off: '已交给浏览器',
+    waiting: '后台准备中',
+    ready: '已就绪，点击下载',
     failed: '下载失败',
     cancelled: '已取消',
   }
@@ -68,6 +71,8 @@ function statusIcon(status: DownloadCenterStatus) {
 function transferText(item: DownloadCenterItem) {
   if (item.status === 'preparing') return '正在准备文件，可继续使用其他页面'
   if (item.status === 'queued') return '等待前面的下载任务'
+  if (item.status === 'waiting') return '稍后点击重试获取就绪链接；后台任务不受页面关闭影响'
+  if (item.status === 'ready') return '文件已准备好，点击下载交给浏览器'
   if (item.status === 'handed_off') return '已交给浏览器，请在浏览器下载列表查看进度'
   if (item.status === 'cancelled') return item.receivedBytes > 0 ? '已下载 ' + formatFileSize(item.receivedBytes) + ' 后取消' : '下载已取消'
   if (item.status === 'failed') return item.receivedBytes > 0 ? '已下载 ' + formatFileSize(item.receivedBytes) + ' 后中断' : '文件未下载，可直接重试'
@@ -94,7 +99,7 @@ function canCancel(item: DownloadCenterItem) {
 }
 
 function canRetry(item: DownloadCenterItem) {
-  return item.status === 'failed' || item.status === 'cancelled'
+  return item.status === 'failed' || item.status === 'cancelled' || item.status === 'waiting' || item.status === 'ready'
 }
 </script>
 
@@ -131,7 +136,9 @@ function canRetry(item: DownloadCenterItem) {
                 <p class="aw-eyebrow">下载中心</p>
                 <h3>{{ panelTitle }}</h3>
                 <span>{{ downloadCenter.summaryText }}，切换页面不会中断</span>
+                <p v-if="downloadCenter.preparationNotice" role="status">{{ downloadCenter.preparationNotice }}</p>
               </div>
+              <button class="aw-secondary-button" type="button" @click="downloadCenter.refreshPreparationRequests()">刷新准备状态</button>
               <button class="aw-icon-action" type="button" aria-label="收起下载中心" title="收起" @click="downloadCenter.closePanel()">
                 <ChevronDown :size="16" aria-hidden="true" />
               </button>

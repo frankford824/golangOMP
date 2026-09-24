@@ -12,10 +12,13 @@ interface CachedMaterializedPreviewImage {
   refCount: number
   expiresAt: number
   lastUsedAt: number
+  bytes: number
 }
 
 const PREVIEW_BLOB_CACHE_TTL_MS = 2 * 60_000
 const PREVIEW_BLOB_CACHE_MAX_ENTRIES = 160
+const PREVIEW_BLOB_CACHE_MAX_BYTES = 64 * 1024 * 1024
+const PREVIEW_MAX_BYTES = 2 * 1024 * 1024
 const PREVIEW_BLOB_FETCH_CONCURRENCY = 5
 
 let activeBlobFetches = 0
@@ -25,10 +28,22 @@ const materializedInflight = new Map<string, Promise<CachedMaterializedPreviewIm
 const materializedGenerationByAsset = new Map<string, number>()
 const materializedCacheKeysByAsset = new Map<string, Set<string>>()
 const materializedAssetByCacheKey = new Map<string, string>()
+let sessionGeneration = 0
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('asset-media-session-reset', () => {
+    sessionGeneration += 1
+    for (const image of materializedCache.values()) if (image.objectUrl) URL.revokeObjectURL(image.objectUrl)
+    materializedCache.clear()
+    materializedInflight.clear()
+    materializedCacheKeysByAsset.clear()
+    materializedAssetByCacheKey.clear()
+  })
+}
 
 export function normalizePreviewAssetId(raw: string | number | null | undefined): string {
   const value = String(raw ?? '').trim()
-  if (!/^\d+$/.test(value)) return ''
+  if (!/^(?:\d+|ext-\d+|external:\d+)$/.test(value)) return ''
   return value
 }
 
@@ -125,15 +140,21 @@ export function invalidateMaterializedPreviewImagesForAsset(rawAssetId: string |
   }
 }
 
-function ensureCachedImage(cacheKey: string, image: CachedMaterializedPreviewImage): CachedMaterializedPreviewImage {
+function ensureCachedImage(cacheKey: string, image: CachedMaterializedPreviewImage): CachedMaterializedPreviewImage | undefined {
   const cached = materializedCache.get(cacheKey)
   if (cached) return cached
+  evictMaterializedCache(image.bytes)
+  const used = Array.from(materializedCache.values()).reduce((sum, entry) => sum + entry.bytes, 0)
+  if (used + image.bytes > PREVIEW_BLOB_CACHE_MAX_BYTES) {
+    if (image.objectUrl) URL.revokeObjectURL(image.objectUrl)
+    unregisterMaterializedCacheKey(cacheKey)
+    return undefined
+  }
   materializedCache.set(cacheKey, image)
-  evictMaterializedCache()
   return image
 }
 
-function evictMaterializedCache(): void {
+function evictMaterializedCache(reserve = 0): void {
   const now = Date.now()
   for (const [key, cached] of materializedCache) {
     if (cached.refCount === 0 && cached.expiresAt > 0 && cached.expiresAt <= now) {
@@ -142,14 +163,16 @@ function evictMaterializedCache(): void {
       unregisterMaterializedCacheKey(key)
     }
   }
-  if (materializedCache.size <= PREVIEW_BLOB_CACHE_MAX_ENTRIES) return
+  let used = Array.from(materializedCache.values()).reduce((sum, entry) => sum + entry.bytes, 0)
+  if (materializedCache.size < PREVIEW_BLOB_CACHE_MAX_ENTRIES && used + reserve <= PREVIEW_BLOB_CACHE_MAX_BYTES) return
   const evictable = Array.from(materializedCache.entries())
     .filter(([, cached]) => cached.refCount === 0)
     .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)
   for (const [key, cached] of evictable) {
-    if (materializedCache.size <= PREVIEW_BLOB_CACHE_MAX_ENTRIES) break
+    if (materializedCache.size < PREVIEW_BLOB_CACHE_MAX_ENTRIES && used + reserve <= PREVIEW_BLOB_CACHE_MAX_BYTES) break
     if (cached.objectUrl) URL.revokeObjectURL(cached.objectUrl)
     materializedCache.delete(key)
+    used -= cached.bytes
     unregisterMaterializedCacheKey(key)
   }
 }
@@ -159,6 +182,7 @@ async function fetchSameOriginPreview(url: string): Promise<CachedMaterializedPr
     const res = await http.get<Blob>(url, { responseType: 'blob' })
     const blob = res.data
     if (!(blob instanceof Blob)) return undefined
+    if (blob.size > PREVIEW_MAX_BYTES) return undefined
     const directImageURL = await extractPreviewDownloadURLFromJSONBlob(blob)
     if (directImageURL) {
       return {
@@ -166,6 +190,7 @@ async function fetchSameOriginPreview(url: string): Promise<CachedMaterializedPr
         refCount: 0,
         expiresAt: 0,
         lastUsedAt: Date.now(),
+        bytes: 0,
       }
     }
     const renderableBlob = await renderablePreviewBlob(blob, url)
@@ -177,6 +202,7 @@ async function fetchSameOriginPreview(url: string): Promise<CachedMaterializedPr
       refCount: 0,
       expiresAt: 0,
       lastUsedAt: Date.now(),
+      bytes: renderableBlob.size,
     }
   })
 }
@@ -290,6 +316,7 @@ export async function materializePreviewImageUrl(
     return { displaySrc: url }
   }
   const assetId = normalizePreviewAssetId(rawAssetId)
+  const session = sessionGeneration
   const generation = assetId ? (materializedGenerationByAsset.get(assetId) ?? 0) : 0
   const cacheKey = assetId ? `${url}\u0000asset=${assetId}\u0000generation=${generation}` : url
   registerMaterializedCacheKey(assetId, cacheKey)
@@ -298,8 +325,9 @@ export async function materializePreviewImageUrl(
   const existingInflight = materializedInflight.get(cacheKey)
   if (existingInflight) {
     const inflightResult = await existingInflight
-    if (assetId && (materializedGenerationByAsset.get(assetId) ?? 0) !== generation) return undefined
-    return inflightResult ? retainCachedImage(cacheKey, ensureCachedImage(cacheKey, inflightResult)) : undefined
+    if (session !== sessionGeneration || (assetId && (materializedGenerationByAsset.get(assetId) ?? 0) !== generation)) return undefined
+    const stored = inflightResult ? ensureCachedImage(cacheKey, inflightResult) : undefined
+    return stored ? retainCachedImage(cacheKey, stored) : undefined
   }
   const pending = fetchSameOriginPreview(url)
   materializedInflight.set(cacheKey, pending)
@@ -309,12 +337,13 @@ export async function materializePreviewImageUrl(
       unregisterMaterializedCacheKey(cacheKey)
       return undefined
     }
-    if (assetId && (materializedGenerationByAsset.get(assetId) ?? 0) !== generation) {
+    if (session !== sessionGeneration || (assetId && (materializedGenerationByAsset.get(assetId) ?? 0) !== generation)) {
       if (image.objectUrl) URL.revokeObjectURL(image.objectUrl)
       unregisterMaterializedCacheKey(cacheKey)
       return undefined
     }
-    return retainCachedImage(cacheKey, ensureCachedImage(cacheKey, image))
+    const stored = ensureCachedImage(cacheKey, image)
+    return stored ? retainCachedImage(cacheKey, stored) : undefined
   } catch {
     unregisterMaterializedCacheKey(cacheKey)
     return undefined

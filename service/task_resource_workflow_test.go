@@ -213,7 +213,7 @@ func TestCurrentResourceViewDoesNotUseDownloadOnlyRawFileRoute(t *testing.T) {
 		t.Fatalf("view-only raw file urls = preview %q download %q", file.PreviewURL, file.DownloadURL)
 	}
 	svc.hydrateCurrentResourceFileURL(file, true, true)
-	if file.PreviewURL == "" || file.DownloadURL == "" {
+	if file.PreviewURL != "" || file.DownloadURL == "" {
 		t.Fatalf("download-capable raw file urls = preview %q download %q", file.PreviewURL, file.DownloadURL)
 	}
 }

@@ -20,12 +20,15 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/config"
+	"workflow/domain"
+	"workflow/repo"
 	mysqlrepo "workflow/repo/mysql"
 	"workflow/service"
 	aiagentsvc "workflow/service/aiagent"
 	aichatsvc "workflow/service/aichat"
 	analyticssvc "workflow/service/analytics"
 	assetcenter "workflow/service/asset_center"
+	assetdelivery "workflow/service/asset_delivery"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	"workflow/service/asset_lifecycle/scheduler"
 	assetworkbench "workflow/service/asset_workbench"
@@ -130,6 +133,20 @@ func main() {
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	productionPackageRepo := mysqlrepo.NewProductionPackageRepo(mdb)
 	productionPackageJobRepo := mysqlrepo.NewProductionPackageJobRepo(mdb)
+	var assetMediaJobs repo.AssetMediaJobRepo
+	if cfg.AssetMedia.JobsEnabled {
+		assetMediaJobs = mysqlrepo.NewAssetMediaJobRepo(mdb)
+	}
+	var systemMediaJobs repo.AssetMediaJobRepo
+	if cfg.AssetMedia.ECSWorkerEnabled {
+		systemMediaJobs = assetMediaJobs
+	}
+	if cfg.AssetMedia.StrictPreviews && !cfg.AssetMedia.ECSWorkerEnabled {
+		logger.Fatal("strict previews require ASSET_MEDIA_ECS_WORKER_ENABLED")
+	}
+	if (cfg.AssetMedia.ECSWorkerEnabled || cfg.AssetMedia.StrictPreviews || cfg.AssetMedia.NASWorkerEnabled || cfg.AssetMedia.NASScanEnabled || cfg.AssetMedia.NASDeliveryEnabled || cfg.AssetMedia.VersionedSources) && assetMediaJobs == nil {
+		logger.Fatal("asset media executors and versioned delivery require ASSET_MEDIA_JOBS_ENABLED")
+	}
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
 	externalAssetRepo := mysqlrepo.NewExternalAssetRepoWithAIRetrieval(mdb, cfg.VectorSearch.EmbeddingVersion)
 	taskAutoArchiveRepo := mysqlrepo.NewTaskAutoArchiveRepo(mdb)
@@ -312,6 +329,7 @@ func main() {
 			zap.Duration("token_ttl", cfg.ERPImageProxy.TokenTTL))
 	}
 	externalAssetSvc := externalassets.NewService(externalAssetRepo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirectSvc)
+	externalAssetSvc.ConfigureMedia(assetMediaJobs, cfg.AssetMedia)
 	uploadClient := service.NewUploadServiceClient(service.UploadServiceClientConfig{
 		Enabled:                 cfg.UploadService.Enabled,
 		BaseURL:                 cfg.UploadService.BaseURL,
@@ -402,6 +420,7 @@ func main() {
 	taskSingleTemplateSvc := tasksingleexcel.NewTemplateService()
 	taskSingleParseSvc := tasksingleexcel.NewParseServiceWithDependencies(erpBridgeSvc)
 	taskAssetCenterSvc := service.NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, assetStorageRefRepo, taskEventRepo, mdb, uploadClient,
+		service.WithTaskAssetMediaJobs(systemMediaJobs, cfg.AssetMedia.StrictPreviews),
 		service.WithOSSDirectService(ossDirectSvc),
 		service.WithTaskAssetCenterModuleRepo(taskModuleRepo),
 		service.WithTaskAssetCenterCustomizationJobRepo(customizationJobRepo),
@@ -496,6 +515,17 @@ func main() {
 		CollectionAlias: cfg.VectorSearch.CollectionAlias, Timeout: cfg.VectorSearch.Timeout,
 	})
 	retrievalService := retrievalsvc.NewService(aiRetrievalRepo, embeddingClient, qdrantClient, cfg.VectorSearch.Enabled, logger.Named("hybrid_retrieval"))
+	retrievalService.SetSourceAvailability(func(ctx context.Context, hit domain.AIRetrievalHit) bool {
+		if hit.EntityType != "external_asset" {
+			return true
+		}
+		id, err := strconv.ParseInt(hit.EntityID, 10, 64)
+		if err != nil {
+			return false
+		}
+		row, err := externalAssetSvc.Get(ctx, id)
+		return err == nil && row != nil && row.Status == domain.ExternalAssetStatusIndexed
+	})
 	searchSvc.SetHybridRetrievalProvider(retrievalService)
 	aiChatService := aichatsvc.NewService(aiChatRepo, mdb, aiChatClient, retrievalService,
 		aichatsvc.NewRedisStreamLimiter(rdb, "omp:ai-chat", cfg.AIChat.MaxConcurrentGlobal, cfg.AIChat.MaxConcurrentUser, cfg.AIChat.ProviderTimeout+time.Minute),
@@ -536,6 +566,11 @@ func main() {
 		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
 		BatchJobWorkerLeaseTTL:   cfg.AssetWorkbench.BatchJobWorkerLeaseTTL,
 	}, assetWorkbenchOptions...)
+	mediaDeliverySvc := &assetdelivery.Service{Config: cfg.AssetMedia, Jobs: assetMediaJobs, Users: userRepo, Tasks: taskRepo, TaskAssets: taskAssetRepo,
+		Access: accessPolicySvc, TaskCenter: taskAssetCenterSvc, Assets: globalAssetCenterSvc, External: externalAssetSvc, Workbench: assetWorkbenchSvc, OSS: ossDirectSvc}
+	if err := mediaDeliverySvc.Initialize(); err != nil {
+		logger.Fatal("initialize media delivery", zap.Error(err))
+	}
 	planningSKUSvc := service.NewPlanningSKUService(
 		planningSKURepo,
 		taskRepo,
@@ -566,6 +601,7 @@ func main() {
 	taskH.SetPlanningSKUService(planningSKUSvc)
 	taskAssignmentH := handler.NewTaskAssignmentHandler(taskAssignmentSvc)
 	taskAssetCenterH := handler.NewTaskAssetCenterHandler(taskAssetCenterSvc)
+	taskAssetCenterH.SetAssetMediaService(mediaDeliverySvc)
 	taskAssetCenterH.SetGlobalAssetServices(globalAssetCenterSvc, globalAssetLifecycleSvc)
 	taskCreateReferenceUploadH := handler.NewTaskCreateReferenceUploadHandler(taskCreateReferenceUploadSvc)
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
@@ -588,6 +624,7 @@ func main() {
 	taskSingleExcelH := handler.NewTaskSingleExcelHandler(taskSingleTemplateSvc, taskSingleParseSvc)
 	assetWorkbenchH := handler.NewAssetWorkbenchHandler(assetWorkbenchSvc, cfg.AssetWorkbench.CookieDomain)
 	integrationCenterH := handler.NewIntegrationCenterHandler(externalAssetSvc)
+	integrationCenterH.SetAssetMediaService(mediaDeliverySvc)
 	integrationCenterH.SetFinalizedAssetSyncService(globalAssetCenterSvc)
 	integrationCenterH.SetExternalAssetSyncService(externalAssetSvc)
 	codeRuleH := handler.NewCodeRuleHandler(codeRuleSvc)
@@ -628,7 +665,7 @@ func main() {
 		WebPushLimit:                    cfg.WebPush.WorkerLimit,
 		SKUSyncFailureReconcileInterval: cfg.WebPush.SKUSyncFailureScanInterval,
 		SKUSyncFailureReconcileLimit:    cfg.WebPush.SKUSyncFailureScanLimit,
-		AssetWorkbenchPreviewEnabled:    cfg.AssetWorkbench.PreviewWorkerEnabled,
+		AssetWorkbenchPreviewEnabled:    cfg.AssetWorkbench.PreviewWorkerEnabled && !cfg.AssetMedia.ECSWorkerEnabled,
 		AssetWorkbenchPreviewInterval:   cfg.AssetWorkbench.PreviewWorkerInterval,
 		AssetWorkbenchPreviewLimit:      cfg.AssetWorkbench.PreviewWorkerLimit,
 		AssetWorkbenchExpiryEnabled:     cfg.AssetWorkbench.UploadExpiryWorkerEnabled,

@@ -39,11 +39,20 @@ tags:
     description: Operational machine-to-machine integration boundary for external-asset ingestion and the narrow ERP Bridge filing trace used by task business information.
 components:
   securitySchemes:
+    AssetMediaWorkerToken:
+      type: apiKey
+      in: header
+      name: X-Asset-Media-Worker-Token
     ExternalAssetEventToken:
       type: apiKey
       in: header
       name: X-External-Asset-Event-Token
       description: Dedicated pre-shared machine credential for the NAS filesystem event watcher. It does not grant access to session or legacy agent APIs.
+    AssetMediaGatewayToken:
+      type: apiKey
+      in: header
+      name: X-Asset-Media-Gateway-Token
+      description: Dedicated credential restricted to online gateway ticket validation.
     AssetSyncToken:
       type: apiKey
       in: header
@@ -3741,6 +3750,17 @@ components:
     AssetDownloadInfo:
       type: object
       properties:
+        source_version: { type: string, description: Immutable source version selected after authorization. }
+        content_id: { type: string, description: Stable representation identity independent of expiring URL signatures. }
+        rendition: { type: string, enum: [thumbnail, preview, original] }
+        state: { type: string, enum: [ready, queued, processing, failed, unsupported, missing, source_disabled, temporarily_unavailable] }
+        job_id: { type: string }
+        request_id: { type: string }
+        retry_after: { type: integer, minimum: 0, description: Suggested preparation polling delay in seconds. }
+        error_code: { type: string }
+        retryable: { type: boolean }
+        lan_delivery: { $ref: '#/components/schemas/AssetMediaDelivery' }
+        cloud_delivery: { $ref: '#/components/schemas/AssetMediaDelivery' }
         download_mode:
           type: string
           description: Current OSS-only business runtime prefers `direct`; `proxy` is compatibility-only fallback.
@@ -3764,6 +3784,14 @@ components:
           description: Ordered set files when a fixed finalized resource revision contains multiple products.
           items:
             $ref: '#/components/schemas/AssetDownloadInfo'
+    AssetMediaDelivery:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string }
+        url: { type: string, description: Short-lived authorized delivery URL; absent while unavailable. }
+        gateway_id: { type: string }
+        expires_at: { type: string, format: date-time }
     AssetBatchDownloadRequest:
       type: object
       description: Provide at least one system asset ID in `asset_ids` or resource ID in `resource_ids`. External resources use `ext-{id}` or `external:{id}` resource IDs.
@@ -4823,6 +4851,13 @@ components:
       type: object
       required: [event_id, type, mount_path, origin_path, observed_at]
       properties:
+        root_identity: { type: string }
+        file_identity: { type: string }
+        modified_ns: { type: integer, format: int64 }
+        changed_ns: { type: integer, format: int64 }
+        agent_epoch: { type: string }
+        sequence: { type: integer, format: int64, minimum: 0 }
+        scan_id: { type: string }
         event_id:
           type: string
           minLength: 1
@@ -6764,7 +6799,677 @@ components:
         next_cursor: { type: string }
         watermark: { type: integer, format: int64 }
         snapshot_version: { type: string, minLength: 64, maxLength: 64 }
+
+    AssetMediaAccessRequest:
+      type: object
+      required: [resource_kind, resource_id, purpose]
+      properties:
+        resource_kind: { type: string, enum: [asset, task_asset, external_asset, client_material, package] }
+        resource_id: { type: string }
+        item_id: { type: integer, format: int64, description: Optional immutable file within an authorized published set. }
+        purpose: { type: string, enum: [preview, download] }
+        rendition: { type: string, enum: [thumbnail, preview, original] }
+        delivery: { type: string, enum: [auto, lan, cloud], default: auto }
+        expected_source_version: { type: string }
+    AssetMediaJob:
+      type: object
+      required: [job_id, kind, pool, resource_id, source_version, recipe, state, phase, priority, attempts, next_run_at, processed_bytes, total_bytes, retryable, created_at, updated_at]
+      properties:
+        job_id: { type: string }
+        kind: { type: string }
+        pool: { type: string, enum: [ecs, nas, scan] }
+        resource_id: { type: string }
+        filename: { type: string, description: Frozen user-facing source name or package label. }
+        source_version: { type: string }
+        recipe: { type: string }
+        state: { type: string, enum: [queued, processing, retry_wait, succeeded, failed, stale] }
+        phase: { type: string }
+        priority: { type: integer }
+        attempts: { type: integer }
+        next_run_at: { type: string, format: date-time }
+        lease_epoch: { type: integer, format: int64 }
+        processed_bytes: { type: integer, format: int64 }
+        total_bytes: { type: integer, format: int64 }
+        result: { type: object, additionalProperties: true }
+        error_code: { type: string }
+        retryable: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AssetMediaRequest:
+      type: object
+      required: [request_id, job, cancelled, created_at, updated_at]
+      properties:
+        request_id: { type: string }
+        access_reference: { $ref: '#/components/schemas/AssetMediaAccessReference' }
+        job: { $ref: '#/components/schemas/AssetMediaJob' }
+        cancelled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AssetMediaReadTarget:
+      type: object
+      required: [source, content_id, source_version, filename, mime_type, size]
+      properties:
+        source: { type: string, enum: [nas, oss, artifact] }
+        content_id: { type: string }
+        source_version: { type: string }
+        relative_path: { type: string }
+        origin_url: { type: string, description: Transient scoped origin URL for the trusted gateway; never persist or log. }
+        filename: { type: string }
+        mime_type: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { type: string }
+        crc64: { type: string }
+        modified_ns: { type: integer, format: int64 }
+        changed_ns: { type: integer, format: int64 }
+        file_identity: { type: string }
+        root_identity: { type: string }
+    ExternalMediaScan:
+      type: object
+      required: [scan_id, agent_id, agent_epoch, root_identity, origin_root, start_sequence, end_sequence, shard_index, shard_count, parts, files, manifest_sha256, read_errors]
+      properties:
+        scan_id: { type: string, format: uuid }
+        agent_id: { type: string }
+        agent_epoch: { type: string }
+        root_identity: { type: string }
+        origin_root: { type: string, enum: [/p3] }
+        start_sequence: { type: integer, format: int64 }
+        end_sequence: { type: integer, format: int64 }
+        shard_index: { type: integer }
+        shard_count: { type: integer, enum: [2] }
+        parts: { type: integer }
+        files: { type: integer, format: int64 }
+        manifest_sha256: { type: string }
+        read_errors: { type: integer }
+    ExternalMediaScanPart:
+      type: object
+      required: [scan_id, part, sha256, items]
+      properties:
+        scan_id: { type: string, format: uuid }
+        part: { type: integer, minimum: 0 }
+        sha256: { type: string }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/ExternalAssetFilesystemEvent' }
+    AssetMediaAccessReference:
+      type: object
+      required: [resource_kind, resource_id, purpose, rendition, expected_source_version]
+      properties:
+        resource_kind: { type: string }
+        resource_id: { type: string }
+        item_id: { type: integer, format: int64 }
+        purpose: { type: string, enum: [preview, download] }
+        rendition: { type: string, enum: [thumbnail, preview, original] }
+        expected_source_version: { type: string }
+    AssetMediaSelection:
+      type: object
+      required: [resource_id, source_version, filename, size]
+      properties:
+        resource_id: { type: string }
+        source_version: { type: string }
+        filename: { type: string }
+        size: { type: integer, format: int64 }
+    AssetMediaPackageRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: object
+            required: [resource_id]
+            properties:
+              resource_id: { type: string }
+              source_version: { type: string, description: Optional expected version. When absent the currently authorized version is frozen at creation. }
+    AssetMediaObject:
+      type: object
+      required: [key, filename, mime_type, size, sha256, source_version, recipe]
+      properties:
+        key: { type: string }
+        filename: { type: string }
+        mime_type: { type: string }
+        size: { type: integer, format: int64 }
+        sha256: { type: string }
+        crc64: { type: string }
+        source_version: { type: string }
+        recipe: { type: string }
+    ExternalMediaResult:
+      type: object
+      properties:
+        original: { $ref: '#/components/schemas/AssetMediaObject' }
+        thumbnail: { $ref: '#/components/schemas/AssetMediaObject' }
+        preview: { $ref: '#/components/schemas/AssetMediaObject' }
+        package: { $ref: '#/components/schemas/AssetMediaObject' }
+        source_sha256: { type: string }
+    AssetMediaUploadCheckpoint:
+      type: object
+      required: [object_key, upload_id, part_size, size, mime_type, sha256, crc64, complete]
+      properties:
+        object_key: { type: string }
+        upload_id: { type: string }
+        part_size: { type: integer, format: int64 }
+        size: { type: integer, format: int64 }
+        mime_type: { type: string }
+        sha256: { type: string }
+        crc64: { type: string }
+        complete: { type: boolean }
+        parts:
+          type: array
+          items:
+            type: object
+            required: [part_number, etag]
+            properties:
+              part_number: { type: integer }
+              etag: { type: string }
+    AssetMediaWorkerCheckpoint:
+      type: object
+      required: [uploads]
+      properties:
+        uploads:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/AssetMediaUploadCheckpoint' }
+    AssetMediaWorkerClaim:
+      type: object
+      required: [job, source, checkpoint]
+      properties:
+        job: { $ref: '#/components/schemas/AssetMediaJob' }
+        source: { $ref: '#/components/schemas/AssetMediaReadTarget' }
+        inputs:
+          type: array
+          items: { $ref: '#/components/schemas/AssetMediaReadTarget' }
+        checkpoint: { $ref: '#/components/schemas/AssetMediaWorkerCheckpoint' }
+    AssetMediaWorkerRequest:
+      type: object
+      required: [job_id, worker_id, lease_epoch]
+      properties:
+        job_id: { type: string }
+        worker_id: { type: string }
+        lease_epoch: { type: integer, format: int64 }
+        phase: { type: string, maxLength: 32 }
+        processed_bytes: { type: integer, format: int64, minimum: 0 }
+        total_bytes: { type: integer, format: int64, minimum: 0 }
+        error_code: { type: string }
+        retryable: { type: boolean }
+        result: { $ref: '#/components/schemas/ExternalMediaResult' }
+    AssetMediaUploadRequest:
+      allOf:
+        - { $ref: '#/components/schemas/AssetMediaWorkerRequest' }
+        - type: object
+          required: [rendition, size, sha256, crc64]
+          properties:
+            rendition: { type: string, enum: [thumbnail, preview, original, zip] }
+            size: { type: integer, format: int64, minimum: 0 }
+            sha256: { type: string }
+            crc64: { type: string }
+            complete: { type: boolean }
+            parts:
+              type: array
+              items:
+                type: object
+                required: [part_number, etag]
+                properties:
+                  part_number: { type: integer }
+                  etag: { type: string }
+    AssetMediaUploadResponse:
+      type: object
+      required: [checkpoint]
+      properties:
+        pending: { type: boolean, description: Legacy copy is being verified through the ECS internal endpoint; poll again without uploading. }
+        plan: { $ref: '#/components/schemas/OSSDirectUploadPlan' }
+        checkpoint: { $ref: '#/components/schemas/AssetMediaUploadCheckpoint' }
+    AssetMediaAccepted:
+      type: object
+      required: [accepted]
+      properties:
+        accepted: { type: boolean }
+    AssetMediaScanResponse:
+      type: object
+      required: [scan_id]
+      properties:
+        scan_id: { type: string }
+        part: { type: integer }
+        job_id: { type: string }
+        state: { type: string, enum: [queued] }
 paths:
+  /v1/assets/media/capabilities:
+    get:
+      summary: Discover enabled company LAN delivery without probing private networks
+      tags: [Assets]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      responses:
+        '200':
+          description: Currently enabled delivery capability; no credentials are returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [lan_available, gateway_id, gateway_url, strict_previews]
+                    properties:
+                      lan_available: { type: boolean }
+                      gateway_id: { type: string }
+                      gateway_url: { type: string }
+                      strict_previews: { type: boolean }
+        '401': { description: Login required }
+        '403': { description: Asset access denied }
+  /v1/assets/media/packages:
+    post:
+      summary: Prepare an immutable external selection ZIP
+      tags: [Assets]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.download]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetMediaPackageRequest' }
+      responses:
+        '200':
+          description: Authorized media operation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetDownloadInfo' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid credential }
+        '403': { description: Resource permission denied }
+        '404': { description: Not found }
+        '409':
+          description: Selection contains unavailable or changed members; no partial ZIP is silently generated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: object
+                    required: [code, message]
+                    properties:
+                      code: { type: string }
+                      message: { type: string }
+                      trace_id: { type: string }
+                      details:
+                        type: object
+                        properties:
+                          available_items:
+                            type: array
+                            items: { $ref: '#/components/schemas/AssetMediaSelection' }
+                          failures:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                resource_id: { type: string }
+                                error_code: { type: string }
+        '410': { description: Source disabled or missing }
+        '503': { description: Service temporarily unavailable }
+  /v1/integration/asset-media/workers/claim:
+    post:
+      summary: Claim NAS jobs with fenced leases
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-Asset-Media-Worker-Token }
+      security: [{ AssetMediaWorkerToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_id]
+              properties:
+                worker_id: { type: string }
+                limit: { type: integer, minimum: 1, maximum: 2 }
+                class: { type: string, enum: [render, transfer], description: Reserve one renderer slot separately from two transfer slots. }
+      responses:
+        '200':
+          description: Authorized media operation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AssetMediaWorkerClaim' } }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid credential }
+        '403': { description: Resource permission denied }
+        '404': { description: Not found }
+        '409': { description: Lease or source version conflict; ZIP failures include explicit available_items }
+        '410': { description: Source disabled or missing }
+        '503': { description: Service temporarily unavailable }
+  /v1/integration/asset-media/workers/heartbeat:
+    post:
+      summary: Renew NAS lease and report actual phase progress
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-Asset-Media-Worker-Token }
+      security: [{ AssetMediaWorkerToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetMediaWorkerRequest' }
+      responses:
+        '200':
+          description: Authorized media operation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaAccepted' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid credential }
+        '403': { description: Resource permission denied }
+        '404': { description: Not found }
+        '409': { description: Lease or source version conflict; ZIP failures include explicit available_items }
+        '410': { description: Source disabled or missing }
+        '503': { description: Service temporarily unavailable }
+  /v1/integration/asset-media/workers/uploads:
+    post:
+      summary: Obtain or resume scoped multipart upload authorization
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-Asset-Media-Worker-Token }
+      security: [{ AssetMediaWorkerToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetMediaUploadRequest' }
+      responses:
+        '200':
+          description: Authorized media operation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaUploadResponse' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid credential }
+        '403': { description: Resource permission denied }
+        '404': { description: Not found }
+        '409': { description: Lease or source version conflict; ZIP failures include explicit available_items }
+        '410': { description: Source disabled or missing }
+        '503': { description: Service temporarily unavailable }
+  /v1/integration/asset-media/workers/complete:
+    post:
+      summary: Commit a version-checked NAS result or failure
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-Asset-Media-Worker-Token }
+      security: [{ AssetMediaWorkerToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetMediaWorkerRequest' }
+      responses:
+        '200':
+          description: Authorized media operation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaAccepted' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid credential }
+        '403': { description: Resource permission denied }
+        '404': { description: Not found }
+        '409': { description: Lease or source version conflict; ZIP failures include explicit available_items }
+        '410': { description: Source disabled or missing }
+        '503': { description: Service temporarily unavailable }
+  /v1/assets/media/delivery:
+    post:
+      summary: Resolve authorized version-bound cloud or LAN media delivery
+      tags: [Assets]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view, asset.download]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetMediaAccessRequest' }
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetDownloadInfo' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/assets/media/requests:
+    get:
+      summary: List current actor preparation requests from the last 24 hours and unfinished work
+      tags: [Assets]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/AssetMediaRequest' } }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/assets/media/requests/{request_id}:
+    delete:
+      summary: Cancel only the current actor waiting subscription
+      tags: [Assets]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      parameters:
+        - { in: path, name: request_id, required: true, schema: { type: string } }
+      responses:
+        '204':
+          description: Own waiting subscription cancelled; shared work continues.
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/assets/media/jobs/{job_id}:
+    get:
+      summary: Read owned preparation task after current authorization
+      tags: [Assets]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      parameters:
+        - { in: path, name: job_id, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaJob' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/assets/media/jobs/{job_id}/retry:
+    post:
+      summary: Retry transient preparation failure with cooldown and deduplication
+      tags: [Assets]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      parameters:
+        - { in: path, name: job_id, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaJob' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/integration/asset-media/validate-ticket:
+    post:
+      summary: Reauthorize a signed gateway ticket against current user and source state
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-Asset-Media-Gateway-Token }
+      security: [{ AssetMediaGatewayToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [ticket], properties: { ticket: { type: string, maxLength: 8192 } } }
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaReadTarget' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/integration/external-assets/scans/start:
+    post:
+      summary: Register a complete NAS scan
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-External-Asset-Event-Token }
+      security: [{ ExternalAssetEventToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalMediaScan' }
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaScanResponse' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/integration/external-assets/scans/parts:
+    post:
+      summary: Store immutable part of a complete NAS scan
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-External-Asset-Event-Token }
+      security: [{ ExternalAssetEventToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalMediaScanPart' }
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaScanResponse' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
+  /v1/integration/external-assets/scans/complete:
+    post:
+      summary: Validate and queue a complete NAS scan
+      tags: [IntegrationCenter]
+      x-api-readiness: ready_for_frontend
+      x-machine-auth: { mode: dedicated_pre_shared_token, header: X-External-Asset-Event-Token }
+      security: [{ ExternalAssetEventToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExternalMediaScan' }
+      responses:
+        '200':
+          description: Authorized media response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetMediaScanResponse' }
+        '400': { description: Invalid request }
+        '401': { description: Missing or invalid identity }
+        '403': { description: Current permission or resource scope denied }
+        '404': { description: Resource or owned request not found }
+        '409': { description: Source version changed or operation conflicts with current state }
+        '410': { description: Source disabled or source file unavailable }
+        '503': { description: Media capability temporarily unavailable }
   /api/cost/skus:
     get:
       tags: [ERPBridge]
@@ -10572,6 +11277,9 @@ paths:
       x-api-readiness: ready_for_frontend
       x-permissions: [asset.view]
       parameters:
+        - in: query
+          name: rendition
+          schema: { type: string, enum: [preview, thumbnail], default: preview }
         - in: path
           name: task_asset_id
           required: true

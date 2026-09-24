@@ -29,6 +29,7 @@ type Config struct {
 	UploadService  UploadServiceConfig
 	OSSDirect      OSSDirectConfig
 	ExternalAssets ExternalAssetsConfig
+	AssetMedia     AssetMediaConfig
 	AssetWorkbench AssetWorkbenchConfig
 	AssetCleanup   AssetCleanupConfig
 	AI             AIConfig
@@ -51,6 +52,24 @@ type WeComConfig struct {
 	AiBotDefaultChatID string
 	AiBotWSURL         string
 	AiBotQueueSize     int
+}
+
+type AssetMediaConfig struct {
+	JobsEnabled        bool
+	ECSWorkerEnabled   bool
+	StrictPreviews     bool
+	QuarkDisabled      bool
+	NASDeliveryEnabled bool
+	NASWorkerEnabled   bool
+	NASScanEnabled     bool
+	VersionedSources   bool
+	ExternalZIPEnabled bool
+	GatewayID          string
+	GatewayURL         string
+	SigningKeyFile     string
+	SigningKeyID       string
+	GatewayToken       string
+	WorkerToken        string
 }
 
 type WebPushConfig struct {
@@ -308,6 +327,23 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
+		AssetMedia: AssetMediaConfig{
+			JobsEnabled:        mustParseBool(getEnv("ASSET_MEDIA_JOBS_ENABLED", "false")),
+			ECSWorkerEnabled:   mustParseBool(getEnv("ASSET_MEDIA_ECS_WORKER_ENABLED", "false")),
+			StrictPreviews:     mustParseBool(getEnv("ASSET_MEDIA_STRICT_PREVIEWS", "false")),
+			QuarkDisabled:      mustParseBool(getEnv("ASSET_MEDIA_QUARK_DISABLED", "false")),
+			NASDeliveryEnabled: mustParseBool(getEnv("ASSET_MEDIA_NAS_DELIVERY_ENABLED", "false")),
+			NASWorkerEnabled:   mustParseBool(getEnv("ASSET_MEDIA_NAS_WORKER_ENABLED", "false")),
+			NASScanEnabled:     mustParseBool(getEnv("ASSET_MEDIA_NAS_SCAN_ENABLED", "false")),
+			VersionedSources:   mustParseBool(getEnv("ASSET_MEDIA_VERSIONED_SOURCES_ENABLED", "false")),
+			ExternalZIPEnabled: mustParseBool(getEnv("ASSET_MEDIA_EXTERNAL_ZIP_ENABLED", "false")),
+			GatewayID:          getEnv("ASSET_MEDIA_GATEWAY_ID", "company-nas"),
+			GatewayURL:         getEnv("ASSET_MEDIA_GATEWAY_URL", "https://media-cache.yongbo.cloud"),
+			SigningKeyFile:     getEnv("ASSET_MEDIA_SIGNING_KEY_FILE", ""),
+			SigningKeyID:       getEnv("ASSET_MEDIA_SIGNING_KEY_ID", "media-v1"),
+			GatewayToken:       getEnv("ASSET_MEDIA_GATEWAY_TOKEN", ""),
+			WorkerToken:        getEnv("ASSET_MEDIA_WORKER_TOKEN", ""),
+		},
 		Server: ServerConfig{
 			Port:         getEnv("SERVER_PORT", "8080"),
 			ReadTimeout:  mustParseDuration(getEnv("SERVER_READ_TIMEOUT", "30s")),

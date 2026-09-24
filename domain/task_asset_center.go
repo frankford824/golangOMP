@@ -134,15 +134,28 @@ const (
 )
 
 type AssetDownloadInfo struct {
-	DownloadMode     AssetDownloadMode   `json:"download_mode"`
-	DownloadURL      *string             `json:"download_url"`
-	AccessHint       string              `json:"access_hint"`
-	PreviewAvailable bool                `json:"preview_available"`
-	Filename         string              `json:"filename"`
-	FileSize         int64               `json:"file_size"`
-	MimeType         string              `json:"mime_type"`
-	ExpiresAt        *time.Time          `json:"expires_at,omitempty"`
-	Items            []AssetDownloadInfo `json:"items,omitempty"`
+	DownloadMode     AssetDownloadMode    `json:"download_mode"`
+	DownloadURL      *string              `json:"download_url"`
+	AccessHint       string               `json:"access_hint"`
+	PreviewAvailable bool                 `json:"preview_available"`
+	Filename         string               `json:"filename"`
+	FileSize         int64                `json:"file_size"`
+	MimeType         string               `json:"mime_type"`
+	ExpiresAt        *time.Time           `json:"expires_at,omitempty"`
+	Items            []AssetDownloadInfo  `json:"items,omitempty"`
+	SourceVersion    string               `json:"source_version,omitempty"`
+	ContentID        string               `json:"content_id,omitempty"`
+	Rendition        string               `json:"rendition,omitempty"`
+	State            string               `json:"state,omitempty"`
+	JobID            string               `json:"job_id,omitempty"`
+	RequestID        string               `json:"request_id,omitempty"`
+	RetryAfter       int                  `json:"retry_after,omitempty"`
+	ErrorCode        string               `json:"error_code,omitempty"`
+	Retryable        bool                 `json:"retryable,omitempty"`
+	LANDelivery      *AssetMediaDelivery  `json:"lan_delivery,omitempty"`
+	CloudDelivery    *AssetMediaDelivery  `json:"cloud_delivery,omitempty"`
+	ObjectKey        string               `json:"-"`
+	LocalSource      *ExternalAssetRecord `json:"-"`
 }
 
 type DesignAsset struct {

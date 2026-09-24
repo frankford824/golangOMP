@@ -4129,9 +4129,12 @@ func TestClientMaterialPreviewRequiresEnabledPublishedMaterial(t *testing.T) {
 			MimeType:     "image/png",
 		},
 	}
+	downloader.info.PreviewAvailable = true
+	previewer := &systemAssetPreviewerStub{previewInfo: downloader.info}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"},
 		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
 		WithSystemAssetDownloader(downloader),
+		WithSystemAssetPreviewer(previewer),
 	)
 	actor := domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetView}}
 
@@ -4149,8 +4152,8 @@ func TestClientMaterialPreviewRequiresEnabledPublishedMaterial(t *testing.T) {
 	if appErr == nil || appErr.Code != domain.ErrCodeNotFound {
 		t.Fatalf("ClientMaterialPreview(disabled) appErr = %+v", appErr)
 	}
-	if downloader.downloadCalls != 1 {
-		t.Fatalf("downloadCalls = %d, want 1", downloader.downloadCalls)
+	if downloader.downloadCalls != 0 || previewer.previewCalls != 1 {
+		t.Fatalf("downloadCalls = %d, want 0", downloader.downloadCalls)
 	}
 }
 
@@ -4265,7 +4268,7 @@ func TestClientMaterialBatchDownloadSupportsMixedSources(t *testing.T) {
 	}
 }
 
-func TestSystemAssetPreviewUsesPreviewableDownloadURL(t *testing.T) {
+func TestSystemAssetPreviewNeverFallsBackToOriginalDownload(t *testing.T) {
 	url := "https://assets.example.com/system/1001.png"
 	downloader := &systemAssetDownloaderStub{
 		info: &domain.AssetDownloadInfo{
@@ -4282,8 +4285,8 @@ func TestSystemAssetPreviewUsesPreviewableDownloadURL(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("SystemAssetPreview() error = %+v", appErr)
 	}
-	if meta.Status != domain.AssetWorkbenchPreviewStatusReady || !meta.PreviewAvailable || meta.PreviewURL != url || meta.DownloadURL != url {
-		t.Fatalf("preview meta = %+v, want ready direct preview", meta)
+	if meta.PreviewAvailable || meta.PreviewURL != "" || meta.DownloadURL != "" || downloader.downloadCalls != 0 {
+		t.Fatalf("preview meta = %+v, must not fetch or expose original without preview provider", meta)
 	}
 }
 

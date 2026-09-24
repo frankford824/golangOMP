@@ -91,6 +91,16 @@ func main() {
 		PartSize:        cfg.OSSDirect.PartSize,
 	})
 	svc := externalassets.NewService(repo, externalassets.ConfigFromApp(cfg.ExternalAssets), ossDirect)
+	if cfg.AssetMedia.JobsEnabled {
+		svc.ConfigureMedia(mysqlrepo.NewAssetMediaJobRepo(mdb), cfg.AssetMedia)
+	} else {
+		svc.ConfigureMedia(nil, cfg.AssetMedia)
+	}
+	versioned := cfg.AssetMedia.VersionedSources || cfg.AssetMedia.NASScanEnabled || cfg.AssetMedia.NASWorkerEnabled || cfg.AssetMedia.NASDeliveryEnabled
+	if versioned && !dryRun && (fullSync || queueVisiblePreviews || drainPreviews) {
+		writeSummary(summary{Message: "legacy scan/preview execution replaced by durable NAS media pools; no legacy writes performed"})
+		return
+	}
 	if !svc.Enabled() {
 		writeSummary(summary{DryRun: dryRun, Message: "external assets disabled"})
 		return

@@ -2995,15 +2995,38 @@ func (r *assetWorkbenchRepo) ClaimPendingPreviewFiles(ctx context.Context, claim
 }
 
 func (r *assetWorkbenchRepo) MarkPreviewReady(ctx context.Context, tx repo.Tx, fileID int64, previewKey string) error {
-	_, err := Unwrap(tx).ExecContext(ctx, `
+	query := `
 		UPDATE asset_workbench_submission_files
 		SET preview_status = ?, preview_key = ?, preview_error = '', preview_worker_id = '',
 		    preview_lease_expires_at = NULL, preview_next_retry_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, domain.AssetWorkbenchPreviewStatusReady, previewKey, fileID)
+		WHERE id = ?`
+	args := []any{domain.AssetWorkbenchPreviewStatusReady, previewKey, fileID}
+	guard := domain.AssetMediaOptionsFromContext(ctx)
+	if guard.WorkbenchPreviewWorker != "" {
+		query += " AND preview_status='processing' AND preview_worker_id=? AND object_key=? AND preview_lease_expires_at>UTC_TIMESTAMP()"
+		args = append(args, guard.WorkbenchPreviewWorker, guard.WorkbenchPreviewObject)
+	}
+	result, err := Unwrap(tx).ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("mark asset workbench preview ready: %w", err)
 	}
+	if guard.WorkbenchPreviewWorker != "" {
+		return requireMediaLease(result, nil)
+	}
 	return nil
+}
+
+func (r *assetWorkbenchRepo) RenewPreviewLease(ctx context.Context, fileID int64, worker, object string) error {
+	return requireMediaLease(r.db.db.ExecContext(ctx, `UPDATE asset_workbench_submission_files SET preview_lease_expires_at=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 120 SECOND)
+ WHERE id=? AND preview_status='processing' AND preview_worker_id=? AND object_key=? AND preview_lease_expires_at>UTC_TIMESTAMP()`, fileID, worker, object))
+}
+
+// Reuse the existing submission preview queue. Do not steal an active lease or
+// enqueue a duplicate task in asset_media_jobs for workbench-owned uploads.
+func (r *assetWorkbenchRepo) RequeueOriginalPreview(ctx context.Context, fileID int64, original string) error {
+	_, err := r.db.db.ExecContext(ctx, `UPDATE asset_workbench_submission_files SET preview_status='pending',preview_attempts=0,preview_next_retry_at=UTC_TIMESTAMP(),preview_error=''
+ WHERE id=? AND object_key=? AND preview_status='ready' AND (preview_key='' OR preview_key=object_key)`, fileID, original)
+	return err
 }
 
 func (r *assetWorkbenchRepo) MarkPreviewFailed(ctx context.Context, tx repo.Tx, fileID int64, attempts int, message string, nextRetryAt *time.Time) error {
@@ -3011,13 +3034,23 @@ func (r *assetWorkbenchRepo) MarkPreviewFailed(ctx context.Context, tx repo.Tx, 
 	if nextRetryAt == nil {
 		status = domain.AssetWorkbenchPreviewStatusFailed
 	}
-	_, err := Unwrap(tx).ExecContext(ctx, `
+	query := `
 		UPDATE asset_workbench_submission_files
 		SET preview_status = ?, preview_attempts = ?, preview_error = ?, preview_worker_id = '',
 		    preview_lease_expires_at = NULL, preview_next_retry_at = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?`, status, attempts, message, toNullTime(nextRetryAt), fileID)
+		WHERE id = ?`
+	args := []any{status, attempts, message, toNullTime(nextRetryAt), fileID}
+	guard := domain.AssetMediaOptionsFromContext(ctx)
+	if guard.WorkbenchPreviewWorker != "" {
+		query += " AND preview_status='processing' AND preview_worker_id=? AND object_key=? AND preview_lease_expires_at>UTC_TIMESTAMP()"
+		args = append(args, guard.WorkbenchPreviewWorker, guard.WorkbenchPreviewObject)
+	}
+	result, err := Unwrap(tx).ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("mark asset workbench preview failed: %w", err)
+	}
+	if guard.WorkbenchPreviewWorker != "" {
+		return requireMediaLease(result, nil)
 	}
 	return nil
 }

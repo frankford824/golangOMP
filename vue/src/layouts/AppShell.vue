@@ -93,11 +93,16 @@
             />
           </div>
           <div class="flex items-center gap-4">
+            <MediaPreparationPanel />
+            <button type="button" :disabled="lanMediaBusy" :aria-pressed="lanMediaEnabled" :title="lanMediaNotice" @click="toggleLANMedia">
+              {{ lanMediaBusy ? '连接中…' : lanMediaEnabled ? '内网加速已启用' : '启用公司内网加速' }}
+            </button>
             <NotificationBadge @open="notificationOpen = true" />
             <AvatarDropdown />
           </div>
         </div>
       </header>
+      <p v-if="lanMediaNotice" class="text-xs px-4 py-1" role="status">{{ lanMediaNotice }}</p>
 
       <div ref="contentScroller" class="flex-1 overflow-auto custom-scrollbar isolate">
         <main class="content">
@@ -166,6 +171,8 @@ import { useRouter } from 'vue-router'
 import { usePermissionsStore } from '@/stores/permissions'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
+import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
+import { lanMediaEnabled, lanMediaBusy, lanMediaNotice, toggleLANMedia } from '@/services/mediaDelivery'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
 

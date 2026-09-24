@@ -138,6 +138,8 @@ type taskAssetCenterService struct {
 	userDisplayNameResolver   UserDisplayNameResolver
 	retouchRequirementRepo    repo.TaskRetouchRequirementRepo
 	referenceFileRefFlatRepo  repo.ReferenceFileRefFlatRepo
+	mediaJobs                 repo.AssetMediaJobRepo
+	strictMediaPreviews       bool
 }
 
 const (
@@ -191,6 +193,10 @@ type taskModuleForUpdateRepo interface {
 }
 
 type TaskAssetCenterServiceOption func(*taskAssetCenterService)
+
+func WithTaskAssetMediaJobs(jobs repo.AssetMediaJobRepo, strict bool) TaskAssetCenterServiceOption {
+	return func(s *taskAssetCenterService) { s.mediaJobs = jobs; s.strictMediaPreviews = strict }
+}
 
 func NewTaskAssetCenterService(
 	taskRepo repo.TaskRepo,
@@ -476,6 +482,9 @@ func (s *taskAssetCenterService) getAssetPreviewInfoByID(ctx context.Context, as
 			return info, nil
 		}
 		if isDerivedPreviewGenerationCandidate(asset.CurrentVersion) {
+			if s.strictMediaPreviews {
+				return s.pendingMediaPreview(ctx, asset.TaskID, asset.ID, asset.CurrentVersion, thumbnail)
+			}
 			actorID := asset.CurrentVersion.UploadedBy
 			if actorID <= 0 {
 				actorID = asset.CreatedBy
@@ -521,11 +530,20 @@ func (s *taskAssetCenterService) GetTaskAssetDownloadInfoByID(ctx context.Contex
 }
 
 func (s *taskAssetCenterService) GetTaskAssetPreviewInfoByID(ctx context.Context, taskAssetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return s.getTaskAssetPreviewInfoByID(ctx, taskAssetID, false)
+}
+
+func (s *taskAssetCenterService) GetTaskAssetThumbnailInfoByID(ctx context.Context, taskAssetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return s.getTaskAssetPreviewInfoByID(ctx, taskAssetID, true)
+}
+
+func (s *taskAssetCenterService) getTaskAssetPreviewInfoByID(ctx context.Context, taskAssetID int64, thumbnail bool) (*domain.AssetDownloadInfo, *domain.AppError) {
 	record, task, appErr := s.requireBoundRevisionTaskAsset(ctx, taskAssetID)
 	if appErr != nil {
 		return nil, appErr
 	}
-	if appErr := authorizeV8TaskAssetPreview(ctx, task, nil); appErr != nil {
+	publicationID, _ := ctx.Value(publicationPreviewContextKey{}).(int64)
+	if appErr := authorizeV8TaskAssetPreview(ctx, task, nil); appErr != nil && publicationID != taskAssetID {
 		return nil, appErr
 	}
 	version := s.buildBoundTaskAssetVersion(record, task)
@@ -539,7 +557,20 @@ func (s *taskAssetCenterService) GetTaskAssetPreviewInfoByID(ctx context.Context
 	if appErr := validateAssetVersionObjectAvailable(version); appErr != nil {
 		return nil, appErr
 	}
+	if s.strictMediaPreviews && !version.IsPreviewFile && !version.IsDesignThumb {
+		info, resolveErr := s.resolveTaskAssetDerivedRenditionInfo(ctx, record, task, thumbnail)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if info != nil {
+			return info, nil
+		}
+		return s.pendingMediaPreview(ctx, task.ID, version.AssetID, version, thumbnail)
+	}
 	if version.PreviewAvailable {
+		if thumbnail {
+			return buildAssetThumbnailInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
+		}
 		return buildAssetPreviewInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
 	}
 	info, resolveErr := s.resolveTaskAssetDerivedPreviewInfo(ctx, record, task)
@@ -668,6 +699,10 @@ func (s *taskAssetCenterService) buildBoundTaskAssetVersion(record *domain.TaskA
 }
 
 func (s *taskAssetCenterService) resolveTaskAssetDerivedPreviewInfo(ctx context.Context, source *domain.TaskAsset, task *domain.Task) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return s.resolveTaskAssetDerivedRenditionInfo(ctx, source, task, false)
+}
+
+func (s *taskAssetCenterService) resolveTaskAssetDerivedRenditionInfo(ctx context.Context, source *domain.TaskAsset, task *domain.Task, thumbnail bool) (*domain.AssetDownloadInfo, *domain.AppError) {
 	if source == nil {
 		return nil, nil
 	}
@@ -675,7 +710,11 @@ func (s *taskAssetCenterService) resolveTaskAssetDerivedPreviewInfo(ctx context.
 	if err != nil {
 		return nil, infraError("list task asset derived previews", err)
 	}
-	for _, candidateType := range []domain.TaskAssetType{domain.TaskAssetTypePreview, domain.TaskAssetTypeDesignThumb} {
+	types := []domain.TaskAssetType{domain.TaskAssetTypePreview, domain.TaskAssetTypeDesignThumb}
+	if thumbnail {
+		types = []domain.TaskAssetType{domain.TaskAssetTypeDesignThumb}
+	}
+	for _, candidateType := range types {
 		for _, candidate := range records {
 			if candidate == nil || candidate.SourceAssetVersionID == nil || *candidate.SourceAssetVersionID != source.ID ||
 				domain.NormalizeTaskAssetType(candidate.AssetType) != candidateType ||
@@ -688,6 +727,9 @@ func (s *taskAssetCenterService) resolveTaskAssetDerivedPreviewInfo(ctx context.
 			}
 			if appErr := validateAssetVersionObjectAvailable(version); appErr != nil {
 				continue
+			}
+			if thumbnail {
+				return buildAssetThumbnailInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
 			}
 			return buildAssetPreviewInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
 		}
@@ -1951,17 +1993,26 @@ func valueOrEmpty(value *string) string {
 	return strings.TrimSpace(*value)
 }
 
-func buildAssetDownloadInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) *domain.AssetDownloadInfo {
+func buildAssetDownloadInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) (result *domain.AssetDownloadInfo) {
+	defer func() { decorateVersionMediaInfo(result, version, "original") }()
 	return buildOSSOrFallback(version, uploadClient, ossDirect, false)
 }
 
-func buildAssetPreviewInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) *domain.AssetDownloadInfo {
+func buildAssetPreviewInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) (result *domain.AssetDownloadInfo) {
+	defer func() { decorateVersionMediaInfo(result, version, "preview") }()
+	if version != nil && version.FileSize != nil && *version.FileSize > ossIMGDefaultMaxSourceBytes {
+		return unpreparedVersionMediaInfo(version, "preview")
+	}
 	return buildOSSOrFallback(version, uploadClient, ossDirect, true)
 }
 
-func buildAssetThumbnailInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) *domain.AssetDownloadInfo {
+func buildAssetThumbnailInfoWithOSS(version *domain.DesignAssetVersion, uploadClient UploadServiceClient, ossDirect *OSSDirectService) (result *domain.AssetDownloadInfo) {
+	defer func() { decorateVersionMediaInfo(result, version, "thumbnail") }()
 	if version == nil {
 		return nil
+	}
+	if version.FileSize != nil && *version.FileSize > ossIMGDefaultMaxSourceBytes {
+		return unpreparedVersionMediaInfo(version, "thumbnail")
 	}
 	filename := resolveDesignAssetDownloadFilename(version)
 	if ossDirect != nil && ossDirect.Enabled() && strings.TrimSpace(version.StorageKey) != "" {
@@ -1973,7 +2024,9 @@ func buildAssetThumbnailInfoWithOSS(version *domain.DesignAssetVersion, uploadCl
 		process, supported := OSSIMGThumbnailProcessForSize(version.OriginalFilename, version.MimeType, fileSize)
 		var info *OSSDirectDownloadInfo
 		mimeType := version.MimeType
-		if supported && process != "" {
+		if version.IsDesignThumb {
+			info = ossDirect.PresignPreviewURL(key)
+		} else if supported && process != "" {
 			info = ossDirect.PresignPreviewURLWithProcess(key, process)
 			if strings.Contains(process, "format,webp") {
 				mimeType = "image/webp"
@@ -2008,7 +2061,9 @@ func buildOSSOrFallback(version *domain.DesignAssetVersion, uploadClient UploadS
 		var info *OSSDirectDownloadInfo
 		mimeType := version.MimeType
 		if preview {
-			if process, ok := buildOSSIMGPreviewProcessForVersion(version); ok {
+			if version.IsPreviewFile || version.IsDesignThumb {
+				info = ossDirect.PresignPreviewURL(key)
+			} else if process, ok := buildOSSIMGPreviewProcessForVersion(version); ok {
 				info = ossDirect.PresignPreviewURLWithProcess(key, process)
 				if strings.Contains(process, "format,jpg") {
 					mimeType = "image/jpeg"

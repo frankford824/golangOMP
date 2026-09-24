@@ -11,6 +11,7 @@ import (
 
 	"workflow/domain"
 	assetcenter "workflow/service/asset_center"
+	assetdelivery "workflow/service/asset_delivery"
 	externalassets "workflow/service/external_assets"
 )
 
@@ -20,7 +21,10 @@ type IntegrationCenterHandler struct {
 	externalAssetEvents externalAssetEventService
 	assetSync           finalizedAssetSyncService
 	externalAssetSync   externalAssetSyncService
+	media               *assetdelivery.Service
 }
+
+func (h *IntegrationCenterHandler) SetAssetMediaService(s *assetdelivery.Service) { h.media = s }
 
 type finalizedAssetSyncService interface {
 	FinalizedSyncManifest(context.Context) (*assetcenter.FinalizedSyncManifest, *domain.AppError)

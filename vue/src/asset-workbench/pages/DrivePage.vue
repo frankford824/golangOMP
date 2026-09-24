@@ -102,7 +102,34 @@ interface MaterialFolderEntry {
 
 const session = useAssetWorkbenchSessionStore()
 const route = useRoute()
-const { queueDriveFile, queueMaterial } = useGlobalDownload()
+const { queueDriveFile, queueMaterial, downloadCenter } = useGlobalDownload()
+const externalZipBusy = ref(false)
+const externalZipFailures = ref<Array<{ resource_id: string; error_code: string }>>([])
+const externalZipAvailable = ref<Array<{ resource_id: string; source_version: string }>>([])
+
+async function prepareExternalZip(availableOnly = false) {
+  if (externalZipBusy.value) return
+  const selected = selectedMaterialAssets.value
+  if (!availableOnly && selected.some((item) => !isExternalMaterialSource(item.source_type))) {
+    notice.value = '此打包入口仅支持外部资源；系统资源请使用原有下载入口'
+    return
+  }
+  const items = availableOnly ? [...externalZipAvailable.value] : selected.map((item) => ({ resource_id: item.resource_id || `ext-${item.id}` }))
+  if (!items.length || items.length > 500) { notice.value = '请选择1至500个外部文件'; return }
+  externalZipBusy.value = true
+  externalZipFailures.value = []; externalZipAvailable.value = []
+  try {
+    await assetWorkbenchApi.createExternalPackage(items)
+    notice.value = '选择集已冻结，正在后台打包。准备好后请在下载中心点击下载'
+    await downloadCenter.refreshPreparationRequests()
+    downloadCenter.openPanel()
+  } catch (error) {
+    const details = (error as { fields?: { failures?: Array<{ resource_id: string; error_code: string }>; available_items?: Array<{ resource_id: string; source_version: string }> } }).fields
+    externalZipFailures.value = details?.failures || []
+    externalZipAvailable.value = details?.available_items || []
+    notice.value = error instanceof Error ? error.message : '创建打包任务失败'
+  } finally { externalZipBusy.value = false }
+}
 
 const UNASSIGNED_KEY = 'unassigned'
 const pageSize = 60
@@ -3933,6 +3960,14 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
+                <div v-if="selectedMaterialCount > 0" class="aw-page-bar__actions">
+                  <button class="aw-secondary-button" type="button" :disabled="externalZipBusy" @click="prepareExternalZip(false)">打包所选外部文件（最多500项 / 512MiB）</button>
+                </div>
+                <section v-if="externalZipFailures.length" class="aw-inline-note" aria-label="打包失败项">
+                  <p>以下文件未加入打包；当前没有生成缺少文件的成功包。</p>
+                  <ul><li v-for="item in externalZipFailures" :key="item.resource_id">{{ item.resource_id }}：{{ item.error_code }}</li></ul>
+                  <button v-if="externalZipAvailable.length" class="aw-secondary-button" type="button" :disabled="externalZipBusy" @click="prepareExternalZip(true)">确认只打包可用的 {{ externalZipAvailable.length }} 项</button>
+                </section>
                 <div v-if="visibleMaterialFolders.length" class="aw-material-folder-grid">
                   <button
                     v-for="folder in visibleMaterialFolders"

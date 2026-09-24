@@ -62,31 +62,28 @@ func OSSIMGPreviewProcess(filename, mimeType string) (string, bool) {
 	return OSSIMGPreviewProcessForSize(filename, mimeType, 0)
 }
 
-// OSSIMGPreviewProcessForSize keeps directly previewable images available when
-// their known source size exceeds OSS IMG's default 20 MiB input limit. Those
-// oversized objects fall back to an untransformed signed preview instead of a
-// transform URL that OSS would reject.
+// Oversized inputs require persisted derivatives. An empty transform must never
+// be interpreted as permission to silently display an original in the browser.
 func OSSIMGPreviewProcessForSize(filename, mimeType string, fileSize int64) (string, bool) {
 	ext := sourceAssetFormatExtension(filename, mimeType)
 	if _, ok := ossIMGDirectSourceExtensions[ext]; !ok {
 		return "", false
 	}
 	if fileSize > ossIMGDefaultMaxSourceBytes {
-		return "", true
+		return "", false
 	}
 	return buildOSSIMGPreviewProcessByExtension(ext), true
 }
 
 // OSSIMGThumbnailProcessForSize returns a low-bandwidth gallery rendition.
-// Oversized originals remain directly previewable until the asynchronous
-// design-thumb derivative is ready.
+// Oversized originals wait for the asynchronous derivative.
 func OSSIMGThumbnailProcessForSize(filename, mimeType string, fileSize int64) (string, bool) {
 	ext := sourceAssetFormatExtension(filename, mimeType)
 	if _, ok := ossIMGDirectSourceExtensions[ext]; !ok {
 		return "", false
 	}
 	if fileSize > ossIMGDefaultMaxSourceBytes {
-		return "", true
+		return "", false
 	}
 	steps := []string{
 		"image/auto-orient,1",

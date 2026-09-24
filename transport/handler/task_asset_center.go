@@ -13,6 +13,7 @@ import (
 	"workflow/domain"
 	"workflow/service"
 	assetcenter "workflow/service/asset_center"
+	assetdelivery "workflow/service/asset_delivery"
 	assetlifecycle "workflow/service/asset_lifecycle"
 )
 
@@ -20,7 +21,10 @@ type TaskAssetCenterHandler struct {
 	svc          service.TaskAssetCenterService
 	globalSvc    *assetcenter.Service
 	lifecycleSvc *assetlifecycle.Service
+	media        *assetdelivery.Service
 }
+
+func (h *TaskAssetCenterHandler) SetAssetMediaService(s *assetdelivery.Service) { h.media = s }
 
 type batchGlobalAssetSearchReq struct {
 	Terms        []string `json:"terms"`
@@ -471,7 +475,20 @@ func (h *TaskAssetCenterHandler) PreviewTaskAssetResource(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task asset id", nil))
 		return
 	}
-	info, appErr := h.svc.GetTaskAssetPreviewInfoByID(c.Request.Context(), taskAssetID)
+	rendition := strings.TrimSpace(c.DefaultQuery("rendition", "preview"))
+	if rendition != "preview" && rendition != "thumbnail" {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "rendition must be preview or thumbnail", nil))
+		return
+	}
+	var info *domain.AssetDownloadInfo
+	var appErr *domain.AppError
+	if thumbnailer, ok := h.svc.(interface {
+		GetTaskAssetThumbnailInfoByID(context.Context, int64) (*domain.AssetDownloadInfo, *domain.AppError)
+	}); ok && rendition == "thumbnail" {
+		info, appErr = thumbnailer.GetTaskAssetThumbnailInfoByID(c.Request.Context(), taskAssetID)
+	} else {
+		info, appErr = h.svc.GetTaskAssetPreviewInfoByID(c.Request.Context(), taskAssetID)
+	}
 	if appErr != nil {
 		respondError(c, appErr)
 		return

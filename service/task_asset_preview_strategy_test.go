@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func TestOSSIMGPreviewProcessForSizeFallsBackAboveDefaultLimit(t *testing.T) {
+func TestOSSIMGPreviewProcessForSizeRequiresDerivativeAboveDefaultLimit(t *testing.T) {
 	process, previewable := OSSIMGPreviewProcessForSize("large.jpg", "image/jpeg", ossIMGDefaultMaxSourceBytes+1)
-	if !previewable || process != "" {
-		t.Fatalf("oversized strategy = (%q, %v), want direct untransformed preview", process, previewable)
+	if previewable || process != "" {
+		t.Fatalf("oversized strategy = (%q, %v), must not expose the untransformed original", process, previewable)
 	}
 
 	process, previewable = OSSIMGPreviewProcessForSize("normal.jpg", "image/jpeg", ossIMGDefaultMaxSourceBytes)
@@ -24,7 +24,7 @@ func TestOSSIMGThumbnailProcessUsesLowBandwidthWebP(t *testing.T) {
 	}
 
 	process, previewable = OSSIMGThumbnailProcessForSize("large.png", "image/png", ossIMGDefaultMaxSourceBytes+1)
-	if !previewable || process != "" {
-		t.Fatalf("oversized thumbnail strategy = (%q, %v), want direct fallback", process, previewable)
+	if previewable || process != "" {
+		t.Fatalf("oversized thumbnail strategy = (%q, %v), must wait for a bounded derivative", process, previewable)
 	}
 }

@@ -161,10 +161,8 @@ describe('ResourceGroupsView', () => {
   it('shows a single SKU cover summary card and navigates on click', async () => {
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.get('.cover img').attributes('src')).toBe('https://img/front.png')
-    await wrapper.get('.cover img').trigger('error')
-    expect(wrapper.find('.cover img').exists()).toBe(false)
-    expect(wrapper.get('.preview-fallback').text()).toContain('PNG')
+    expect(wrapper.get('.cover img').attributes('data-task-asset-id')).toBe('1001')
+    expect(wrapper.get('.cover img').attributes('src')).toBeUndefined()
     expect(wrapper.text()).toContain('北欧沙发组合')
     expect(wrapper.text()).toContain('任务 RW-008')
     expect(wrapper.text()).toContain('套装')
@@ -243,6 +241,7 @@ describe('ResourceGroupsView', () => {
       view_mode: 'flat',
       flat_items: [{
         group_id: 8,
+        task_asset_id: 1002,
         task_id: 3,
         task_no: 'RW-008',
         task_type: 'new_product_development',
@@ -262,7 +261,8 @@ describe('ResourceGroupsView', () => {
     await flushPromises()
     expect(wrapper.find('.flat-grid').exists()).toBe(true)
     expect(wrapper.text()).toContain('参考图')
-    expect(wrapper.get('.flat-card img').attributes('src')).toBe('https://img/ref.png')
+    expect(wrapper.get('.flat-card img').attributes('data-task-asset-id')).toBe('1002')
+    expect(wrapper.get('.flat-card img').attributes('src')).toBeUndefined()
     await wrapper.get('.flat-card').trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
   })

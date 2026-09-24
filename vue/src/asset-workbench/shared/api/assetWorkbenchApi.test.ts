@@ -132,15 +132,17 @@ describe('assetWorkbenchApi resource-group downloads', () => {
   })
 
   it('does not present a resource-group download URL as a preview URL', async () => {
-    postMock.mockResolvedValue({ data: { data: { items: [
-      { group_id: 8, revision_id: 70, revision_item_id: 701, task_id: 3, sort_order: 1, filename: 'source.psd', download_url: 'https://files/source' },
-    ] } } })
+    getMock.mockResolvedValue({ data: { data: { id: 8, finalized_revision: { id: 70, items: [{ id: 701, task_asset_id: 123, sort_order: 1 }] } } } })
+    postMock.mockResolvedValueOnce({ data: { data: { state: 'processing', preview_available: false } } })
+    postMock.mockResolvedValueOnce({ data: { data: { state: 'ready', preview_available: true, download_url: 'https://previews/cover.webp' } } })
     const { assetWorkbenchApi } = await import('./assetWorkbenchApi')
 
     const unavailable = await assetWorkbenchApi.previewMaterialAsset({ id: 8, resource_group_id: 8 })
     expect(unavailable.preview_available).toBe(false)
     expect(unavailable.preview_url).toBeUndefined()
-    expect(unavailable.download_url).toBe('https://files/source')
+    expect(unavailable.download_url).toBeUndefined()
+    expect(unavailable.preparing).toBe(true)
+    expect(postMock).toHaveBeenCalledWith('/v1/assets/media/delivery', expect.objectContaining({ resource_kind: 'task_asset', resource_id: '123', purpose: 'preview' }), expect.anything())
 
     const ready = await assetWorkbenchApi.previewMaterialAsset({
       id: 8,

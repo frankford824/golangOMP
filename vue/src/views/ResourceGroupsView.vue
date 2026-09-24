@@ -43,7 +43,7 @@
       <section v-else class="grid flat-grid" aria-label="匹配资源列表">
         <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
           <span class="cover">
-            <img v-if="item.preview_url && !brokenFlat.has(index)" :src="item.preview_url" :alt="item.file_name" loading="lazy" @error="markFlatBroken(index)" />
+            <AssetPreviewMedia v-if="item.task_asset_id" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" rendition="thumbnail" />
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
             <span class="mode-badge">{{ roleLabel(item.resource_role) }}</span>
           </span>
@@ -63,15 +63,13 @@
         <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" @click="openGroup(group.id)">
           <span class="cover">
             <AssetPreviewMedia
-              v-if="protectedCoverURL(group) && !brokenImages.has(group.id)"
+              v-if="coverAssetID(group) > 0"
               :task-asset-id="String(coverAssetID(group))"
-              :fallback-src="protectedCoverURL(group)"
               :alt="coverName(group)"
               img-class="resource-cover-media"
               inner-img-class="resource-cover-image"
               defer-until-visible
             />
-            <img v-else-if="coverURL(group) && !brokenImages.has(group.id)" :src="coverURL(group)" :alt="coverName(group)" loading="lazy" @error="markImageBroken(group.id)" />
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(coverName(group)) }}</span><small>暂无成品预览</small></span>
             <span class="mode-badge">{{ revision(group)?.mode === 'set' ? '套装' : '单图' }}</span>
             <span class="item-count">{{ finals(group).length }} 张成品</span>
@@ -112,7 +110,7 @@
         <div class="grid external-grid">
           <button v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" @click="openExternal(asset)">
             <span class="cover">
-              <img v-if="externalPreviewURL(asset)" :src="externalPreviewURL(asset)" :alt="externalFileName(asset)" loading="lazy" />
+              <AssetPreviewMedia v-if="externalResourceID(asset)" :asset-id="externalResourceID(asset)" :alt="externalFileName(asset)" rendition="thumbnail" />
               <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(externalFileName(asset)) }}</span><small>外部资源</small></span>
               <span class="mode-badge">外部</span>
             </span>
@@ -189,8 +187,6 @@ const roleLabel = (role: string) => ({ reference: '参考图', source: '源文�
 const displaySKU = (group: ResourceGroup) => group.sku_code || group.sku_profile?.sku_code || 'SKU 待关联'
 const productTitle = (group: ResourceGroup) => group.sku_profile?.product_name || group.product_name || (group.scope_kind === 'retouch_requirement' ? '修图成品' : '未命名产品')
 const coverName = (group: ResourceGroup) => finals(group)[0]?.file?.file_name || finals(group)[0]?.item_name || group.product_name || '资源'
-const coverURL = (group: ResourceGroup) => finals(group)[0]?.file?.preview_url || finals(group)[0]?.file?.download_url || ''
-const protectedCoverURL = (group: ResourceGroup) => coverURL(group).startsWith('/') ? coverURL(group) : ''
 const coverAssetID = (group: ResourceGroup) => finals(group)[0]?.file?.task_asset_id || finals(group)[0]?.task_asset_id || 0
 const specificationText = (group: ResourceGroup) => group.sku_profile?.size_text || group.sku_profile?.spec_text || '规格待补充'
 const areaText = (group: ResourceGroup) => {
@@ -225,15 +221,9 @@ const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).
   return [{ key, label: `${filterLabels[key]}：${display}` }]
 }))
 
-function markImageBroken(id: number) { brokenImages.value = new Set(brokenImages.value).add(id) }
-function markFlatBroken(index: number) { brokenFlat.value = new Set(brokenFlat.value).add(index) }
 function openGroup(id: number) { void router.push(`/asset-center/${id}`) }
 function externalResourceID(asset: BackendAsset) { return String(asset.resource_id || asset.id || '') }
 function externalFileName(asset: BackendAsset) { return asset.file_name || asset.original_filename || externalResourceID(asset) || '外部资源' }
-function externalPreviewURL(asset: BackendAsset) {
-  const candidate = typeof asset.preview_url === 'string' ? asset.preview_url : asset.preview_available ? asset.download_url : ''
-  return candidate || ''
-}
 function openExternal(asset: BackendAsset) {
   const id = externalResourceID(asset)
   if (id.startsWith('ext-')) void router.push(`/asset-center/${id}`)

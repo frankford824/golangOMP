@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"workflow/domain"
+	"workflow/internal/assetmedia"
 )
 
 const watcherStateVersion = 1
@@ -48,16 +49,24 @@ type watcherConfig struct {
 	BootstrapEmit     bool
 	ShardCount        int
 	ShardIndex        int
+	MediaProtocol     bool
 }
 
 type fileSnapshot struct {
-	Size             int64 `json:"size"`
-	ModifiedUnixNano int64 `json:"modified_unix_nano"`
+	Size             int64  `json:"size"`
+	ModifiedUnixNano int64  `json:"modified_unix_nano"`
+	ChangedUnixNano  int64  `json:"changed_unix_nano,omitempty"`
+	FileIdentity     string `json:"file_identity,omitempty"`
 }
 
 type watcherState struct {
-	Version int                     `json:"version"`
-	Files   map[string]fileSnapshot `json:"files"`
+	Version         int                     `json:"version"`
+	Files           map[string]fileSnapshot `json:"files"`
+	Epoch           string                  `json:"epoch,omitempty"`
+	RootIdentity    string                  `json:"root_identity,omitempty"`
+	Sequence        int64                   `json:"sequence,omitempty"`
+	Outbox          []mediaJournalItem      `json:"outbox,omitempty"`
+	AppliedSequence map[string]int64        `json:"applied_sequence,omitempty"`
 }
 
 type pendingEvent struct {
@@ -65,6 +74,7 @@ type pendingEvent struct {
 	DueAt     time.Time
 	Sample    *fileSnapshot
 	Attempts  int
+	Revision  int64
 }
 
 type rawWatchEvent struct {
@@ -75,13 +85,14 @@ type rawWatchEvent struct {
 }
 
 type nasWatcher struct {
-	cfg       watcherConfig
-	fd        int
-	client    *http.Client
-	watchMu   sync.Mutex
-	watchDirs map[int]string
-	state     watcherState
-	pending   map[string]pendingEvent
+	cfg        watcherConfig
+	fd         int
+	client     *http.Client
+	watchMu    sync.Mutex
+	watchDirs  map[int]string
+	state      watcherState
+	pending    map[string]pendingEvent
+	journalErr error
 }
 
 func loadWatcherConfig() (watcherConfig, error) {
@@ -102,6 +113,7 @@ func loadWatcherConfig() (watcherConfig, error) {
 		BootstrapEmit:     boolEnv("WATCH_BOOTSTRAP_EMIT", false),
 		ShardCount:        intEnv("WATCH_SHARD_COUNT", 1),
 		ShardIndex:        intEnv("WATCH_SHARD_INDEX", 0),
+		MediaProtocol:     boolEnv("WATCH_MEDIA_PROTOCOL", false),
 	}
 	if cfg.BackendURL == "" || cfg.EventToken == "" {
 		return watcherConfig{}, fmt.Errorf("WATCH_BACKEND_URL and WATCH_EVENT_TOKEN are required")
@@ -152,6 +164,9 @@ func (w *nasWatcher) Close() error {
 }
 
 func (w *nasWatcher) Run(ctx context.Context) error {
+	if w.cfg.MediaProtocol {
+		return w.runMedia(ctx)
+	}
 	if err := w.addRecursive(w.cfg.Root); err != nil {
 		return err
 	}
@@ -327,7 +342,16 @@ func (w *nasWatcher) schedule(rel, operation string) {
 	if rel == "." || shouldIgnoreRelative(rel) {
 		return
 	}
-	w.pending[rel] = pendingEvent{Operation: operation, DueAt: time.Now().Add(w.cfg.Debounce)}
+	revision := int64(0)
+	if w.cfg.MediaProtocol {
+		revision = w.state.Sequence + 1
+		if err := w.appendJournal(rel, operation, revision); err != nil {
+			w.journalErr = err
+			return
+		}
+		w.state.Sequence = revision
+	}
+	w.pending[rel] = pendingEvent{Operation: operation, DueAt: time.Now().Add(w.cfg.Debounce), Revision: revision}
 }
 
 func (w *nasWatcher) processDue(ctx context.Context) error {
@@ -498,6 +522,9 @@ func (w *nasWatcher) scanSnapshots(root string) (map[string]fileSnapshot, error)
 		if entry.IsDir() {
 			return nil
 		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
@@ -527,7 +554,8 @@ func (w *nasWatcher) ownsRelative(rel string) bool {
 }
 
 func snapshotFromInfo(info fs.FileInfo) fileSnapshot {
-	return fileSnapshot{Size: info.Size(), ModifiedUnixNano: info.ModTime().UnixNano()}
+	identity, changed, _ := assetmedia.FileIdentity(info)
+	return fileSnapshot{Size: info.Size(), ModifiedUnixNano: info.ModTime().UnixNano(), ChangedUnixNano: changed, FileIdentity: identity}
 }
 
 func diffSnapshots(current, previous map[string]fileSnapshot) (upserts, deletes []string) {
@@ -571,13 +599,30 @@ func saveWatcherState(filename string, state watcherState) error {
 		return err
 	}
 	tmp := filename + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(raw); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, filename); err != nil {
 		return err
 	}
-	return nil
+	dir, err := os.Open(filepath.Dir(filename))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 func filesystemEventID(operation, originPath string, snapshot fileSnapshot) string {

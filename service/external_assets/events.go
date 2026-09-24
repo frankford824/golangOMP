@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"workflow/domain"
+	"workflow/repo"
 )
 
 const maxExternalAssetEventBatch = 500
@@ -51,6 +53,9 @@ func (s *Service) ApplyFilesystemEvents(ctx context.Context, batch domain.Extern
 		if raw.ObservedAt.IsZero() {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("events[%d].observed_at is required", idx), nil)
 		}
+		if s.mediaConfig.NASScanEnabled && (raw.AgentEpoch == "" || raw.RootIdentity == "" || raw.Sequence < 0 || (raw.Sequence == 0 && raw.ScanID == "")) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "versioned NAS events require epoch, root and sequence", nil)
+		}
 		raw.ObservedAt = raw.ObservedAt.UTC().Truncate(time.Second)
 		if raw.Type != domain.ExternalAssetFilesystemEventUpsert && raw.Type != domain.ExternalAssetFilesystemEventDelete {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("events[%d].type must be upsert or delete", idx), nil)
@@ -73,7 +78,17 @@ func (s *Service) ApplyFilesystemEvents(ctx context.Context, batch domain.Extern
 		event := item.event
 		switch event.Type {
 		case domain.ExternalAssetFilesystemEventDelete:
-			if err := s.repo.MarkOriginPathMissing(ctx, "alist", item.mount.Path, event.OriginPath); err != nil {
+			var deleteErr error
+			if s.mediaConfig.NASScanEnabled {
+				mediaRepo, ok := s.repo.(repo.ExternalAssetMediaRepo)
+				if !ok {
+					return nil, domain.NewAppError(domain.ErrCodeInternalError, "NAS media repository unavailable", nil)
+				}
+				deleteErr = mediaRepo.ApplyMediaDelete(ctx, batch.AgentID, event)
+			} else {
+				deleteErr = s.repo.MarkOriginPathMissing(ctx, "alist", item.mount.Path, event.OriginPath)
+			}
+			if err := deleteErr; err != nil {
 				return nil, domain.NewAppError(domain.ErrCodeInternalError, "apply external asset delete event: "+err.Error(), nil)
 			}
 			result.Deleted++
@@ -83,6 +98,18 @@ func (s *Service) ApplyFilesystemEvents(ctx context.Context, batch domain.Extern
 			driver := item.mount.Driver
 			if driver == "" {
 				driver = driverForMountKind(item.mount.Kind, item.mount.Path)
+			}
+			var fp *domain.ExternalMediaFingerprint
+			if s.mediaConfig.NASScanEnabled {
+				if event.ChangedNS <= 0 || event.FileIdentity == "" {
+					return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "NAS source identity is incomplete", nil)
+				}
+				fp = &domain.ExternalMediaFingerprint{Size: event.FileSize, ModifiedNS: event.ModifiedNS, ChangedNS: event.ChangedNS, FileIdentity: event.FileIdentity, RootIdentity: event.RootIdentity,
+					AgentID: batch.AgentID, AgentEpoch: event.AgentEpoch, Sequence: event.Sequence, ScanID: event.ScanID}
+				fp.SourceVersion = fp.Version(event.OriginPath)
+				if event.ScanID == "" {
+					fp.SourceVersion = domain.AssetMediaIdentity(fp.SourceVersion, event.AgentEpoch, strconv.FormatInt(event.Sequence, 10))
+				}
 			}
 			_, err := s.repo.Upsert(ctx, domain.ExternalAssetUpsert{
 				Provider:         "alist",
@@ -98,6 +125,7 @@ func (s *Service) ApplyFilesystemEvents(ctx context.Context, batch domain.Extern
 				SourceModifiedAt: event.ModifiedAt,
 				SearchableText:   strings.Join([]string{event.OriginPath, path.Dir(event.OriginPath), name, driver, string(domain.ExternalAssetKindNASLocal)}, " "),
 				ScannedAt:        event.ObservedAt,
+				MediaFingerprint: fp,
 			})
 			if err != nil {
 				return nil, domain.NewAppError(domain.ErrCodeInternalError, "apply external asset upsert event: "+err.Error(), nil)

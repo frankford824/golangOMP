@@ -318,6 +318,7 @@ func (s *planningSKUService) GetResult(ctx context.Context, actor domain.Request
 			if storageRef.FileSize != nil {
 				fileSize = *storageRef.FileSize
 			}
+			if fileSize>ossIMGDefaultMaxSourceBytes{revision.ProductImageURL="";continue}
 			if process, ok := OSSIMGPreviewProcessForSize(storageRef.FileName, storageRef.MimeType, fileSize); ok && process != "" {
 				signed = s.ossDirect.PresignPreviewURLWithProcess(storageRef.RefKey, process)
 			}

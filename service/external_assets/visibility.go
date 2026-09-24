@@ -53,6 +53,9 @@ func (s *Service) visibleRootsForMount(mountPath string) ([]string, bool) {
 }
 
 func (s *Service) isOriginVisible(mountPath, originPath string) bool {
+	if s.mediaConfig.QuarkDisabled && (cleanAListPath(mountPath) != "/p3" || (cleanAListPath(originPath) != "/p3" && !strings.HasPrefix(cleanAListPath(originPath), "/p3/"))) {
+		return false
+	}
 	roots, narrowed := s.visibleRootsForMount(mountPath)
 	if !narrowed {
 		return true

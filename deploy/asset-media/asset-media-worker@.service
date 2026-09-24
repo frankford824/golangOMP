@@ -1,0 +1,24 @@
+[Unit]
+Description=Yongbo bounded asset media pool %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=ASSET_MEDIA_WORKER_POOL=%i
+Environment=TMPDIR=/root/ecommerce_ai/media-work/%i
+ExecStart=/bin/bash /root/ecommerce_ai/current/deploy/run-with-env.sh /root/ecommerce_ai/shared/main.env /root/ecommerce_ai/current/asset_media_worker
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=45
+MemoryMax=2G
+CPUQuota=100%
+TasksMax=64
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectSystem=strict
+ReadWritePaths=/root/ecommerce_ai/media-work/%i
+
+[Install]
+WantedBy=multi-user.target

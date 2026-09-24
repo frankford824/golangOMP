@@ -11,7 +11,440 @@
 
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
-- 本文件覆盖 `16` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `23` 个 `/v1` path；同一路径多 method 合并在同一节。
+
+## GET /v1/assets/media/capabilities
+
+### 简介
+支持方法: GET。
+
+- `GET`: Discover enabled company LAN delivery without probing private networks
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "lan_available": true,
+    "gateway_id": "string",
+    "gateway_url": "string",
+    "strict_previews": true
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Login required |
+| 403 | 见 `error.code` | 见 `deny_code` | Asset access denied |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/assets/media/capabilities \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/media/packages
+
+### 简介
+支持方法: POST。
+
+- `POST`: Prepare an immutable external selection ZIP
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `items` | array<object> | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "source_version": "string",
+    "content_id": "string",
+    "rendition": "thumbnail",
+    "state": "ready"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetDownloadInfo | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid credential |
+| 403 | 见 `error.code` | 见 `deny_code` | Resource permission denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Selection contains unavailable or changed members; no partial ZIP is silently generated. |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or missing |
+| 503 | 见 `error.code` | 见 `deny_code` | Service temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/media/packages \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/media/delivery
+
+### 简介
+支持方法: POST。
+
+- `POST`: Resolve authorized version-bound cloud or LAN media delivery
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `resource_kind` | enum(asset/task_asset/external_asset/client_material/package) | 是 | - |
+| `resource_id` | string | 是 | - |
+| `item_id` | integer | 否 | Optional immutable file within an authorized published set. |
+| `purpose` | enum(preview/download) | 是 | - |
+| `rendition` | enum(thumbnail/preview/original) | 否 | - |
+| `delivery` | enum(auto/lan/cloud) | 否 | - |
+| `expected_source_version` | string | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "source_version": "string",
+    "content_id": "string",
+    "rendition": "thumbnail",
+    "state": "ready"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetDownloadInfo | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/media/delivery \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/assets/media/requests
+
+### 简介
+支持方法: GET。
+
+- `GET`: List current actor preparation requests from the last 24 hours and unfinished work
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "request_id": "...",
+      "job": "...",
+      "cancelled": "...",
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<AssetMediaRequest> | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/assets/media/requests \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## DELETE /v1/assets/media/requests/{request_id}
+
+### 简介
+支持方法: DELETE。
+
+- `DELETE`: Cancel only the current actor waiting subscription
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `DELETE` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `request_id` | path | string | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `204`
+
+无 JSON 响应体或响应体由文件流承载。
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X DELETE https://api.example.com/v1/assets/media/requests/<request_id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/assets/media/jobs/{job_id}
+
+### 简介
+支持方法: GET。
+
+- `GET`: Read owned preparation task after current authorization
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `job_id` | path | string | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "job_id": "string",
+    "kind": "string",
+    "pool": "ecs",
+    "resource_id": "string",
+    "source_version": "string",
+    "recipe": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaJob | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/assets/media/jobs/<job_id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/media/jobs/{job_id}/retry
+
+### 简介
+支持方法: POST。
+
+- `POST`: Retry transient preparation failure with cooldown and deduplication
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `job_id` | path | string | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "job_id": "string",
+    "kind": "string",
+    "pool": "ecs",
+    "resource_id": "string",
+    "source_version": "string",
+    "recipe": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetMediaJob | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid identity |
+| 403 | 见 `error.code` | 见 `deny_code` | Current permission or resource scope denied |
+| 404 | 见 `error.code` | 见 `deny_code` | Resource or owned request not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Source version changed or operation conflicts with current state |
+| 410 | 见 `error.code` | 见 `deny_code` | Source disabled or source file unavailable |
+| 503 | 见 `error.code` | 见 `deny_code` | Media capability temporarily unavailable |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/media/jobs/<job_id>/retry \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/assets/search/batch
 
@@ -579,10 +1012,10 @@ curl -X DELETE https://api.example.com/v1/assets/<asset_id> \
 ```json
 {
   "data": {
-    "download_mode": "string",
-    "download_url": "string",
-    "access_hint": "string",
-    "preview_available": true
+    "source_version": "string",
+    "content_id": "string",
+    "rendition": "thumbnail",
+    "state": "ready"
   }
 }
 ```
@@ -688,10 +1121,10 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/content \
 ```json
 {
   "data": {
-    "download_mode": "string",
-    "download_url": "string",
-    "access_hint": "string",
-    "preview_available": true
+    "source_version": "string",
+    "content_id": "string",
+    "rendition": "thumbnail",
+    "state": "ready"
   }
 }
 ```

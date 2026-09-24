@@ -2,6 +2,7 @@ package asset_center
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -36,6 +37,10 @@ func (s *Service) GetExternalDetail(ctx context.Context, externalID int64) (*Ass
 	}
 	row, err := s.externalSvc.Get(ctx, externalID)
 	if err != nil {
+		var appErr *domain.AppError
+		if errors.As(err, &appErr) {
+			return nil, appErr
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
 	if row == nil {

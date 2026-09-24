@@ -19,6 +19,27 @@ type retrievalRepoStub struct {
 	indexedID string
 }
 
+func TestSourceAvailabilityRejectsStaleAuthorizedSearchProjection(t *testing.T) {
+	r := &retrievalRepoStub{exact: []domain.AIRetrievalHit{
+		{DocumentID: "retired", EntityType: "external_asset", EntityID: "1", Title: "old Quark"},
+		{DocumentID: "live", EntityType: "external_asset", EntityID: "2", Title: "NAS"},
+		{DocumentID: "denied", EntityType: "external_asset", EntityID: "3"},
+	}, allowed: map[string]bool{"retired": true, "live": true}}
+	s := NewService(r, nil, nil, false, nil)
+	checked := []string{}
+	s.SetSourceAvailability(func(_ context.Context, hit domain.AIRetrievalHit) bool {
+		checked = append(checked, hit.DocumentID)
+		return hit.DocumentID == "live"
+	})
+	hits, _, err := s.Search(context.Background(), domain.RequestActor{ID: 1}, "sample", 20)
+	if err != nil || len(hits) != 1 || hits[0].DocumentID != "live" {
+		t.Fatalf("unexpected visible hits: %+v %v", hits, err)
+	}
+	if len(checked) != 2 {
+		t.Fatalf("availability must run only after permission check: %v", checked)
+	}
+}
+
 func (r *retrievalRepoStub) UpsertRetrievalDocument(context.Context, repo.Tx, domain.AIRetrievalDocument) error {
 	return nil
 }

@@ -324,6 +324,13 @@ func NewRouter(
 
 	assetGroup := v1.Group("/assets")
 	{
+		assetGroup.GET("/media/capabilities", capabilityAccess(assetGroup, http.MethodGet, "/media/capabilities", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.MediaCapabilities)
+		assetGroup.POST("/media/delivery", capabilityAccess(assetGroup, http.MethodPost, "/media/delivery", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView, domain.PermissionAssetDownload), taskAssetCenterH.ResolveAssetMedia)
+		assetGroup.POST("/media/packages", capabilityAccess(assetGroup, http.MethodPost, "/media/packages", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskAssetCenterH.CreateExternalMediaPackage)
+		assetGroup.GET("/media/requests", capabilityAccess(assetGroup, http.MethodGet, "/media/requests", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.ListMediaRequests)
+		assetGroup.DELETE("/media/requests/:request_id", capabilityAccess(assetGroup, http.MethodDelete, "/media/requests/:request_id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.CancelMediaRequest)
+		assetGroup.GET("/media/jobs/:job_id", capabilityAccess(assetGroup, http.MethodGet, "/media/jobs/:job_id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.GetMediaJob)
+		assetGroup.POST("/media/jobs/:job_id/retry", capabilityAccess(assetGroup, http.MethodPost, "/media/jobs/:job_id/retry", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.RetryMediaJob)
 		assetGroup.POST("/search/batch", capabilityAccess(assetGroup, http.MethodPost, "/search/batch", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.BatchSearchGlobalAssets)
 		assetGroup.POST("/batch-download", capabilityAccess(assetGroup, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.BatchDownloadGlobalAssets)
 		assetGroup.POST("/excel-package/preview", capabilityAccess(assetGroup, http.MethodPost, "/excel-package/preview", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.PreviewExcelPackage)
@@ -374,6 +381,17 @@ func NewRouter(
 		externalAssetIntegrationGroup := integrationGroup.Group("/external-assets")
 		externalAssetIntegrationGroup.Use(withExternalAssetEventTokenAuth())
 		externalAssetIntegrationGroup.POST("/events", integrationCenterH.IngestExternalAssetEvents)
+		externalAssetIntegrationGroup.POST("/scans/start", integrationCenterH.StartMediaScan)
+		externalAssetIntegrationGroup.POST("/scans/parts", integrationCenterH.PutMediaScanPart)
+		externalAssetIntegrationGroup.POST("/scans/complete", integrationCenterH.FinishMediaScan)
+		mediaIntegrationGroup := integrationGroup.Group("/asset-media")
+		mediaIntegrationGroup.POST("/validate-ticket", integrationCenterH.AssetMediaMachineAuth("gateway"), integrationCenterH.ValidateMediaTicket)
+		mediaWorkerGroup := mediaIntegrationGroup.Group("/workers")
+		mediaWorkerGroup.Use(integrationCenterH.AssetMediaMachineAuth("worker"))
+		mediaWorkerGroup.POST("/claim", integrationCenterH.ClaimMediaWork)
+		mediaWorkerGroup.POST("/heartbeat", integrationCenterH.HeartbeatMediaWork)
+		mediaWorkerGroup.POST("/uploads", integrationCenterH.PrepareMediaUpload)
+		mediaWorkerGroup.POST("/complete", integrationCenterH.CompleteMediaWork)
 	}
 
 	// V7: CodeRule (numbering engine)

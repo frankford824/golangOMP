@@ -504,6 +504,10 @@ package_release() {
     fi
     go_build_linux_amd64 "$root" "$go_tool" "$main_output" "$entrypoint"
     go_build_linux_amd64 "$root" "$go_tool" "$bridge_output" "$entrypoint"
+    local media_tool
+    for media_tool in asset-media-worker asset-media-nas-worker asset-media-gateway asset-media-keygen; do
+      go_build_linux_amd64 "$root" "$go_tool" "$stage_root/${media_tool//-/_}" "./cmd/tools/$media_tool"
+    done
     if [ -f "$root/cmd/tools/generate-asset-previews/main.go" ]; then
       go_build_linux_amd64 "$root" "$go_tool" "$asset_preview_output" "./cmd/tools/generate-asset-previews"
     fi
@@ -550,6 +554,7 @@ package_release() {
   cp "$root/deploy/bridge.env.example" "$stage_root/bridge.env.example"
   cp "$root/deploy/DEPLOYMENT_WORKFLOW.md" "$stage_root/README_DEPLOY.md"
   cp "$root/deploy/docker-compose.external-asset-watcher.yml" "$deploy_root/docker-compose.external-asset-watcher.yml"
+  cp -R "$root/deploy/asset-media" "$deploy_root/asset-media"
 
   local helpe
   for helper in lib.sh remote-deploy.sh deploy-on-host.sh backup-production-db.sh publish-front-on-host.sh verify-static-artifact.mjs run-with-env.sh run-pending-migrations.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh check-v8-cutover-readiness.sh; do
@@ -558,13 +563,14 @@ package_release() {
   # Normalize packaged shell helpers to LF to avoid CRLF parse failures on Linux.
   local deploy_script
   local normalized_script
-  for deploy_script in "$deploy_root/"*.sh; do
+  for deploy_script in "$deploy_root/"*.sh "$deploy_root/asset-media/"*.sh; do
     [ -f "$deploy_script" ] || continue
     normalized_script="${deploy_script}.normalized"
     tr -d '\r' <"$deploy_script" >"$normalized_script"
     mv "$normalized_script" "$deploy_script"
   done
   chmod +x "$stage_root/ecommerce-api" "$stage_root/erp_bridge" "$deploy_root/"*.sh
+  chmod +x "$stage_root/asset_media_worker" "$stage_root/asset_media_nas_worker" "$stage_root/asset_media_gateway" "$stage_root/asset_media_keygen"
   if [ -f "$stage_root/generate_asset_previews" ]; then
     chmod +x "$stage_root/generate_asset_previews"
   fi
@@ -592,6 +598,10 @@ package_release() {
   "asset_preview_generator_binary": "generate_asset_previews",
   "external_asset_worker_binary": "external_asset_worker",
   "external_asset_nas_watcher_binary": "external_asset_nas_watcher",
+  "asset_media_worker_binary": "asset_media_worker",
+  "asset_media_nas_worker_binary": "asset_media_nas_worker",
+  "asset_media_gateway_binary": "asset_media_gateway",
+  "asset_media_keygen_binary": "asset_media_keygen",
   "search_reindex_binary": "search_reindex",
   "purge_superseded_resource_objects_binary": "purge_superseded_resource_objects",
   "resolved_entrypoint": "$(json_escape "$entrypoint")",

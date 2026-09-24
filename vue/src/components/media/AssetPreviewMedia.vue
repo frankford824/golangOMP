@@ -19,7 +19,7 @@
     </template>
     <template v-else-if="phase === 'preparing'">
       <div class="apm-placeholder apm-loading" role="status" aria-live="polite">
-        <span>正在准备预览…</span>
+        <span>{{ errorHint }}</span>
         <button type="button" class="apm-retry apm-retry--below" @click.stop="reload">刷新</button>
       </div>
     </template>
@@ -27,9 +27,7 @@
       <div class="apm-empty apm-empty--stack" role="alert">
         <img :src="placeholderSrc" alt="" class="apm-placeholder-img" />
         <div class="apm-empty-caption">{{ errorHint }}</div>
-        <button v-if="fallbackSrc" type="button" class="apm-retry" @click.stop="useFallbackOnly">
-          使用缓存图
-        </button>
+        <button type="button" class="apm-retry" @click.stop="reload">重新获取预览</button>
       </div>
     </template>
     <template v-else-if="displaySrc">
@@ -41,7 +39,10 @@
         loading="lazy"
         decoding="async"
         @click.stop="onOpenFull"
+        @error="onImageError"
       />
+      <span v-if="detailNotice" role="status">{{ detailNotice }}</span>
+      <small v-if="previewNote" class="apm-media-note">{{ previewNote }}</small>
     </template>
     <template v-else>
       <div class="apm-empty" role="img" aria-label="无预览">
@@ -54,7 +55,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import assetPreviewPlaceholder from '@/assets/default.png'
-import { fetchAssetPreviewMeta, fetchTaskAssetPreviewMeta } from '@/domain/asset-access'
+import { fetchAssetPreviewMeta, fetchTaskAssetPreviewMeta, invalidateAssetAccessCache, invalidateTaskAssetAccessCache } from '@/domain/asset-access'
 import {
   materializePreviewImageUrl,
   normalizePreviewAssetId,
@@ -87,6 +88,7 @@ const props = withDefaults(
      * 为 true 时仅在根节点进入视口（含 margin）后再发起预览请求，用于缩略图网格等。
      */
     deferUntilVisible?: boolean
+    rendition?: 'thumbnail' | 'preview'
   }>(),
   {
     assetId: null,
@@ -95,7 +97,8 @@ const props = withDefaults(
     fallbackSrc: null,
     resolvedPreviewUrl: null,
     alt: '',
-    deferUntilVisible: false,
+    deferUntilVisible: true,
+    rendition: 'thumbnail',
   },
 )
 
@@ -116,14 +119,23 @@ type Phase = 'idle' | 'deferred' | 'loading' | 'ready' | 'preparing' | 'not_foun
 const phase = ref<Phase>('idle')
 const displaySrc = ref('')
 const errorHint = ref('加载失败')
+const detailNotice = ref('')
 const rootEl = ref<HTMLElement | null>(null)
 
 const innerImgClass = computed(() => props.innerImgClass)
+const previewNote = computed(() => {
+  if (/\.pdf$/i.test(props.alt)) return '仅首页预览'
+  if (/\.(tiff?|gif)$/i.test(props.alt)) return '仅首画面（静态）'
+  if (/\.ps[db]$/i.test(props.alt)) return '合成画面预览'
+  return ''
+})
 
 let seq = 0
 let materializedImage: MaterializedPreviewImage | null = null
 let io: IntersectionObserver | null = null
 let prepareRetryTimer: number | null = null
+let prepareStartedAt = 0
+let prepareAttempt = 0
 /** 已满足「进入视区」条件，或无需 defer */
 const viewportGateOpen = ref(!props.deferUntilVisible)
 
@@ -153,10 +165,22 @@ function clearPrepareRetryTimer() {
 
 function schedulePrepareRetry() {
   clearPrepareRetryTimer()
+  if (!prepareStartedAt) prepareStartedAt = Date.now()
+  if (Date.now() - prepareStartedAt >= 120_000) {
+    errorHint.value = '后台仍在处理，可稍后手动刷新'
+    return
+  }
+  if (document.hidden) return
+  const delay = [5_000, 10_000, 20_000, 30_000][Math.min(prepareAttempt++, 3)]!
   prepareRetryTimer = window.setTimeout(() => {
     prepareRetryTimer = null
-    void runLoad()
-  }, 12_000)
+    if (!document.hidden) void runLoad()
+  }, delay)
+}
+
+function onVisibilityChange() {
+  if (document.hidden) clearPrepareRetryTimer()
+  else if (phase.value === 'preparing') schedulePrepareRetry()
 }
 
 function bindDeferIo() {
@@ -186,8 +210,13 @@ function bindDeferIo() {
 }
 
 async function materializeDisplaySrc(url: string, assetId?: string): Promise<string | undefined> {
+  const expected = seq
   const image = await materializePreviewImageUrl(url, assetId)
   if (!image) return undefined
+  if (expected !== seq) {
+    revokeMaterializedPreviewImage(image)
+    return undefined
+  }
   clearObjectUrl()
   materializedImage = image
   return image.displaySrc
@@ -225,7 +254,14 @@ async function runLoad() {
 
   if (!taskAssetId && !primaryId && !secondaryId) {
     clearObjectUrl()
+    const unbound = (props.fallbackSrc ?? '').trim()
+    if (unbound && !/^(blob:|data:image\/|\/v1\/public\/erp-product-images\/)/.test(unbound)) {
+      displaySrc.value = ''
+      phase.value = 'unavailable'
+      return
+    }
     const fallback = await materializeDisplaySrc((props.fallbackSrc ?? '').trim(), previewCacheAssetId)
+    if (my !== seq) return
     displaySrc.value = fallback ?? ''
     phase.value = displaySrc.value ? 'ready' : 'idle'
     return
@@ -233,18 +269,9 @@ async function runLoad() {
   phase.value = 'loading'
   clearObjectUrl()
   displaySrc.value = ''
-  let res = taskAssetId
-    ? await fetchTaskAssetPreviewMeta(taskAssetId)
-    : await fetchAssetPreviewMeta(primaryId || secondaryId)
-  const canTrySecondary =
-    !taskAssetId &&
-    Boolean(primaryId) &&
-    Boolean(secondaryId) &&
-    secondaryId !== primaryId &&
-    (res.status === 'not_found' || res.status === 'error')
-  if (canTrySecondary) {
-    res = await fetchAssetPreviewMeta(secondaryId)
-  }
+  const res = taskAssetId
+    ? await fetchTaskAssetPreviewMeta(taskAssetId, undefined, props.rendition)
+    : await fetchAssetPreviewMeta(primaryId || secondaryId, undefined, props.rendition)
   if (my !== seq) return
   if (res.status === 'ok' && res.displayUrl) {
     const renderable = await materializeDisplaySrc(res.displayUrl, previewCacheAssetId)
@@ -260,18 +287,7 @@ async function runLoad() {
     return
   }
   if (res.status === 'unavailable') {
-    if (props.fallbackSrc?.trim()) {
-      const fallback = await materializeDisplaySrc(props.fallbackSrc.trim(), previewCacheAssetId)
-      if (my !== seq) return
-      if (fallback) {
-        displaySrc.value = fallback
-        phase.value = 'ready'
-      } else {
-        phase.value = 'unavailable'
-      }
-    } else {
-      phase.value = 'unavailable'
-    }
+    phase.value = 'unavailable'
     return
   }
   if (res.status === 'preparing') {
@@ -282,38 +298,29 @@ async function runLoad() {
   }
   errorHint.value = res.message ?? '加载失败'
   phase.value = 'error'
-  if (props.fallbackSrc?.trim()) {
-    const fallback = await materializeDisplaySrc(props.fallbackSrc.trim(), previewCacheAssetId)
-    if (my !== seq) return
-    if (fallback) {
-      displaySrc.value = fallback
-      phase.value = 'ready'
-    }
-  }
 }
 
 function reload() {
+  if (props.taskAssetId) invalidateTaskAssetAccessCache(String(props.taskAssetId))
+  else if (props.assetId || props.fallbackAssetId) invalidateAssetAccessCache(String(props.assetId || props.fallbackAssetId))
+  prepareStartedAt = 0
+  prepareAttempt = 0
   void runLoad()
 }
 
-function useFallbackOnly() {
-  void (async () => {
-    if (props.fallbackSrc?.trim()) {
-      const fallback = await materializeDisplaySrc(
-        props.fallbackSrc.trim(),
-        normalizePreviewAssetId(props.taskAssetId)
-          || normalizePreviewAssetId(props.assetId)
-          || normalizePreviewAssetId(props.fallbackAssetId),
-      )
-      if (fallback) {
-        displaySrc.value = fallback
-        phase.value = 'ready'
-      }
-    }
-  })()
+function onImageError() {
+  clearPrepareRetryTimer()
+  clearObjectUrl()
+  displaySrc.value = ''
+  errorHint.value = '预览加载失败，可重新获取预览或明确下载原件'
+  phase.value = 'error'
 }
 
 function scheduleAfterPropChange() {
+  seq += 1
+  prepareStartedAt = 0
+  prepareAttempt = 0
+  clearPrepareRetryTimer()
   if (props.deferUntilVisible) {
     viewportGateOpen.value = false
     phase.value = 'deferred'
@@ -333,6 +340,7 @@ watch(
       props.fallbackSrc,
       props.resolvedPreviewUrl,
       props.deferUntilVisible,
+      props.rendition,
     ] as const,
   () => {
     scheduleAfterPropChange()
@@ -341,20 +349,35 @@ watch(
 )
 
 onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange)
   if (props.deferUntilVisible) {
     void nextTick(() => bindDeferIo())
   }
 })
 
 onBeforeUnmount(() => {
+  seq += 1
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   disconnectDeferIo()
   clearPrepareRetryTimer()
   clearObjectUrl()
 })
 
-function onOpenFull() {
-  const u = displaySrc.value.trim()
+async function onOpenFull() {
+  let u = displaySrc.value.trim()
   if (!u) return
+  if (!props.resolvedPreviewUrl && props.rendition === 'thumbnail') {
+    const taskId = normalizePreviewAssetId(props.taskAssetId)
+    const id = normalizePreviewAssetId(props.assetId) || normalizePreviewAssetId(props.fallbackAssetId)
+    if (taskId || id) {
+      const current = seq
+      const info = taskId ? await fetchTaskAssetPreviewMeta(taskId, undefined, 'preview') : await fetchAssetPreviewMeta(id, undefined, 'preview')
+      if (current !== seq) return
+      if (info.status !== 'ok' || !info.displayUrl) { detailNotice.value = info.message || '详情预览正在准备中，请稍后再试'; return }
+      u = info.displayUrl
+      detailNotice.value = ''
+    }
+  }
   emit('open-full', u, {
     assetId: props.assetId?.trim() || undefined,
     fallbackAssetId: props.fallbackAssetId?.trim() || undefined,
@@ -381,6 +404,7 @@ function onOpenFull() {
   object-fit: contain;
   cursor: zoom-in;
 }
+.apm-media-note { position: absolute; right: .25rem; bottom: .25rem; padding: .15rem .3rem; border-radius: .25rem; font-size: .625rem; color: rgb(var(--yb-text)); background: rgb(var(--yb-surface) / .94); }
 .apm-placeholder {
   width: 100%;
   min-height: 2.5rem;

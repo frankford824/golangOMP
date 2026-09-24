@@ -494,9 +494,10 @@ export const assetsApi = {
     }),
 
   /** GET /v1/assets/{id}/preview */
-  getAssetPreviewMeta: (assetId: string, signal?: AbortSignal) =>
+  getAssetPreviewMeta: (assetId: string, signal?: AbortSignal, rendition: 'thumbnail' | 'preview' = 'preview') =>
     http.get<{ data?: AssetDownloadMeta }>(`/v1/assets/${assetId}/preview`, {
       signal,
+      params: rendition === 'thumbnail' ? { rendition } : undefined,
     }),
 
   deleteAsset: (assetId: string, payload: { reason: string }, signal?: AbortSignal) =>

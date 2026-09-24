@@ -19,11 +19,13 @@ export function getToken(): string | null {
 }
 
 export function setToken(token: string): void {
+  if (getToken() !== token && typeof window !== 'undefined') window.dispatchEvent(new Event('asset-media-session-reset'))
   localStorage.setItem(TOKEN_KEY, token)
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('asset-media-session-reset'))
 }
 
 const http = axios.create({

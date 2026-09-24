@@ -4331,9 +4331,29 @@ func (s *Service) GetFilePreview(ctx context.Context, actor domain.RequestActor,
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "OSS direct preview is not enabled.", nil)
 	}
 	previewKey := strings.TrimSpace(file.PreviewKey)
-	if previewKey == "" {
-		previewKey = file.ObjectKey
+	if previewKey == "" || previewKey == file.ObjectKey {
+		meta.Status = domain.AssetWorkbenchPreviewStatusNotApplicable
+		meta.Preparing = false
+		if file.FileType == "image" || file.FileType == "design" || file.FileType == "pdf" {
+			if queue, ok := s.repo.(interface {
+				RequeueOriginalPreview(context.Context, int64, string) error
+			}); ok {
+				if err := queue.RequeueOriginalPreview(ctx, file.ID, file.ObjectKey); err != nil {
+					return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to prepare bounded preview.", nil)
+				}
+				meta.Status = domain.AssetWorkbenchPreviewStatusPending
+				meta.Preparing = true
+			}
+		}
+		return meta, nil
 	}
+	stat, exists, err := s.oss.StatObject(ctx, previewKey)
+	if err != nil || !exists || stat.ContentLength > 2<<20 {
+		meta.Status = domain.AssetWorkbenchPreviewStatusFailed
+		meta.Error = "预览不可用，可下载原件"
+		return meta, nil
+	}
+	meta.MimeType = "image/webp"
 	signed := s.oss.PresignPreviewURL(previewKey)
 	if signed != nil {
 		meta.PreviewURL = signed.DownloadURL
@@ -6586,17 +6606,9 @@ func (s *Service) systemAssetPreviewMeta(ctx context.Context, assetID int64, thu
 			return nil, appErr
 		}
 	}
-	if s.systemDownloads == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
-	}
-	info, appErr := s.systemDownloads.DownloadLatest(ctx, assetID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	if info == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset preview info is empty.", nil)
-	}
-	return systemAssetPreviewMetaFromDownloadInfo(assetID, string(domain.AssetResourceSourceSystem), strconv.FormatInt(assetID, 10), info), nil
+	// Download metadata is not a preview fallback: it may point to a 200MB
+	// original. A missing renderer leaves the explicit download action intact.
+	return systemAssetPreviewMetaFromDownloadInfo(assetID, string(domain.AssetResourceSourceSystem), strconv.FormatInt(assetID, 10), nil), nil
 }
 
 func systemAssetPreviewMetaFromDownloadInfo(assetID int64, sourceType, sourceRef string, info *domain.AssetDownloadInfo) *SystemAssetPreviewMeta {
@@ -6616,12 +6628,12 @@ func systemAssetPreviewMetaFromDownloadInfo(assetID int64, sourceType, sourceRef
 	if info.DownloadURL != nil {
 		meta.DownloadURL = strings.TrimSpace(*info.DownloadURL)
 	}
-	if meta.DownloadURL != "" && (info.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(meta.MimeType, info.Filename)) {
+	if meta.DownloadURL != "" && info.PreviewAvailable && (info.State == "" || info.State == "ready") {
 		meta.Status = domain.AssetWorkbenchPreviewStatusReady
 		meta.PreviewURL = meta.DownloadURL
 		meta.PreviewAvailable = true
 	}
-	if strings.Contains(strings.TrimSpace(info.AccessHint), "prepare_required") {
+	if info.State == "queued" || info.State == "processing" || (info.State == "" && strings.Contains(strings.TrimSpace(info.AccessHint), "prepare_required")) {
 		meta.Status = domain.AssetWorkbenchPreviewStatusPending
 		meta.Preparing = true
 	}
@@ -7552,17 +7564,23 @@ func (s *Service) ProcessPendingPreviews(ctx context.Context, limit int) (int, *
 		if file == nil {
 			continue
 		}
-		if err := s.processPreviewFile(ctx, file); err != nil {
+		if err := s.processPreviewWithLease(ctx, file); err != nil {
 			nextAttempts := file.PreviewAttempts + 1
 			var nextRetryAt *time.Time
 			if nextAttempts < s.cfg.PreviewWorkerMaxAttempts {
 				value := s.nowFn().UTC().Add(previewRetryBackoff(nextAttempts))
 				nextRetryAt = &value
 			}
+			if baseservice.MediaRenderFailureIsPermanent(err) {
+				nextRetryAt = nil
+			}
 			message := err.Error()
-			if markErr := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-				return s.repo.MarkPreviewFailed(ctx, tx, file.ID, nextAttempts, message, nextRetryAt)
-			}); markErr != nil {
+			finishCtx, finishCancel := context.WithTimeout(workbenchPreviewContext(context.Background(), file), 10*time.Second)
+			markErr := s.tx.RunInTx(finishCtx, func(tx repo.Tx) error {
+				return s.repo.MarkPreviewFailed(finishCtx, tx, file.ID, nextAttempts, message, nextRetryAt)
+			})
+			finishCancel()
+			if markErr != nil {
 				return processed, domain.NewAppError(domain.ErrCodeInternalError, "Failed to mark asset workbench preview failure.", markErr.Error())
 			}
 			processed++
@@ -10370,6 +10388,7 @@ func (s *Service) clientMaterialSourceSnapshot(ctx context.Context, source clien
 }
 
 func (s *Service) clientMaterialDownloadInfo(ctx context.Context, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetDownloadInfo, *domain.AppError) {
+	ctx = withClientMaterialMediaReference(ctx, material, "download", "original")
 	normalizeClientMaterialRow(material)
 	if material.SourceType == "task_resource_group" {
 		resolver, ok := s.repo.(resourceGroupPublicationResolver)
@@ -10428,9 +10447,10 @@ func (s *Service) clientMaterialDownloadInfo(ctx context.Context, material *doma
 }
 
 func (s *Service) clientMaterialPreviewMeta(ctx context.Context, material *domain.AssetWorkbenchClientMaterial) (*SystemAssetPreviewMeta, *domain.AppError) {
+	ctx = withClientMaterialMediaReference(ctx, material, "preview", "preview")
 	normalizeClientMaterialRow(material)
 	if material.SourceType == "task_resource_group" {
-		info, appErr := s.clientMaterialDownloadInfo(ctx, material)
+		info, appErr := s.clientMaterialMediaInfo(ctx, material, "preview", "preview")
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -11683,9 +11703,13 @@ func writeWorkbenchPreviewSourceTempFile(reader io.Reader, filename, mimeType st
 	cleanup := func() {
 		_ = os.Remove(path)
 	}
-	if _, err := io.Copy(file, reader); err != nil {
+	n, err := io.Copy(file, io.LimitReader(reader, baseservice.AssetPreviewSourceMaxBytes+1))
+	if err != nil || n > baseservice.AssetPreviewSourceMaxBytes {
 		_ = file.Close()
 		cleanup()
+		if n > baseservice.AssetPreviewSourceMaxBytes {
+			return "", func() {}, fmt.Errorf("preview_source_exceeds_limit")
+		}
 		return "", func() {}, fmt.Errorf("write preview source temp file: %w", err)
 	}
 	if err := file.Close(); err != nil {

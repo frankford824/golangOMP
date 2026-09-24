@@ -53,6 +53,8 @@ export function resolveAssetSaveFilename(preferredFilename: string, metaFilename
 
 export function triggerBrowserURLDownload(downloadUrl: string, filename: string, signal?: AbortSignal) {
   if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError')
+  const parsed = new URL(downloadUrl, window.location.origin)
+  if (!['http:', 'https:', 'blob:'].includes(parsed.protocol)) throw new Error('下载地址协议无效')
   const link = document.createElement('a')
   link.href = downloadUrl
   link.download = filename
@@ -69,20 +71,21 @@ export async function downloadAssetFileWithOriginalFilename(
   options: DownloadAssetFileOptions,
 ): Promise<DownloadAssetFileResult> {
   const numericAssetId = parseNumericAssetId(options.assetId)
+  const externalAssetId = /^(ext-|external:)\d+$/.test(String(options.assetId || '').trim()) ? String(options.assetId).trim() : undefined
   const numericTaskAssetId = parseNumericAssetId(options.taskAssetId)
   const preferredFilename = String(options.preferredFilename ?? '').trim()
   const fallbackUrl = String(options.downloadUrl ?? '').trim()
 
-  if (numericTaskAssetId || numericAssetId) {
+  if (numericTaskAssetId || numericAssetId || externalAssetId) {
     const meta = numericTaskAssetId
       ? await fetchTaskAssetDownloadMetaResolved(numericTaskAssetId, options.signal)
-      : await fetchAssetDownloadMetaResolved(numericAssetId!, options.signal)
+      : await fetchAssetDownloadMetaResolved(numericAssetId || externalAssetId!, options.signal)
     if (meta.status === 'not_found') return { ok: false, message: '资源不存在' }
     if (meta.status === 'forbidden') return { ok: false, message: '无权限下载该资源' }
     if (meta.status !== 'ok' || !meta.downloadUrl) {
-      if (!fallbackUrl) {
-        return { ok: false, message: meta.message ?? '获取下载地址失败' }
-      }
+      // Canonical permission/source/version failures must never fall through
+      // to an older signed URL retained by a card or historical reference.
+      return { ok: false, message: meta.message ?? '获取下载地址失败' }
     } else {
       const saveName = resolveAssetSaveFilename(meta.filename ?? '', preferredFilename)
       try {

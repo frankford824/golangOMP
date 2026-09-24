@@ -13,13 +13,20 @@ const (
 // stable or removed. event_id is stable across retries; applying the same event
 // repeatedly converges on the same origin_path row and OSS queue state.
 type ExternalAssetFilesystemEvent struct {
-	EventID    string                           `json:"event_id"`
-	Type       ExternalAssetFilesystemEventType `json:"type"`
-	MountPath  string                           `json:"mount_path"`
-	OriginPath string                           `json:"origin_path"`
-	FileSize   int64                            `json:"file_size,omitempty"`
-	ModifiedAt *time.Time                       `json:"modified_at,omitempty"`
-	ObservedAt time.Time                        `json:"observed_at"`
+	EventID      string                           `json:"event_id"`
+	Type         ExternalAssetFilesystemEventType `json:"type"`
+	MountPath    string                           `json:"mount_path"`
+	OriginPath   string                           `json:"origin_path"`
+	FileSize     int64                            `json:"file_size,omitempty"`
+	ModifiedAt   *time.Time                       `json:"modified_at,omitempty"`
+	ObservedAt   time.Time                        `json:"observed_at"`
+	RootIdentity string                           `json:"root_identity,omitempty"`
+	FileIdentity string                           `json:"file_identity,omitempty"`
+	ModifiedNS   int64                            `json:"modified_ns,omitempty"`
+	ChangedNS    int64                            `json:"changed_ns,omitempty"`
+	AgentEpoch   string                           `json:"agent_epoch,omitempty"`
+	Sequence     int64                            `json:"sequence,omitempty"`
+	ScanID       string                           `json:"scan_id,omitempty"`
 }
 
 type ExternalAssetFilesystemEventBatch struct {

@@ -14,11 +14,18 @@ import (
 )
 
 type Service struct {
-	repo      repo.AIRetrievalRepo
-	embedding EmbeddingProvider
-	vectors   VectorStore
-	enabled   bool
-	logger    *zap.Logger
+	repo            repo.AIRetrievalRepo
+	embedding       EmbeddingProvider
+	vectors         VectorStore
+	enabled         bool
+	logger          *zap.Logger
+	sourceAvailable func(context.Context, domain.AIRetrievalHit) bool
+}
+
+// SetSourceAvailability is configured once at startup. It rechecks application
+// source policy after authorization, including stale vector/search projections.
+func (s *Service) SetSourceAvailability(check func(context.Context, domain.AIRetrievalHit) bool) {
+	s.sourceAvailable = check
 }
 
 func NewService(repository repo.AIRetrievalRepo, embedding EmbeddingProvider, vectors VectorStore, enabled bool, logger *zap.Logger) *Service {
@@ -86,6 +93,9 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, query s
 			return nil, meta, err
 		}
 		if !allowed {
+			continue
+		}
+		if s.sourceAvailable != nil && !s.sourceAvailable(ctx, hit) {
 			continue
 		}
 		hit.Excerpt = sanitizeText(hit.Excerpt)

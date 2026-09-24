@@ -43,7 +43,7 @@ export function useGlobalDownload() {
     const initialName = snapshot.original_filename || snapshot.file_name || snapshot.product_name || snapshot.asset_no || '素材文件'
     const knownSize = Number((snapshot as SystemAssetRow & { file_size?: number }).file_size || 0)
     const loadMeta = (signal: AbortSignal) => materialID > 0
-      ? assetWorkbenchApi.downloadClientMaterial(materialID, signal)
+      ? assetWorkbenchApi.downloadClientMaterial(materialID, signal, (!snapshot.resource_group_id && snapshot.source_type !== 'task_resource_group') || (snapshot.resource_mode === 'single' && snapshot.resource_item_count === 1))
       : assetWorkbenchApi.downloadMaterialAsset(snapshot, signal)
 
     return downloadCenter.enqueue({
@@ -161,7 +161,9 @@ async function transferResourceGroupBundle(
   saveBundleBlob(archive, meta.filename)
   const elapsed = Math.max(1, performance.now() - startedAt)
   onProgress({ receivedBytes, totalBytes: totalBytes || receivedBytes, speedBytesPerSecond: receivedBytes * 1000 / elapsed, progress: 100 })
-  return { mode: 'tracked', receivedBytes, totalBytes: totalBytes || receivedBytes, speedBytesPerSecond: receivedBytes * 1000 / elapsed }
+  // Client-side group packing is retained, but clicking its Blob link still
+  // cannot certify that the browser saved the ZIP to disk.
+  return { mode: 'browser', receivedBytes: 0, totalBytes: totalBytes || receivedBytes, speedBytesPerSecond: 0 }
 }
 
 function withoutExtension(filename: string) { return filename.replace(/\.[^.]+$/, '') || '任务资源' }

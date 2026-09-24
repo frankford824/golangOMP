@@ -7,6 +7,7 @@ import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import type { AssetDownloadMeta } from '@/services/api/assetsApi'
 import { assetsApi } from '@/services/api/assetsApi'
 import http from '@/services/http'
+import { lanMediaEnabled, resolveMediaAccess, resolveMediaPreview, mediaMessage, type MediaDeliveryInfo } from '@/services/mediaDelivery'
 import { invalidateMaterializedPreviewImagesForAsset, normalizePreviewAssetId } from '@/domain/asset-preview-image'
 import { toRelativeAssetUrl } from '@/utils/url'
 
@@ -39,9 +40,19 @@ const PREVIEW_META_TTL_MS = 60_000
 const previewMetaCache = new Map<string, { result: AssetPreviewMetaResult; expiresAt: number }>()
 const previewMetaInflight = new Map<string, Promise<AssetPreviewMetaResult>>()
 const assetAccessGeneration = new Map<string, number>()
+let sessionGeneration = 0
+if (typeof window !== 'undefined') {
+  window.addEventListener('asset-media-session-reset', () => {
+    sessionGeneration += 1
+    previewMetaCache.clear()
+    downloadMetaCache.clear()
+    previewMetaInflight.clear()
+    downloadMetaInflight.clear()
+  })
+}
 
 function accessGeneration(id: string): number {
-  return assetAccessGeneration.get(id) ?? 0
+  return sessionGeneration * 1_000_000 + (assetAccessGeneration.get(id) ?? 0)
 }
 
 function readPreviewMetaCache(id: string): AssetPreviewMetaResult | undefined {
@@ -92,12 +103,24 @@ export function primeAssetDownloadMetaCache(assetId: string, responseBody: unkno
 export function invalidateAssetAccessCache(assetId: string): void {
   const id = normalizePreviewAssetId(assetId)
   if (!id) return
-  assetAccessGeneration.set(id, accessGeneration(id) + 1)
+  assetAccessGeneration.set(id, (assetAccessGeneration.get(id) ?? 0) + 1)
   previewMetaCache.delete(id)
+  previewMetaCache.delete(`${id}:thumbnail`)
   downloadMetaCache.delete(id)
   previewMetaInflight.delete(id)
+  previewMetaInflight.delete(`${id}:thumbnail`)
   downloadMetaInflight.delete(id)
   invalidateMaterializedPreviewImagesForAsset(id)
+}
+
+export function invalidateTaskAssetAccessCache(taskAssetId: string): void {
+  if (!/^\d+$/.test(taskAssetId)) return
+  for (const key of [`task-asset:${taskAssetId}`, `task-asset:${taskAssetId}:preview`, `task-asset:${taskAssetId}:thumbnail`]) {
+    assetAccessGeneration.set(key, (assetAccessGeneration.get(key) ?? 0) + 1)
+    previewMetaCache.delete(key); downloadMetaCache.delete(key)
+    previewMetaInflight.delete(key); downloadMetaInflight.delete(key)
+  }
+  invalidateMaterializedPreviewImagesForAsset(taskAssetId)
 }
 
 function unwrapDownloadPayload(body: unknown): AssetDownloadMeta | undefined {
@@ -126,6 +149,7 @@ export function pickDownloadFilenameFromMeta(meta: AssetDownloadMeta | undefined
 function pickMetaUrl(meta: AssetDownloadMeta | undefined): string | undefined {
   if (!meta) return undefined
   const raw = meta as Record<string, unknown>
+  if (raw.state && raw.state !== 'ready') return undefined
   const candidates = [
     raw.download_url,
     raw.downloadUrl,
@@ -141,6 +165,20 @@ function pickMetaUrl(meta: AssetDownloadMeta | undefined): string | undefined {
   return undefined
 }
 
+function structuredPreviewState(meta: AssetDownloadMeta | undefined): AssetPreviewMetaResult | undefined {
+  const state = (meta as Record<string, unknown> | undefined)?.state
+  if (!state || state === 'ready') return undefined
+  if (state === 'queued' || state === 'processing') return { status: 'preparing', message: '正在准备预览' }
+  const messages: Record<string, string> = {
+    failed: '预览生成失败，可下载原件',
+    unsupported: '此格式不支持预览，可下载原件',
+    missing: '原文件已不可用',
+    source_disabled: '该来源已停用，请重新选择资源',
+    temporarily_unavailable: '文件服务暂不可用，请稍后重试',
+  }
+  return { status: 'unavailable', message: messages[String(state)] || '当前预览不可用' }
+}
+
 /**
  * GET /v1/assets/{id}/preview
  * - 200：返回展示 URL（优先 download_url）
@@ -151,19 +189,29 @@ function pickMetaUrl(meta: AssetDownloadMeta | undefined): string | undefined {
 export async function fetchAssetPreviewMeta(
   assetId: string,
   signal?: AbortSignal,
+  rendition: 'thumbnail' | 'preview' = 'preview',
 ): Promise<AssetPreviewMetaResult> {
   const id = normalizePreviewAssetId(assetId)
   if (!id) return { status: 'error', message: '缺少资产 id' }
-  const cached = readPreviewMetaCache(id)
+  if (lanMediaEnabled.value) {
+    try {
+      const info = await resolveMediaPreview({ resource_kind: 'asset', resource_id: id, rendition }, signal)
+      return structuredPreviewState(info as unknown as AssetDownloadMeta) || { status: info.download_url ? 'ok' : 'unavailable', displayUrl: info.download_url || undefined }
+    } catch (e) { return { status: 'error', message: e instanceof Error ? e.message : '加载预览失败' } }
+  }
+  const cacheID = rendition === 'preview' ? id : `${id}:thumbnail`
+  const cached = readPreviewMetaCache(cacheID)
   if (cached) return cached
-  const inflight = previewMetaInflight.get(id)
+  const inflight = previewMetaInflight.get(cacheID)
   if (inflight) return inflight
   const generation = accessGeneration(id)
 
   const p = (async (): Promise<AssetPreviewMetaResult> => {
     try {
-      const res = await assetsApi.getAssetPreviewMeta(id, signal)
+      const res = await assetsApi.getAssetPreviewMeta(id, signal, rendition)
       const meta = unwrapDownloadPayload(res.data)
+      const structured = structuredPreviewState(meta)
+      if (structured) return structured
       const url = normalizeDisplayUrl(pickMetaUrl(meta))
       if (url) {
         const out: AssetPreviewMetaResult = {
@@ -171,7 +219,7 @@ export async function fetchAssetPreviewMeta(
           displayUrl: url,
           downloadUrl: normalizeDisplayUrl(pickMetaUrl(meta)),
         }
-        if (accessGeneration(id) === generation) writePreviewMetaCache(id, out)
+        if (accessGeneration(id) === generation) writePreviewMetaCache(cacheID, out)
         return out
       }
       const raw = meta as Record<string, unknown> | undefined
@@ -191,11 +239,11 @@ export async function fetchAssetPreviewMeta(
       const msg = e instanceof Error ? e.message : '加载预览失败'
       return { status: 'error', message: msg }
     } finally {
-      previewMetaInflight.delete(id)
+      previewMetaInflight.delete(cacheID)
     }
   })()
 
-  previewMetaInflight.set(id, p)
+  previewMetaInflight.set(cacheID, p)
   return p
 }
 
@@ -203,19 +251,29 @@ export async function fetchAssetPreviewMeta(
 export async function fetchTaskAssetPreviewMeta(
   taskAssetId: string,
   signal?: AbortSignal,
+  rendition: 'thumbnail' | 'preview' = 'preview',
 ): Promise<AssetPreviewMetaResult> {
   const id = normalizePreviewAssetId(taskAssetId)
   if (!id) return { status: 'error', message: '缺少任务资产 id' }
-  const cacheID = `task-asset:${id}`
+  if (lanMediaEnabled.value) {
+    try {
+      const info = await resolveMediaPreview({ resource_kind: 'task_asset', resource_id: id, rendition }, signal)
+      return structuredPreviewState(info as unknown as AssetDownloadMeta) || { status: info.download_url ? 'ok' : 'unavailable', displayUrl: info.download_url || undefined }
+    } catch (e) { return { status: 'error', message: e instanceof Error ? e.message : '加载预览失败' } }
+  }
+  const cacheID = `task-asset:${id}:${rendition}`
+  const generation = accessGeneration(cacheID)
   const cached = readPreviewMetaCache(cacheID)
   if (cached) return cached
   try {
-    const res = await http.get(`/v1/task-assets/${encodeURIComponent(id)}/preview`, { signal })
+    const res = await http.get(`/v1/task-assets/${encodeURIComponent(id)}/preview`, { signal, params: rendition === 'thumbnail' ? { rendition } : undefined })
     const meta = unwrapDownloadPayload(res.data)
+    const structured = structuredPreviewState(meta)
+    if (structured) return structured
     const url = normalizeDisplayUrl(pickMetaUrl(meta))
     if (!url) return { status: 'unavailable', message: '预览地址为空' }
     const out: AssetPreviewMetaResult = { status: 'ok', displayUrl: url, downloadUrl: url }
-    writePreviewMetaCache(cacheID, out)
+    if (accessGeneration(cacheID) === generation) writePreviewMetaCache(cacheID, out)
     return out
   } catch (e) {
     if (axios.isAxiosError(e)) {
@@ -230,6 +288,10 @@ export async function fetchTaskAssetPreviewMeta(
 }
 
 function buildDownloadMetaResult(meta: AssetDownloadMeta | undefined): AssetDownloadMetaResult {
+  const state = (meta as Record<string, unknown> | undefined)?.state
+  if (state && state !== 'ready') {
+    return { status: state === 'queued' || state === 'processing' ? 'preparing' : 'error', message: mediaMessage(meta as unknown as MediaDeliveryInfo) }
+  }
   const downloadUrl = normalizeDisplayUrl(pickMetaUrl(meta))
   if (!downloadUrl) {
     const raw = meta as Record<string, unknown> | undefined
@@ -257,6 +319,12 @@ export async function fetchAssetDownloadMetaResolved(
 ): Promise<AssetDownloadMetaResult> {
   const id = assetId.trim()
   if (!id) return { status: 'error', message: '缺少资产 id' }
+  if (lanMediaEnabled.value) {
+    try {
+      const info = await resolveMediaAccess({ resource_kind: /^(ext-|external:)/.test(id) ? 'external_asset' : 'asset', resource_id: id, purpose: 'download', rendition: 'original' }, signal)
+      return buildDownloadMetaResult(info as unknown as AssetDownloadMeta)
+    } catch (e) { return { status: 'error', message: e instanceof Error ? e.message : '获取下载地址失败' } }
+  }
   const cached = readDownloadCache(id)
   if (cached) return cached
   const inflight = downloadMetaInflight.get(id)
@@ -294,6 +362,12 @@ export async function fetchTaskAssetDownloadMetaResolved(
 ): Promise<AssetDownloadMetaResult> {
   const id = taskAssetId.trim()
   if (!/^\d+$/.test(id) || Number(id) <= 0) return { status: 'error', message: '缺少任务资产 id' }
+  if (lanMediaEnabled.value) {
+    try {
+      const info = await resolveMediaAccess({ resource_kind: 'task_asset', resource_id: id, purpose: 'download', rendition: 'original' }, signal)
+      return buildDownloadMetaResult(info as unknown as AssetDownloadMeta)
+    } catch (e) { return { status: 'error', message: e instanceof Error ? e.message : '获取下载地址失败' } }
+  }
   const cacheID = `task-asset:${id}`
   const cached = readDownloadCache(cacheID)
   if (cached) return cached

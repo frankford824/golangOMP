@@ -791,14 +791,14 @@ func (s *taskResourceWorkflowService) hydrateResourceFileURL(file *domain.TaskRe
 	if s.ossDirect != nil && s.ossDirect.Enabled() {
 		if info := s.ossDirect.PresignDownloadURLWithFilename(file.StorageKey, file.FileName); info != nil {
 			file.DownloadURL = info.DownloadURL
-			file.PreviewURL = info.DownloadURL
+			file.PreviewURL = ""
 			expiresAt := time.Now().UTC().Add(s.ossDirect.Config().PresignExpiry)
 			file.DownloadExpiry = &expiresAt
 			return
 		}
 	}
 	file.DownloadURL = "/v1/assets/files/" + escapeStorageKey(file.StorageKey) + "?download_filename=" + url.QueryEscape(file.FileName)
-	file.PreviewURL = file.DownloadURL
+	file.PreviewURL = ""
 }
 
 func escapeStorageKey(storageKey string) string {
