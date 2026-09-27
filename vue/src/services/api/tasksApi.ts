@@ -8,6 +8,13 @@
  */
 
 import http from '@/services/http'
+import type { CostSyncState } from '@/services/api/costManagementApi'
+export interface TaskCostSyncView {
+  state: CostSyncState | null
+  baseline: { revision: number; erp_cost: number | null } | null
+  erp_available: boolean
+  message: string
+}
 import type {
   TaskListParams,
   AssignTaskPayload,
@@ -426,6 +433,9 @@ export const tasksApi = {
    */
   patchSkuItemCostInfo: (id: string, skuItemId: number | string, patch: Record<string, unknown>, signal?: AbortSignal) =>
     http.patch(`/v1/tasks/${id}/sku-items/${skuItemId}/cost-info`, patch, { signal }),
+
+  getSkuItemCostSync: (id: string, skuItemId: number | string, refresh = false) =>
+    http.get<{ data: TaskCostSyncView }>(`/v1/tasks/${id}/sku-items/${skuItemId}/cost-sync`, { params: { refresh } }),
 
   /**
    * POST /v1/tasks/{id}/cost-quote/preview

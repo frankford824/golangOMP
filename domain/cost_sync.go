@@ -27,6 +27,11 @@ func DecideCostObservation(s *CostSyncState, erp *float64) string {
 	if EqualCost(s.LocalCost, erp) {
 		return "agree"
 	}
+	// An explicitly reviewed pending write may replace an observed empty/zero
+	// ERP price. Unsolicited zero observations remain protected below.
+	if s.Status != "conflict" && s.Revision > s.AckRevision && EqualCost(s.ERPCost, erp) {
+		return "unchanged"
+	}
 	if erp != nil && *erp == 0 {
 		return "conflict"
 	}
@@ -81,4 +86,17 @@ type CostSyncListResult struct {
 type CostSyncDecisionResult struct {
 	Accepted bool   `json:"accepted"`
 	SKUCode  string `json:"sku_code"`
+}
+
+// A caller-visible optimistic edit baseline. ERP nil is a known empty price,
+// not a failed lookup; unavailable lookups do not issue a baseline.
+type CostEditBaseline struct {
+	Revision int64    `json:"revision"`
+	ERPCost  *float64 `json:"erp_cost"`
+}
+type TaskCostSyncView struct {
+	State        *CostSyncState    `json:"state"`
+	Baseline     *CostEditBaseline `json:"baseline"`
+	ERPAvailable bool              `json:"erp_available"`
+	Message      string            `json:"message"`
 }

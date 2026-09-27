@@ -6423,7 +6423,7 @@ export interface paths {
         head?: never;
         /**
          * Patch per-SKU cost information for a batch task item
-         * @description Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to an active task created by the current actor. This does not grant cost-rule management.
+         * @description Saves one SKU manual cost. With sync_baseline, validates a fresh ERP read and the local revision, then atomically saves the price and queues cost-only synchronization, including an explicitly reviewed existing conflict. A stale baseline returns 409 without saving. Without a baseline, legacy callers retain conservative asynchronous conflict handling. Success means local persistence, not ERP delivery; inspect the task-scoped cost-sync state. catalog.manage may update rows within its stable data scope; task.create may update only rows belonging to an active task created by the current actor. This does not grant global ERP or cost-rule management.
          */
         patch: {
             parameters: {
@@ -6444,6 +6444,7 @@ export interface paths {
                         manual_cost_override?: boolean | null;
                         manual_cost_override_reason?: string | null;
                         remark?: string | null;
+                        sync_baseline?: components["schemas"]["CostEditBaseline"];
                     };
                 };
             };
@@ -6466,8 +6467,75 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description Local or ERP price changed since the edit baseline. No manual price is saved; refresh and review before retrying. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
+        trace?: never;
+    };
+    "/v1/tasks/{id}/sku-items/{sku_item_id}/cost-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read task-scoped SKU cost synchronization and edit baseline
+         * @description Enforces the task detail read scope and exact SKU membership. Read-only; refresh=true also reads ERP directly to prepare an optimistic manual edit baseline. Default reads persisted status only and is suitable for polling.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    refresh?: boolean;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                    sku_item_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current cost state and optional fresh ERP baseline */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["TaskCostSyncView"];
+                        };
+                    };
+                };
+                /** @description Task outside actor scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Task or SKU membership not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/tasks/{id}/cost-quote/preview": {
@@ -21419,6 +21487,18 @@ export interface components {
             /** Format: date-time */
             checked_at?: string | null;
         };
+        /** @description Optimistic baseline obtained from the task-scoped cost-sync endpoint with refresh=true. A null ERP price means an observed empty price, not a failed read. */
+        CostEditBaseline: {
+            /** Format: int64 */
+            revision: number;
+            erp_cost: number | null;
+        };
+        TaskCostSyncView: {
+            state: components["schemas"]["CostSyncState"] | null;
+            baseline: components["schemas"]["CostEditBaseline"] | null;
+            erp_available: boolean;
+            message: string;
+        };
         CostFace: {
             width_m: number;
             height_m: number;
@@ -25308,7 +25388,7 @@ export interface operations {
                 operational_bucket?: "active_tasks" | "design_pending" | "pending_audit" | "handover" | "customization_in_progress" | "overdue" | "due_today" | "today_created";
                 date_from?: string;
                 date_to?: string;
-                /** @description Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document. */
+                /** @description Searches task number, task title, every child SKU code/name, task participants and indexed resource text. Multiple task/SKU codes separated by whitespace (including newlines), commas (English or Chinese), semicolons (English or Chinese), or Chinese enumeration commas match any listed code exactly, including child SKUs; duplicate codes and matching tasks are deduplicated, and data scope, filters and pagination still apply. List mode requires every token to contain ASCII letters and digits with optional hyphens, underscores or dots; other input retains phrase search. Single full child codes use indexed exact/prefix recall; numeric fragments of at least two characters are constrained to child SKU codes, while text fragments use the ngram search document. */
                 keyword?: string;
                 /** @description Stable list order. `updated_at` uses the latest business activity time from the task event chain; maintenance-only row updates are ignored. Every order uses task ID as a deterministic tie-breaker. */
                 sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at" | "due_at" | "-due_at" | "task_no" | "-task_no";

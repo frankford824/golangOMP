@@ -3569,6 +3569,25 @@ components:
         needs_check: { type: boolean }
         reason: { type: string }
         checked_at: { type: string, format: date-time, nullable: true }
+    CostEditBaseline:
+      type: object
+      required: [revision, erp_cost]
+      description: Optimistic baseline obtained from the task-scoped cost-sync endpoint with refresh=true. A null ERP price means an observed empty price, not a failed read.
+      properties:
+        revision: { type: integer, format: int64, minimum: 1 }
+        erp_cost: { type: number, nullable: true, minimum: 0, maximum: 1000000000 }
+    TaskCostSyncView:
+      type: object
+      required: [state, baseline, erp_available, message]
+      properties:
+        state:
+          allOf: [{ $ref: '#/components/schemas/CostSyncState' }]
+          nullable: true
+        baseline:
+          allOf: [{ $ref: '#/components/schemas/CostEditBaseline' }]
+          nullable: true
+        erp_available: { type: boolean }
+        message: { type: string }
     CostFace:
       type: object
       required: [width_m, height_m, count]
@@ -11403,7 +11422,7 @@ paths:
   /v1/tasks/{id}/sku-items/{sku_item_id}/cost-info:
     patch:
       summary: Patch per-SKU cost information for a batch task item
-      description: Updates one `task_sku_items` cost projection and forces ERP filing so the child SKU uses its own `cost_price` instead of the mother-task cost. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to an active task created by the current actor. This does not grant cost-rule management.
+      description: Saves one SKU manual cost. With sync_baseline, validates a fresh ERP read and the local revision, then atomically saves the price and queues cost-only synchronization, including an explicitly reviewed existing conflict. A stale baseline returns 409 without saving. Without a baseline, legacy callers retain conservative asynchronous conflict handling. Success means local persistence, not ERP delivery; inspect the task-scoped cost-sync state. catalog.manage may update rows within its stable data scope; task.create may update only rows belonging to an active task created by the current actor. This does not grant global ERP or cost-rule management.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.manage, task.create]
@@ -11430,6 +11449,8 @@ paths:
                 manual_cost_override: { type: boolean, nullable: true }
                 manual_cost_override_reason: { type: string, nullable: true }
                 remark: { type: string, nullable: true }
+                sync_baseline:
+                  $ref: '#/components/schemas/CostEditBaseline'
       responses:
         '200':
           description: Updated SKU item cost projection
@@ -11442,6 +11463,41 @@ paths:
                     $ref: '#/components/schemas/TaskSKUItem'
         '403':
           description: "`PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope."
+        '409':
+          description: Local or ERP price changed since the edit baseline. No manual price is saved; refresh and review before retrying.
+  /v1/tasks/{id}/sku-items/{sku_item_id}/cost-sync:
+    get:
+      summary: Read task-scoped SKU cost synchronization and edit baseline
+      description: Enforces the task detail read scope and exact SKU membership. Read-only; refresh=true also reads ERP directly to prepare an optimistic manual edit baseline. Default reads persisted status only and is suitable for polling.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [task.view]
+      x-rbac-placeholder:
+        auth_mode: session_token_capability_enforced
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: sku_item_id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: refresh
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Current cost state and optional fresh ERP baseline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TaskCostSyncView'
+        '403': { description: Task outside actor scope }
+        '404': { description: Task or SKU membership not found }
   /v1/tasks/{id}/cost-quote/preview:
     post:
       summary: Preview cost quote for one task

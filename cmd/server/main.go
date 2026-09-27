@@ -367,6 +367,7 @@ func main() {
 	}
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostSyncNotifier(costNotify),
+		service.WithTaskCostSyncService(costSyncSvc),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
 		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
 		service.WithTaskSKUTraceRepo(skuTraceRepo),

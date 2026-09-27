@@ -329,11 +329,12 @@ type patchTaskCostInfoReq struct {
 }
 
 type patchTaskSKUItemCostInfoReq struct {
-	OperatorID               *int64   `json:"operator_id"`
-	CostPrice                *float64 `json:"cost_price"`
-	ManualCostOverride       *bool    `json:"manual_cost_override"`
-	ManualCostOverrideReason *string  `json:"manual_cost_override_reason"`
-	Remark                   *string  `json:"remark"`
+	SyncBaseline             *domain.CostEditBaseline `json:"sync_baseline"`
+	OperatorID               *int64                   `json:"operator_id"`
+	CostPrice                *float64                 `json:"cost_price"`
+	ManualCostOverride       *bool                    `json:"manual_cost_override"`
+	ManualCostOverrideReason *string                  `json:"manual_cost_override_reason"`
+	Remark                   *string                  `json:"remark"`
 }
 
 type taskCostQuotePreviewReq struct {
@@ -1725,6 +1726,7 @@ func (h *TaskHandler) PatchSKUItemCostInfo(c *gin.Context) {
 		remark = strings.TrimSpace(*req.Remark)
 	}
 	updated, appErr := updater.UpdateSKUItemCostInfo(c.Request.Context(), service.UpdateTaskSKUItemCostInfoParams{
+		SyncBaseline:             req.SyncBaseline,
 		TaskID:                   taskID,
 		SKUItemID:                skuItemID,
 		OperatorID:               operatorID,
@@ -1738,6 +1740,32 @@ func (h *TaskHandler) PatchSKUItemCostInfo(c *gin.Context) {
 		return
 	}
 	respondOK(c, updated)
+}
+
+func (h *TaskHandler) GetSKUCostSync(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.ErrNotFound)
+		return
+	}
+	itemID, err := parseInt64(c.Param("sku_item_id"))
+	if err != nil || itemID <= 0 {
+		respondError(c, domain.ErrNotFound)
+		return
+	}
+	svc, ok := h.svc.(interface {
+		GetSKUCostSync(context.Context, int64, int64, bool) (*domain.TaskCostSyncView, *domain.AppError)
+	})
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "成本同步服务未配置", nil))
+		return
+	}
+	v, appErr := svc.GetSKUCostSync(c.Request.Context(), taskID, itemID, c.Query("refresh") == "true")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, v)
 }
 
 // PreviewCostQuote handles POST /v1/tasks/:id/cost-quote/preview

@@ -158,5 +158,72 @@ func TestCostSyncIntegration(t *testing.T) {
 	if s.Status != "synced" {
 		t.Fatal("old failure overwrote a newer acknowledgement")
 	}
+	// Reproduce a fresh-SKU manual edit blocked by the first ERP price, then
+	// explicitly review that ERP price and save atomically on the same SKU.
+	exec(`UPDATE task_sku_items SET cost_price=3.3,manual_cost_override=1,override_actor='operator:1' WHERE id=1`)
+	if err = r.Observe(ctx, sku, value(9.9)); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = r.Get(ctx, sku)
+	editRevision := s.Revision
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := &MySQLTx{tx: tx}
+	if err = r.LockManualRevision(ctx, wrapped, sku, editRevision); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(`UPDATE task_sku_items SET product_name_snapshot='current name',quantity=7,erp_sync_required=0 WHERE id=1`); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	taskWriter := &taskRepo{db: r.db}
+	if err = taskWriter.UpdateSKUCostOnly(ctx, wrapped, &domain.TaskSKUItem{ID: 1, TaskID: 1, ProductNameSnapshot: "stale name", CostPrice: value(3.3), ManualCostOverride: true, OverrideActor: "operator:1"}, true); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = r.StageManualCost(ctx, wrapped, sku, value(9.9), 1, "QA reviewed current ERP"); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var keptName string
+	var keptQty int
+	var filing bool
+	if err = db.QueryRow(`SELECT product_name_snapshot,quantity,erp_sync_required FROM task_sku_items WHERE id=1`).Scan(&keptName, &keptQty, &filing); err != nil || keptName != "current name" || keptQty != 7 || filing {
+		t.Fatalf("manual save replayed business fields %s %d %t %v", keptName, keptQty, filing, err)
+	}
+	s, _ = r.Get(ctx, sku)
+	if s.Status != "pending" || !s.NeedsCheck || s.Revision <= editRevision || !domain.EqualCost(s.ERPCost, value(9.9)) {
+		t.Fatalf("manual retry remained stuck %+v", s)
+	}
+	if err = r.Observe(ctx, sku, value(9.9)); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = r.Get(ctx, sku)
+	if s.Status != "pending" {
+		t.Fatalf("reviewed ERP baseline re-conflicted %+v", s)
+	}
+	// A stale tab cannot save after the reviewed intent advanced its revision.
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.LockManualRevision(ctx, &MySQLTx{tx: tx}, sku, editRevision); err == nil {
+		tx.Rollback()
+		t.Fatal("stale local baseline accepted")
+	}
+	tx.Rollback()
+	if err = r.Observe(ctx, sku, value(10.1)); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = r.Get(ctx, sku)
+	if s.Status != "conflict" || *s.LocalCost != 3.3 {
+		t.Fatal("post-save ERP edit overwritten")
+	}
 	t.Log("PASS triggers, 4dp mirrors, manual conflict, stale revisions, ERP event cursor, no echo")
 }
