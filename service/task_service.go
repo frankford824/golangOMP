@@ -193,6 +193,7 @@ type TaskFilter struct {
 }
 
 type UpdateTaskSKUItemCostInfoParams struct {
+	SyncBaseline             *domain.CostEditBaseline
 	TaskID                   int64
 	SKUItemID                int64
 	OperatorID               int64
@@ -250,6 +251,7 @@ type taskResourceGroupInitializer interface {
 }
 
 type taskService struct {
+	costSync                       *CostSyncService
 	costSyncNotify                 func()
 	taskRepo                       repo.TaskRepo
 	taskAssetRepo                  repo.TaskAssetRepo
@@ -319,6 +321,10 @@ func WithTaskSKUTraceRepo(skuTraceRepo repo.SKUTraceRepo) TaskServiceOption {
 }
 func WithTaskCostSyncNotifier(notify func()) TaskServiceOption {
 	return func(s *taskService) { s.costSyncNotify = notify }
+}
+
+func WithTaskCostSyncService(sync *CostSyncService) TaskServiceOption {
+	return func(s *taskService) { s.costSync = sync }
 }
 
 func WithTaskCostRuleBindingRepo(bindingRepo repo.CostRuleBindingRepo) TaskServiceOption {
@@ -2852,6 +2858,18 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 	if item == nil {
 		return nil, domain.ErrNotFound
 	}
+	if p.CostPrice != nil && !domain.ValidObservedCost(p.CostPrice) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "人工成本必须是有效的非负金额", nil)
+	}
+	var edit *ManualCostEdit
+	if s.costSync != nil && p.ManualCostOverride {
+		var appErr *domain.AppError
+		edit, appErr = s.costSync.PrepareManualEdit(ctx, item.SKUCode, p.SyncBaseline)
+		if appErr != nil {
+			return nil, appErr
+		}
+		defer edit.Close()
+	}
 
 	previousCostPrice := cloneFloat64Ptr(item.CostPrice)
 	previousEstimatedCost := cloneFloat64Ptr(item.EstimatedCost)
@@ -2884,6 +2902,7 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 	}
 	if item.ManualCostOverride {
 		item.OverrideActor = formatOverrideActor(p.OperatorID)
+		item.RequiresManualReview = false
 		now := time.Now().UTC()
 		item.OverrideAt = &now
 	} else {
@@ -2913,15 +2932,29 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 		detail.OverrideAt = cloneTimePtr(item.OverrideAt)
 	}
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := updater.UpdateSKUItemCostInfo(ctx, tx, item); err != nil {
+		if err := edit.Lock(ctx, tx); err != nil {
 			return err
 		}
-		if syncDetailCost {
-			if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
+		if narrow, ok := s.taskRepo.(interface {
+			UpdateSKUCostOnly(context.Context, repo.Tx, *domain.TaskSKUItem, bool) error
+		}); ok {
+			if err := narrow.UpdateSKUCostOnly(ctx, tx, item, syncDetailCost); err != nil {
 				return err
+			}
+		} else {
+			if err := updater.UpdateSKUItemCostInfo(ctx, tx, item); err != nil {
+				return err
+			}
+			if syncDetailCost {
+				if err := s.taskRepo.UpdateDetailBusinessInfo(ctx, tx, detail); err != nil {
+					return err
+				}
 			}
 		}
 		if err := s.traceTaskCostUpdate(ctx, tx, task, detail, item, p.OperatorID, skuTraceEventSourceSKUItemCost, "sku_item_cost_changed"); err != nil {
+			return err
+		}
+		if err := edit.Stage(ctx, tx, p.OperatorID, item.ManualCostOverrideReason); err != nil {
 			return err
 		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventCostUpdated, &p.OperatorID,
@@ -2951,6 +2984,9 @@ func (s *taskService) UpdateSKUItemCostInfo(ctx context.Context, p UpdateTaskSKU
 		return err
 	})
 	if txErr != nil {
+		if appErr, ok := txErr.(*domain.AppError); ok {
+			return nil, appErr
+		}
 		return nil, infraError("update sku item cost info tx", txErr)
 	}
 	if s.costSyncNotify != nil {

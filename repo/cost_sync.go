@@ -18,3 +18,8 @@ type CostSyncRepo interface {
 	BaselineDue(context.Context, int) ([]string, error)
 	Resolve(context.Context, domain.CostSyncResolution) error
 }
+
+type ManualCostSyncRepo interface {
+	LockManualRevision(context.Context, Tx, string, int64) error
+	StageManualCost(context.Context, Tx, string, *float64, int64, string) error
+}

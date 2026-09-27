@@ -6,7 +6,7 @@ import { DataScopeEnum, RoleEnum } from '@/types'
 import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
-  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(), cancel: vi.fn(),
+  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(), getSkuItemCostSync: vi.fn(), cancel: vi.fn(),
   taskBundle: vi.fn(), uploadReference: vi.fn(), replaceReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), listAssets: vi.fn(), resolveAssetDownload: vi.fn(), runRetouchBatchDownload: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
@@ -97,6 +97,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.patchBusinessInfo.mockResolvedValue({})
     mocks.patchSkuItem.mockResolvedValue({})
     mocks.patchSkuItemCostInfo.mockResolvedValue({})
+    mocks.getSkuItemCostSync.mockResolvedValue({data:{data:{state:{status:'synced'},baseline:{revision:1,erp_cost:12.5},erp_available:true,message:''}}})
     mocks.cancel.mockResolvedValue({})
     mocks.listAssets.mockResolvedValue({ data: { data: [] } })
     mocks.resolveAssetDownload.mockResolvedValue({ status: 'not_found', message: '资源不存在' })
@@ -409,6 +410,8 @@ describe('TaskDetailV8View business context', () => {
     const specInput = inputFor('规格')
     const costInput = inputFor('当前/人工成本')
     const reasonInput = inputFor('成本调整原因')
+    costInput?.dispatchEvent(new FocusEvent('focus'))
+    await flushPromises()
     expect(specInput?.value).toBe('旧规格')
     if (specInput) specInput.value = '新规格'
     specInput?.dispatchEvent(new Event('input', { bubbles: true }))
@@ -427,8 +430,8 @@ describe('TaskDetailV8View business context', () => {
       manual_cost_override: true,
       manual_cost_override_reason: '供应商报价调整',
     }))
-    expect(dialog().textContent).toContain('任务成本已保存；ERP 价格仍需核对')
-    expect(dialog().textContent).toContain('ERP 如有不同价格，需管理员在“成本规则 → 成本同步”确认')
+    expect(dialog().textContent).toContain('人工成本已保存。')
+    expect(dialog().textContent).toContain('编辑期间价格再次变化时，会提示重新确认')
   })
 
   it('lets the creator update business fields and audited manual cost on their own active batch task', async () => {
@@ -492,6 +495,8 @@ describe('TaskDetailV8View business context', () => {
       .find((label) => label.textContent?.includes('成本调整原因'))
       ?.querySelector<HTMLInputElement>('input')
     if (!costInput || !reasonInput) throw new Error('expected editable SKU cost fields')
+    costInput.dispatchEvent(new FocusEvent('focus'))
+    await flushPromises()
     costInput.value = '20.5'
     costInput.dispatchEvent(new Event('input', { bubbles: true }))
     reasonInput.value = '核对供应商报价后修正'

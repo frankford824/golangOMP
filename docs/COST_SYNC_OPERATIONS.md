@@ -34,9 +34,21 @@ transaction: ERP does not expose a verified compare-and-swap price write contrac
   old cost/specification snapshot after an ERP call.
 - Inbound acceptance and local mirror updates are atomic. A projected revision
   prevents ERP echoes from generating another local price cycle. Manual conflict
-  decisions compare both local and ERP revisions and require a reason.
+decisions compare both local and ERP revisions and require a reason.
 - Identity filing remains independent of cost confirmation. Blocked/conflicting
   cost fields are omitted from identity requests, not silently approved.
+
+Task SKU editors can read `/v1/tasks/{id}/sku-items/{sku_item_id}/cost-sync`
+within the existing task-read scope. `refresh=true` returns a fresh ERP price
+and local revision as an edit baseline without writing state. A manual cost
+save with this baseline checks both again, locks the canonical SKU then its
+state, and saves the cost plus a `manual_saved` intent in the same transaction.
+This also supports explicitly retrying the same local amount after reviewing
+an old conflict. No global ERP-management permission is granted: existing own
+active-task edit scope still applies. A stale baseline returns 409 without a
+price change. ERP changes after save remain conflicts until reviewed again.
+Cost-only edits never replay product fields or enqueue identity filing. Older
+callers without a baseline retain conservative asynchronous behavior.
 
 ## Operations
 

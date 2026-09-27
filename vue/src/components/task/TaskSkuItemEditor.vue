@@ -51,12 +51,19 @@
         <label>数量<input v-model.trim="drafts[itemKey(item)].quantity" :disabled="!canEdit || isSaving(item)" inputmode="numeric" /></label>
         <label class="wide">运营修改要求<textarea v-model.trim="drafts[itemKey(item)].designRequirement" :disabled="!canEdit || isSaving(item)" rows="2" /></label>
         <details class="cost-specification" :open="!!variant(item).cost_input"><summary>计价规格：平面 / 多面 / 展开 / 工艺</summary><p v-if="variant(item).cost_input">本 SKU 按以下计价规格计算，上方尺寸仅保留历史参考。</p><CostInputFields v-model="drafts[itemKey(item)].costInput" :disabled="!canEdit || isSaving(item)" @update:model-value="drafts[itemKey(item)].costInputEdited=true" /></details>
-        <label>当前/人工成本<input v-model.trim="drafts[itemKey(item)].costPrice" :disabled="!canEditCost || isSaving(item)" inputmode="decimal" :placeholder="canEditCost ? '修改后按人工成本保存' : '当前账号不可修改成本'" /></label>
+        <label>当前/人工成本<input v-model.trim="drafts[itemKey(item)].costPrice" :disabled="!canEditCost || isSaving(item)" inputmode="decimal" :placeholder="canEditCost ? '修改后按人工成本保存' : '当前账号不可修改成本'" @focus="ensureCostBaseline(item)" /></label>
         <label>成本调整原因<input v-model.trim="drafts[itemKey(item)].costReason" :disabled="!canEditCost || isSaving(item)" :required="costChanged(item)" placeholder="人工改成本时必填" /></label>
-        <p v-if="canEditCost" class="cost-sync-hint">人工成本先保存到任务。ERP 如有不同价格，需管理员在“成本规则 → 成本同步”确认后才会更新。</p>
+        <div class="cost-sync-hint" aria-live="polite">
+          <span v-if="costStates[itemKey(item)]">成本同步：{{ syncLabel(costStates[itemKey(item)]?.status) }}。{{ costStates[itemKey(item)]?.reason }}</span>
+          <span v-if="baselines[itemKey(item)]"> ERP 当前成本：{{ priceLabel(baselines[itemKey(item)]?.erp_cost) }}。</span>
+          <span v-else-if="costStates[itemKey(item)]"> ERP 最近核对成本：{{ priceLabel(costStates[itemKey(item)]?.erp_cost) }}。</span>
+          <span v-if="costReadErrors[itemKey(item)]">{{ costReadErrors[itemKey(item)] }}</span>
+          <button type="button" :disabled="costLoading[itemKey(item)] || isSaving(item)" @click="inspectCost(item,true)">{{ costLoading[itemKey(item)] ? '核对中…' : '核对 ERP 成本' }}</button>
+          <p v-if="canEditCost">核对后保存，将用本次人工价更新 ERP；编辑期间价格再次变化时，会提示重新确认。</p>
+        </div>
         <div class="row-actions">
           <p v-if="messages[itemKey(item)]" :class="{ error: failures[itemKey(item)] }" role="status">{{ messages[itemKey(item)] }}</p>
-          <button v-if="canEdit" type="submit" :disabled="isSaving(item)">{{ isSaving(item) ? '保存中…' : '保存该 SKU' }}</button>
+          <button v-if="canEdit" type="submit" :disabled="isSaving(item) || costLoading[itemKey(item)]">{{ isSaving(item) ? '保存中…' : costStates[itemKey(item)]?.status === 'conflict' && canEditCost ? '保存人工价并同步 ERP' : '保存该 SKU' }}</button>
         </div>
       </form>
     </article>
@@ -71,10 +78,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
 import {emptyCostInput,type CostInput} from '@/domain/cost-model'
-import { tasksApi } from '@/services/api/tasksApi'
+import { tasksApi, type TaskCostSyncView } from '@/services/api/tasksApi'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
 import type { ImagePreviewLightboxItem } from '@/components/media/imagePreviewLightbox'
 
@@ -123,6 +130,43 @@ const drafts = ref<Record<string, SKUDraft>>({})
 const saving = ref<Record<string, boolean>>({})
 const messages = ref<Record<string, string>>({})
 const failures = ref<Record<string, boolean>>({})
+const costStates = ref<Record<string, TaskCostSyncView['state']>>({})
+const baselines = ref<Record<string, TaskCostSyncView['baseline']>>({})
+const costChecked = ref<Record<string, boolean>>({})
+const costLoading = ref<Record<string, boolean>>({})
+const costReadErrors = ref<Record<string, string>>({})
+const costEpoch: Record<string, number> = {}
+const costTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let disposed = false
+onBeforeUnmount(() => { disposed = true; costTimers.forEach(clearTimeout); costTimers.clear() })
+function priceLabel(value: number | null | undefined) { return value == null ? '未填写' : `¥${value}` }
+function syncLabel(status?: string) { return ({synced:'已回读一致',pending:'等待 ERP 回读',retry:'同步重试中',conflict:'两端价格需确认',no_price:'尚未报价',baseline:'等待首次核对',observe:'正在核对'} as Record<string,string>)[status||''] || '状态未知' }
+async function inspectCost(item: SKUItem, refresh: boolean) {
+  const key = itemKey(item), epoch = (costEpoch[key] || 0) + 1
+  costEpoch[key] = epoch
+  costLoading.value[key] = true
+  costReadErrors.value[key] = ''
+  try {
+    const { data } = await tasksApi.getSkuItemCostSync(String(props.taskId), Number(item.id), refresh)
+    if (disposed || costEpoch[key] !== epoch) return
+    costStates.value[key] = data.data.state
+    if (refresh) { baselines.value[key] = data.data.baseline; costChecked.value[key] = true }
+    costReadErrors.value[key] = data.data.message
+  } catch (e) {
+    if (disposed || costEpoch[key] !== epoch) return
+    costReadErrors.value[key] = e instanceof Error ? e.message : '成本同步状态读取失败，请重新核对'
+  } finally { if (!disposed && costEpoch[key] === epoch) costLoading.value[key] = false }
+}
+function ensureCostBaseline(item: SKUItem) {
+  const key = itemKey(item)
+  if (props.canEditCost && !costChecked.value[key] && !costLoading.value[key]) void inspectCost(item,true)
+}
+function pollCost(item: SKUItem, attempt = 0) {
+  const key = itemKey(item)
+  clearTimeout(costTimers.get(key))
+  if (disposed || attempt >= 15 || !['pending','retry','observe','baseline'].includes(costStates.value[key]?.status || '')) return
+  costTimers.set(key,setTimeout(async () => { await inspectCost(item,false); pollCost(item,attempt+1) },2000))
+}
 const referencePreviewOpen = ref(false)
 const referencePreviewIndex = ref(0)
 const referencePreviewItems = ref<ImagePreviewLightboxItem[]>([])
@@ -245,6 +289,12 @@ function costChanged(item: SKUItem) {
   return Math.abs(next - current) > 0.000001
 }
 
+function businessChanged(item: SKUItem, draft: SKUDraft) {
+  const original = createDraft(item)
+  const keys: (keyof SKUDraft)[] = ['productName','productIID','specText','sizeText','width','height','area','quantity','designRequirement']
+  return draft.costInputEdited || keys.some(key => draft[key] !== original[key])
+}
+
 watch(
   () => props.items,
   (items) => {
@@ -272,10 +322,15 @@ async function save(item: SKUItem) {
     messages.value[key] = '数量必须是整数。'
     return
   }
-  const shouldUpdateCost = costChanged(item)
+  const shouldUpdateCost = costChanged(item) || (props.canEditCost && cost != null && costStates.value[key]?.status === 'conflict')
   if (shouldUpdateCost && cost != null && !draft.costReason.trim()) {
     failures.value[key] = true
     messages.value[key] = '人工调整成本时必须填写原因。'
+    return
+  }
+  if (shouldUpdateCost && !costChecked.value[key]) {
+    await inspectCost(item,true)
+    messages.value[key] = '已读取当前同步状态，请核对 ERP 成本后再次保存。'
     return
   }
 
@@ -283,7 +338,7 @@ async function save(item: SKUItem) {
   failures.value[key] = false
   messages.value[key] = ''
   try {
-    await tasksApi.patchSkuItem(String(props.taskId), skuItemId, {
+    if (businessChanged(item,draft)) await tasksApi.patchSkuItem(String(props.taskId), skuItemId, {
       cost_input: draft.costInputEdited ? draft.costInput : undefined,
       product_name: draft.productName,
       product_i_id: draft.productIID,
@@ -301,14 +356,24 @@ async function save(item: SKUItem) {
         cost_price: cost,
         manual_cost_override: true,
         manual_cost_override_reason: draft.costReason,
+        sync_baseline: baselines.value[key] || undefined,
         remark: '任务详情逐 SKU 成本维护',
       })
     }
     messages.value[key] = shouldUpdateCost
-      ? '任务成本已保存；ERP 价格仍需核对。如两端不同，请联系管理员在“成本规则 → 成本同步”确认。'
+      ? '人工成本已保存。下方同步状态以 ERP 回读结果为准。'
       : '已保存。'
+    if (shouldUpdateCost) {
+      baselines.value[key] = null
+      costStates.value[key] = null
+      costChecked.value[key] = false
+      await inspectCost(item,false)
+      pollCost(item)
+    }
     emit('saved')
   } catch (cause) {
+    baselines.value[key] = null
+    costChecked.value[key] = false
     failures.value[key] = true
     messages.value[key] = cause instanceof Error ? cause.message : '保存失败，请稍后重试。'
   } finally {
@@ -318,7 +383,7 @@ async function save(item: SKUItem) {
 </script>
 
 <style scoped>
-.cost-specification{grid-column:1/-1}.cost-specification summary{padding:10px 0;cursor:pointer;font-weight:700}.cost-sync-hint{grid-column:1/-1;margin:0;color:rgb(var(--yb-text-muted));font-size:11px;line-height:1.5}
+.cost-specification{grid-column:1/-1}.cost-specification summary{padding:10px 0;cursor:pointer;font-weight:700}.cost-sync-hint{grid-column:1/-1;margin:0;padding:10px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text-muted));font-size:12px;line-height:1.6}.cost-sync-hint button{margin-left:8px;padding:4px 8px;border:1px solid rgb(var(--yb-border));border-radius:6px;color:rgb(var(--yb-brand));background:rgb(var(--yb-surface));cursor:pointer}.cost-sync-hint p{margin:5px 0 0}
 .sku-editor{display:grid;gap:12px;margin-top:10px}.sku-editor-row{overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:13px;background:rgb(var(--yb-surface))}.sku-editor-row>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.sku-editor-row header div{min-width:0;display:grid;gap:3px}.sku-editor-row header strong{color:rgb(var(--yb-brand));font:800 12px var(--yb-font-data)}.sku-editor-row header span:not(.edit-state){overflow:hidden;color:rgb(var(--yb-text-muted));font-size:12px;text-overflow:ellipsis;white-space:nowrap}.edit-state{flex:0 0 auto;padding:3px 8px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-size:10px;font-weight:750}.sku-reference-strip{display:grid;gap:9px;padding:11px 14px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-brand-soft)/.28)}.reference-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.reference-heading strong{color:rgb(var(--yb-text));font-size:12px}.reference-heading span{color:rgb(var(--yb-text-muted));font-size:11px}.reference-list{display:flex;flex-wrap:wrap;gap:8px}.reference-list a{display:flex;max-width:280px;align-items:center;gap:8px;padding:6px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-body));font-size:11px;text-decoration:none}.reference-list a>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-list img,.reference-file-mark{width:34px;height:34px;flex:0 0 34px;border-radius:7px;object-fit:cover}.reference-file-mark{display:grid;place-items:center;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text-muted));font-size:9px;font-weight:800}.sku-editor-row form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}.sku-editor-row label{min-width:0;display:grid;gap:5px;color:rgb(var(--yb-text-muted));font-size:11px;font-weight:700}.sku-editor-row label.wide{grid-column:span 2}.sku-editor-row input,.sku-editor-row textarea{width:100%;min-height:36px;padding:8px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font:500 12px var(--yb-font-sans);box-sizing:border-box}.sku-editor-row textarea{resize:vertical}.sku-editor-row input:disabled,.sku-editor-row textarea:disabled{background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text-muted))}.row-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-end;gap:12px}.row-actions p{margin:0;color:rgb(var(--yb-success-strong));font-size:11px}.row-actions p.error{color:rgb(var(--yb-danger-text))}.row-actions button{min-height:36px;padding:0 13px;border:0;border-radius:9px;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));font-size:12px;font-weight:750;cursor:pointer}.row-actions button:disabled{opacity:.55;cursor:wait}@media(max-width:900px){.sku-editor-row form{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.reference-heading{align-items:flex-start;flex-direction:column}.reference-list a{max-width:100%}.sku-editor-row form{grid-template-columns:1fr}.sku-editor-row label.wide{grid-column:auto}}
 .reference-list button{display:flex;max-width:280px;align-items:center;gap:8px;padding:6px 9px;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-body));font:inherit;font-size:11px;text-align:left;cursor:zoom-in}.reference-list button>span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:560px){.reference-list button{max-width:100%}}
 </style>

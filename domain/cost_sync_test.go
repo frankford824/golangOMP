@@ -16,6 +16,8 @@ func TestCostObservationPolicy(t *testing.T) {
 		{"ERP only", CostSyncState{LocalCost: p(10), ERPCost: p(10), Revision: 1, AckRevision: 1, Status: "synced"}, p(12.3456), "accept_erp"},
 		{"historic conflict stays", CostSyncState{LocalCost: p(10), ERPCost: p(12), Revision: 1, Status: "conflict"}, p(12), "conflict"},
 		{"local pending", CostSyncState{LocalCost: p(11), ERPCost: p(10), Revision: 2, AckRevision: 1, Status: "pending"}, p(10), "unchanged"},
+		{"reviewed zero baseline", CostSyncState{LocalCost: p(11), ERPCost: p(0), Revision: 2, AckRevision: 1, Status: "pending"}, p(0), "unchanged"},
+		{"changed zero baseline", CostSyncState{LocalCost: p(11), ERPCost: p(10), Revision: 2, AckRevision: 1, Status: "pending"}, p(0), "conflict"},
 		{"ERP removal", CostSyncState{LocalCost: p(10), ERPCost: p(10), Revision: 1, AckRevision: 1, Status: "synced"}, nil, "conflict"},
 	}
 	for _, tc := range cases {
