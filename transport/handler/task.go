@@ -1765,7 +1765,7 @@ func (h *TaskHandler) GetSKUCostSync(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
-	respondOK(c, v)
+	respondOK(c, domain.TaskCostSyncView{State: v.State, Baseline: v.Baseline, ERPAvailable: v.ERPAvailable, Message: v.Message})
 }
 
 // PreviewCostQuote handles POST /v1/tasks/:id/cost-quote/preview
