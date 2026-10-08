@@ -22,10 +22,11 @@ import (
 )
 
 type plan struct {
-	Database   string                              `json:"database"`
-	Rules      []*domain.CostRule                  `json:"original_rules"`
-	Successors []*domain.CostRule                  `json:"successor_rules"`
-	Bindings   []service.LegacyCostBindingDecision `json:"binding_decisions"`
+	Database      string                              `json:"database"`
+	Rules         []*domain.CostRule                  `json:"original_rules"`
+	Successors    []*domain.CostRule                  `json:"successor_rules"`
+	Bindings      []service.LegacyCostBindingDecision `json:"binding_decisions"`
+	CatalogDigest string                              `json:"catalog_digest,omitempty"`
 }
 
 func main() {
@@ -40,6 +41,7 @@ func run() error {
 	expected := flag.String("expected-plan", "", "SHA256 returned by dry-run")
 	confirm := flag.String("confirm-database", "", "required database name for apply")
 	recovery := flag.String("recovery", "", "new recovery report path required for apply")
+	catalog := flag.String("style-catalog", "", "optional JSON array of existing selectable style identities")
 	flag.Parse()
 	dsn := os.Getenv("MYSQL_DSN")
 	if dsn == "" {
@@ -151,6 +153,20 @@ func run() error {
 		return err
 	}
 	rows.Close()
+	if *catalog != "" {
+		raw, e := os.ReadFile(*catalog)
+		if e != nil {
+			return e
+		}
+		var ids []string
+		if e = json.Unmarshal(raw, &ids); e != nil {
+			return e
+		}
+		p.CatalogDigest = service.LegacyCostPlanDigest(ids)
+		for _, id := range ids {
+			evidence = append(evidence, service.LegacyCostBindingEvidence{IID: id, Catalog: true})
+		}
+	}
 	p.Bindings = service.PlanLegacyCostBindings(p.Rules, bindings, evidence)
 	digest := service.LegacyCostPlanDigest(p)
 	if !*apply {

@@ -13,8 +13,9 @@ import (
 const LegacyCostRestoreSource = "production_legacy_restore_20261007"
 
 type LegacyCostBindingEvidence struct {
-	IID    string   `json:"i_id"`
-	Groups []string `json:"historical_groups"`
+	IID     string   `json:"i_id"`
+	Groups  []string `json:"historical_groups"`
+	Catalog bool     `json:"catalog_identity,omitempty"`
 }
 
 type LegacyCostBindingDecision struct {
@@ -49,6 +50,7 @@ func PlanLegacyCostBindings(rules []*domain.CostRule, existing []*domain.CostRul
 		old := byIID[n]
 		old.IID = strings.TrimSpace(e.IID)
 		old.Groups = append(old.Groups, e.Groups...)
+		old.Catalog = old.Catalog || e.Catalog
 		byIID[n] = old
 	}
 	keys := make([]string, 0, len(byIID))
@@ -81,8 +83,8 @@ func PlanLegacyCostBindings(rules []*domain.CostRule, existing []*domain.CostRul
 			}
 			// Only named material families can use this fallback. An accidental
 			// match on an opaque purchase/style code must not become a tariff.
-			known := map[string]string{"常规模切": "DIECUT_STICKER", "定制模切": "DIECUT_STICKER", "常规车缝": "FLAG_CLOTH_SEWED", "A3纸打印": "A3_PRINT", "A4纸打印": "A4_PRINT"}
-			if expected := known[n]; expected != "" && unique[expected] {
+			known := map[string]string{"常规模切": "DIECUT_STICKER", "定制模切": "DIECUT_STICKER", "常规车缝": "FLAG_CLOTH_SEWED", "A3纸打印": "A3_PRINT", "A4纸打印": "A4_PRINT", "叶雕": "LEAF_CARVING"}
+			if expected := known[n]; expected != "" && groups[expected] && (unique[expected] || e.Catalog) {
 				d.Group = expected
 				d.Reason = "named_historical_family"
 			} else {
