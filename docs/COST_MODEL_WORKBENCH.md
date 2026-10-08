@@ -38,14 +38,34 @@ Internal priority and version identifiers are not operator form fields.
   expressions. Editing a model formula creates a successor version.
 - Missing specifications, unmatched thicknesses, unconfirmed configured processes,
   or conflicting models yield no automatic cost. A surcharge alone is not a price.
-- Unknown/unreviewed costs keep new-product ERP filing pending. Audited manual
-  prices remain eligible. ERP image-only sync must not become a pricing source.
-- Legacy rules remain available during transition. Conversion copies only basic
-  rate/minimum/small-area settings as a draft; legacy formula/process semantics
-  must be explicitly reviewed. This release does not certify legacy sample rates,
-  migrate all business tariffs, or repair historical prices automatically.
+- Unknown/unreviewed costs do not block SKU identity filing; the cost field is
+  omitted. ERP defaults and externally changed prices remain unconfirmed until
+  an explicit decision. Image-only sync must not become a pricing source.
+- Existing production schemes may retain multiple price components. Restore
+  them with the audited operator tool below; do not require users to recreate
+  existing tariffs. A manually created structured model is a separate option,
+  not a prerequisite for an existing scheme to work.
 - Migration 140 enlarges formula storage to TEXT; it does not change rates,
   bindings or historical amounts. Existing stored expressions remain intact.
 - Local visual fixture: `/tests/fixtures/cost-model-workbench.html` on Vite dev
   server. It uses labelled fake data and prohibits saving; it is not a production
   calculation test or a production build entry.
+
+## Restore the existing production tariffs
+
+`cmd/tools/restore-cost-rules` previews the effective legacy price components
+and exact style bindings. Apply requires the reviewed plan SHA256, database name
+and a new recovery file. It creates successor rule versions without changing
+rates, thresholds, formulas or process charges. Existing explicit bindings win;
+opaque codes and missing tariff families are reported instead of guessed.
+The existing **方案与绑定** view displays these schemes and their individual
+editable charges. Re-entering the prices in a new model is not required.
+
+`cmd/tools/repair-legacy-costs` previews affected, initially unpriced new-product
+SKUs through the same bound-rule calculator. Human overrides, explicit cost
+decisions, later ERP price changes and insufficient per-SKU specifications are
+excluded. Apply requires the report SHA256 and an operator ID, rechecks ERP and
+local revisions, records a durable journal and calculation snapshot, and queues
+the normal cost-only worker. It never rewrites product identity or audit history.
+Unreviewed ERP imports that cannot be recalculated retain their numeric value
+but lose the false manual-confirmation flag and remain explicitly unconfirmed.

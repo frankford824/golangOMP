@@ -9322,6 +9322,7 @@ paths:
   /v1/cost-management/sync-states:
     get:
       summary: List current SKU cost synchronization and conflicts
+      description: Observed ERP prices, including defaults assigned during SKU creation, never automatically become confirmed local or manual prices. Differences require explicit resolution; identity filing remains independent of cost confirmation.
       tags: [CostRules, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.view]

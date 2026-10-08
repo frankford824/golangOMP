@@ -3214,7 +3214,7 @@ curl -X POST https://api.example.com/v1/trace-events \
 ### 简介
 支持方法: GET。
 
-- `GET`: List current SKU cost synchronization and conflicts
+- `GET`: Observed ERP prices, including defaults assigned during SKU creation, never automatically become confirmed local or manual prices. Differences require explicit resolution; identity filing remains independent of cost confirmation.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

@@ -15,10 +15,10 @@ func ValidObservedCost(p *float64) bool {
 	return p != nil && !math.IsNaN(*p) && !math.IsInf(*p, 0) && *p >= 0 && *p <= 1e9
 }
 
-// Observation never treats an external edit as permission to replace a local
-// manual price or an unacknowledged local write. Historical conflicts stay held.
+// An observed ERP value is not evidence of a reviewed business price. Only an
+// explicit resolution may import it, including the first price after creation.
 func DecideCostObservation(s *CostSyncState, erp *float64) string {
-	if s.LocalCost != nil && !s.LocalConfirmed {
+	if !s.LocalConfirmed && (s.LocalCost != nil || erp != nil) {
 		return "conflict"
 	}
 	if (erp != nil && !ValidObservedCost(erp)) || (s.LocalCost != nil && !ValidObservedCost(s.LocalCost)) {
@@ -44,7 +44,7 @@ func DecideCostObservation(s *CostSyncState, erp *float64) string {
 	if !ValidObservedCost(erp) || (s.ManualLock && s.ManualOrigin != "erp") || s.Revision > s.AckRevision {
 		return "conflict"
 	}
-	return "accept_erp"
+	return "conflict"
 }
 
 type CostSyncState struct {
