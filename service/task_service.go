@@ -3587,7 +3587,7 @@ func (s *taskService) listActiveCostRulesForTextWithTrace(ctx context.Context, c
 }
 
 func applyCostRuleMatchMetadata(result costPreviewComputation, trace domain.CostRuleMatchTrace) costPreviewComputation {
-	if result.MatchedRule != nil && result.MatchedRule.RuleType == domain.CostRuleTypeModel && trace.MatchMode != domain.CostRuleMatchModeBindingERPIID && trace.MatchMode != domain.CostRuleMatchModeBindingProductIID && result.Response != nil {
+	if result.MatchedRule != nil && (result.MatchedRule.RuleType == domain.CostRuleTypeModel || result.MatchedRule.Source == LegacyCostRestoreSource) && trace.MatchMode != domain.CostRuleMatchModeBindingERPIID && trace.MatchMode != domain.CostRuleMatchModeBindingProductIID && result.Response != nil {
 		result.Response.EstimatedCost = nil
 		result.Response.RequiresManualReview = true
 		result.Response.Explanation = "统一计价方案必须先精确绑定款式编码，不使用商品名称或类目文字猜测"
@@ -3651,7 +3651,7 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 	// current SKU/product text. This happened to PP adhesive records that still
 	// carried an old KT category and were consequently priced by KT minimums.
 	hasPPMaterial := containsCostAliasPPMaterial(combined)
-	if strings.Contains(combined, "无背胶") && hasPPMaterial {
+	if (strings.Contains(combined, "无背胶") || strings.Contains(compactCostAliasText(combined), "无pp背胶")) && hasPPMaterial {
 		return add("PP_PLAIN")
 	} else if strings.Contains(combined, "背胶") && hasPPMaterial {
 		return add("PP_STICKY")

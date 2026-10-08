@@ -71,3 +71,24 @@ func TestLegacyBindingRestorationUsesStyleIdentityAndKeepsConflicts(t *testing.T
 		}
 	}
 }
+
+func TestRestoredTariffsRequireExactStyleBindings(t *testing.T) {
+	for _, mode := range []domain.CostRuleMatchMode{domain.CostRuleMatchModeLegacyAlias, domain.CostRuleMatchModeBindingProductIID} {
+		r := applyCostRuleMatchMetadata(costPreviewComputation{MatchedRule: &domain.CostRule{Source: LegacyCostRestoreSource, RuleType: domain.CostRuleTypeFixedUnitPrice}, Response: &domain.CostRulePreviewResponse{EstimatedCost: float64Ptr(4.235)}}, domain.CostRuleMatchTrace{MatchMode: mode})
+		if mode == domain.CostRuleMatchModeLegacyAlias && (!r.Response.RequiresManualReview || r.Response.EstimatedCost != nil) {
+			t.Fatal("restored tariff guessed from free text")
+		}
+		if mode == domain.CostRuleMatchModeBindingProductIID && r.Response.EstimatedCost == nil {
+			t.Fatal("bound tariff did not price")
+		}
+	}
+	rules := []*domain.CostRule{{CategoryCode: "A4_PRINT", IsActive: true}, {CategoryCode: "PP_STICKY", IsActive: true}}
+	for _, d := range PlanLegacyCostBindings(rules, nil, []LegacyCostBindingEvidence{{IID: "A4纸打印", Catalog: true}, {IID: "常规无PP背胶", Catalog: true}}) {
+		if d.IID == "A4纸打印" && d.Group != "A4_PRINT" {
+			t.Fatal("existing unused catalog identity omitted")
+		}
+		if d.IID == "常规无PP背胶" && d.Group != "" {
+			t.Fatal("plain PP bound to adhesive tariff")
+		}
+	}
+}
