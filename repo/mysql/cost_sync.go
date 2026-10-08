@@ -152,7 +152,9 @@ func (r *costSyncRepo) Observe(ctx context.Context, sku string, value *float64) 
 			s.Status = "conflict"
 			s.NeedsCheck = false
 			s.Reason = "本地价格与ERP价格冲突，请确认保留哪一侧；不会自动覆盖人工价格"
-			if s.LocalCost != nil && !s.LocalConfirmed {
+			if s.LocalCost == nil && value != nil {
+				s.Reason = "本地尚无核定成本，ERP返回价格不能自动认定为人工报价"
+			} else if s.LocalCost != nil && !s.LocalConfirmed {
 				s.Reason = "本地报价尚未核定，请核对价格后确认；相同金额不代表报价已审核"
 			} else if (s.LocalCost != nil && !domain.ValidObservedCost(s.LocalCost)) || (value != nil && !domain.ValidObservedCost(value)) {
 				s.Reason = "存在无效成本（负数或超出范围），请核对后再同步"
@@ -160,10 +162,6 @@ func (r *costSyncRepo) Observe(ctx context.Context, sku string, value *float64) 
 				s.Reason = "ERP未提供可核对的成本，请确认商品建档和报价"
 			} else if *value == 0 && !domain.EqualCost(s.LocalCost, value) {
 				s.Reason = "ERP为零价，需确认是有效报价还是尚未填写；未自动覆盖系统成本"
-			}
-		case "accept_erp":
-			if err := r.importERP(ctx, tx, s, id, taskID, nil, "ERP外部价格变更，按人工价保护", "erp"); err != nil {
-				return err
 			}
 		}
 		if err := persistCostState(ctx, tx, s); err != nil {

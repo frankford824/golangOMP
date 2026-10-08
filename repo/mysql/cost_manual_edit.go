@@ -23,6 +23,34 @@ func (r *costSyncRepo) LockManualRevision(ctx context.Context, tx repo.Tx, sku s
 }
 
 func (r *costSyncRepo) StageManualCost(ctx context.Context, tx repo.Tx, sku string, observedERP *float64, actor int64, reason string) error {
+	return r.stageReviewedCost(ctx, tx, sku, observedERP, actor, reason, "manual_saved", "人工成本已保存，等待ERP回读")
+}
+
+// Operator recovery retains automatic-rule provenance instead of labelling an
+// audited deterministic recalculation as a human-entered price.
+func (r *costSyncRepo) StageRestoredCost(ctx context.Context, tx repo.Tx, sku string, observedERP *float64, actor int64, reason string) error {
+	return r.stageReviewedCost(ctx, tx, sku, observedERP, actor, reason, "rule_restored", "既有计价规则已恢复，等待ERP回读")
+}
+
+func (r *costSyncRepo) QuarantineRestoredCost(ctx context.Context, tx repo.Tx, sku string, actor int64, report string) error {
+	q := Unwrap(tx)
+	s, err := scanCostState(q.QueryRowContext(ctx, `SELECT `+syncColumns+` FROM sku_cost_sync_states WHERE sku_code=? FOR UPDATE`, sku))
+	if err != nil {
+		return err
+	}
+	if s == nil || s.LocalConfirmed || s.ManualLock {
+		return domain.NewAppError(domain.ErrCodeConflict, "价格确认状态已变化", nil)
+	}
+	s.Status = "conflict"
+	s.NeedsCheck = false
+	s.Reason = "ERP观察价未经核定；请补齐规格或明确计价方案"
+	if err = persistCostState(ctx, q, s); err != nil {
+		return err
+	}
+	return auditCost(ctx, q, s, "rule_quarantined", report, actor)
+}
+
+func (r *costSyncRepo) stageReviewedCost(ctx context.Context, tx repo.Tx, sku string, observedERP *float64, actor int64, reason, action, pendingReason string) error {
 	q := Unwrap(tx)
 	s, err := scanCostState(q.QueryRowContext(ctx, `SELECT `+syncColumns+` FROM sku_cost_sync_states WHERE sku_code=? FOR UPDATE`, sku))
 	if err != nil {
@@ -43,9 +71,9 @@ func (r *costSyncRepo) StageManualCost(ctx context.Context, tx repo.Tx, sku stri
 	s.ERPCost = observedERP
 	s.Status = "pending"
 	s.NeedsCheck = true
-	s.Reason = "人工成本已保存，等待ERP回读"
+	s.Reason = pendingReason
 	if err = persistCostState(ctx, q, s); err != nil {
 		return err
 	}
-	return auditCost(ctx, q, s, "manual_saved", reason, actor)
+	return auditCost(ctx, q, s, action, reason, actor)
 }

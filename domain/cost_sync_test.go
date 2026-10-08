@@ -13,7 +13,7 @@ func TestCostObservationPolicy(t *testing.T) {
 		{"echo", CostSyncState{LocalCost: p(12), ERPCost: p(10), Revision: 2, AckRevision: 1, ManualLock: true, Status: "pending"}, p(12), "agree"},
 		{"manual conflict", CostSyncState{LocalCost: p(10), ERPCost: p(10), Revision: 1, AckRevision: 1, ManualLock: true, Status: "synced"}, p(12), "conflict"},
 		{"two writers", CostSyncState{LocalCost: p(11), ERPCost: p(10), Revision: 2, AckRevision: 1, Status: "pending"}, p(12), "conflict"},
-		{"ERP only", CostSyncState{LocalCost: p(10), ERPCost: p(10), Revision: 1, AckRevision: 1, Status: "synced"}, p(12.3456), "accept_erp"},
+		{"ERP only", CostSyncState{LocalCost: p(10), ERPCost: p(10), Revision: 1, AckRevision: 1, Status: "synced"}, p(12.3456), "conflict"},
 		{"historic conflict stays", CostSyncState{LocalCost: p(10), ERPCost: p(12), Revision: 1, Status: "conflict"}, p(12), "conflict"},
 		{"local pending", CostSyncState{LocalCost: p(11), ERPCost: p(10), Revision: 2, AckRevision: 1, Status: "pending"}, p(10), "unchanged"},
 		{"reviewed zero baseline", CostSyncState{LocalCost: p(11), ERPCost: p(0), Revision: 2, AckRevision: 1, Status: "pending"}, p(0), "unchanged"},
@@ -35,10 +35,21 @@ func TestCostObservationPolicy(t *testing.T) {
 	s.LocalConfirmed = true
 	s.ManualLock = true
 	s.ManualOrigin = "erp"
-	if DecideCostObservation(&s, p(12)) != "accept_erp" {
-		t.Fatal("consecutive ERP-only edits must continue to synchronize")
+	if DecideCostObservation(&s, p(12)) != "conflict" {
+		t.Fatal("previous automatic import must not authorize another unreviewed ERP price")
 	}
 	if DecideCostObservation(&s, p(0)) != "conflict" {
 		t.Fatal("ERP zero cannot silently replace a nonzero cost")
+	}
+}
+
+func TestNewSKUMustNotCertifyERPDefaultPrice(t *testing.T) {
+	price := 72.084
+	s := CostSyncState{Revision: 1, AckRevision: 1, Status: "no_price"}
+	if got := DecideCostObservation(&s, &price); got != "conflict" {
+		t.Fatalf("ERP creation default must remain unconfirmed, got %s", got)
+	}
+	if got := DecideCostObservation(&s, nil); got != "agree" {
+		t.Fatalf("two absent prices remain unpriced, got %s", got)
 	}
 }

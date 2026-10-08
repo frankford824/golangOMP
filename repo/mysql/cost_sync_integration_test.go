@@ -64,11 +64,19 @@ func TestCostSyncIntegration(t *testing.T) {
 	if err = r.Acknowledge(ctx, sku, 1, value(10)); err != nil {
 		t.Fatal(err)
 	}
-	// A clean ERP edit imports exactly once, marks manual protection, and updates every local mirror.
+	// An observation is not a reviewed price. Only explicit resolution may
+	// import an ERP edit and update canonical prices and their mirrors.
 	if err = r.Observe(ctx, sku, value(12.3456)); err != nil {
 		t.Fatal(err)
 	}
 	s, _ := r.Get(ctx, sku)
+	if s.Status != "conflict" || !domain.EqualCost(s.LocalCost, value(10)) || s.ManualLock {
+		t.Fatalf("unreviewed ERP observation changed a canonical price: %+v", s)
+	}
+	if err = r.Resolve(ctx, domain.CostSyncResolution{SKUCode: sku, Revision: s.Revision, ERPRevision: s.ERPRevision, Choice: "erp", Reason: "QA reviewed ERP price", ActorID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = r.Get(ctx, sku)
 	if s.CheckedAt == nil || time.Since(*s.CheckedAt) > time.Minute || time.Until(*s.CheckedAt) > time.Minute {
 		t.Fatal("checked_at has a driver timezone shift")
 	}
@@ -98,8 +106,8 @@ func TestCostSyncIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, _ = r.Get(ctx, sku)
-	if s.Status != "synced" || s.ManualOrigin != "erp" || *s.LocalCost != 13.1111 {
-		t.Fatal("consecutive ERP edits stopped synchronizing")
+	if s.Status != "conflict" || *s.LocalCost != 12.3456 {
+		t.Fatal("a subsequent ERP edit was silently accepted")
 	}
 	exec(`UPDATE task_sku_items SET cost_price=14,override_actor='qa_local' WHERE id=1`)
 	if err = r.Observe(ctx, sku, value(15)); err != nil {
@@ -225,5 +233,62 @@ func TestCostSyncIntegration(t *testing.T) {
 	if s.Status != "conflict" || *s.LocalCost != 3.3 {
 		t.Fatal("post-save ERP edit overwritten")
 	}
-	t.Log("PASS triggers, 4dp mirrors, manual conflict, stale revisions, ERP event cursor, no echo")
+	// Restored automatic prices keep automatic provenance and use the same
+	// guarded worker baseline; an ERP creation default never becomes manual.
+	exec(`UPDATE task_sku_items SET cost_price=NULL,manual_cost_override=0,requires_manual_review=1,override_actor='' WHERE id=1`)
+	if err = r.Observe(ctx, sku, value(72.084)); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = r.Get(ctx, sku)
+	if s.Status != "conflict" || s.LocalCost != nil || s.ManualLock || s.LocalConfirmed {
+		t.Fatalf("creation default certified %+v", s)
+	}
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped = &MySQLTx{tx: tx}
+	if err = r.LockManualRevision(ctx, wrapped, sku, s.Revision); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(`UPDATE task_sku_items SET cost_price=10.406,requires_manual_review=0,manual_cost_override=0 WHERE id=1`); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = r.StageRestoredCost(ctx, wrapped, sku, value(72.084), 1, "QA restored tariff"); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = r.Get(ctx, sku)
+	if s.Status != "pending" || s.ManualLock || !s.LocalConfirmed || *s.LocalCost != 10.406 {
+		t.Fatalf("bad recovery provenance %+v", s)
+	}
+	var action string
+	if err = db.QueryRow(`SELECT action FROM sku_cost_sync_audit WHERE sku_code=? ORDER BY id DESC LIMIT 1`, sku).Scan(&action); err != nil || action != "rule_restored" {
+		t.Fatalf("bad recovery audit %s %v", action, err)
+	}
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(`UPDATE task_sku_items SET requires_manual_review=1 WHERE id=1`); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = r.QuarantineRestoredCost(ctx, &MySQLTx{tx: tx}, sku, 1, "QA missing specification"); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = r.Get(ctx, sku)
+	if s.Status != "conflict" || s.LocalConfirmed || s.ManualLock || *s.LocalCost != 10.406 {
+		t.Fatalf("quarantine changed price or certified it: %+v", s)
+	}
+	t.Log("PASS triggers, 4dp mirrors, explicit ERP confirmation, stale revisions, creation-default protection, automatic rule recovery")
 }
