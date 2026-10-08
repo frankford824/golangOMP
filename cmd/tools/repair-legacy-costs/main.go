@@ -117,15 +117,51 @@ func run() error {
 		defer f.Close()
 		enc := json.NewEncoder(f)
 		applied, skipped, quarantined := 0, 0, 0
-		for _, it := range p.Items {
+		batchReader, ok := remote.(interface {
+			BatchCostProducts(context.Context, []string) ([]*domain.ERPProduct, error)
+		})
+		if !ok {
+			return fmt.Errorf("ERP batch reader unavailable")
+		}
+		batchEnd := 0
+		liveBySKU := map[string]*domain.ERPProduct{}
+		var readErr error
+		for i, it := range p.Items {
 			if it.Preview == nil || (it.Preview.SkipReason != "" && !it.Preview.NeedsQuarantine()) {
 				continue
 			}
 			row := it.Preview
-			r, err := remote.GetProductByID(ctx, row.SKU)
+			if i >= batchEnd {
+				batchEnd = i + 50
+				if batchEnd > len(p.Items) {
+					batchEnd = len(p.Items)
+				}
+				codes := []string{}
+				for _, next := range p.Items[i:batchEnd] {
+					if next.Preview != nil && (next.Preview.SkipReason == "" || next.Preview.NeedsQuarantine()) {
+						codes = append(codes, next.Preview.SKU)
+					}
+				}
+				var products []*domain.ERPProduct
+				products, readErr = batchReader.BatchCostProducts(ctx, codes)
+				liveBySKU = map[string]*domain.ERPProduct{}
+				for _, product := range products {
+					if product != nil {
+						liveBySKU[product.SKUID] = product
+					}
+				}
+			}
+			r := liveBySKU[row.SKU]
 			out := map[string]interface{}{"sku": row.SKU, "old_cost": row.OldCost, "new_cost": row.NewCost, "revision": row.Revision}
-			if err != nil || r == nil || r.SKUID != row.SKU || !domain.EqualCost(r.CostPrice, it.ERP) {
+			if readErr != nil || r == nil || r.SKUID != row.SKU || !domain.EqualCost(r.CostPrice, it.ERP) {
 				out["status"] = "skipped_erp_changed_or_unavailable"
+				out["expected_erp"] = it.ERP
+				if r != nil {
+					out["observed_erp"] = r.CostPrice
+				}
+				if readErr != nil {
+					out["error"] = readErr.Error()
+				}
 				skipped++
 			} else {
 				// Immutable prepared record is synced to disk before any write.
@@ -159,7 +195,9 @@ func run() error {
 			if err = f.Sync(); err != nil {
 				return err
 			}
-			time.Sleep(150 * time.Millisecond)
+			// The normal write worker still performs its own fresh single-SKU
+			// revision/ERP check. Batch observations avoid exhausting read quotas.
+			time.Sleep(20 * time.Millisecond)
 		}
 		fmt.Printf("APPLIED queued=%d quarantined=%d skipped=%d journal=%s\n", applied, quarantined, skipped, *output)
 		return nil
