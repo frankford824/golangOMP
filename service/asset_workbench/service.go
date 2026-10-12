@@ -7975,7 +7975,7 @@ func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, 
 	var saved *domain.AssetWorkbenchProfile
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		var err error
-		if s.userRepo != nil && profile.WorkerType != "" {
+		if appendGradePeriod && s.userRepo != nil && profile.WorkerType != "" {
 			writer, ok := s.userRepo.(interface {
 				UpdateEmploymentType(context.Context, repo.Tx, int64, domain.EmploymentType, time.Time) error
 			})
