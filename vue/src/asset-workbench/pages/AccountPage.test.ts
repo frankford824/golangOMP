@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   bootstrapHook: vi.fn(),
   logout: vi.fn(),
   upsertMyProfile: vi.fn(),
+  changeMyPassword: vi.fn(),
 }))
 
 vi.mock('@aw/app/useAssetWorkbenchBootstrap', () => ({
@@ -18,7 +19,7 @@ vi.mock('@aw/app/useWorkbenchSession', () => ({
 }))
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
-  assetWorkbenchApi: { upsertMyProfile: mocks.upsertMyProfile },
+  assetWorkbenchApi: { upsertMyProfile: mocks.upsertMyProfile, changeMyPassword: mocks.changeMyPassword },
 }))
 
 import AccountPage from './AccountPage.vue'
@@ -31,6 +32,7 @@ function fieldValue(wrapper: ReturnType<typeof mount>, label: string) {
 
 describe('AccountPage', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     mocks.bootstrapHook.mockReset()
     mocks.bootstrapHook.mockReturnValue({
       bootstrap: ref({
@@ -75,7 +77,7 @@ describe('AccountPage', () => {
     const gender = wrapper.findAll('label').find((item) => item.text().startsWith('性别'))?.find('select')
 
     expect(idCard?.attributes('required')).toBeDefined()
-    expect(idCard?.attributes('pattern')).toBe('[0-9]{18}')
+    expect(idCard?.attributes('pattern')).toBe('[0-9]{17}[0-9Xx]')
     expect(idCard?.attributes('minlength')).toBe('18')
     expect(idCard?.attributes('maxlength')).toBe('18')
     expect(gender?.attributes('required')).toBeDefined()
@@ -88,5 +90,23 @@ describe('AccountPage', () => {
 
     expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('请填写城市')
+  })
+
+  it('validates confirmation and clears password fields after a successful change', async () => {
+    mocks.changeMyPassword.mockResolvedValue(undefined)
+    const wrapper = mount(AccountPage)
+    const form = wrapper.get('form')
+    const fields = form.findAll('input')
+    await fields[0]!.setValue('OldPass123')
+    await fields[1]!.setValue('NewPass123')
+    await fields[2]!.setValue('OtherPass123')
+    await form.trigger('submit')
+    expect(mocks.changeMyPassword).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('两次新密码不一致')
+    await fields[2]!.setValue('NewPass123')
+    await form.trigger('submit')
+    expect(mocks.changeMyPassword).toHaveBeenCalledWith({ old_password: 'OldPass123', new_password: 'NewPass123', confirm: 'NewPass123' })
+    expect(fields.every((field) => (field.element as HTMLInputElement).value === '')).toBe(true)
+    expect(wrapper.text()).toContain('密码已修改')
   })
 })

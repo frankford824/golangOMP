@@ -17,9 +17,11 @@ describe('validateClientProfile', () => {
     expect(validateClientProfile({ ...completeProfile, province: '', gender: '' })).toBe('请填写省份、性别')
   })
 
-  it('requires an 18 digit ID card number', () => {
-    expect(validateClientProfile({ ...completeProfile, id_card: '32010019900101000X' })).toBe('身份证号必须为 18 位数字')
-    expect(validateClientProfile({ ...completeProfile, id_card: '32010019900101000' })).toBe('身份证号必须为 18 位数字')
+  it('accepts X and x only in the last ID card position', () => {
+    expect(validateClientProfile({ ...completeProfile, id_card: '32010019900101000X' })).toBe('')
+    expect(validateClientProfile({ ...completeProfile, id_card: '32010019900101000x' })).toBe('')
+    expect(validateClientProfile({ ...completeProfile, id_card: '32010019900101000' })).toContain('身份证号须为18位')
+    expect(validateClientProfile({ ...completeProfile, id_card: 'X20100199001010000' })).toContain('身份证号须为18位')
   })
 
   it('accepts a complete profile with male or female gender', () => {

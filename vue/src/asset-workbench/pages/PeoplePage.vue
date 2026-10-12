@@ -8,7 +8,7 @@ import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { maskPhone } from '@aw/shared/format/pii'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
 import { cityOptions, provinceOptions } from '@aw/shared/profile/chinaRegions'
-import { validateClientProfile } from '@aw/shared/profile/clientProfileValidation'
+import { validateClientProfile, validateProfileIdentity } from '@aw/shared/profile/clientProfileValidation'
 
 const parttimeGrades = ['J1', 'J2', 'J3']
 const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
@@ -135,7 +135,7 @@ async function saveProfile() {
       phone: form.phone,
       province: form.province,
       city: form.city,
-      id_card: form.id_card,
+      id_card: form.id_card.trim().toUpperCase(),
       gender: form.gender as 'female' | 'male',
       alipay_account: form.alipay_account,
       reason: 'self profile update',
@@ -214,6 +214,8 @@ async function goToPendingSubmissions() {
 async function saveHRProfile() {
   const profile = selectedProfile.value
   if (!profile) return
+	const identityError = validateProfileIdentity(hrForm)
+	if (identityError) { error.value = identityError; return }
   hrSaving.value = true
   error.value = ''
   notice.value = ''
@@ -225,7 +227,7 @@ async function saveHRProfile() {
       phone: hrForm.phone || undefined,
       province: hrForm.province,
       city: hrForm.city,
-      id_card: hrForm.id_card || undefined,
+      id_card: hrForm.id_card.trim().toUpperCase() || undefined,
       gender: hrForm.gender,
       alipay_account: hrForm.alipay_account || undefined,
       onboarded_at: hrForm.onboarded_at ? `${hrForm.onboarded_at}T00:00:00+08:00` : undefined,
@@ -329,7 +331,7 @@ onMounted(() => {
             </span>
           </div>
           <div v-if="selectedProfileNeedsGrade" class="aw-inline-alert">
-            该人员缺少可计价定级。保存人员类型、岗级并设为“可计价”后，历史待定级作品需要在“资产维护专区”点击重计价。
+            该人员尚未定级。保存人员类型、岗级并设为“可计价”后，系统会自动重新计算历史待定级作品；没有有效单价的作品仍保持未计价。
           </div>
           <div v-if="profileDetailLoading" class="aw-inline-alert">正在读取完整人员资料，请稍候。</div>
           <div v-else-if="profileDetailError" class="aw-inline-alert">{{ profileDetailError }}</div>
@@ -374,7 +376,7 @@ onMounted(() => {
             </label>
             <label>
               身份证号
-              <input v-model="hrForm.id_card" autocomplete="off" :disabled="profileDetailLoading" />
+              <input v-model="hrForm.id_card" autocomplete="off" minlength="18" maxlength="18" pattern="[0-9]{17}[0-9Xx]" placeholder="18位，末位可为X" :disabled="profileDetailLoading" />
             </label>
             <label>
               性别
@@ -433,7 +435,7 @@ onMounted(() => {
         <div class="aw-form-grid">
           <label>
             人员类型
-            <select v-model="form.worker_type">
+            <select v-model="form.worker_type" disabled>
               <option value="parttime">兼职</option>
               <option value="fulltime">全职</option>
             </select>
@@ -466,7 +468,7 @@ onMounted(() => {
           </label>
           <label>
             <span>身份证号 <small class="aw-field__mark">必填</small></span>
-            <input v-model="form.id_card" autocomplete="off" inputmode="numeric" minlength="18" maxlength="18" pattern="[0-9]{18}" placeholder="请输入 18 位数字" required />
+            <input v-model="form.id_card" autocomplete="off" minlength="18" maxlength="18" pattern="[0-9]{17}[0-9Xx]" placeholder="18位，末位可为X" required />
           </label>
           <label>
             <span>性别 <small class="aw-field__mark">必填</small></span>

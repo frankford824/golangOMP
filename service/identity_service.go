@@ -38,11 +38,15 @@ type RegisterUserParams struct {
 }
 
 type RegisterAssetWorkbenchUserParams struct {
-	Username    string
-	DisplayName string
-	Mobile      string
-	Email       string
-	Password    string
+	Username       string
+	DisplayName    string
+	Mobile         string
+	Email          string
+	Password       string
+	EmploymentType domain.EmploymentType
+	// Provision participates in the identity transaction; any error rolls back
+	// the user, roles, workbench profile, membership and session together.
+	Provision func(context.Context, repo.Tx, *domain.User) error
 }
 
 type LoginParams struct {
@@ -602,6 +606,13 @@ func (s *identityService) Register(ctx context.Context, p RegisterUserParams) (*
 }
 
 func (s *identityService) RegisterAssetWorkbenchUser(ctx context.Context, p RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError) {
+	employmentType := p.EmploymentType
+	if employmentType == "" {
+		employmentType = domain.EmploymentTypePartTime
+	}
+	if employmentType != domain.EmploymentTypePartTime && employmentType != domain.EmploymentTypeFullTime {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid employment_type", nil)
+	}
 	username := normalizeUsername(p.Username)
 	displayName := strings.TrimSpace(p.DisplayName)
 	mobile := strings.TrimSpace(p.Mobile)
@@ -652,7 +663,7 @@ func (s *identityService) RegisterAssetWorkbenchUser(ctx context.Context, p Regi
 		Email:          email,
 		PasswordHash:   string(hash),
 		Status:         domain.UserStatusActive,
-		EmploymentType: domain.EmploymentTypePartTime,
+		EmploymentType: employmentType,
 		LastLoginAt:    &now,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -685,6 +696,11 @@ func (s *identityService) RegisterAssetWorkbenchUser(ctx context.Context, p Regi
 			explicitIdentityRole{Code: "asset_submitter", Scope: domain.AccessScopeSelf},
 		); err != nil {
 			return err
+		}
+		if p.Provision != nil {
+			if err := p.Provision(ctx, tx, user); err != nil {
+				return err
+			}
 		}
 		session.UserID = userID
 		if _, err := s.sessionRepo.Create(ctx, tx, session); err != nil {

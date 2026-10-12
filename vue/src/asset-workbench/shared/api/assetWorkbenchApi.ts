@@ -1295,6 +1295,9 @@ function normalizeOverviewSearchResult(value: unknown): OverviewSearchResult {
 }
 
 export const assetWorkbenchApi = {
+  async changeMyPassword(payload: { old_password: string; new_password: string; confirm: string }): Promise<void> {
+    await http.put('/v1/auth/password', payload)
+  },
   async refreshDownloadCookie(signal?: AbortSignal): Promise<void> {
     await http.post('/v1/auth/asset-cookie', undefined, { signal })
   },

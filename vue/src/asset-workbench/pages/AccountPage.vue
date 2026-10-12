@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { LogOut, Save, UserRound } from 'lucide-vue-next'
+import { LockKeyhole, LogOut, Save, UserRound } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { useWorkbenchSession } from '@aw/app/useWorkbenchSession'
@@ -9,6 +9,8 @@ import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
 import { roleDisplayList } from '@aw/shared/format/roleDisplay'
 import { cityOptions, provinceOptions } from '@aw/shared/profile/chinaRegions'
 import { validateClientProfile } from '@aw/shared/profile/clientProfileValidation'
+import { validateWorkbenchPassword } from '@aw/shared/profile/passwordValidation'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
@@ -16,6 +18,34 @@ const { logout } = useWorkbenchSession()
 const saving = ref(false)
 const notice = ref('')
 const saveError = ref('')
+const passwordForm = reactive({ old_password: '', new_password: '', confirm: '' })
+const passwordSaving = ref(false)
+const passwordError = ref('')
+const passwordNotice = ref('')
+
+async function changePassword() {
+  if (passwordSaving.value) return
+  passwordError.value = ''
+  passwordNotice.value = ''
+  const validation = validateWorkbenchPassword(passwordForm.new_password)
+  if (!passwordForm.old_password) passwordError.value = '请输入旧密码'
+  else if (validation) passwordError.value = validation
+  else if (passwordForm.new_password !== passwordForm.confirm) passwordError.value = '两次新密码不一致'
+  else if (passwordForm.new_password === passwordForm.old_password) passwordError.value = '新密码不能与旧密码相同'
+  if (passwordError.value) return
+  passwordSaving.value = true
+  try {
+    await assetWorkbenchApi.changeMyPassword({ ...passwordForm })
+    passwordForm.old_password = ''
+    passwordForm.new_password = ''
+    passwordForm.confirm = ''
+    passwordNotice.value = '密码已修改，下次登录请使用新密码'
+  } catch (err) {
+    passwordError.value = resolveApiUserMessage(err, { fallback: '密码修改失败，请重试' })
+  } finally {
+    passwordSaving.value = false
+  }
+}
 
 const form = reactive({
   real_name: '',
@@ -73,7 +103,7 @@ async function saveProfile() {
       phone: form.phone,
       province: form.province,
       city: form.city,
-      id_card: form.id_card,
+      id_card: form.id_card.trim().toUpperCase(),
       gender: form.gender as 'female' | 'male',
       alipay_account: form.alipay_account,
       reason: 'self profile update',
@@ -100,7 +130,7 @@ watch(bootstrap, syncForm, { immediate: true })
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">账号</p>
         <h2>个人中心</h2>
-        <p>补全收款和联系资料，或退出当前账号。</p>
+        <p>维护个人资料、修改登录密码，或退出当前账号。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="logout">
@@ -196,7 +226,7 @@ watch(bootstrap, syncForm, { immediate: true })
           </label>
           <label>
             <span>身份证号 <small class="aw-field__mark">必填</small></span>
-            <input v-model="form.id_card" autocomplete="off" inputmode="numeric" minlength="18" maxlength="18" pattern="[0-9]{18}" placeholder="请输入 18 位数字" required />
+            <input v-model="form.id_card" autocomplete="off" minlength="18" maxlength="18" pattern="[0-9]{17}[0-9Xx]" placeholder="18位，末位可为X" required />
           </label>
           <label>
             <span>支付宝账号 <small class="aw-field__mark">必填</small></span>
@@ -217,6 +247,20 @@ watch(bootstrap, syncForm, { immediate: true })
         </div>
       </section>
       </div>
+      <section class="aw-panel" aria-labelledby="aw-password-title">
+        <div class="aw-panel__head">
+          <div><p class="aw-eyebrow">账号安全</p><h3 id="aw-password-title">修改密码</h3></div>
+          <LockKeyhole :size="18" aria-hidden="true" />
+        </div>
+        <form class="aw-form-grid" @submit.prevent="changePassword">
+          <label><span>旧密码</span><input v-model="passwordForm.old_password" type="password" autocomplete="current-password" required /></label>
+          <label><span>新密码</span><input v-model="passwordForm.new_password" type="password" autocomplete="new-password" minlength="8" placeholder="至少8位，包含字母和数字" required /></label>
+          <label><span>确认新密码</span><input v-model="passwordForm.confirm" type="password" autocomplete="new-password" minlength="8" required /></label>
+          <p v-if="passwordError" class="aw-inline-alert aw-form-grid__full" role="alert">{{ passwordError }}</p>
+          <p v-if="passwordNotice" class="aw-inline-alert aw-form-grid__full" role="status">{{ passwordNotice }}</p>
+          <button class="aw-primary-button aw-form-grid__full" type="submit" :disabled="passwordSaving">{{ passwordSaving ? '正在修改' : '修改密码' }}</button>
+        </form>
+      </section>
     </AsyncBoundary>
   </section>
 </template>
