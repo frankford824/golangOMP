@@ -5089,6 +5089,118 @@ body.aw-submission-dialog-locked {
   margin: 0;
 }
 
+.aw-account-overview {
+  max-width: 920px;
+}
+
+.aw-account-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--aw-space-4);
+  margin: 0;
+  padding-bottom: var(--aw-space-5);
+}
+
+.aw-account-facts dt {
+  color: var(--aw-ink-3);
+  font-size: var(--aw-font-size-sm);
+  margin-bottom: var(--aw-space-2);
+}
+
+.aw-account-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.aw-account-actions__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-4);
+  border-top: 1px solid var(--aw-hairline);
+  padding-block: var(--aw-space-4);
+}
+
+.aw-account-actions__row .aw-copy {
+  margin: var(--aw-space-1) 0 0;
+}
+
+.aw-account-actions__row > button {
+  flex-shrink: 0;
+}
+
+.aw-account-dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.aw-account-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--aw-stage) 65%, transparent);
+}
+
+.aw-account-dialog {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(680px, calc(100vw - var(--aw-space-5) * 2));
+  max-height: calc(100dvh - var(--aw-space-5) * 2);
+  overflow-y: auto;
+  padding: var(--aw-space-5);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-raised);
+}
+
+.aw-account-dialog--password {
+  width: min(460px, calc(100vw - var(--aw-space-5) * 2));
+}
+
+.aw-account-password-form {
+  grid-template-columns: 1fr;
+}
+
+.aw-account-dialog input,
+.aw-account-dialog select {
+  width: 100%;
+  min-height: var(--aw-row-md);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface);
+  color: var(--aw-ink);
+  padding: 0 var(--aw-space-3);
+}
+
+.aw-account-dialog input::placeholder {
+  color: var(--aw-ink-3);
+}
+
+.aw-account-dialog :is(input, select, button):focus-visible {
+  outline: 2px solid var(--aw-accent);
+  outline-offset: 2px;
+}
+
+.aw-account-dialog__close {
+  padding-inline: var(--aw-space-2);
+}
+
+.aw-account-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--aw-space-3);
+  padding-top: var(--aw-space-3);
+}
+
+@media (max-width: 480px) {
+  .aw-account-facts { grid-template-columns: 1fr 1fr; }
+  .aw-account-actions__row { align-items: flex-start; }
+  .aw-account-dialog .aw-form-grid { grid-template-columns: 1fr; }
+}
+
 .aw-personnel-picker {
   display: grid;
   grid-column: 1 / -1;
