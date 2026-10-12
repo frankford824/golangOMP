@@ -222,6 +222,13 @@ func (r *userRepo) Update(ctx context.Context, tx repo.Tx, user *domain.User) er
 	return nil
 }
 
+// UpdateEmploymentType changes only the classification owned by workbench HR,
+// leaving concurrently edited identity/organization fields untouched.
+func (r *userRepo) UpdateEmploymentType(ctx context.Context, tx repo.Tx, userID int64, employmentType domain.EmploymentType, at time.Time) error {
+	_, err := Unwrap(tx).ExecContext(ctx, `UPDATE users SET employment_type = ?, updated_at = ? WHERE id = ?`, employmentType, at, userID)
+	return err
+}
+
 func (r *userRepo) UpdateJstFields(ctx context.Context, tx repo.Tx, userID int64, displayName, status, department, team string, managedDepartments, managedTeams []string, jstRawSnapshot string, jstUID *int64, lastLoginAt *time.Time) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE users

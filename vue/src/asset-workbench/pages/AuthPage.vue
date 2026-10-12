@@ -8,6 +8,7 @@ import { clearToken, setToken } from '@/services/http'
 import { assetWorkbenchApi } from '../shared/api/assetWorkbenchApi'
 import { cityOptions, provinceOptions } from '../shared/profile/chinaRegions'
 import { validateClientProfile } from '../shared/profile/clientProfileValidation'
+import { validateWorkbenchPassword } from '../shared/profile/passwordValidation'
 
 const route = useRoute()
 const router = useRouter()
@@ -80,7 +81,7 @@ async function submitLogin() {
 
 async function submitRegister() {
   if (loading.value) return
-  const validationError = validateClientProfile({
+  const validationError = validateWorkbenchPassword(registerForm.password) || validateClientProfile({
     real_name: registerForm.name,
     phone: registerForm.phone,
     province: registerForm.province,
@@ -105,7 +106,7 @@ async function submitRegister() {
       worker_type: registerForm.worker_type as 'fulltime' | 'parttime',
       province: registerForm.province,
       city: registerForm.city,
-      id_card: registerForm.id_card,
+      id_card: registerForm.id_card.trim().toUpperCase(),
       gender: registerForm.gender as 'female' | 'male',
       alipay_account: registerForm.alipay_account,
     })
@@ -161,7 +162,7 @@ async function submitRegister() {
 
       <form v-else class="aw-auth__form" @submit.prevent="submitRegister">
         <h1 id="aw-auth-title">{{ title }}</h1>
-        <p class="aw-auth__lead">提交后进入成员开通流程。</p>
+        <p class="aw-auth__lead">注册成功后自动开通交付权限；计件金额需管理人员定岗后按有效单价计算。</p>
         <div class="aw-form-grid">
           <label class="aw-field">
             <span class="aw-field__label">账号 <small class="aw-field__mark">必填</small></span>
@@ -210,7 +211,7 @@ async function submitRegister() {
           </label>
           <label class="aw-field aw-form-grid__full">
             <span class="aw-field__label">身份证号 <small class="aw-field__mark">必填</small></span>
-            <input v-model.trim="registerForm.id_card" autocomplete="off" inputmode="numeric" minlength="18" maxlength="18" pattern="[0-9]{18}" placeholder="请输入 18 位数字" required />
+            <input v-model.trim="registerForm.id_card" autocomplete="off" minlength="18" maxlength="18" pattern="[0-9]{17}[0-9Xx]" placeholder="18位，末位可为X" required />
           </label>
           <label class="aw-field aw-form-grid__full">
             <span class="aw-field__label">支付宝账号 <small class="aw-field__mark">必填</small></span>
@@ -218,7 +219,7 @@ async function submitRegister() {
           </label>
           <label class="aw-field aw-form-grid__full">
             <span class="aw-field__label">密码 <small class="aw-field__mark">必填</small></span>
-            <input v-model="registerForm.password" type="password" autocomplete="new-password" placeholder="设置登录密码" required />
+            <input v-model="registerForm.password" type="password" autocomplete="new-password" minlength="8" placeholder="至少8位，包含字母和数字" required />
           </label>
         </div>
         <p v-if="error" class="aw-form-error">{{ error }}</p>

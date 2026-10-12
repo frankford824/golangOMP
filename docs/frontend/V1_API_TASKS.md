@@ -8351,7 +8351,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/batch-jobs/<job_id> \
 ### 简介
 支持方法: POST。
 
-- `POST`: Creates a workbench account only after all required contact, location, identity and payment profile fields pass validation.
+- `POST`: Creates the account, submitter role, session, complete pending-grade profile and active workbench membership atomically after validation. Worker type is mirrored to the user's employment type; registration automatically opens submitter access, while HR/settlement administrators assign the job grade for pricing. Identity-card terminal x is normalized to X.
 
 ### 鉴权与 RBAC
 - 本节为公开资源接口，不需要 Bearer token。
@@ -8371,7 +8371,7 @@ Content-Type: `application/json`
 | `name` | string | 是 | - |
 | `phone` | string | 是 | - |
 | `email` | string | 否 | - |
-| `password` | string | 是 | - |
+| `password` | string | 是 | Must contain an ASCII letter and a digit. |
 | `worker_type` | enum(fulltime/parttime) | 是 | - |
 | `province` | string | 是 | - |
 | `city` | string | 是 | - |
@@ -8641,7 +8641,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `worker_type` | enum(fulltime/parttime) | 否 | - |
+| `worker_type` | enum(fulltime/parttime) | 否 | Accepted for existing clients but ignored; only authorized HR/settlement administrators may change an existing profile's worker type. |
 | `real_name` | string | 是 | - |
 | `phone` | string | 是 | - |
 | `province` | string | 是 | - |

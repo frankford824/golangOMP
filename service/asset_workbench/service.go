@@ -1097,12 +1097,31 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 	if appErr = validateRequiredClientProfile(profile); appErr != nil {
 		return nil, appErr
 	}
+	var savedProfile *domain.AssetWorkbenchProfile
 	auth, appErr := s.identity.RegisterAssetWorkbenchUser(ctx, baseservice.RegisterAssetWorkbenchUserParams{
-		Username:    account,
-		DisplayName: name,
-		Mobile:      phone,
-		Email:       strings.TrimSpace(params.Email),
-		Password:    params.Password,
+		Username:       account,
+		DisplayName:    name,
+		Mobile:         phone,
+		Email:          strings.TrimSpace(params.Email),
+		Password:       params.Password,
+		EmploymentType: workbenchEmploymentType(workerType),
+		Provision: func(ctx context.Context, tx repo.Tx, user *domain.User) error {
+			actor := domain.RequestActor{ID: user.ID, Username: user.Username, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+			profile.UserID = user.ID
+			profile.CreatedBy = &actor.ID
+			profile.UpdatedBy = &actor.ID
+			var err error
+			savedProfile, err = s.upsertProfileInTx(ctx, tx, actor, profile, profileParams.Reason, true)
+			if err != nil {
+				return err
+			}
+			_, err = s.repo.OpenMembership(ctx, tx, repo.AssetWorkbenchAccessOpenParams{
+				UserID: user.ID, Status: domain.AppMembershipStatusActive,
+				IdentityType: domain.AppMembershipIdentityExternal,
+				Source:       domain.AppMembershipSourceAssetRegistered, OpenedBy: user.ID,
+			})
+			return err
+		},
 	})
 	if appErr != nil {
 		return nil, appErr
@@ -1110,35 +1129,11 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 	if auth == nil || auth.User == nil || auth.User.ID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench registration did not create a user.", nil)
 	}
-	actor := domain.RequestActor{
-		ID:       auth.User.ID,
-		Username: auth.User.Username,
-		Roles:    auth.User.Roles,
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	if savedProfile == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Registration profile was not provisioned.", nil)
 	}
-	profile.UserID = auth.User.ID
-	profile.CreatedBy = &actor.ID
-	profile.UpdatedBy = &actor.ID
-	profile, appErr = s.upsertProfile(ctx, actor, profile, profileParams.Reason, true)
-	if appErr != nil {
-		return nil, appErr
-	}
-	if s.tx != nil {
-		if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-			_, err := s.repo.OpenMembership(ctx, tx, repo.AssetWorkbenchAccessOpenParams{
-				UserID:       auth.User.ID,
-				Status:       domain.AppMembershipStatusActive,
-				IdentityType: domain.AppMembershipIdentityExternal,
-				Source:       domain.AppMembershipSourceAssetRegistered,
-				OpenedBy:     auth.User.ID,
-			})
-			return err
-		}); err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to open asset workbench access for registered user.", err.Error())
-		}
-	}
-	return &RegisterResponse{Auth: auth, Profile: profile}, nil
+	s.notifyProfileCompletionRequired(ctx, savedProfile)
+	return &RegisterResponse{Auth: auth, Profile: savedProfile}, nil
 }
 
 func (s *Service) Entry(ctx context.Context, actor domain.RequestActor) (*EntryResponse, *domain.AppError) {
@@ -1376,9 +1371,7 @@ func preserveExistingProfilePII(params UpsertProfileParams, existing *domain.Ass
 func preserveSelfManagedProfileFields(params UpsertProfileParams, existing *domain.AssetWorkbenchProfile, now time.Time) UpsertProfileParams {
 	params = preserveExistingProfilePII(params, existing)
 	if existing == nil {
-		if strings.TrimSpace(params.WorkerType) == "" {
-			params.WorkerType = domain.AssetWorkbenchWorkerTypeParttime
-		}
+		params.WorkerType = domain.AssetWorkbenchWorkerTypeParttime
 		params.JobGrade = ""
 		if params.OnboardedAt == nil {
 			params.OnboardedAt = &now
@@ -1389,9 +1382,7 @@ func preserveSelfManagedProfileFields(params UpsertProfileParams, existing *doma
 		params.GradeHidden = false
 		return params
 	}
-	if strings.TrimSpace(params.WorkerType) == "" {
-		params.WorkerType = existing.WorkerType
-	}
+	params.WorkerType = existing.WorkerType
 	params.JobGrade = existing.JobGrade
 	params.OnboardedAt = existing.OnboardedAt
 	params.GradeHidden = existing.GradeHidden
@@ -8002,33 +7993,56 @@ func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, 
 	var saved *domain.AssetWorkbenchProfile
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		var err error
-		saved, err = s.repo.UpsertProfile(ctx, tx, profile)
-		if err != nil {
-			return err
-		}
-		if appendGradePeriod && (profile.WorkerType != "" || profile.JobGrade != "") {
-			_, err = s.repo.AppendGradePeriod(ctx, tx, &domain.AssetWorkbenchGradePeriod{
-				ProfileID:     saved.ID,
-				UserID:        saved.UserID,
-				WorkerType:    saved.WorkerType,
-				JobGrade:      saved.JobGrade,
-				EffectiveFrom: s.nowFn().In(s.loc),
-				ChangedBy:     &actor.ID,
-				Reason:        strings.TrimSpace(reason),
+		if s.userRepo != nil && profile.WorkerType != "" {
+			writer, ok := s.userRepo.(interface {
+				UpdateEmploymentType(context.Context, repo.Tx, int64, domain.EmploymentType, time.Time) error
 			})
+			if !ok {
+				return fmt.Errorf("workbench employment writer is not configured")
+			}
+			if err := writer.UpdateEmploymentType(ctx, tx, profile.UserID, workbenchEmploymentType(profile.WorkerType), s.nowFn().UTC()); err != nil {
+				return err
+			}
 		}
-		if err != nil {
-			return err
-		}
-		if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventProfileUpserted, domain.AssetWorkbenchEntityProfile, &saved.ID, nil, saved, reason); err != nil {
-			return err
-		}
-		return s.autoRepricePendingGradeItemsForProfile(ctx, tx, actor, saved, reason)
+		saved, err = s.upsertProfileInTx(ctx, tx, actor, profile, reason, appendGradePeriod)
+		return err
 	}); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to save asset workbench profile.", err.Error())
 	}
 	s.notifyProfileCompletionRequired(ctx, saved)
 	return saved, nil
+}
+
+func workbenchEmploymentType(workerType string) domain.EmploymentType {
+	if workerType == domain.AssetWorkbenchWorkerTypeFulltime {
+		return domain.EmploymentTypeFullTime
+	}
+	return domain.EmploymentTypePartTime
+}
+
+func (s *Service) upsertProfileInTx(ctx context.Context, tx repo.Tx, actor domain.RequestActor, profile *domain.AssetWorkbenchProfile, reason string, appendGradePeriod bool) (*domain.AssetWorkbenchProfile, error) {
+	saved, err := s.repo.UpsertProfile(ctx, tx, profile)
+	if err != nil {
+		return nil, err
+	}
+	if appendGradePeriod && (profile.WorkerType != "" || profile.JobGrade != "") {
+		_, err = s.repo.AppendGradePeriod(ctx, tx, &domain.AssetWorkbenchGradePeriod{
+			ProfileID:     saved.ID,
+			UserID:        saved.UserID,
+			WorkerType:    saved.WorkerType,
+			JobGrade:      saved.JobGrade,
+			EffectiveFrom: s.nowFn().In(s.loc),
+			ChangedBy:     &actor.ID,
+			Reason:        strings.TrimSpace(reason),
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventProfileUpserted, domain.AssetWorkbenchEntityProfile, &saved.ID, nil, saved, reason); err != nil {
+		return nil, err
+	}
+	return saved, s.autoRepricePendingGradeItemsForProfile(ctx, tx, actor, saved, reason)
 }
 
 func (s *Service) autoRepricePendingGradeItemsForProfile(ctx context.Context, tx repo.Tx, actor domain.RequestActor, profile *domain.AssetWorkbenchProfile, reason string) error {
@@ -8253,9 +8267,13 @@ func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfilePa
 	if jobGrade != "" && !validWorkbenchJobGrade(workerType, jobGrade, false) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
 	}
-	idCard := strings.TrimSpace(params.IDCard)
+	idCard := strings.ToUpper(strings.TrimSpace(params.IDCard))
 	if idCard != "" && !assetWorkbenchIDCardPattern.MatchString(idCard) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "身份证号必须为 18 位数字。", nil)
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "身份证号须为18位，前17位数字，末位数字或X。", nil)
+	}
+	phone := strings.TrimSpace(params.Phone)
+	if phone != "" && !assetWorkbenchPhonePattern.MatchString(phone) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "手机号格式不正确。", nil)
 	}
 	gender := strings.TrimSpace(params.Gender)
 	if gender != "" && gender != "female" && gender != "male" {
@@ -8268,7 +8286,7 @@ func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfilePa
 		WorkerType:    workerType,
 		JobGrade:      jobGrade,
 		RealName:      strings.TrimSpace(params.RealName),
-		Phone:         stringPtr(strings.TrimSpace(params.Phone)),
+		Phone:         stringPtr(phone),
 		Province:      strings.TrimSpace(params.Province),
 		City:          strings.TrimSpace(params.City),
 		IDCard:        stringPtr(idCard),
@@ -9767,7 +9785,8 @@ func clientMaterialMatchesSKU(item *domain.AssetWorkbenchClientMaterial, sku str
 }
 
 var (
-	assetWorkbenchIDCardPattern = regexp.MustCompile(`^[0-9]{18}$`)
+	assetWorkbenchIDCardPattern = regexp.MustCompile(`^[0-9]{17}[0-9Xx]$`)
+	assetWorkbenchPhonePattern  = regexp.MustCompile(`^1[3-9][0-9]{9}$`)
 	externalMaterialCodePattern = regexp.MustCompile(`(?i)([A-Z]{1,8}[-_]?\d{3,}[A-Z0-9_-]*|\d{6}-\d{8,}|[A-Z0-9]{6,}[-_][A-Z0-9_-]{2,})`)
 )
 

@@ -3095,6 +3095,10 @@ export interface paths {
                     "application/json": {
                         old_password: string;
                         new_password: string;
+                        /** @description Optional confirmation; when supplied must equal new_password. */
+                        confirm?: string;
+                        /** @description Legacy confirmation alias. */
+                        password_confirmation?: string;
                     };
                 };
             };
@@ -3501,7 +3505,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List current SKU cost synchronization and conflicts */
+        /**
+         * List current SKU cost synchronization and conflicts
+         * @description Observed ERP prices, including defaults assigned during SKU creation, never automatically become confirmed local or manual prices. Differences require explicit resolution; identity filing remains independent of cost confirmation.
+         */
         get: {
             parameters: {
                 query?: {
@@ -11908,7 +11915,7 @@ export interface paths {
         put?: never;
         /**
          * Register an asset workbench account
-         * @description Creates a workbench account only after all required contact, location, identity and payment profile fields pass validation.
+         * @description Creates the account, submitter role, session, complete pending-grade profile and active workbench membership atomically after validation. Worker type is mirrored to the user's employment type; registration automatically opens submitter access, while HR/settlement administrators assign the job grade for pricing. Identity-card terminal x is normalized to X.
          */
         post: {
             parameters: {
@@ -11923,7 +11930,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Registered account and pending workbench profile */
+                /** @description Registered account with an authenticated session, active membership and complete profile awaiting job-grade assignment */
                 201: {
                     headers: {
                         [name: string]: unknown;
@@ -20401,7 +20408,10 @@ export interface components {
             reason?: string;
         };
         AssetWorkbenchSelfProfileUpdate: {
-            /** @enum {string} */
+            /**
+             * @description Accepted for existing clients but ignored; only authorized HR/settlement administrators may change an existing profile's worker type.
+             * @enum {string}
+             */
             worker_type?: "fulltime" | "parttime";
             real_name: string;
             phone: string;
@@ -20419,7 +20429,10 @@ export interface components {
             phone: string;
             /** Format: email */
             email?: string;
-            /** Format: password */
+            /**
+             * Format: password
+             * @description Must contain an ASCII letter and a digit.
+             */
             password: string;
             /** @enum {string} */
             worker_type: "fulltime" | "parttime";

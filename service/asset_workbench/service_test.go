@@ -654,14 +654,20 @@ type baseserviceRegisterParams struct {
 	mobile      string
 }
 
-func (s *registerIdentityStub) RegisterAssetWorkbenchUser(_ context.Context, p baseservice.RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError) {
+func (s *registerIdentityStub) RegisterAssetWorkbenchUser(ctx context.Context, p baseservice.RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError) {
 	s.params = baseserviceRegisterParams{username: p.Username, displayName: p.DisplayName, mobile: p.Mobile}
+	if p.Provision != nil {
+		if err := p.Provision(ctx, nil, &domain.User{ID: 77, Username: p.Username}); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "registration failed", err.Error())
+		}
+	}
 	return &domain.AuthResult{
 		User: &domain.User{
-			ID:          77,
-			Username:    p.Username,
-			DisplayName: p.DisplayName,
-			Roles:       []domain.Role{domain.RoleAssetSubmitter},
+			ID:             77,
+			Username:       p.Username,
+			DisplayName:    p.DisplayName,
+			Roles:          []domain.Role{domain.RoleAssetSubmitter},
+			EmploymentType: p.EmploymentType,
 		},
 		Session: &domain.AuthSession{Token: "token-77"},
 	}, nil
@@ -2634,9 +2640,9 @@ func TestUpsertMyProfileValidatesIDCardAndGender(t *testing.T) {
 		AlipayAccount: "13800000078",
 	}
 	for name, mutate := range map[string]func(*UpsertProfileParams){
-		"short id card":  func(params *UpsertProfileParams) { params.IDCard = "33010019900101007" },
-		"id card with X": func(params *UpsertProfileParams) { params.IDCard = "33010019900101007X" },
-		"unknown gender": func(params *UpsertProfileParams) { params.Gender = "unknown" },
+		"short id card":               func(params *UpsertProfileParams) { params.IDCard = "33010019900101007" },
+		"id card with invalid prefix": func(params *UpsertProfileParams) { params.IDCard = "X30100199001010078" },
+		"unknown gender":              func(params *UpsertProfileParams) { params.Gender = "unknown" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			params := valid

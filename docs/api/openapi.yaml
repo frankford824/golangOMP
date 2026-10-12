@@ -126,7 +126,7 @@ components:
         phone: { type: string }
         province: { type: string }
         city: { type: string }
-        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{18}$' }
+        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{17}[0-9Xx]$' }
         gender: { type: string, enum: ['', female, male] }
         alipay_account: { type: string }
         onboarded_at: { type: string, format: date-time }
@@ -137,12 +137,15 @@ components:
       type: object
       required: [real_name, phone, province, city, id_card, gender, alipay_account]
       properties:
-        worker_type: { type: string, enum: [fulltime, parttime] }
+        worker_type:
+          type: string
+          enum: [fulltime, parttime]
+          description: Accepted for existing clients but ignored; only authorized HR/settlement administrators may change an existing profile's worker type.
         real_name: { type: string, minLength: 1 }
         phone: { type: string, minLength: 1 }
         province: { type: string, minLength: 1 }
         city: { type: string, minLength: 1 }
-        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{18}$' }
+        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{17}[0-9Xx]$' }
         gender: { type: string, enum: [female, male] }
         alipay_account: { type: string, minLength: 1 }
         reason: { type: string }
@@ -154,11 +157,11 @@ components:
         name: { type: string, minLength: 1 }
         phone: { type: string, minLength: 1 }
         email: { type: string, format: email }
-        password: { type: string, minLength: 1, format: password }
+        password: { type: string, minLength: 8, format: password, description: Must contain an ASCII letter and a digit. }
         worker_type: { type: string, enum: [fulltime, parttime] }
         province: { type: string, minLength: 1 }
         city: { type: string, minLength: 1 }
-        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{18}$' }
+        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{17}[0-9Xx]$' }
         gender: { type: string, enum: [female, male] }
         alipay_account: { type: string, minLength: 1 }
     AssetWorkbenchRegisterResponse:
@@ -9008,6 +9011,8 @@ paths:
               properties:
                 old_password: { type: string }
                 new_password: { type: string }
+                confirm: { type: string, description: Optional confirmation; when supplied must equal new_password. }
+                password_confirmation: { type: string, description: Legacy confirmation alias. }
       responses:
         '200':
           description: Password changed
@@ -14824,7 +14829,7 @@ paths:
   /v1/asset-workbench/register:
     post:
       summary: Register an asset workbench account
-      description: Creates a workbench account only after all required contact, location, identity and payment profile fields pass validation.
+      description: Creates the account, submitter role, session, complete pending-grade profile and active workbench membership atomically after validation. Worker type is mirrored to the user's employment type; registration automatically opens submitter access, while HR/settlement administrators assign the job grade for pricing. Identity-card terminal x is normalized to X.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -14838,7 +14843,7 @@ paths:
               $ref: '#/components/schemas/AssetWorkbenchRegisterRequest'
       responses:
         '201':
-          description: Registered account and pending workbench profile
+          description: Registered account with an authenticated session, active membership and complete profile awaiting job-grade assignment
           content:
             application/json:
               schema:

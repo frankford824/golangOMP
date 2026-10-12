@@ -295,6 +295,8 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `old_password` | string | 是 | - |
 | `new_password` | string | 是 | - |
+| `confirm` | string | 否 | Optional confirmation; when supplied must equal new_password. |
+| `password_confirmation` | string | 否 | Legacy confirmation alias. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

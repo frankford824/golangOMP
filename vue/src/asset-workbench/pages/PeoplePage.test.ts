@@ -112,6 +112,18 @@ describe('PeoplePage', () => {
     expect((nameField?.find('input').element as HTMLInputElement).value).toBe('测试李梅')
   })
 
+  it('normalizes an X suffix on the manager profile editor before saving', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings/people', component: PeoplePage }] })
+    await router.push('/settings/people')
+    await router.isReady()
+    const wrapper = mount(PeoplePage, { global: { plugins: [router] } })
+    await flushPromises()
+    await editorField(wrapper, '身份证号').setValue('32010019900101033x')
+    await wrapper.find('.aw-grade-editor .aw-primary-button').trigger('click')
+    await flushPromises()
+    expect(mocks.upsertProfile).toHaveBeenCalledWith(330, expect.objectContaining({ id_card: '32010019900101033X' }))
+  })
+
   it('blocks an incomplete self-service profile before calling the API', async () => {
     mocks.bootstrap.mockResolvedValue({
       capabilities: ['asset.workbench.profile'],
@@ -128,10 +140,10 @@ describe('PeoplePage', () => {
 
     const selfPanel = wrapper.find('.aw-two-column .aw-panel')
     const idCard = selfPanel.findAll('label').find((item) => item.text().startsWith('身份证号'))?.find('input')
-    await idCard?.setValue('32010019900101033X')
+    await idCard?.setValue('32010019900101033')
     await wrapper.find('.aw-page-bar__actions .aw-primary-button').trigger('click')
 
     expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('身份证号必须为 18 位数字')
+    expect(wrapper.text()).toContain('身份证号须为18位')
   })
 })
