@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   bootstrapHook: vi.fn(),
@@ -23,6 +23,16 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
 }))
 
 import AccountPage from './AccountPage.vue'
+
+const mountedPages: ReturnType<typeof mount>[] = []
+function mountPage() {
+  const wrapper = mount(AccountPage, { attachTo: document.body, global: { stubs: { DialogPortal: { template: '<slot />' } } } })
+  mountedPages.push(wrapper)
+  return wrapper
+}
+afterEach(() => {
+  mountedPages.splice(0).forEach((wrapper) => { wrapper.unmount(); wrapper.element.remove() })
+})
 
 function fieldValue(wrapper: ReturnType<typeof mount>, label: string) {
   const field = wrapper.findAll('label').find((item) => item.text().startsWith(label))
@@ -59,8 +69,11 @@ describe('AccountPage', () => {
     })
   })
 
-  it('hydrates a cached profile immediately when the page is opened again', () => {
-    const wrapper = mount(AccountPage)
+  it('shows only the summary until a profile editor is explicitly opened', async () => {
+    const wrapper = mountPage()
+    expect(wrapper.findAll('input')).toHaveLength(0)
+    expect(wrapper.text()).toContain('资料已完成')
+    await wrapper.get('[data-testid="account-edit-profile"]').trigger('click')
 
     expect(fieldValue(wrapper, '姓名')).toBe('张三')
     expect(fieldValue(wrapper, '手机号')).toBe('13800000302')
@@ -72,7 +85,8 @@ describe('AccountPage', () => {
   })
 
   it('marks every client-managed field as required and blocks an incomplete save', async () => {
-    const wrapper = mount(AccountPage)
+    const wrapper = mountPage()
+    await wrapper.get('[data-testid="account-edit-profile"]').trigger('click')
     const idCard = wrapper.findAll('label').find((item) => item.text().startsWith('身份证号'))?.find('input')
     const gender = wrapper.findAll('label').find((item) => item.text().startsWith('性别'))?.find('select')
 
@@ -86,7 +100,7 @@ describe('AccountPage', () => {
 
     const city = wrapper.findAll('label').find((item) => item.text().startsWith('城市'))?.find('select')
     await city?.setValue('')
-    await wrapper.find('.aw-form-grid .aw-primary-button').trigger('click')
+    await wrapper.get('form').trigger('submit')
 
     expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('请填写城市')
@@ -94,7 +108,8 @@ describe('AccountPage', () => {
 
   it('validates confirmation and clears password fields after a successful change', async () => {
     mocks.changeMyPassword.mockResolvedValue(undefined)
-    const wrapper = mount(AccountPage)
+    const wrapper = mountPage()
+    await wrapper.get('[data-testid="account-edit-password"]').trigger('click')
     const form = wrapper.get('form')
     const fields = form.findAll('input')
     await fields[0]!.setValue('OldPass123')
@@ -106,7 +121,27 @@ describe('AccountPage', () => {
     await fields[2]!.setValue('NewPass123')
     await form.trigger('submit')
     expect(mocks.changeMyPassword).toHaveBeenCalledWith({ old_password: 'OldPass123', new_password: 'NewPass123', confirm: 'NewPass123' })
-    expect(fields.every((field) => (field.element as HTMLInputElement).value === '')).toBe(true)
+    expect(wrapper.find('form').exists()).toBe(false)
     expect(wrapper.text()).toContain('密码已修改')
+    await wrapper.get('[data-testid="account-edit-password"]').trigger('click')
+    expect(wrapper.get('form').findAll('input').every((field) => (field.element as HTMLInputElement).value === '')).toBe(true)
+  })
+
+  it('discards unsaved profile changes and clears password fields on cancel', async () => {
+    const wrapper = mountPage()
+    await wrapper.get('[data-testid="account-edit-profile"]').trigger('click')
+    await wrapper.get('input[autocomplete="name"]').setValue('未保存姓名')
+    await wrapper.get('[aria-label="关闭"]').trigger('click')
+    expect(wrapper.find('form').exists()).toBe(false)
+    await wrapper.get('[data-testid="account-edit-profile"]').trigger('click')
+    expect(fieldValue(wrapper, '姓名')).toBe('张三')
+    await wrapper.get('[aria-label="关闭"]').trigger('click')
+    await wrapper.get('[data-testid="account-edit-password"]').trigger('click')
+    await wrapper.get('input[autocomplete="current-password"]').setValue('Secret123')
+    await wrapper.get('[aria-label="关闭"]').trigger('click')
+    await wrapper.get('[data-testid="account-edit-password"]').trigger('click')
+    expect((wrapper.get('input[autocomplete="current-password"]').element as HTMLInputElement).value).toBe('')
+    expect(mocks.changeMyPassword).not.toHaveBeenCalled()
+    expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
   })
 })

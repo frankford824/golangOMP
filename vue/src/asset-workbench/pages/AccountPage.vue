@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { LockKeyhole, LogOut, Save, UserRound } from 'lucide-vue-next'
+import { LockKeyhole, LogOut, Save, UserRound, X } from 'lucide-vue-next'
+import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { useWorkbenchSession } from '@aw/app/useWorkbenchSession'
@@ -22,6 +23,32 @@ const passwordForm = reactive({ old_password: '', new_password: '', confirm: '' 
 const passwordSaving = ref(false)
 const passwordError = ref('')
 const passwordNotice = ref('')
+const editor = ref<'profile' | 'password' | null>(null)
+let editorTrigger: HTMLElement | null = null
+
+function openEditor(kind: 'profile' | 'password', event: MouseEvent) {
+  editorTrigger = event.currentTarget as HTMLElement
+  syncForm()
+  saveError.value = ''
+  passwordError.value = ''
+  passwordNotice.value = ''
+  editor.value = kind
+}
+
+function closeEditor() {
+  if (saving.value || passwordSaving.value) return
+  editor.value = null
+  passwordForm.old_password = ''
+  passwordForm.new_password = ''
+  passwordForm.confirm = ''
+  passwordError.value = ''
+  saveError.value = ''
+  syncForm()
+}
+
+function restoreEditorFocus() {
+  editorTrigger?.focus()
+}
 
 async function changePassword() {
   if (passwordSaving.value) return
@@ -40,6 +67,9 @@ async function changePassword() {
     passwordForm.new_password = ''
     passwordForm.confirm = ''
     passwordNotice.value = '密码已修改，下次登录请使用新密码'
+    notice.value = passwordNotice.value
+    passwordSaving.value = false
+    closeEditor()
   } catch (err) {
     passwordError.value = resolveApiUserMessage(err, { fallback: '密码修改失败，请重试' })
   } finally {
@@ -110,6 +140,8 @@ async function saveProfile() {
     })
     notice.value = '资料已保存'
     await refresh({ force: true })
+    saving.value = false
+    closeEditor()
   } catch (err) {
     saveError.value = err instanceof Error ? err.message : '资料保存失败'
   } finally {
@@ -140,8 +172,7 @@ watch(bootstrap, syncForm, { immediate: true })
       </div>
     </div>
 
-    <p v-if="saveError" class="aw-inline-alert">{{ saveError }}</p>
-    <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
+    <p v-if="notice" class="aw-inline-alert" role="status">{{ notice }}</p>
 
     <AsyncBoundary
       :loading="loading && !bootstrap"
@@ -151,8 +182,7 @@ watch(bootstrap, syncForm, { immediate: true })
       empty-label="暂无账号资料"
       @retry="refresh"
     >
-      <div class="aw-two-column">
-      <section class="aw-panel">
+      <section class="aw-panel aw-account-overview">
         <div class="aw-panel__head">
           <div>
             <p class="aw-eyebrow">当前账号</p>
@@ -160,48 +190,39 @@ watch(bootstrap, syncForm, { immediate: true })
           </div>
           <UserRound :size="18" aria-hidden="true" />
         </div>
-        <div class="aw-compact-list">
-          <article class="aw-compact-list__item">
-            <div>
-              <strong>账号</strong>
-              <span>{{ accountName }}</span>
-            </div>
-          </article>
-          <article class="aw-compact-list__item">
-            <div>
-              <strong>身份</strong>
-              <span class="aw-chip" :class="bootstrap?.is_admin ? 'aw-chip--info' : 'aw-chip--neutral'">{{ identityLabel }}</span>
-            </div>
-          </article>
-          <article class="aw-compact-list__item">
-            <div>
-              <strong>资料状态</strong>
-              <span class="aw-chip" :class="bootstrap?.profile?.pii_completed ? 'aw-chip--success' : 'aw-chip--warn'">{{ profileState }}</span>
-            </div>
-          </article>
-          <article class="aw-compact-list__item">
-            <div>
-              <strong>联系资料</strong>
-              <span>{{ maskedPhone || '未填写' }}</span>
-            </div>
-          </article>
-          <article class="aw-compact-list__item">
-            <div>
-              <strong>证件 / 收款</strong>
-              <span>{{ maskedIdCard || '未填写' }} · {{ maskedAlipay || '未填写' }}</span>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <p class="aw-eyebrow">资料</p>
-            <h3>我的资料</h3>
+        <dl class="aw-account-facts">
+          <div><dt>账号</dt><dd>{{ accountName }}</dd></div>
+          <div><dt>身份</dt><dd><span class="aw-chip" :class="bootstrap?.is_admin ? 'aw-chip--info' : 'aw-chip--neutral'">{{ identityLabel }}</span></dd></div>
+          <div><dt>资料状态</dt><dd><span class="aw-chip" :class="bootstrap?.profile?.pii_completed ? 'aw-chip--success' : 'aw-chip--warn'">{{ profileState }}</span></dd></div>
+          <div><dt>联系资料</dt><dd>{{ maskedPhone || '未填写' }}</dd></div>
+          <div><dt>证件 / 收款</dt><dd>{{ maskedIdCard || '未填写' }} · {{ maskedAlipay || '未填写' }}</dd></div>
+        </dl>
+        <div class="aw-account-actions">
+          <div class="aw-account-actions__row">
+            <div><strong>我的资料</strong><p class="aw-copy">维护姓名、联系资料和收款信息。</p></div>
+            <button class="aw-secondary-button" data-testid="account-edit-profile" type="button" @click="openEditor('profile', $event)">{{ bootstrap?.profile?.pii_completed ? '编辑资料' : '补全资料' }}</button>
+          </div>
+          <div class="aw-account-actions__row">
+            <div><strong>账号安全</strong><p class="aw-copy">使用旧密码修改当前账号的登录密码。</p></div>
+            <button class="aw-secondary-button" data-testid="account-edit-password" type="button" @click="openEditor('password', $event)"><LockKeyhole :size="16" aria-hidden="true" />修改密码</button>
           </div>
         </div>
-        <div class="aw-form-grid">
+      </section>
+    </AsyncBoundary>
+
+    <DialogRoot :open="Boolean(editor)" @update:open="(open) => { if (!open) closeEditor() }">
+      <DialogPortal>
+        <div v-if="editor" class="aw-token-scope aw-account-dialog-layer">
+          <DialogOverlay class="aw-account-dialog-backdrop" />
+          <DialogContent class="aw-account-dialog" :class="{ 'aw-account-dialog--password': editor === 'password' }" @close-auto-focus.prevent="restoreEditorFocus">
+            <header class="aw-panel__head">
+              <div>
+                <DialogTitle as="h3">{{ editor === 'profile' ? '编辑我的资料' : '修改密码' }}</DialogTitle>
+                <DialogDescription class="aw-copy">{{ editor === 'profile' ? '资料用于联系和结算，请核对后保存。' : '新密码至少8位，包含字母和数字。' }}</DialogDescription>
+              </div>
+              <button class="aw-secondary-button aw-account-dialog__close" type="button" aria-label="关闭" :disabled="saving || passwordSaving" @click="closeEditor"><X :size="18" aria-hidden="true" /></button>
+            </header>
+        <form v-if="editor === 'profile'" class="aw-form-grid" @submit.prevent="saveProfile">
           <label>
             <span>姓名 <small class="aw-field__mark">必填</small></span>
             <input v-model="form.real_name" autocomplete="name" required />
@@ -240,27 +261,28 @@ watch(bootstrap, syncForm, { immediate: true })
               <option value="male">男</option>
             </select>
           </label>
-          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="saving" @click="saveProfile">
+          <p v-if="saveError" class="aw-inline-alert aw-form-grid__full" role="alert">{{ saveError }}</p>
+          <div class="aw-account-dialog__footer aw-form-grid__full">
+          <button class="aw-secondary-button" type="button" :disabled="saving" @click="closeEditor">取消</button>
+          <button class="aw-primary-button" type="submit" :disabled="saving">
             <Save :size="16" aria-hidden="true" />
             保存资料
           </button>
-        </div>
-      </section>
-      </div>
-      <section class="aw-panel" aria-labelledby="aw-password-title">
-        <div class="aw-panel__head">
-          <div><p class="aw-eyebrow">账号安全</p><h3 id="aw-password-title">修改密码</h3></div>
-          <LockKeyhole :size="18" aria-hidden="true" />
-        </div>
-        <form class="aw-form-grid" @submit.prevent="changePassword">
+          </div>
+        </form>
+        <form v-else class="aw-form-grid aw-account-password-form" @submit.prevent="changePassword">
           <label><span>旧密码</span><input v-model="passwordForm.old_password" type="password" autocomplete="current-password" required /></label>
           <label><span>新密码</span><input v-model="passwordForm.new_password" type="password" autocomplete="new-password" minlength="8" placeholder="至少8位，包含字母和数字" required /></label>
           <label><span>确认新密码</span><input v-model="passwordForm.confirm" type="password" autocomplete="new-password" minlength="8" required /></label>
           <p v-if="passwordError" class="aw-inline-alert aw-form-grid__full" role="alert">{{ passwordError }}</p>
-          <p v-if="passwordNotice" class="aw-inline-alert aw-form-grid__full" role="status">{{ passwordNotice }}</p>
-          <button class="aw-primary-button aw-form-grid__full" type="submit" :disabled="passwordSaving">{{ passwordSaving ? '正在修改' : '修改密码' }}</button>
+          <div class="aw-account-dialog__footer aw-form-grid__full">
+            <button class="aw-secondary-button" type="button" :disabled="passwordSaving" @click="closeEditor">取消</button>
+            <button class="aw-primary-button" type="submit" :disabled="passwordSaving">{{ passwordSaving ? '正在修改' : '确认修改' }}</button>
+          </div>
         </form>
-      </section>
-    </AsyncBoundary>
+          </DialogContent>
+        </div>
+      </DialogPortal>
+    </DialogRoot>
   </section>
 </template>
