@@ -179,6 +179,8 @@ describe('UploadOverviewPage cross-page deletion', () => {
   it('retains page-one choices and removes only page-two choices when unchecked', async () => {
     const wrapper = mountLedger()
     await flushPromises()
+    expect(wrapper.text()).toContain('文件夹作品 · 本页 50 个文件 · 只计 1 件')
+    expect(wrapper.text()).not.toContain('文件夹作品 · 共 50 个文件')
     await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
     expect(wrapper.get('[aria-label="批量操作"] strong').text()).toContain('50')
     await pageButton(wrapper, '下一页').trigger('click')
