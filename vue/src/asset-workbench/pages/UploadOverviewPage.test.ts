@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
+import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   driveDirectories: vi.fn(),
   driveFiles: vi.fn(),
   listSettlementSupplements: vi.fn(),
+  getSubmissionDetail: vi.fn(),
+  batchDeleteFiles: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -153,5 +156,98 @@ describe('UploadOverviewPage operation source', () => {
       page: 1,
     }), expect.any(AbortSignal))
     expect(wrapper.text()).toContain('重置 1')
+  })
+})
+
+describe('UploadOverviewPage cross-page deletion', () => {
+  const files = Array.from({ length: 53 }, (_, index) => ({ id: index + 1, submission_id: 20, submission_item_id: 30,
+    original_filename: `${index + 1}.jpg`, relative_path: `image/nested/${index + 1}.jpg`, is_folder_upload: true,
+    business_month: '2026-10', operation_source: 'normal_upload', created_at: '2026-10-13T01:00:00Z', gross_amount: 1 }))
+  const dialogStub = { props: ['selection', 'busy'], template: '<div />' }
+  const pageButton = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find((button) => button.text().trim() === label)!
+  const mountLedger = () => mount(UploadOverviewPage, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, DriveDeleteConfirmDialog: dialogStub } } })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.driveDirectories.mockResolvedValue([])
+    mocks.listSettlementSupplements.mockResolvedValue({ items: [], total: 0 })
+    mocks.driveFiles.mockImplementation(async (params) => ({ items: params.page_size === 100 ? files : params.page === 2 ? files.slice(50) : files.slice(0, 50), total: 53 }))
+    mocks.getSubmissionDetail.mockResolvedValue({ submission: { id: 20 }, items: [{ item: { id: 30 }, files }] })
+    mocks.batchDeleteFiles.mockResolvedValue({ deleted: files.map((file) => file.id), failures: [] })
+  })
+
+  it('retains page-one choices and removes only page-two choices when unchecked', async () => {
+    const wrapper = mountLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    expect(wrapper.get('[aria-label="批量操作"] strong').text()).toContain('50')
+    await pageButton(wrapper, '下一页').trigger('click')
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    expect(wrapper.get('[aria-label="批量操作"] strong').text()).toContain('53')
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(false)
+    expect(wrapper.get('[aria-label="批量操作"] strong').text()).toContain('50')
+    wrapper.unmount()
+  })
+
+  it('selects all filtered files, but changing filters clears the selection', async () => {
+    const wrapper = mountLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await pageButton(wrapper, '全选筛选结果（53个）').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[aria-label="批量操作"] strong').text()).toContain('53')
+    await wrapper.get('form.aw-upload-ledger__filters').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('[aria-label="批量操作"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('reads the full 53-file work before confirmation and never deletes on cancel', async () => {
+    const wrapper = mountLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await wrapper.get('input[aria-label="操作原因"]').setValue('错传')
+    await pageButton(wrapper, '删除').trigger('click')
+    await flushPromises()
+    const dialog = wrapper.findComponent(DriveDeleteConfirmDialog)
+    expect(dialog.props('selection')).toEqual(expect.objectContaining({ fileIds: files.map((file) => file.id), workCount: 1, extraCount: 3 }))
+    expect(mocks.batchDeleteFiles).not.toHaveBeenCalled()
+    dialog.vm.$emit('close')
+    await flushPromises()
+    expect(mocks.batchDeleteFiles).not.toHaveBeenCalled()
+    await pageButton(wrapper, '删除').trigger('click')
+    await flushPromises()
+    dialog.vm.$emit('confirm')
+    await flushPromises()
+    expect(mocks.batchDeleteFiles).toHaveBeenCalledWith(files.map((file) => file.id), '错传')
+    wrapper.unmount()
+  })
+
+  it('does not apply edited-but-unsubmitted filters to a cross-page selection', async () => {
+    const wrapper = mountLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await wrapper.get('input[placeholder="姓名或账号"]').setValue('其他人员')
+    expect(pageButton(wrapper, '全选筛选结果（53个）').attributes('disabled')).toBeDefined()
+    await pageButton(wrapper, '下一页').trigger('click')
+    await flushPromises()
+    expect(mocks.driveFiles).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, owner: undefined }), expect.any(AbortSignal))
+    expect(wrapper.get('[aria-label="批量操作"] strong').text()).toContain('50')
+    wrapper.unmount()
+  })
+
+  it('keeps selection and never calls delete if full work details cannot be read', async () => {
+    mocks.getSubmissionDetail.mockRejectedValue(new Error('无权读取作品'))
+    const wrapper = mountLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await wrapper.get('input[aria-label="操作原因"]').setValue('错传')
+    await pageButton(wrapper, '删除').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('无权读取作品')
+    expect(wrapper.findComponent(DriveDeleteConfirmDialog).props('selection')).toBeNull()
+    expect(mocks.batchDeleteFiles).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 })
