@@ -359,14 +359,14 @@ function filePieceworkNote(file: DriveFileRow, lookup = pieceworkDisplayByFileID
   const state = filePieceworkState(file, lookup)
   if (state.siblingCount <= 1) return ''
   return state.isPrimary
-    ? `同一作品包含 ${state.siblingCount} 个文件，数量和金额只统计一次。`
+    ? `当前结果展示同一作品的 ${state.siblingCount} 个文件，数量和金额只统计一次。`
     : '该文件属于同一作品，数量和金额已计入同作品记录。'
 }
 
 function filePieceworkInlineNote(file: DriveFileRow) {
   const state = filePieceworkState(file)
   if (state.siblingCount <= 1) return ''
-  return state.isPrimary ? `文件夹作品 · 共 ${state.siblingCount} 个文件 · 只计 1 件` : '同一文件夹作品 · 金额已计入同作品'
+  return state.isPrimary ? `文件夹作品 · 本页 ${state.siblingCount} 个文件 · 只计 1 件` : '同一文件夹作品 · 金额已计入同作品'
 }
 
 function csvEscape(value: unknown) {
