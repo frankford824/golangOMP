@@ -11948,7 +11948,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Account already exists */
+                /** @description Account, phone or identity-card number already belongs to an existing user or workbench profile; registration is rolled back. */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -12253,6 +12253,13 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description Phone or identity-card number is already owned by another workbench profile; no existing profile is changed. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         trace?: never;
@@ -12442,6 +12449,13 @@ export interface paths {
                 };
                 /** @description Profile not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Phone or identity-card number is already owned by another workbench profile; no existing profile is changed. */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };

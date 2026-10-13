@@ -12,7 +12,7 @@ import (
 )
 
 func TestWorkbenchRegistrationProvisionFailureRollsBackIdentityAndRoles(t *testing.T) {
-	for _, stage := range []string{"profile", "membership"} {
+	for _, stage := range []string{"profile", "membership", "profile_conflict"} {
 		t.Run(stage, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			if err != nil {
@@ -32,7 +32,13 @@ func TestWorkbenchRegistrationProvisionFailureRollsBackIdentityAndRoles(t *testi
 			if stage == "membership" {
 				mock.ExpectExec("INSERT INTO registration_profile_probe").WillReturnResult(sqlmock.NewResult(1, 1))
 			}
-			mock.ExpectExec("INSERT INTO registration_" + stage + "_probe").WillReturnError(errors.New("provision failure"))
+			failedStage := stage
+			var provisionErr error = errors.New("provision failure")
+			if stage == "profile_conflict" {
+				failedStage = "profile"
+				provisionErr = domain.NewAppError(domain.ErrCodeConflict, "资料已被占用", map[string]interface{}{"deny_code": "profile_identity_conflict"})
+			}
+			mock.ExpectExec("INSERT INTO registration_" + failedStage + "_probe").WillReturnError(provisionErr)
 			mock.ExpectRollback()
 			result, appErr := svc.RegisterAssetWorkbenchUser(context.Background(), RegisterAssetWorkbenchUserParams{
 				Username: "atomic-worker", DisplayName: "注册测试", Mobile: "13800000991", Password: "Pass1234",
@@ -46,7 +52,7 @@ func TestWorkbenchRegistrationProvisionFailureRollsBackIdentityAndRoles(t *testi
 							return err
 						}
 					}
-					_, err := mysqlrepo.Unwrap(tx).ExecContext(ctx, "INSERT INTO registration_"+stage+"_probe VALUES (?)", user.ID)
+					_, err := mysqlrepo.Unwrap(tx).ExecContext(ctx, "INSERT INTO registration_"+failedStage+"_probe VALUES (?)", user.ID)
 					return err
 				},
 			})
@@ -55,6 +61,9 @@ func TestWorkbenchRegistrationProvisionFailureRollsBackIdentityAndRoles(t *testi
 			}
 			if len(sessions.sessions) != 0 {
 				t.Fatal("failed registration issued a session")
+			}
+			if stage == "profile_conflict" && appErr.Code != domain.ErrCodeConflict {
+				t.Fatalf("profile conflict became %s instead of CONFLICT", appErr.Code)
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatal(err)

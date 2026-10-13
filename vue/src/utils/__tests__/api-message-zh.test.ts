@@ -3,6 +3,14 @@ import { describe, expect, it } from 'vitest'
 import { mapRawBackendMessageToZh, resolveApiUserMessage } from '@/utils/api-message-zh'
 
 describe('resolveApiUserMessage', () => {
+  it('shows profile ownership conflicts identically for client, admin and registration', () => {
+    const backendMessage = '身份证号已被已有工作台资料占用，请联系管理员核对账号归属。'
+    for (const url of ['/v1/asset-workbench/profile', '/v1/asset-workbench/profiles/77', '/v1/asset-workbench/register']) {
+      expect(resolveApiUserMessage({ status: 409, config: { url }, responseData: { error: {
+        code: 'CONFLICT', message: backendMessage, details: { deny_code: 'profile_identity_conflict', field: 'id_card' },
+      } } })).toBe(backendMessage)
+    }
+  })
   it.each(['upload_session is already terminal', 'upload_session changed concurrently and is already terminal'])('explains %s without asking to reupload successful files', (message) => {
     expect(resolveApiUserMessage({ status: 409, responseData: { error: { code: 'INVALID_STATE_TRANSITION', message } } })).toContain('其他已成功文件无需重传')
   })

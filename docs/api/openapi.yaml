@@ -14852,7 +14852,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/AssetWorkbenchRegisterResponse'
         '400': { description: Invalid registration data }
-        '409': { description: Account already exists }
+        '409': { description: "Account, phone or identity-card number already belongs to an existing user or workbench profile; registration is rolled back." }
   /v1/asset-workbench/access/request:
     post:
       summary: Request asset workbench access
@@ -15013,6 +15013,7 @@ paths:
         '400': { description: Invalid profile data }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+        '409': { description: Phone or identity-card number is already owned by another workbench profile; no existing profile is changed. }
   /v1/asset-workbench/profiles:
     get:
       summary: List asset workbench profiles
@@ -15119,6 +15120,7 @@ paths:
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
         '404': { description: Profile not found }
+        '409': { description: Phone or identity-card number is already owned by another workbench profile; no existing profile is changed. }
   /v1/asset-workbench/members:
     get:
       summary: List asset workbench members

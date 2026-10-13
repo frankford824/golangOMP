@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
+
 	"workflow/domain"
 	"workflow/repo"
 )
@@ -402,28 +404,12 @@ func (r *assetWorkbenchRepo) GetAccountLinkByCanonical(ctx context.Context, cano
 
 func (r *assetWorkbenchRepo) UpsertProfile(ctx context.Context, tx repo.Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error) {
 	sqlTx := Unwrap(tx)
-	_, err := sqlTx.ExecContext(ctx, `
-		INSERT INTO asset_workbench_profiles (
-			user_id, worker_type, job_grade, real_name, phone, province, city, id_card, gender,
-			alipay_account, onboarded_at, grade_hidden, status, pii_completed, created_by, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			worker_type = VALUES(worker_type),
-			job_grade = VALUES(job_grade),
-			real_name = VALUES(real_name),
-			phone = VALUES(phone),
-			province = VALUES(province),
-			city = VALUES(city),
-			id_card = VALUES(id_card),
-			gender = VALUES(gender),
-			alipay_account = VALUES(alipay_account),
-			onboarded_at = VALUES(onboarded_at),
-			grade_hidden = VALUES(grade_hidden),
-			status = VALUES(status),
-			pii_completed = VALUES(pii_completed),
-			updated_by = VALUES(updated_by),
-			updated_at = CURRENT_TIMESTAMP`,
-		profile.UserID,
+	var existingID int64
+	err := sqlTx.QueryRowContext(ctx, `SELECT id FROM asset_workbench_profiles WHERE user_id = ? FOR UPDATE`, profile.UserID).Scan(&existingID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("lock asset workbench profile: %w", err)
+	}
+	values := []interface{}{
 		profile.WorkerType,
 		profile.JobGrade,
 		profile.RealName,
@@ -437,10 +423,40 @@ func (r *assetWorkbenchRepo) UpsertProfile(ctx context.Context, tx repo.Tx, prof
 		profile.GradeHidden,
 		profile.Status,
 		profile.PIICompleted,
-		toNullInt64(profile.CreatedBy),
 		toNullInt64(profile.UpdatedBy),
-	)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		// INSERT must fail on another user's phone/ID-card ownership. An
+		// ON DUPLICATE KEY UPDATE would match those indexes as well as user_id.
+		args := append([]interface{}{profile.UserID}, values...)
+		args = append(args, toNullInt64(profile.CreatedBy))
+		_, err = sqlTx.ExecContext(ctx, `INSERT INTO asset_workbench_profiles (
+			user_id, worker_type, job_grade, real_name, phone, province, city, id_card, gender,
+			alipay_account, onboarded_at, grade_hidden, status, pii_completed, updated_by, created_by
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
+	} else {
+		args := append(values, profile.UserID)
+		_, err = sqlTx.ExecContext(ctx, `UPDATE asset_workbench_profiles SET
+			worker_type = ?, job_grade = ?, real_name = ?, phone = ?, province = ?, city = ?,
+			id_card = ?, gender = ?, alipay_account = ?, onboarded_at = ?, grade_hidden = ?,
+			status = ?, pii_completed = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE user_id = ?`, args...)
+	}
 	if err != nil {
+		var duplicate *mysql.MySQLError
+		if errors.As(err, &duplicate) && duplicate.Number == 1062 {
+			field, label := "identity", "手机号、身份证号或账号"
+			key := strings.ToLower(duplicate.Message)
+			if strings.Contains(key, "phone") {
+				field, label = "phone", "手机号"
+			}
+			if strings.Contains(key, "id_card") {
+				field, label = "id_card", "身份证号"
+			}
+			return nil, domain.NewAppError(domain.ErrCodeConflict, label+"已被已有工作台资料占用，请联系管理员核对账号归属。", map[string]interface{}{
+				"deny_code": "profile_identity_conflict", "field": field,
+			})
+		}
 		return nil, fmt.Errorf("upsert asset workbench profile: %w", err)
 	}
 	row := sqlTx.QueryRowContext(ctx, assetWorkbenchProfileSelect()+` WHERE user_id = ?`, profile.UserID)

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -708,6 +709,10 @@ func (s *identityService) RegisterAssetWorkbenchUser(ctx context.Context, p Regi
 		}
 		return nil
 	}); err != nil {
+		var appErr *domain.AppError
+		if errors.As(err, &appErr) {
+			return nil, appErr
+		}
 		return nil, infraError("register asset workbench user tx", err)
 	}
 
