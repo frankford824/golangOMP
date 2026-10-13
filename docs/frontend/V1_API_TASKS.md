@@ -7816,7 +7816,7 @@ Content-Type: `application/json`
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid registration data |
-| 409 | 见 `error.code` | 见 `deny_code` | Account already exists |
+| 409 | 见 `error.code` | 见 `deny_code` | Account, phone or identity-card number already belongs to an existing user or workbench profile; registration is rolled back. |
 
 ### curl 示例
 ```bash
@@ -8087,6 +8087,7 @@ Content-Type: `application/json`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid profile data |
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
 | 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 409 | 见 `error.code` | 见 `deny_code` | Phone or identity-card number is already owned by another workbench profile; no existing profile is changed. |
 
 ### curl 示例
 ```bash
@@ -8293,6 +8294,7 @@ Content-Type: `application/json`
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
 | 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
 | 404 | 见 `error.code` | 见 `deny_code` | Profile not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Phone or identity-card number is already owned by another workbench profile; no existing profile is changed. |
 
 ##### curl 示例
 ```bash

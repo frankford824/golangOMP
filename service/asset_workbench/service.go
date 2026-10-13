@@ -7989,6 +7989,9 @@ func (s *Service) upsertProfile(ctx context.Context, actor domain.RequestActor, 
 		saved, err = s.upsertProfileInTx(ctx, tx, actor, profile, reason, appendGradePeriod)
 		return err
 	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to save asset workbench profile.", err.Error())
 	}
 	s.notifyProfileCompletionRequired(ctx, saved)

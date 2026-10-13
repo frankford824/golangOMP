@@ -2,12 +2,40 @@ package assetworkbench
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"workflow/domain"
 	"workflow/repo"
 )
+
+type conflictingProfileRepo struct{ profileListRepo }
+
+func (r *conflictingProfileRepo) UpsertProfile(context.Context, repo.Tx, *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error) {
+	return nil, fmt.Errorf("save profile: %w", domain.NewAppError(domain.ErrCodeConflict, "手机号已被占用", map[string]interface{}{"deny_code": "profile_identity_conflict"}))
+}
+
+func TestSelfAndManagedProfilePreserveIdentityConflict(t *testing.T) {
+	for _, managed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("managed=%t", managed), func(t *testing.T) {
+			r := &conflictingProfileRepo{}
+			s := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
+			params := UpsertProfileParams{RealName: "测试", Phone: "13800000991", Province: "浙江", City: "杭州", IDCard: "330100199001010078", Gender: "female", AlipayAccount: "test@example.com"}
+			actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+			var appErr *domain.AppError
+			if managed {
+				actor = domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleSuperAdmin}}
+				_, appErr = s.HRUpsertProfile(context.Background(), actor, 77, params)
+			} else {
+				_, appErr = s.UpsertMyProfile(context.Background(), actor, params)
+			}
+			if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+				t.Fatalf("error=%v, want profile CONFLICT instead of 500", appErr)
+			}
+		})
+	}
+}
 
 type employmentWriterStub struct {
 	repo.UserRepo
