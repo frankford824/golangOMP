@@ -41,6 +41,8 @@ import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
 import { batchMutationFailureMessage, hasSupplementRecordFailure } from '@aw/shared/drive/batchMutationFeedback'
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
+import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.vue'
+import { collectFolderFiles, resolveWholeWorks, type PendingWorkDeletion, type WorkSelectionFile } from '@aw/shared/drive/workSelection'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
 import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
 import ResourceGroupMaterialCard from '@aw/shared/resource-groups/ResourceGroupMaterialCard.vue'
@@ -147,6 +149,11 @@ const fileTotal = ref(0)
 const filePage = ref(1)
 const selectedFile = ref<DriveFileRow | null>(null)
 const selectedFileIds = ref<Set<number>>(new Set())
+const selectionRows = ref<Map<number, WorkSelectionFile>>(new Map())
+const selectionLoading = ref(false)
+const pendingDeletion = ref<PendingWorkDeletion | null>(null)
+let selectionAbortController: AbortController | null = null
+let selectionRequestSeq = 0
 const fileMutationLoading = ref(false)
 const highlightFileId = ref<number | null>(null)
 const uploadOverviewQuery = ref('')
@@ -298,9 +305,8 @@ const driveFolderBreadcrumbs = computed(() => {
     ...parts.map((part, index) => ({ path: drivePathFromSegments(parts.slice(0, index + 1)), name: part })),
   ]
 })
-const selectedFiles = computed(() => files.value.filter((file) => selectedFileIds.value.has(file.id)))
 const selectedFileActionIds = computed(() => {
-  const ids = selectedFiles.value.map((file) => file.id)
+  const ids = [...selectedFileIds.value]
   if (ids.length) return ids
   return selectedFile.value ? [selectedFile.value.id] : []
 })
@@ -1606,28 +1612,65 @@ async function changePage(delta: number) {
 }
 
 function selectFile(file: DriveFileRow, additive = false) {
+  if (selectionLoading.value || fileMutationLoading.value) return
   selectedFile.value = file
   highlightFileId.value = file.id
   const next = additive ? new Set(selectedFileIds.value) : new Set<number>()
   next.add(file.id)
   selectedFileIds.value = next
+  selectionRows.value.set(file.id, file)
 }
 
 function toggleFile(file: DriveFileRow, checked: boolean) {
+  if (selectionLoading.value || fileMutationLoading.value) return
   const next = new Set(selectedFileIds.value)
   if (checked) next.add(file.id)
   else next.delete(file.id)
   selectedFileIds.value = next
+  selectionRows.value.set(file.id, file)
   selectedFile.value = file
 }
 
 function selectAllFilesInDirectory() {
-  selectedFileIds.value = new Set(files.value.map((file) => file.id))
+  if (selectionLoading.value || fileMutationLoading.value) return
+  const next = new Set(selectedFileIds.value)
+  for (const file of files.value) { next.add(file.id); selectionRows.value.set(file.id, file) }
+  selectedFileIds.value = next
   if (!selectedFile.value && files.value[0]) selectedFile.value = files.value[0]
 }
 
 function clearSelection() {
+  selectionRequestSeq += 1
+  selectionAbortController?.abort()
+  selectionLoading.value = false
+  pendingDeletion.value = null
   selectedFileIds.value = new Set()
+  selectionRows.value = new Map()
+  selectedFile.value = null
+}
+
+async function selectWholeFolder(path: string, expectedCount?: number) {
+  if (!selectedDir.value || selectionLoading.value || fileMutationLoading.value) return
+  const requestID = ++selectionRequestSeq
+  selectionAbortController?.abort()
+  selectionAbortController = new AbortController()
+  const signal = selectionAbortController.signal
+  const scope = { dir_id: selectedDir.value.unassigned ? undefined : selectedDir.value.id ?? undefined, unassigned: selectedDir.value.unassigned }
+  selectionLoading.value = true
+  actionError.value = ''
+  try {
+    const rows = await collectFolderFiles(path, (path, page) => assetWorkbenchApi.driveFolder({ ...scope, path, page, page_size: 100 }, signal))
+    if (requestID !== selectionRequestSeq) return
+    if (expectedCount !== undefined && rows.length !== expectedCount) throw new Error('文件夹文件数量已变化，请刷新后重新选择。')
+    selectionRows.value = new Map(rows.map((file) => [file.id, file]))
+    selectedFileIds.value = new Set(rows.map((file) => file.id))
+    selectedFile.value = null
+    notice.value = `已选择文件夹内全部 ${rows.length} 个文件（含子文件夹），删除前会核对整件作品`
+  } catch (err) {
+    if (requestID === selectionRequestSeq && !isAbortError(err)) actionError.value = err instanceof Error ? err.message : '整个文件夹选择失败'
+  } finally {
+    if (requestID === selectionRequestSeq) selectionLoading.value = false
+  }
 }
 
 function resetToRoot() {
@@ -2216,25 +2259,57 @@ async function moveSelectedFiles() {
 }
 
 async function deleteSelectedFiles() {
-  if (!canDeleteDriveFiles.value || fileMutationLoading.value) return
+  if (!canDeleteDriveFiles.value || fileMutationLoading.value || selectionLoading.value) return
   const ids = selectedFileActionIds.value
   if (!ids.length || !deleteReason.value.trim()) return
+  const requestID = ++selectionRequestSeq
+  selectionAbortController?.abort()
+  selectionAbortController = new AbortController()
+  const signal = selectionAbortController.signal
+  const reason = deleteReason.value.trim()
+  selectionLoading.value = true
+  actionError.value = ''
+  try {
+    const seeds = ids.map((id) => {
+      const file = selectionRows.value.get(id) ?? files.value.find((row) => row.id === id) ?? (selectedFile.value?.id === id ? selectedFile.value : null)
+      if (!file) throw new Error('部分所选文件信息已失效，请重新选择。')
+      return file
+    })
+    const complete = await resolveWholeWorks(seeds, (id) => assetWorkbenchApi.getSubmissionDetail(id, signal))
+    if (requestID !== selectionRequestSeq) return
+    selectionRows.value = new Map(complete.files.map((file) => [file.id, file]))
+    selectedFileIds.value = new Set(complete.files.map((file) => file.id))
+    pendingDeletion.value = { fileIds: [...selectedFileIds.value], workCount: complete.workCount, extraCount: complete.files.length - ids.length, reason }
+  } catch (err) {
+    if (requestID === selectionRequestSeq && !isAbortError(err)) actionError.value = err instanceof Error ? err.message : '作品读取失败，未提交删除'
+  } finally {
+    if (requestID === selectionRequestSeq) selectionLoading.value = false
+  }
+}
+
+async function confirmDeleteSelectedFiles() {
+  const selection = pendingDeletion.value
+  if (!selection || fileMutationLoading.value) return
+  const rows = new Map(selectionRows.value)
   fileMutationLoading.value = true
   actionError.value = ''
   supplementDeleteGuidance.value = false
   try {
-    const result = await assetWorkbenchApi.batchDeleteFiles(ids, deleteReason.value.trim())
+    const result = await assetWorkbenchApi.batchDeleteFiles(selection.fileIds, selection.reason)
     const deletedCount = result.deleted?.length ?? 0
     notice.value = deletedCount ? `已删除 ${deletedCount} 个文件` : ''
     actionError.value = batchMutationFailureMessage('删除', result.failures)
     supplementDeleteGuidance.value = hasSupplementRecordFailure(result.failures)
-    selectedFileIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
     if (!result.failures?.length) deleteReason.value = ''
     await refreshCurrentDrive()
+    selectedFile.value = null
+    selectedFileIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
+    selectionRows.value = rows
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '删除文件失败'
     supplementDeleteGuidance.value = false
   } finally {
+    pendingDeletion.value = null
     fileMutationLoading.value = false
   }
 }
@@ -3096,6 +3171,7 @@ function syncEditForm(file: DriveFileRow | null) {
 }
 
 watch(selectedFile, syncEditForm)
+watch(() => [activeMode.value, selectedDir.value?.key, driveFolderPath.value, uploadOverviewQuery.value, uploadOverviewOwner.value, uploadOverviewDirectory.value, uploadOverviewFrom.value, uploadOverviewTo.value], clearSelection)
 watch(activeMode, (mode) => {
   if (mode === 'operational') activeMaterial.value = null
 })
@@ -3139,6 +3215,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  selectionAbortController?.abort()
   abortDriveRequests()
   cancelSearchDebounce()
   stopBatchJobPolling()
@@ -3536,7 +3613,8 @@ onBeforeUnmount(() => {
               </button>
             </template>
             <template v-else-if="activeMode === 'directories'">
-              <button v-if="selectedDir && files.length" class="aw-secondary-button" type="button" @click="selectAllFilesInDirectory">全选</button>
+              <button v-if="selectedDir && files.length" class="aw-secondary-button" type="button" :disabled="selectionLoading || fileMutationLoading" @click="selectAllFilesInDirectory">全选本页</button>
+              <button v-if="selectedDir && !archiveView && canDeleteDriveFiles" class="aw-secondary-button" type="button" :disabled="filesLoading || selectionLoading || fileMutationLoading" @click="selectWholeFolder(driveFolderPath)">{{ selectionLoading ? '正在读取文件夹…' : '选择当前文件夹（含子文件夹）' }}</button>
               <button class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
                 <Table2 :size="16" aria-hidden="true" />
                 {{ driveSpreadsheetOpen ? '收起清单模式' : '清单模式' }}
@@ -3631,7 +3709,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-if="canDeleteDriveFiles">
             <input v-model.trim="deleteReason" placeholder="删除原因" aria-label="删除原因" />
-            <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="fileMutationLoading || !deleteReason.trim()" @click="deleteSelectedFiles">
+            <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="selectionLoading || fileMutationLoading || !deleteReason.trim()" @click="deleteSelectedFiles">
               <IconfontActionIcon name="delete" :size="15" />
               删除
             </button>
@@ -3779,17 +3857,18 @@ onBeforeUnmount(() => {
               <template v-else>
                 <p v-if="driveFolderTruncated" class="aw-drive-inline-note">当前目录文件量较大，已优先展示前 10000 个文件生成的文件夹索引。</p>
                 <div v-if="driveFolders.length" class="aw-drive-tiles aw-drive-tiles--folders">
-                  <button
+                  <article
                     v-for="folder in driveFolders"
                     :key="folder.path"
                     class="aw-drive-tile aw-drive-tile--folder"
-                    type="button"
-                    @click="openDriveFolder(folder.path)"
                   >
-                    <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="starFilled" />
-                    <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
-                    <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
-                  </button>
+                    <button class="aw-drive-tile__button" type="button" @click="openDriveFolder(folder.path)">
+                      <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="starFilled" />
+                      <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
+                      <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
+                    </button>
+                    <button v-if="canDeleteDriveFiles" class="aw-grid-button" type="button" :disabled="selectionLoading || fileMutationLoading" :aria-label="`选择整个文件夹 ${folder.name}`" @click="selectWholeFolder(folder.path, folder.file_count)">选择整个文件夹</button>
+                  </article>
                 </div>
                 <div v-if="files.length" class="aw-drive-files aw-drive-files--roomy" @dragover.prevent @drop.prevent="dropOnCurrentDirectory">
                   <article
@@ -4119,7 +4198,7 @@ onBeforeUnmount(() => {
                 <span>删除原因</span>
                 <input v-model.trim="deleteReason" placeholder="删除必须填写原因" />
               </label>
-              <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || !deleteReason.trim()" @click="deleteSelectedFiles">
+              <button class="aw-secondary-button" type="button" :disabled="selectionLoading || fileMutationLoading || !deleteReason.trim()" @click="deleteSelectedFiles">
                 <IconfontActionIcon name="delete" :size="15" />
                 删除文件
               </button>
@@ -4288,5 +4367,6 @@ onBeforeUnmount(() => {
       @close="closePreview"
       @download="previewDownload && previewDownload()"
     />
+    <DriveDeleteConfirmDialog :selection="pendingDeletion" :busy="fileMutationLoading" @close="pendingDeletion = null" @confirm="confirmDeleteSelectedFiles" />
   </section>
 </template>

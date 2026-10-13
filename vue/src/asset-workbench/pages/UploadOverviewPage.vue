@@ -19,11 +19,14 @@ import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
 import { batchMutationFailureMessage, hasSupplementRecordFailure } from '@aw/shared/drive/batchMutationFeedback'
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
+import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.vue'
+import { collectFilteredFiles, resolveWholeWorks, type PendingWorkDeletion, type WorkSelectionFile } from '@aw/shared/drive/workSelection'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 
 type SortBy = 'created_at' | 'owner' | 'directory' | 'name' | 'format'
 type SortDir = 'asc' | 'desc'
 type OperationSourceFilter = 'all' | 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
+type LedgerFilters = Omit<Parameters<typeof assetWorkbenchApi.driveFiles>[0], 'page' | 'page_size'>
 interface PieceworkDisplayState {
   isPrimary: boolean
   siblingCount: number
@@ -46,6 +49,9 @@ const files = ref<DriveFileRow[]>([])
 const supplementItemIds = ref<Set<number>>(new Set())
 const selectedFile = ref<DriveFileRow | null>(null)
 const selectedIds = ref<Set<number>>(new Set())
+const selectionRows = ref<Map<number, WorkSelectionFile>>(new Map())
+const selectionLoading = ref(false)
+const pendingDeletion = ref<PendingWorkDeletion | null>(null)
 const loading = ref(false)
 const actionLoading = ref(false)
 const exporting = ref(false)
@@ -62,6 +68,7 @@ const directory = ref('all')
 const operationSource = ref<OperationSourceFilter>('all')
 const sortBy = ref<SortBy>('created_at')
 const sortDir = ref<SortDir>('desc')
+const appliedFilters = ref<LedgerFilters>({})
 const moveTargetDirectoryId = ref(0)
 const actionReason = ref('')
 const editingFileId = ref<number | null>(null)
@@ -84,6 +91,8 @@ const archiveError = ref('')
 
 let requestSeq = 0
 let listAbortController: AbortController | null = null
+let selectionAbortController: AbortController | null = null
+let selectionRequestSeq = 0
 let archivePreviewObjectUrl = ''
 let archivePreviewRequestSeq = 0
 
@@ -413,7 +422,15 @@ async function hydrateSupplementSources(rows: DriveFileRow[], signal?: AbortSign
   }
 }
 
-async function loadFiles(nextPage = page.value) {
+function currentFileFilters(): LedgerFilters {
+  return { ...directoryParams(), q: query.value.trim() || undefined, owner: owner.value.trim() || undefined,
+    operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
+    created_from: createdFrom.value || undefined, created_to: createdTo.value || undefined, sort_by: sortBy.value, sort_dir: sortDir.value }
+}
+
+const filterChangesPending = computed(() => JSON.stringify(currentFileFilters()) !== JSON.stringify(appliedFilters.value))
+
+async function loadFiles(nextPage = page.value, filters = currentFileFilters()) {
   const requestID = ++requestSeq
   listAbortController?.abort()
   listAbortController = new AbortController()
@@ -422,14 +439,7 @@ async function loadFiles(nextPage = page.value) {
   try {
     const result = await assetWorkbenchApi.driveFiles(
       {
-        ...directoryParams(),
-        q: query.value.trim() || undefined,
-        owner: owner.value.trim() || undefined,
-        operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
-        created_from: createdFrom.value || undefined,
-        created_to: createdTo.value || undefined,
-        sort_by: sortBy.value,
-        sort_dir: sortDir.value,
+        ...filters,
         page: nextPage,
         page_size: pageSize,
       },
@@ -440,11 +450,12 @@ async function loadFiles(nextPage = page.value) {
     await hydrateSupplementSources(result.items, listAbortController.signal)
     if (requestID !== requestSeq) return
     total.value = result.total
+    appliedFilters.value = { ...filters }
     page.value = nextPage
     if (selectedFile.value) {
       selectedFile.value = result.items.find((file) => file.id === selectedFile.value?.id) || null
     }
-    selectedIds.value = new Set([...selectedIds.value].filter((id) => result.items.some((file) => file.id === id)))
+    // Keep selections from other pages; only changing filters clears the scope.
   } catch (err) {
     if ((err as DOMException)?.name === 'AbortError') return
     files.value = []
@@ -457,7 +468,7 @@ async function loadFiles(nextPage = page.value) {
 
 async function applyFilters() {
   page.value = 1
-  selectedIds.value = new Set()
+  clearSelection()
   await loadFiles(1)
 }
 
@@ -474,7 +485,7 @@ async function resetFilters() {
 async function changePage(delta: number) {
   const next = page.value + delta
   if (next < 1 || next > totalPages.value) return
-  await loadFiles(next)
+  await loadFiles(next, appliedFilters.value)
 }
 
 async function setSort(nextSort: SortBy) {
@@ -500,19 +511,56 @@ function closeDetail() {
 }
 
 function toggleFile(file: DriveFileRow, checked: boolean) {
+  if (selectionLoading.value || actionLoading.value) return
   const next = new Set(selectedIds.value)
   if (checked) next.add(file.id)
   else next.delete(file.id)
   selectedIds.value = next
+  selectionRows.value.set(file.id, file)
   selectedFile.value = file
 }
 
 function togglePageSelection(checked: boolean) {
-  selectedIds.value = checked ? new Set(files.value.map((file) => file.id)) : new Set()
+  if (selectionLoading.value || actionLoading.value) return
+  const next = new Set(selectedIds.value)
+  for (const file of files.value) {
+    if (checked) { next.add(file.id); selectionRows.value.set(file.id, file) }
+    else next.delete(file.id)
+  }
+  selectedIds.value = next
 }
 
 function clearSelection() {
+  selectionRequestSeq += 1
+  selectionAbortController?.abort()
+  selectionLoading.value = false
+  pendingDeletion.value = null
   selectedIds.value = new Set()
+  selectionRows.value = new Map()
+}
+
+async function selectAllFilteredFiles() {
+  if (filterChangesPending.value || loading.value || selectionLoading.value || actionLoading.value) return
+  const requestID = ++selectionRequestSeq
+  selectionAbortController?.abort()
+  selectionAbortController = new AbortController()
+  const signal = selectionAbortController.signal
+  const filters = { ...appliedFilters.value }
+  const expectedTotal = total.value
+  selectionLoading.value = true
+  error.value = ''
+  try {
+    const rows = await collectFilteredFiles((page) => assetWorkbenchApi.driveFiles({ ...filters, page, page_size: 100 }, signal))
+    if (requestID !== selectionRequestSeq) return
+    if (rows.length !== expectedTotal) throw new Error('筛选结果数量已变化，未更改原选择，请刷新后重试。')
+    selectionRows.value = new Map(rows.map((file) => [file.id, file]))
+    selectedIds.value = new Set(rows.map((file) => file.id))
+    notice.value = `已选择筛选结果全部 ${rows.length} 个文件，翻页不会丢失选择`
+  } catch (err) {
+    if (requestID === selectionRequestSeq && (err as DOMException)?.name !== 'AbortError') error.value = err instanceof Error ? err.message : '完整选择失败'
+  } finally {
+    if (requestID === selectionRequestSeq) selectionLoading.value = false
+  }
 }
 
 function startEditName(file: DriveFileRow) {
@@ -743,17 +791,45 @@ async function moveSelectedFiles() {
 async function deleteSelectedFiles() {
   const ids = [...selectedIds.value]
   const reason = actionReason.value.trim()
-  if (!ids.length || !reason || !canManageDrive.value) return
+  if (!ids.length || !reason || !canManageDrive.value || selectionLoading.value || actionLoading.value) return
+  const requestID = ++selectionRequestSeq
+  selectionAbortController?.abort()
+  selectionAbortController = new AbortController()
+  const signal = selectionAbortController.signal
+  selectionLoading.value = true
+  error.value = ''
+  try {
+    const seeds = ids.map((id) => {
+      const file = selectionRows.value.get(id) ?? files.value.find((row) => row.id === id)
+      if (!file) throw new Error('部分所选文件信息已失效，请重新选择。')
+      return file
+    })
+    const complete = await resolveWholeWorks(seeds, (id) => assetWorkbenchApi.getSubmissionDetail(id, signal))
+    if (requestID !== selectionRequestSeq) return
+    selectionRows.value = new Map(complete.files.map((file) => [file.id, file]))
+    selectedIds.value = new Set(complete.files.map((file) => file.id))
+    pendingDeletion.value = { fileIds: [...selectedIds.value], workCount: complete.workCount, extraCount: complete.files.length - ids.length, reason }
+  } catch (err) {
+    if (requestID === selectionRequestSeq && (err as DOMException)?.name !== 'AbortError') error.value = err instanceof Error ? err.message : '作品读取失败，未提交删除'
+  } finally {
+    if (requestID === selectionRequestSeq) selectionLoading.value = false
+  }
+}
+
+async function confirmDeleteSelectedFiles() {
+  const selection = pendingDeletion.value
+  if (!selection || actionLoading.value) return
   actionLoading.value = true
   error.value = ''
   supplementDeleteGuidance.value = false
   notice.value = ''
   try {
-    const result = await assetWorkbenchApi.batchDeleteFiles(ids, reason)
+    const result = await assetWorkbenchApi.batchDeleteFiles(selection.fileIds, selection.reason)
     const deletedCount = result.deleted?.length || 0
     const failureMessage = batchMutationFailureMessage('删除', result.failures)
     notice.value = deletedCount ? `已删除 ${deletedCount} 个文件` : ''
     selectedIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
+    pendingDeletion.value = null
     await loadFiles()
     error.value = failureMessage
     supplementDeleteGuidance.value = hasSupplementRecordFailure(result.failures)
@@ -761,6 +837,7 @@ async function deleteSelectedFiles() {
     error.value = err instanceof Error ? err.message : '删除失败'
     supplementDeleteGuidance.value = false
   } finally {
+    pendingDeletion.value = null
     actionLoading.value = false
   }
 }
@@ -817,6 +894,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   listAbortController?.abort()
+  selectionAbortController?.abort()
   revokeArchivePreviewObjectUrl()
 })
 </script>
@@ -911,7 +989,8 @@ onBeforeUnmount(() => {
 
     <section v-if="selectedIds.size" class="aw-upload-ledger__batch" aria-label="批量操作">
       <strong>已选择 {{ selectedIds.size }} 个文件</strong>
-      <span class="aw-copy">文件夹上传按一件作品计价，移动或删除时必须勾选文件夹内的全部文件。</span>
+      <span class="aw-copy">选择跨页保留；删除前会补齐整件作品并确认文件数，包括子文件夹。</span>
+      <button v-if="total > files.length" class="aw-grid-button" type="button" :disabled="loading || selectionLoading || actionLoading || filterChangesPending" :title="filterChangesPending ? '筛选条件已更改，请先点击查询' : '选择已查询的全部文件，包含其他页'" @click="selectAllFilteredFiles">{{ selectionLoading ? '正在读取全部文件…' : `全选筛选结果（${total}个）` }}</button>
       <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadSelectedFiles">
         <Download :size="15" aria-hidden="true" />
         下载
@@ -923,7 +1002,7 @@ onBeforeUnmount(() => {
         </select>
         <button class="aw-secondary-button" type="button" :disabled="actionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
         <input v-model.trim="actionReason" placeholder="删除原因或移动备注" aria-label="操作原因" />
-        <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || !actionReason.trim()" @click="deleteSelectedFiles">
+        <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || selectionLoading || !actionReason.trim()" @click="deleteSelectedFiles">
           <Trash2 :size="15" aria-hidden="true" />
           删除
         </button>
@@ -952,7 +1031,7 @@ onBeforeUnmount(() => {
           <thead>
             <tr>
               <th class="aw-upload-ledger__check">
-                <input type="checkbox" :checked="allPageSelected" aria-label="选择当前页" @change="togglePageSelection(($event.target as HTMLInputElement).checked)" />
+                <input type="checkbox" :checked="allPageSelected" :disabled="loading || selectionLoading || actionLoading" aria-label="选择当前页" @change="togglePageSelection(($event.target as HTMLInputElement).checked)" />
               </th>
               <th>预览</th>
               <th>
@@ -1023,6 +1102,7 @@ onBeforeUnmount(() => {
                   <input
                     type="checkbox"
                     :checked="selectedIds.has(file.id)"
+                    :disabled="selectionLoading || actionLoading"
                     :aria-label="`选择 ${fileDisplayName(file)}`"
                     @click.stop
                     @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
@@ -1231,5 +1311,6 @@ onBeforeUnmount(() => {
         </template>
       </article>
     </section>
+    <DriveDeleteConfirmDialog :selection="pendingDeletion" :busy="actionLoading" @close="pendingDeletion = null" @confirm="confirmDeleteSelectedFiles" />
   </section>
 </template>
