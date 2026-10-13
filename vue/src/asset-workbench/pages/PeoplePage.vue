@@ -55,6 +55,7 @@ const peopleRequest = usePageRequest(
 const loading = peopleRequest.loading
 const error = peopleRequest.error
 const capabilities = computed(() => new Set(peopleRequest.data.value?.bootstrap?.capabilities ?? []))
+const canManageProfiles = computed(() => capabilities.value.has('asset.workbench.profile.manage'))
 const canViewUploadOverview = computed(() => capabilities.value.has('asset.workbench.manage') || capabilities.value.has('asset.workbench.settlement'))
 const hrForm = reactive({
   worker_type: 'parttime',
@@ -80,6 +81,7 @@ const focusedUserID = computed(() => Number(route.query.user_id || 0))
 const pendingProfiles = computed(() => profiles.value.filter((profile) => profileNeedsGrade(profile)))
 const readyProfiles = computed(() => profiles.value.filter((profile) => !profileNeedsGrade(profile)))
 const selectedProfileNeedsGrade = computed(() => selectedProfile.value ? profileNeedsGrade(selectedProfile.value) : false)
+const cannotSaveHRProfile = computed(() => !selectedProfile.value || hrSaving.value || profileDetailLoading.value || !!profileDetailError.value || (hrForm.status === 'active' && !hrForm.job_grade))
 let profileDetailRequestID = 0
 function profileNeedsGrade(profile: AssetWorkbenchProfile) {
   return profile.status !== 'active' || !profile.worker_type || !profile.job_grade
@@ -171,8 +173,8 @@ function fillHRForm(profile: AssetWorkbenchProfile, includePII: boolean) {
     alipay_account: includePII ? profile.alipay_account || '' : '',
     onboarded_at: formatDateInput(profile.onboarded_at),
     grade_hidden: profile.grade_hidden === true,
-    status: profileNeedsGrade(profile) ? 'active' : profile.status || 'pending',
-    reason: profileNeedsGrade(profile) ? '人员定级' : '',
+    status: profile.status || 'pending',
+    reason: '',
   })
 }
 
@@ -214,6 +216,10 @@ async function goToPendingSubmissions() {
 async function saveHRProfile() {
   const profile = selectedProfile.value
   if (!profile) return
+  if (hrForm.status === 'active' && !hrForm.job_grade) {
+    error.value = '设为可计价前请选择岗级；仅补全资料时请保留待定级状态。'
+    return
+  }
 	const identityError = validateProfileIdentity(hrForm)
 	if (identityError) { error.value = identityError; return }
   hrSaving.value = true
@@ -268,9 +274,12 @@ onMounted(() => {
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadPeople">
           {{ loading ? '刷新中' : '刷新' }}
         </button>
-        <button class="aw-primary-button" type="button" :disabled="saving" @click="saveProfile">保存资料</button>
+        <button v-if="canManageProfiles" class="aw-primary-button" type="button" :disabled="cannotSaveHRProfile" @click="saveHRProfile">保存人员资料</button>
+        <button v-else class="aw-primary-button" type="button" :disabled="saving" @click="saveProfile">保存我的资料</button>
       </div>
     </div>
+    <p v-if="notice" class="aw-inline-alert" role="status">{{ notice }}</p>
+    <p v-if="error" class="aw-inline-alert" role="alert">{{ error }}</p>
 
     <div v-if="profiles.length" class="aw-panel aw-grade-console">
       <div class="aw-panel__head">
@@ -331,7 +340,7 @@ onMounted(() => {
             </span>
           </div>
           <div v-if="selectedProfileNeedsGrade" class="aw-inline-alert">
-            该人员尚未定级。保存人员类型、岗级并设为“可计价”后，系统会自动重新计算历史待定级作品；没有有效单价的作品仍保持未计价。
+            该人员尚未定级，可以先保存联系和收款资料。选择岗级并设为“可计价”后，系统会自动重新计算历史待定级作品；没有有效单价的作品仍保持未计价。
           </div>
           <div v-if="profileDetailLoading" class="aw-inline-alert">正在读取完整人员资料，请稍候。</div>
           <div v-else-if="profileDetailError" class="aw-inline-alert">{{ profileDetailError }}</div>
@@ -410,7 +419,7 @@ onMounted(() => {
             </label>
           </div>
           <div class="aw-inline-actions">
-            <button class="aw-primary-button" type="button" :disabled="hrSaving || profileDetailLoading || !!profileDetailError || !hrForm.job_grade" @click="saveHRProfile">
+            <button class="aw-primary-button" type="button" :disabled="cannotSaveHRProfile" @click="saveHRProfile">
               {{ profileDetailLoading ? '正在读取资料' : hrSaving ? '保存中' : '保存人员资料' }}
             </button>
             <button class="aw-secondary-button" type="button" @click="clearSelectedProfile">取消选择</button>
@@ -423,7 +432,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="aw-two-column">
+    <div v-if="!canManageProfiles" class="aw-two-column">
       <div class="aw-panel">
         <div class="aw-panel__head">
           <div>
@@ -483,8 +492,6 @@ onMounted(() => {
             <input v-model="form.alipay_account" autocomplete="off" required />
           </label>
         </div>
-        <p v-if="notice" class="aw-copy">{{ notice }}</p>
-        <p v-if="error" class="aw-copy">{{ error }}</p>
       </div>
 
       <div class="aw-panel">

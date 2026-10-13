@@ -61,6 +61,44 @@ describe('PeoplePage', () => {
     mocks.upsertMyProfile.mockResolvedValue(completeProfile)
   })
 
+  it('saves the selected pending person without assigning a grade or editing the admin profile', async () => {
+    const pending = { ...completeProfile, job_grade: '', status: 'pending' }
+    mocks.listProfiles.mockResolvedValue({ items: [pending], total: 1 })
+    mocks.getProfile.mockResolvedValue(pending)
+    mocks.upsertProfile.mockResolvedValue(pending)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings/people', component: PeoplePage }] })
+    await router.push('/settings/people')
+    await router.isReady()
+    const wrapper = mount(PeoplePage, { global: { plugins: [router] } })
+    await flushPromises()
+
+    expect((editorField(wrapper, '状态').element as HTMLSelectElement).value).toBe('pending')
+    expect(wrapper.find('.aw-two-column').exists()).toBe(false)
+    const save = wrapper.find('.aw-page-bar__actions .aw-primary-button')
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click')
+    await flushPromises()
+    expect(mocks.upsertProfile).toHaveBeenCalledWith(330, expect.objectContaining({ job_grade: '', status: 'pending' }))
+    expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="status"]').text()).toContain('已更新 测试李梅 的人员资料')
+
+    await editorField(wrapper, '状态').setValue('active')
+    expect(wrapper.find('.aw-grade-editor .aw-primary-button').attributes('disabled')).toBeDefined()
+  })
+
+  it('disables both manager save buttons when full profile details cannot be read', async () => {
+    mocks.getProfile.mockRejectedValue(new Error('完整资料加载失败'))
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings/people', component: PeoplePage }] })
+    await router.push('/settings/people')
+    await router.isReady()
+    const wrapper = mount(PeoplePage, { global: { plugins: [router] } })
+    await flushPromises()
+    expect(wrapper.find('.aw-page-bar__actions .aw-primary-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.aw-grade-editor .aw-primary-button').attributes('disabled')).toBeDefined()
+    expect(mocks.upsertProfile).not.toHaveBeenCalled()
+    expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
+  })
+
   it('loads the authorized full profile and submits every PII field', async () => {
     const router = createRouter({
       history: createMemoryHistory(),
