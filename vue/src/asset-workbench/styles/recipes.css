@@ -5803,6 +5803,13 @@ body.aw-submission-dialog-locked {
   .aw-simple-nav__item {
     flex: 1 1 0;
     justify-content: center;
+    flex-direction: column;
+    gap: var(--aw-space-1);
+    padding: var(--aw-space-2) var(--aw-space-1);
+  }
+
+  .aw-simple-nav__item span {
+    white-space: nowrap;
   }
 
   .aw-simple {
@@ -6323,6 +6330,14 @@ body.aw-submission-dialog-locked {
   align-items: end;
   gap: var(--aw-space-2);
   min-width: 0;
+}
+
+.aw-upload-ledger--self .aw-upload-ledger__toolbar {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.aw-upload-ledger--self .aw-upload-ledger__filters {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .aw-upload-ledger__filters label {
@@ -7129,6 +7144,20 @@ body.aw-submission-dialog-locked {
 }
 
 @media (max-width: 720px) {
+  .aw-upload-ledger--self .aw-upload-ledger__filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-upload-ledger--self .aw-upload-ledger__summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .aw-upload-ledger--self .aw-upload-ledger__summary > div + div {
+    border-top: 0;
+    border-left: 1px solid var(--aw-hairline);
+  }
+
   .aw-upload-ledger {
     padding: var(--aw-space-3);
   }

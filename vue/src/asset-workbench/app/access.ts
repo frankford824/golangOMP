@@ -78,7 +78,8 @@ export const assetWorkbenchRouteAccess = {
     label: '上传总览',
     subtitle: '全站上传台账与批量管理',
     aliases: ['上传台账', '上传记录', '作品总览', '作品台账'],
-    requiresAnyCapability: ['asset.workbench.manage', 'asset.workbench.settlement'],
+    simple: true,
+    requiresAnyCapability: ['asset.workbench.submit', 'asset.workbench.manage', 'asset.workbench.settlement'],
   },
   '/quality-errors': {
     label: '出错记录',

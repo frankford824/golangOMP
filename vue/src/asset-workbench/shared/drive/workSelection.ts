@@ -11,6 +11,7 @@ export interface PendingWorkDeletion {
   workCount: number
   extraCount: number
   reason: string
+  scopeLabel?: string
 }
 
 function checkLimit(count: number) {

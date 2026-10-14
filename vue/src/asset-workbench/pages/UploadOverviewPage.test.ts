@@ -4,6 +4,7 @@ import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  capabilities: ['asset.workbench.manage', 'asset.workbench.settlement'],
   driveDirectories: vi.fn(),
   driveFiles: vi.fn(),
   listSettlementSupplements: vi.fn(),
@@ -17,7 +18,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@aw/app/session.store', () => ({
-  useAssetWorkbenchSessionStore: () => ({ bootstrap: { capabilities: ['asset.workbench.manage', 'asset.workbench.settlement'] } }),
+  useAssetWorkbenchSessionStore: () => ({ bootstrap: { capabilities: mocks.capabilities } }),
 }))
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
@@ -45,6 +46,7 @@ import UploadOverviewPage from './UploadOverviewPage.vue'
 describe('UploadOverviewPage operation source', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.capabilities = ['asset.workbench.manage', 'asset.workbench.settlement']
     mocks.driveDirectories.mockResolvedValue([])
     mocks.listSettlementSupplements.mockResolvedValue({ items: [], total: 0, page: 1, size: 100 })
   })
@@ -169,6 +171,7 @@ describe('UploadOverviewPage cross-page deletion', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.capabilities = ['asset.workbench.manage', 'asset.workbench.settlement']
     mocks.driveDirectories.mockResolvedValue([])
     mocks.listSettlementSupplements.mockResolvedValue({ items: [], total: 0 })
     mocks.driveFiles.mockImplementation(async (params) => ({ items: params.page_size === 100 ? files : params.page === 2 ? files.slice(50) : files.slice(0, 50), total: 53 }))
@@ -250,6 +253,106 @@ describe('UploadOverviewPage cross-page deletion', () => {
     expect(wrapper.text()).toContain('无权读取作品')
     expect(wrapper.findComponent(DriveDeleteConfirmDialog).props('selection')).toBeNull()
     expect(mocks.batchDeleteFiles).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+})
+
+describe('UploadOverviewPage self-service date scope', () => {
+  const files = Array.from({ length: 53 }, (_, index) => ({ id: index + 1, submission_id: 20, submission_item_id: 30,
+    owner_user_id: 22, original_filename: `${index + 1}.jpg`, is_folder_upload: true,
+    business_month: '2026-10', operation_source: 'normal_upload', created_at: '2026-10-13T01:00:00Z', gross_amount: 0.4 }))
+  const mountSelfLedger = () => mount(UploadOverviewPage, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, DriveDeleteConfirmDialog: { props: ['selection', 'busy'], template: '<div />' } } } })
+  const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find((item) => item.text().trim() === label)!
+  const reasonAndDelete = async (wrapper: ReturnType<typeof mount>) => {
+    await wrapper.get('input[aria-label="操作原因"]').setValue('错传')
+    await button(wrapper, '删除').trigger('click')
+    await flushPromises()
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.capabilities = ['asset.workbench.submit']
+    mocks.driveDirectories.mockResolvedValue([])
+    mocks.driveFiles.mockImplementation(async (params) => ({ items: params.page_size === 100 ? files : files.slice(0, 50), total: 53 }))
+    mocks.getSubmissionDetail.mockResolvedValue({ submission: { id: 20 }, items: [{ item: { id: 30 }, files }] })
+    mocks.batchDeleteFiles.mockResolvedValue({ deleted: files.map((file) => file.id), failures: [] })
+  })
+
+  it('opens an own-uploads ledger with default dates but without creator, rename or move controls', async () => {
+    const wrapper = mountSelfLedger()
+    await flushPromises()
+    const dateInputs = wrapper.findAll('input[type="date"]')
+    const day = (dateInputs[0]!.element as HTMLInputElement).value
+    expect(day).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect((dateInputs[1]!.element as HTMLInputElement).value).toBe(day)
+    expect(mocks.driveFiles).toHaveBeenCalledWith(expect.objectContaining({ created_from: day, created_to: day, owner: undefined }), expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('我的上传台账')
+    expect(wrapper.text()).not.toContain('全站上传台账')
+    expect(wrapper.find('input[placeholder="姓名或账号"]').exists()).toBe(false)
+    await wrapper.get('.aw-upload-ledger__name button').trigger('click')
+    expect(wrapper.find('input[aria-label="作品名称"]').exists()).toBe(false)
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    expect(wrapper.find('select[aria-label="移动目标分类"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some((item) => item.text().trim() === '删除')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('queries explicit dates and clears the previous selection before replacing the scope', async () => {
+    const wrapper = mountSelfLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await wrapper.findAll('input[type="date"]')[0]!.setValue('2026-01-01')
+    await wrapper.findAll('input[type="date"]')[1]!.setValue('2026-01-02')
+    await wrapper.get('input[aria-label="操作原因"]').setValue('错传')
+    expect(button(wrapper, '删除').attributes('disabled')).toBeDefined()
+    await wrapper.get('form.aw-upload-ledger__filters').trigger('submit')
+    await flushPromises()
+    expect(mocks.driveFiles).toHaveBeenLastCalledWith(expect.objectContaining({ created_from: '2026-01-01', created_to: '2026-01-02' }), expect.any(AbortSignal))
+    expect(wrapper.find('[aria-label="批量操作"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('blocks deletion when completing a folder would include uploads outside the queried date range', async () => {
+    mocks.driveFiles.mockImplementation(async () => ({ items: files.slice(0, 1), total: 1 }))
+    mocks.getSubmissionDetail.mockResolvedValue({ submission: { id: 20 }, items: [{ item: { id: 30 }, files: files.slice(0, 2) }] })
+    const wrapper = mountSelfLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await reasonAndDelete(wrapper)
+    expect(wrapper.text()).toContain('包含当前日期范围外的文件')
+    expect(wrapper.findComponent(DriveDeleteConfirmDialog).props('selection')).toBeNull()
+    expect(mocks.batchDeleteFiles).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('completes 53 same-date files and includes the queried date range in confirmation', async () => {
+    const wrapper = mountSelfLedger()
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await reasonAndDelete(wrapper)
+    const plan = wrapper.findComponent(DriveDeleteConfirmDialog).props('selection')
+    if (!plan) throw new Error('expected a date-scoped deletion confirmation')
+    expect(plan.fileIds).toEqual(files.map((file) => file.id))
+    expect(plan.extraCount).toBe(3)
+    expect(plan.scopeLabel).toContain('仅删除我的上传；上传日期（北京时间）')
+    expect(mocks.batchDeleteFiles).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('requires a queried date range even if all historical rows have been selected', async () => {
+    const wrapper = mountSelfLedger()
+    await flushPromises()
+    for (const input of wrapper.findAll('input[type="date"]')) await input.setValue('')
+    await wrapper.get('form.aw-upload-ledger__filters').trigger('submit')
+    await flushPromises()
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await wrapper.get('input[aria-label="操作原因"]').setValue('错传')
+    expect(button(wrapper, '删除').attributes('disabled')).toBeDefined()
+    expect(mocks.batchDeleteFiles).not.toHaveBeenCalled()
+    await button(wrapper, '恢复今天').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[aria-label="批量操作"]').exists()).toBe(false)
+    expect((wrapper.findAll('input[type="date"]')[0]!.element as HTMLInputElement).value).not.toBe('')
     wrapper.unmount()
   })
 })

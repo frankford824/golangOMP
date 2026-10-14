@@ -37,6 +37,10 @@ const route = useRoute()
 const { queueDriveFile } = useGlobalDownload()
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
+const canViewAllUploads = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
+const personalLedger = computed(() => !canViewAllUploads.value)
+const canDeleteFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
+const canMaintainFiles = computed(() => canViewAllUploads.value)
 const canViewSupplementLedger = computed(() => capabilities.value.has('asset.workbench.settlement'))
 const supplementRecordPath = computed(() => capabilities.value.has('asset.workbench.settlement') ? '/supplements' : '/my-settlement')
 
@@ -62,8 +66,9 @@ const page = ref(1)
 const total = ref(0)
 const query = ref('')
 const owner = ref('')
-const createdFrom = ref('')
-const createdTo = ref('')
+const currentUploadDay = () => formatShanghaiDateTime(new Date()).slice(0, 10)
+const createdFrom = ref(personalLedger.value ? currentUploadDay() : '')
+const createdTo = ref(personalLedger.value ? currentUploadDay() : '')
 const directory = ref('all')
 const operationSource = ref<OperationSourceFilter>('all')
 const sortBy = ref<SortBy>('created_at')
@@ -423,12 +428,13 @@ async function hydrateSupplementSources(rows: DriveFileRow[], signal?: AbortSign
 }
 
 function currentFileFilters(): LedgerFilters {
-  return { ...directoryParams(), q: query.value.trim() || undefined, owner: owner.value.trim() || undefined,
+  return { ...directoryParams(), q: query.value.trim() || undefined, owner: canViewAllUploads.value ? owner.value.trim() || undefined : undefined,
     operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
     created_from: createdFrom.value || undefined, created_to: createdTo.value || undefined, sort_by: sortBy.value, sort_dir: sortDir.value }
 }
 
 const filterChangesPending = computed(() => JSON.stringify(currentFileFilters()) !== JSON.stringify(appliedFilters.value))
+const deletionDateRangeMissing = computed(() => personalLedger.value && (!appliedFilters.value.created_from || !appliedFilters.value.created_to))
 
 async function loadFiles(nextPage = page.value, filters = currentFileFilters()) {
   const requestID = ++requestSeq
@@ -469,14 +475,18 @@ async function loadFiles(nextPage = page.value, filters = currentFileFilters()) 
 async function applyFilters() {
   page.value = 1
   clearSelection()
+  if (createdFrom.value && createdTo.value && createdFrom.value > createdTo.value) {
+    error.value = '开始日期不能晚于结束日期，请调整后查询。'
+    return
+  }
   await loadFiles(1)
 }
 
 async function resetFilters() {
   query.value = ''
   owner.value = ''
-  createdFrom.value = ''
-  createdTo.value = ''
+  createdFrom.value = personalLedger.value ? currentUploadDay() : ''
+  createdTo.value = personalLedger.value ? currentUploadDay() : ''
   directory.value = 'all'
   operationSource.value = 'all'
   await applyFilters()
@@ -575,6 +585,7 @@ function cancelEditName() {
 }
 
 async function saveDisplayName(file: DriveFileRow) {
+  if (!canMaintainFiles.value) return
   const nextName = editingName.value.trim()
   if (!nextName) {
     error.value = '作品名称不能为空'
@@ -791,7 +802,11 @@ async function moveSelectedFiles() {
 async function deleteSelectedFiles() {
   const ids = [...selectedIds.value]
   const reason = actionReason.value.trim()
-  if (!ids.length || !reason || !canManageDrive.value || selectionLoading.value || actionLoading.value) return
+  if (!ids.length || !reason || !canDeleteFiles.value || selectionLoading.value || actionLoading.value || filterChangesPending.value) return
+  if (deletionDateRangeMissing.value) {
+    error.value = '请先选择开始日期和结束日期并查询，再批量删除。'
+    return
+  }
   const requestID = ++selectionRequestSeq
   selectionAbortController?.abort()
   selectionAbortController = new AbortController()
@@ -806,9 +821,21 @@ async function deleteSelectedFiles() {
     })
     const complete = await resolveWholeWorks(seeds, (id) => assetWorkbenchApi.getSubmissionDetail(id, signal))
     if (requestID !== selectionRequestSeq) return
+    // An item is indivisible, but date-scoped self-service deletion must never
+    // silently pull older uploads into that item selection.
+    if (personalLedger.value && complete.files.length > ids.length) {
+      const datedRows = await collectFilteredFiles((page) => assetWorkbenchApi.driveFiles({
+        created_from: appliedFilters.value.created_from, created_to: appliedFilters.value.created_to,
+        sort_by: 'created_at', sort_dir: 'desc', page, page_size: 100,
+      }, signal))
+      if (requestID !== selectionRequestSeq) return
+      const inRange = new Set(datedRows.map((file) => file.id))
+      if (complete.files.some((file) => !inRange.has(file.id))) throw new Error('这件文件夹作品包含当前日期范围外的文件，未提交删除。请调整日期范围后再整件选择，避免误删历史上传。')
+    }
     selectionRows.value = new Map(complete.files.map((file) => [file.id, file]))
     selectedIds.value = new Set(complete.files.map((file) => file.id))
-    pendingDeletion.value = { fileIds: [...selectedIds.value], workCount: complete.workCount, extraCount: complete.files.length - ids.length, reason }
+    pendingDeletion.value = { fileIds: [...selectedIds.value], workCount: complete.workCount, extraCount: complete.files.length - ids.length, reason,
+      scopeLabel: personalLedger.value ? `仅删除我的上传；上传日期（北京时间）：${appliedFilters.value.created_from} 至 ${appliedFilters.value.created_to}` : undefined }
   } catch (err) {
     if (requestID === selectionRequestSeq && (err as DOMException)?.name !== 'AbortError') error.value = err instanceof Error ? err.message : '作品读取失败，未提交删除'
   } finally {
@@ -818,7 +845,7 @@ async function deleteSelectedFiles() {
 
 async function confirmDeleteSelectedFiles() {
   const selection = pendingDeletion.value
-  if (!selection || actionLoading.value) return
+  if (!selection || actionLoading.value || !canDeleteFiles.value || filterChangesPending.value) return
   actionLoading.value = true
   error.value = ''
   supplementDeleteGuidance.value = false
@@ -900,12 +927,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="aw-upload-ledger aw-token-scope">
+  <section class="aw-upload-ledger aw-token-scope" :class="{ 'aw-upload-ledger--self': personalLedger }">
     <header class="aw-upload-ledger__hero">
       <div class="aw-upload-ledger__hero-copy">
-        <p class="aw-eyebrow">上传总览</p>
-        <h2>全站上传台账</h2>
-        <span>按创建人、创建日期、分类、作品名称、格式和操作来源跟踪已上传作品。</span>
+        <p class="aw-eyebrow">{{ personalLedger ? '我的上传' : '上传总览' }}</p>
+        <h2>{{ personalLedger ? '我的上传台账' : '全站上传台账' }}</h2>
+        <span>{{ personalLedger ? '仅显示自己的上传。默认查询今天，可按上传日期、分类、名称和来源筛选。' : '按创建人、创建日期、分类、作品名称、格式和操作来源跟踪已上传作品。' }}</span>
       </div>
       <dl class="aw-upload-ledger__summary" aria-label="当前筛选汇总">
         <div>
@@ -922,6 +949,7 @@ onBeforeUnmount(() => {
         </div>
       </dl>
     </header>
+    <p v-if="personalLedger" class="aw-copy">上传日期按北京时间计算。批量删除前，请先查询明确的开始、结束日期；切换筛选会清空旧选择。</p>
 
     <section class="aw-upload-ledger__toolbar" aria-label="上传记录筛选">
       <form class="aw-upload-ledger__filters" @submit.prevent="applyFilters">
@@ -929,7 +957,7 @@ onBeforeUnmount(() => {
           <span>关键词</span>
           <input v-model.trim="query" type="search" placeholder="作品名称 / 文件名 / 格式" />
         </label>
-        <label>
+        <label v-if="canViewAllUploads">
           <span>创建人</span>
           <input v-model.trim="owner" placeholder="姓名或账号" />
         </label>
@@ -955,15 +983,15 @@ onBeforeUnmount(() => {
         </label>
         <label>
           <span>开始日期</span>
-          <input v-model="createdFrom" type="date" />
+          <input v-model="createdFrom" type="date" :max="createdTo || undefined" />
         </label>
         <label>
           <span>结束日期</span>
-          <input v-model="createdTo" type="date" />
+          <input v-model="createdTo" type="date" :min="createdFrom || undefined" />
         </label>
         <div class="aw-upload-ledger__filter-actions">
           <button class="aw-primary-button" type="submit" :disabled="loading">查询</button>
-          <button v-if="activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">重置 {{ activeFilterCount }}</button>
+          <button v-if="personalLedger || activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">{{ personalLedger ? '恢复今天' : `重置 ${activeFilterCount}` }}</button>
         </div>
       </form>
       <div class="aw-upload-ledger__tools">
@@ -1001,8 +1029,10 @@ onBeforeUnmount(() => {
           <option v-for="dir in directoryOptions" :key="dir.directory_id ?? dir.name" :value="Number(dir.directory_id)">{{ dir.name }}</option>
         </select>
         <button class="aw-secondary-button" type="button" :disabled="actionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
-        <input v-model.trim="actionReason" placeholder="删除原因或移动备注" aria-label="操作原因" />
-        <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || selectionLoading || !actionReason.trim()" @click="deleteSelectedFiles">
+      </template>
+      <template v-if="canDeleteFiles">
+        <input v-model.trim="actionReason" :placeholder="canManageDrive ? '删除原因或移动备注' : '删除原因'" aria-label="操作原因" />
+        <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || selectionLoading || !actionReason.trim() || filterChangesPending || deletionDateRangeMissing" :title="filterChangesPending ? '筛选条件已改变，请先查询再选择' : deletionDateRangeMissing ? '请先查询明确的开始、结束日期范围' : '核对整件作品后再确认删除'" @click="deleteSelectedFiles">
           <Trash2 :size="15" aria-hidden="true" />
           删除
         </button>
@@ -1137,7 +1167,7 @@ onBeforeUnmount(() => {
                       <X :size="14" aria-hidden="true" />
                     </button>
                   </form>
-                  <button v-else type="button" @click.stop="startEditName(file)">
+                  <button v-else type="button" @click.stop="canMaintainFiles ? startEditName(file) : selectFile(file)">
                     <span>
                       <strong :title="fileDisplayName(file)">{{ fileDisplayName(file) }}</strong>
                       <small v-if="secondaryFilename(file)" :title="secondaryFilename(file)">{{ secondaryFilename(file) }}</small>
@@ -1145,7 +1175,7 @@ onBeforeUnmount(() => {
                         {{ filePieceworkInlineNote(file) }}
                       </small>
                     </span>
-                    <Pencil :size="14" aria-hidden="true" />
+                    <Pencil v-if="canMaintainFiles" :size="14" aria-hidden="true" />
                   </button>
                 </td>
                 <td class="aw-upload-ledger__format">
