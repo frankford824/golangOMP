@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { HandCoins, HardDrive, ImagePlus, UserRound } from 'lucide-vue-next'
+import { HandCoins, HardDrive, ImagePlus, Table2, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 import GlobalDownloadCenter from '../shared/download/GlobalDownloadCenter.vue'
@@ -29,6 +29,7 @@ const navItems = [
     capabilities: ['asset.workbench.submit', 'asset.workbench.material.download', 'asset.workbench.system_search'],
   },
   { to: '/upload', label: '上传成品', icon: ImagePlus, capabilities: ['asset.workbench.submit'] },
+  { to: '/upload-overview', label: '上传台账', icon: Table2, capabilities: ['asset.workbench.submit'] },
   { to: '/my-settlement', label: '看收入', icon: HandCoins },
 ]
 const visibleNavItems = computed(() => {

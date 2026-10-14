@@ -35,7 +35,7 @@ describe('asset workbench access rules', () => {
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/submissions'))).toBe(false)
-    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload-overview'))).toBe(false)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload-overview'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/quality-errors'))).toBe(false)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/materials'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/my-settlement'))).toBe(true)
@@ -47,6 +47,7 @@ describe('asset workbench access rules', () => {
 
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload'))).toBe(false)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload-overview'))).toBe(false)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/materials'))).toBe(false)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/account'))).toBe(true)
   })
