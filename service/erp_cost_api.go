@@ -442,7 +442,11 @@ func selectHistoryCostPeriods(periods []domain.JSTHistoryCostPeriod, asOf time.T
 func historyPeriodContains(period domain.JSTHistoryCostPeriod, asOf time.Time) bool {
 	begin, beginOK := parseHistoryDate(period.BeginDate)
 	end, endOK := parseHistoryDate(period.EndDate)
-	if strings.TrimSpace(period.BeginDate) != "" && !beginOK {
+	// JST uses 开始 for its opening interval. This is an explicit unbounded
+	// lower boundary, not the row's created/modified timestamp. Keep the raw
+	// marker in the response; dated intervals still take precedence below.
+	beginRaw := strings.TrimSpace(period.BeginDate)
+	if beginRaw != "" && beginRaw != "开始" && !beginOK {
 		return false
 	}
 	if strings.TrimSpace(period.EndDate) != "" && !endOK {

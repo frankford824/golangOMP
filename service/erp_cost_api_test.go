@@ -191,3 +191,41 @@ func TestERPCostChangesKeepsIDWatermarkAndFourDecimals(t *testing.T) {
 		t.Fatalf("second result = %+v", second)
 	}
 }
+
+func TestERPCostHistoryOpeningMarkerPreservesSourceBoundary(t *testing.T) {
+	opening, later := "14.24", "17.3500"
+	svc := NewERPCostAPIService(&erpCostReadRepoStub{}, historyCostProviderStub{periods: []domain.JSTHistoryCostPeriod{
+		{WMSCoID: "10562500", SKUID: "PACK", CostPrice: &opening, BeginDate: "开始", EndDate: "2026-08-16"},
+		{WMSCoID: "10562500", SKUID: "PACK", CostPrice: &later, BeginDate: "2026-08-17", EndDate: "2026-10-19"},
+	}}, "cost-secret")
+	for _, day := range []string{"2026-08-01", "2026-08-16"} {
+		result, appErr := svc.History(context.Background(), []string{"PACK"}, day, []int64{10562500})
+		if appErr != nil || len(result.Data) != 1 || len(result.MissingSKUIDs) != 0 {
+			t.Fatalf("opening day %s: result=%+v error=%+v", day, result, appErr)
+		}
+		if result.Data[0].BeginDate != "开始" || *result.Data[0].CostPrice != "14.2400" {
+			t.Fatalf("opening boundary/price lost: %+v", result.Data[0])
+		}
+	}
+	result, appErr := svc.History(context.Background(), []string{"PACK"}, "2026-08-17", nil)
+	if appErr != nil || len(result.Data) != 1 || *result.Data[0].CostPrice != "17.3500" {
+		t.Fatalf("dated interval must supersede opening: %+v error=%+v", result, appErr)
+	}
+	result, appErr = svc.History(context.Background(), []string{"PACK"}, "2026-10-20", nil)
+	if appErr != nil || len(result.Data) != 0 || len(result.MissingSKUIDs) != 1 {
+		t.Fatalf("expired history must stay missing: %+v error=%+v", result, appErr)
+	}
+}
+
+func TestERPCostHistoryUnknownBoundaryDoesNotBecomeOpening(t *testing.T) {
+	day := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	for _, period := range []domain.JSTHistoryCostPeriod{
+		{SKUID: "PACK", BeginDate: "未知", EndDate: "2026-08-31"},
+		{SKUID: "PACK", BeginDate: "开始", EndDate: "未知"},
+		{SKUID: "PACK", BeginDate: "2026-08-10", EndDate: "2026-08-31"},
+	} {
+		if historyPeriodContains(period, day) {
+			t.Fatalf("invalid/noncovering boundary accepted: %+v", period)
+		}
+	}
+}
