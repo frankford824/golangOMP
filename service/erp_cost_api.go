@@ -205,8 +205,11 @@ func (s *erpCostAPIService) History(ctx context.Context, rawSKUIDs []string, asO
 			end = len(skuIDs)
 		}
 		response, err := s.historyProvider.QueryHistoryCosts(ctx, domain.JSTHistoryCostQuery{
-			SKUIDs:                skuIDs[start:end],
-			WMSCoIDs:              wmsCoIDs,
+			SKUIDs: skuIDs[start:end],
+			// JST synthesizes current-price periods when wms_co_ids is supplied,
+			// even with IsUseItemSKUCostPrice=false. Read actual history across
+			// companies and apply the requested company scope locally.
+			WMSCoIDs:              nil,
 			GetWay:                "all",
 			IsUseItemSKUCostPrice: false, // Never synthesize history from today's SKU price.
 		})
@@ -219,6 +222,19 @@ func (s *erpCostAPIService) History(ctx context.Context, rawSKUIDs []string, asO
 		if response != nil {
 			periods = append(periods, response.Periods...)
 		}
+	}
+	if len(wmsCoIDs) > 0 {
+		allowed := make(map[string]struct{}, len(wmsCoIDs))
+		for _, id := range wmsCoIDs {
+			allowed[strconv.FormatInt(id, 10)] = struct{}{}
+		}
+		scoped := make([]domain.JSTHistoryCostPeriod, 0, len(periods))
+		for _, period := range periods {
+			if _, ok := allowed[strings.TrimSpace(period.WMSCoID)]; ok {
+				scoped = append(scoped, period)
+			}
+		}
+		periods = scoped
 	}
 	selected := selectHistoryCostPeriods(periods, asOf)
 	resolved := make(map[string]struct{}, len(selected))
