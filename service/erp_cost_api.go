@@ -208,7 +208,7 @@ func (s *erpCostAPIService) History(ctx context.Context, rawSKUIDs []string, asO
 			SKUIDs:                skuIDs[start:end],
 			WMSCoIDs:              wmsCoIDs,
 			GetWay:                "all",
-			IsUseItemSKUCostPrice: true,
+			IsUseItemSKUCostPrice: false, // Never synthesize history from today's SKU price.
 		})
 		if err != nil {
 			return nil, domain.NewAppError("erp_upstream_failure", "JST history cost upstream failed", map[string]interface{}{
