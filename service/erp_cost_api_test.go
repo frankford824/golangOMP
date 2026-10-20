@@ -229,3 +229,20 @@ func TestERPCostHistoryUnknownBoundaryDoesNotBecomeOpening(t *testing.T) {
 		}
 	}
 }
+
+type historyFallbackTrapProvider struct{}
+
+func (historyFallbackTrapProvider) QueryHistoryCosts(_ context.Context, q domain.JSTHistoryCostQuery) (*domain.JSTHistoryCostResponse, error) {
+	if q.IsUseItemSKUCostPrice {
+		current := "999.0000"
+		return &domain.JSTHistoryCostResponse{Periods: []domain.JSTHistoryCostPeriod{{SKUID: q.SKUIDs[0], WMSCoID: "10562500", CostPrice: &current, BeginDate: "开始"}}}, nil
+	}
+	return &domain.JSTHistoryCostResponse{Periods: []domain.JSTHistoryCostPeriod{}}, nil
+}
+func TestERPCostHistoryNeverSynthesizesCurrentCatalogPrice(t *testing.T) {
+	svc := NewERPCostAPIService(&erpCostReadRepoStub{}, historyFallbackTrapProvider{}, "cost-secret")
+	result, err := svc.History(context.Background(), []string{"NO-HISTORY"}, "2026-08-01", nil)
+	if err != nil || len(result.Data) != 0 || len(result.MissingSKUIDs) != 1 {
+		t.Fatalf("current-price fallback leaked into history: result=%+v err=%+v", result, err)
+	}
+}

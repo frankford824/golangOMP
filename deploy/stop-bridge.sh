@@ -37,7 +37,7 @@ if command -v pgrep >/dev/null 2>&1; then
     [ -n "$pid" ] || continue
     kill "$pid" >/dev/null 2>&1 || true
     STOPPED="$STOPPED $pid"
-  done < <(pgrep -f "$BASE_DIR/erp_bridge" || true)
+  done < <(pgrep -f "^$BASE_DIR/erp_bridge([[:space:]]|$)" || true)
 fi
 
 printf 'STOPPED_PIDS=%s\n' "$(printf '%s' "$STOPPED" | xargs 2>/dev/null || true)"

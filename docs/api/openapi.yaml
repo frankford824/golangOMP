@@ -6790,7 +6790,7 @@ components:
         as_of: { type: string, format: date }
         begin_date:
           type: string
-          description: ISO date or the original JST opening marker 开始, which means an unbounded lower interval boundary. Creation and modification timestamps never determine this boundary.
+          description: ISO date or the original JST opening marker 开始, which means an unbounded lower interval boundary. Creation and modification timestamps never determine this boundary. Current catalog-price fallback is disabled; only stored JST history is admitted.
         end_date:
           type: string
           description: Inclusive source interval end date; absent means an open upper boundary.
