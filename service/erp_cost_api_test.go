@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -233,7 +234,7 @@ func TestERPCostHistoryUnknownBoundaryDoesNotBecomeOpening(t *testing.T) {
 type historyFallbackTrapProvider struct{}
 
 func (historyFallbackTrapProvider) QueryHistoryCosts(_ context.Context, q domain.JSTHistoryCostQuery) (*domain.JSTHistoryCostResponse, error) {
-	if q.IsUseItemSKUCostPrice {
+	if q.IsUseItemSKUCostPrice || len(q.WMSCoIDs) > 0 {
 		current := "999.0000"
 		return &domain.JSTHistoryCostResponse{Periods: []domain.JSTHistoryCostPeriod{{SKUID: q.SKUIDs[0], WMSCoID: "10562500", CostPrice: &current, BeginDate: "开始"}}}, nil
 	}
@@ -241,8 +242,32 @@ func (historyFallbackTrapProvider) QueryHistoryCosts(_ context.Context, q domain
 }
 func TestERPCostHistoryNeverSynthesizesCurrentCatalogPrice(t *testing.T) {
 	svc := NewERPCostAPIService(&erpCostReadRepoStub{}, historyFallbackTrapProvider{}, "cost-secret")
-	result, err := svc.History(context.Background(), []string{"NO-HISTORY"}, "2026-08-01", nil)
-	if err != nil || len(result.Data) != 0 || len(result.MissingSKUIDs) != 1 {
-		t.Fatalf("current-price fallback leaked into history: result=%+v err=%+v", result, err)
+	for _, companies := range [][]int64{nil, {10562500}} {
+		result, err := svc.History(context.Background(), []string{"NO-HISTORY"}, "2026-08-01", companies)
+		if err != nil || len(result.Data) != 0 || len(result.MissingSKUIDs) != 1 {
+			t.Fatalf("current-price fallback leaked into history: result=%+v err=%+v", result, err)
+		}
+	}
+}
+
+func TestERPCostHistoryFiltersCompanyAfterReadingActualHistory(t *testing.T) {
+	a, b := "14.24", "99.99"
+	svc := NewERPCostAPIService(&erpCostReadRepoStub{}, historyCostProviderStub{periods: []domain.JSTHistoryCostPeriod{
+		{WMSCoID: "10562500", SKUID: "PACK", CostPrice: &a, BeginDate: "开始", EndDate: "2026-08-31"},
+		{WMSCoID: "200", SKUID: "PACK", CostPrice: &b, BeginDate: "开始", EndDate: "2026-08-31"},
+	}}, "secret")
+	for _, tc := range []struct {
+		companies []int64
+		count     int
+	}{{[]int64{10562500}, 1}, {[]int64{200}, 1}, {[]int64{300}, 0}, {nil, 2}} {
+		r, err := svc.History(context.Background(), []string{"PACK"}, "2026-08-02", tc.companies)
+		if err != nil || len(r.Data) != tc.count {
+			t.Fatalf("scope=%v result=%+v error=%+v", tc.companies, r, err)
+		}
+		for _, item := range r.Data {
+			if len(tc.companies) > 0 && item.WMSCoID != strconv.FormatInt(tc.companies[0], 10) {
+				t.Fatal("cross-company price")
+			}
+		}
 	}
 }
