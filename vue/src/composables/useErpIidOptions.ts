@@ -1,160 +1,52 @@
 import { computed, ref } from 'vue'
-import { erpApi } from '@/services/api/erpApi'
-import { ERP_IID_PRESETS, type ErpIidOption } from '@/domain/erp-iid-presets'
-
-type SourceMode = 'api' | 'fallback' | 'mixed'
-
-const optionCache = new Map<string, ErpIidOption[]>()
-const PAGE_SIZE = 200
-
-function unwrapErpIidsPayload(payloadRaw: unknown): {
-  rows: unknown[]
-  total?: number
-  page?: number
-  page_size?: number
-} {
-  const payload = (payloadRaw ?? {}) as { data?: unknown; pagination?: unknown }
-  const nested = (payload.data ?? {}) as { data?: unknown; pagination?: unknown }
-  const rows = Array.isArray(payload.data)
-    ? payload.data
-    : Array.isArray(nested.data)
-      ? nested.data
-      : []
-  const paginationRaw = (payload.pagination ?? nested.pagination ?? {}) as Record<string, unknown>
-  const totalRaw = Number(paginationRaw.total)
-  const pageRaw = Number(paginationRaw.page)
-  const pageSizeRaw = Number(paginationRaw.page_size)
-  return {
-    rows,
-    total: Number.isFinite(totalRaw) && totalRaw >= 0 ? totalRaw : undefined,
-    page: Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : undefined,
-    page_size: Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? pageSizeRaw : undefined,
-  }
-}
-
-function normalizeErpIidItem(raw: Record<string, unknown>): ErpIidOption | null {
-  const i_id = String(raw.i_id ?? raw.label ?? '').trim()
-  if (!i_id) return null
-  const label = String(raw.label ?? i_id).trim() || i_id
-  const category = String(raw.category ?? i_id).trim() || i_id
-  const category_name = String(raw.category_name ?? category).trim() || category
-  const product_count_raw = Number(raw.product_count)
-  const product_count =
-    Number.isFinite(product_count_raw) && product_count_raw >= 0
-      ? Math.floor(product_count_raw)
-      : undefined
-  return { i_id, label, category, category_name, product_count }
-}
-
-function filterPresets(keyword: string): ErpIidOption[] {
-  const q = keyword.trim().toLowerCase()
-  if (!q) return ERP_IID_PRESETS.slice()
-  return ERP_IID_PRESETS.filter((item) => {
-    return (
-      item.i_id.toLowerCase().includes(q) ||
-      item.label.toLowerCase().includes(q) ||
-      item.category.toLowerCase().includes(q) ||
-      item.category_name.toLowerCase().includes(q)
-    )
-  })
-}
-
-function mergeWithPresetsFirst(presetMatched: ErpIidOption[], apiItems: ErpIidOption[]): ErpIidOption[] {
-  if (!apiItems.length) return presetMatched
-  const merged = presetMatched.slice()
-  const seen = new Set(merged.map((item) => item.i_id))
-  for (const item of apiItems) {
-    if (seen.has(item.i_id)) continue
-    merged.push(item)
-    seen.add(item.i_id)
-  }
-  return merged
-}
+import type { ErpIidOption } from '@/domain/erp-iid-presets'
+import { fetchErpIidOptions } from '@/services/erpIidCatalog'
 
 export function useErpIidOptions() {
   const loading = ref(false)
-  const items = ref<ErpIidOption[]>(ERP_IID_PRESETS.slice())
-  const lastSourceMode = ref<SourceMode>('fallback')
+  const items = ref<ErpIidOption[]>([])
+  const error = ref('')
+  const hasLoaded = ref(false)
   let seq = 0
   let activeAbort: AbortController | null = null
 
-  async function loadIids(keyword = ''): Promise<void> {
+  function reset() {
+    seq += 1
     activeAbort?.abort()
-    const requestSeq = ++seq
-    const cacheKey = keyword.trim().toLowerCase()
-    if (!cacheKey) {
-      const presets = ERP_IID_PRESETS.slice()
-      items.value = presets
-      lastSourceMode.value = 'fallback'
-      optionCache.set(cacheKey, presets)
-      loading.value = false
-      return
-    }
-    if (optionCache.has(cacheKey)) {
-      items.value = optionCache.get(cacheKey) ?? []
-      loading.value = false
-      return
-    }
-    const abortController = new AbortController()
-    activeAbort = abortController
+    activeAbort = null
+    items.value = []
+    error.value = ''
+    hasLoaded.value = false
+    loading.value = false
+  }
+
+  async function loadIids(keyword = ''): Promise<void> {
+    reset()
+    const requestSeq = seq
+    const controller = new AbortController()
+    activeAbort = controller
     loading.value = true
     try {
-      const q = keyword.trim()
-      const presetMatched = filterPresets(keyword)
-      const first = await erpApi.getIids({
-        q,
-        page: 1,
-        page_size: PAGE_SIZE,
-      }, abortController.signal)
-      if (abortController.signal.aborted || requestSeq !== seq) return
-      const firstPayload = unwrapErpIidsPayload(first.data)
-      const normalized = firstPayload.rows
-        .map((row) => normalizeErpIidItem((row ?? {}) as Record<string, unknown>))
-        .filter((row): row is ErpIidOption => row != null)
-      if (normalized.length > 0) {
-        const merged = mergeWithPresetsFirst(presetMatched, normalized)
-        lastSourceMode.value = presetMatched.length > 0 ? 'mixed' : 'api'
-        items.value = merged
-        optionCache.set(cacheKey, merged)
-        return
-      }
-      const fallback = presetMatched
-      lastSourceMode.value = 'mixed'
-      items.value = fallback
-      optionCache.set(cacheKey, fallback)
-    } catch (error) {
-      if (abortController.signal.aborted || requestSeq !== seq) return
-      // eslint-disable-next-line no-console
-      console.warn('[useErpIidOptions] GET /v1/erp/iids failed, fallback to local presets', error)
-      const fallback = filterPresets(keyword)
-      lastSourceMode.value = 'fallback'
-      items.value = fallback
-      optionCache.set(cacheKey, fallback)
+      const options = await fetchErpIidOptions(keyword, controller.signal)
+      if (controller.signal.aborted || requestSeq !== seq) return
+      items.value = options
+      hasLoaded.value = true
+    } catch {
+      if (controller.signal.aborted || requestSeq !== seq) return
+      error.value = 'ERP 款式查询失败，请重试；当前未提供可选项'
     } finally {
-      if (activeAbort === abortController) {
-        activeAbort = null
-      }
       if (requestSeq === seq) {
         loading.value = false
+        activeAbort = null
       }
     }
   }
 
-  const selectOptions = computed(() =>
-    items.value.map((item) => ({
-      value: item.i_id,
-      label:
-        item.category_name && item.category_name !== item.i_id
-          ? `${item.i_id}（${item.category_name}）`
-          : item.i_id,
-    })),
-  )
+  const selectOptions = computed(() => items.value.map((item) => ({
+    value: item.i_id,
+    label: item.category_name && item.category_name !== item.i_id
+      ? `${item.i_id}（${item.category_name}）` : item.i_id,
+  })))
 
-  return {
-    loading,
-    items,
-    lastSourceMode,
-    selectOptions,
-    loadIids,
-  }
+  return { loading, items, error, hasLoaded, selectOptions, loadIids, reset }
 }
