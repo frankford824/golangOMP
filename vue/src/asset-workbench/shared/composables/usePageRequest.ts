@@ -23,10 +23,12 @@ export function usePageRequest<T>(
     loading.value = true
     error.value = ''
     try {
-      data.value = await request(controller.signal)
+      const next = await request(controller.signal)
+      if (id !== requestId || controller.signal.aborted) return data.value
+      data.value = next
       return data.value
     } catch (err) {
-      if ((err as DOMException)?.name !== 'AbortError') {
+      if (id === requestId && (err as DOMException)?.name !== 'AbortError') {
         error.value = err instanceof Error ? err.message : fallbackError
       }
       return data.value

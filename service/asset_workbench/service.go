@@ -952,6 +952,8 @@ type SettlementReportDifficultyMetric struct {
 }
 
 type MySettlementResponse struct {
+	GeneratedAt          time.Time                                    `json:"generated_at"`
+	RefreshAfterSeconds  int                                          `json:"refresh_after_seconds"`
 	CurrentMonth         string                                       `json:"current_month"`
 	EstimatedNetAmount   float64                                      `json:"estimated_net_amount"`
 	Months               []MySettlementMonthRow                       `json:"months"`
@@ -960,16 +962,23 @@ type MySettlementResponse struct {
 }
 
 type MySettlementMonthRow struct {
-	BusinessMonth    string  `json:"business_month"`
-	ItemCount        int     `json:"item_count"`
-	PageCount        int     `json:"page_count"`
-	GrossAmount      float64 `json:"gross_amount"`
-	DeductionAmount  float64 `json:"deduction_amount"`
-	WelfareAmount    float64 `json:"welfare_amount"`
-	SupplementAmount float64 `json:"supplement_amount"`
-	AdjustmentAmount float64 `json:"adjustment_amount"`
-	NetAmount        float64 `json:"net_amount"`
-	Confirmed        bool    `json:"confirmed"`
+	SettlementState           string  `json:"settlement_state"`
+	ConfirmedNetAmount        float64 `json:"confirmed_net_amount"`
+	PendingConfirmationAmount float64 `json:"pending_confirmation_amount"`
+	EstimatedAmount           float64 `json:"estimated_amount"`
+	PendingPricingCount       int     `json:"pending_pricing_count"`
+	SupplementItemCount       int     `json:"supplement_item_count"`
+	SupplementPageCount       int     `json:"supplement_page_count"`
+	BusinessMonth             string  `json:"business_month"`
+	ItemCount                 int     `json:"item_count"`
+	PageCount                 int     `json:"page_count"`
+	GrossAmount               float64 `json:"gross_amount"`
+	DeductionAmount           float64 `json:"deduction_amount"`
+	WelfareAmount             float64 `json:"welfare_amount"`
+	SupplementAmount          float64 `json:"supplement_amount"`
+	AdjustmentAmount          float64 `json:"adjustment_amount"`
+	NetAmount                 float64 `json:"net_amount"`
+	Confirmed                 bool    `json:"confirmed"`
 }
 
 type welfareSettlementLine struct {
@@ -4732,127 +4741,7 @@ func (s *Service) DeleteErrorImportBatch(ctx context.Context, actor domain.Reque
 }
 
 func (s *Service) MySettlement(ctx context.Context, actor domain.RequestActor) (*MySettlementResponse, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if !actorHasAny(actor, assetWorkbenchRolesForService()...) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Authentication required.", nil)
-	}
-	currentMonth := s.businessMonth(s.nowFn().UTC())
-	rowsByMonth := map[string]*MySettlementMonthRow{}
-	ensureRow := func(month string) *MySettlementMonthRow {
-		row := rowsByMonth[month]
-		if row == nil {
-			row = &MySettlementMonthRow{BusinessMonth: month}
-			rowsByMonth[month] = row
-		}
-		return row
-	}
-
-	confirmedItems, err := s.repo.ListConfirmedSettlementItemsByPayee(ctx, actor.ID)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load confirmed settlement items.", err.Error())
-	}
-	for _, item := range confirmedItems {
-		if item == nil {
-			continue
-		}
-		row := ensureRow(item.BusinessMonth)
-		row.Confirmed = true
-		switch item.ItemType {
-		case domain.AssetWorkbenchItemTypeGrossPiecework:
-			row.ItemCount++
-			row.PageCount += int(item.Quantity)
-			row.GrossAmount += item.Amount
-		case domain.AssetWorkbenchItemTypeErrorDeduction:
-			row.DeductionAmount += item.Amount
-		case domain.AssetWorkbenchItemTypeWelfare:
-			row.WelfareAmount += item.Amount
-		case domain.AssetWorkbenchItemTypeSupplement:
-			row.SupplementAmount += item.Amount
-		case domain.AssetWorkbenchItemTypeAdjustment, domain.AssetWorkbenchItemTypeReversal:
-			if item.Direction == "debit" {
-				row.AdjustmentAmount -= item.Amount
-			} else {
-				row.AdjustmentAmount += item.Amount
-			}
-		}
-		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount + row.AdjustmentAmount
-	}
-
-	currentItems, err := s.repo.ListSubmissionItemsByMonth(ctx, currentMonth)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month submission items.", err.Error())
-	}
-	selfItems := make([]*domain.AssetWorkbenchSubmissionItem, 0, len(currentItems))
-	for _, item := range currentItems {
-		if item == nil || item.PayeeUserID != actor.ID {
-			continue
-		}
-		if item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
-			continue
-		}
-		selfItems = append(selfItems, item)
-	}
-	currentSupplements, _, err := s.repo.ListSettlementSupplements(ctx, repo.AssetWorkbenchSettlementSupplementFilter{
-		PayeeUserID:   &actor.ID,
-		BusinessMonth: currentMonth,
-		PageSize:      500,
-	})
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month supplements.", err.Error())
-	}
-	if appErr := s.enrichSettlementSupplementFiles(ctx, currentSupplements); appErr != nil {
-		return nil, appErr
-	}
-	permission, err := s.repo.GetSupplementPermission(ctx, actor.ID, currentMonth)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current supplement permission.", err.Error())
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		permission = nil
-	}
-	errorRecords, err := s.repo.ListErrorRecordsByMonth(ctx, currentMonth)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month error records.", err.Error())
-	}
-	preview, appErr := s.buildSettlementPreview(ctx, currentMonth, selfItems, errorRecords, currentSupplements)
-	if appErr != nil {
-		return nil, appErr
-	}
-	for _, previewRow := range preview.Rows {
-		if previewRow.PayeeUserID != actor.ID {
-			continue
-		}
-		row := ensureRow(currentMonth)
-		row.ItemCount += previewRow.ItemCount
-		row.PageCount += previewRow.PageCount
-		row.GrossAmount += previewRow.GrossAmount
-		row.DeductionAmount += previewRow.DeductionAmount
-		row.WelfareAmount += previewRow.WelfareAmount
-		row.SupplementAmount += previewRow.SupplementAmount
-		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount + row.AdjustmentAmount
-	}
-
-	months := make([]MySettlementMonthRow, 0, len(rowsByMonth))
-	for _, row := range rowsByMonth {
-		months = append(months, *row)
-	}
-	sort.Slice(months, func(i, j int) bool {
-		return months[i].BusinessMonth > months[j].BusinessMonth
-	})
-	currentRow := rowsByMonth[currentMonth]
-	estimated := 0.0
-	if currentRow != nil {
-		estimated = currentRow.NetAmount
-	}
-	return &MySettlementResponse{
-		CurrentMonth:         currentMonth,
-		EstimatedNetAmount:   estimated,
-		Months:               months,
-		SupplementPermission: permission,
-		Supplements:          currentSupplements,
-	}, nil
+	return s.personalIncome(ctx, actor)
 }
 
 func (s *Service) PreviewSettlement(ctx context.Context, actor domain.RequestActor, businessMonth string) (*SettlementPreview, *domain.AppError) {
@@ -4878,7 +4767,11 @@ func (s *Service) PreviewSettlement(ctx context.Context, actor domain.RequestAct
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", err.Error())
 	}
-	preview, appErr := s.buildSettlementPreview(ctx, businessMonth, items, errorRecords, supplements)
+	reserved, err := s.repo.ListReservedSettlementSources(ctx, nil, businessMonth)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load reserved settlement sources.", nil)
+	}
+	preview, appErr := s.buildSettlementPreview(ctx, businessMonth, items, reservedSettlementSources(reserved).remainingErrors(errorRecords), supplements, reserved)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -4908,7 +4801,11 @@ func (s *Service) SettlementReport(ctx context.Context, actor domain.RequestActo
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", err.Error())
 	}
-	report, appErr := s.buildSettlementReport(ctx, businessMonth, items, errorRecords, supplements)
+	reserved, err := s.repo.ListReservedSettlementSources(ctx, nil, businessMonth)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load reserved settlement sources.", nil)
+	}
+	report, appErr := s.buildSettlementReport(ctx, businessMonth, items, reservedSettlementSources(reserved).remainingErrors(errorRecords), supplements)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -4943,7 +4840,13 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 		if len(items) == 0 && len(supplements) == 0 {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "No settleable items or supplements for this month.", nil)
 		}
-		preview, appErr := s.buildSettlementPreview(ctx, businessMonth, items, errorRecords, supplements)
+		reserved, err := s.repo.ListReservedSettlementSources(ctx, tx, businessMonth)
+		if err != nil {
+			return err
+		}
+		reservationKeys := reservedSettlementSources(reserved)
+		remainingErrors := reservationKeys.remainingErrors(errorRecords)
+		preview, appErr := s.buildSettlementPreview(ctx, businessMonth, items, remainingErrors, supplements, reserved)
 		if appErr != nil {
 			return appErr
 		}
@@ -4966,6 +4869,7 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 		if appErr != nil {
 			return appErr
 		}
+		welfareLines = reservationKeys.remainingWelfare(welfareLines)
 		profiles := map[int64]*domain.AssetWorkbenchProfile{}
 		deductionCache := map[string]deductionRuleCacheEntry{}
 		itemIDs := make([]int64, 0, len(items))
@@ -5017,7 +4921,7 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 				}
 			}
 		}
-		for _, record := range errorRecords {
+		for _, record := range remainingErrors {
 			if record == nil || record.PayeeUserID == nil || record.MatchStatus != domain.AssetWorkbenchErrorMatchStatusMatched || strings.TrimSpace(record.DifficultyClass) == "" || record.ErrorCount <= 0 {
 				continue
 			}
@@ -8329,7 +8233,7 @@ func (s *Service) loadSettleableSupplements(ctx context.Context, businessMonth s
 	return items, nil
 }
 
-func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth string, items []*domain.AssetWorkbenchSubmissionItem, errorRecords []*domain.AssetWorkbenchErrorRecord, supplements []*domain.AssetWorkbenchSettlementSupplement) (*SettlementPreview, *domain.AppError) {
+func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth string, items []*domain.AssetWorkbenchSubmissionItem, errorRecords []*domain.AssetWorkbenchErrorRecord, supplements []*domain.AssetWorkbenchSettlementSupplement, reserved ...[]*domain.AssetWorkbenchSettlementItem) (*SettlementPreview, *domain.AppError) {
 	rowsByPayee := map[int64]*SettlementPreviewRow{}
 	normalPayrollRowsByPayee := map[int64]*SettlementPayrollRow{}
 	supplementPayrollRowsByPayee := map[int64]*SettlementPayrollRow{}
@@ -8416,6 +8320,9 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 	welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, items)
 	if appErr != nil {
 		return nil, appErr
+	}
+	if len(reserved) > 0 {
+		welfareLines = reservedSettlementSources(reserved[0]).remainingWelfare(welfareLines)
 	}
 	for _, line := range welfareLines {
 		row := rowsByPayee[line.PayeeUserID]

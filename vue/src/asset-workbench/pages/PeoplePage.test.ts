@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getProfile: vi.fn(),
   upsertProfile: vi.fn(),
   upsertMyProfile: vi.fn(),
+  setSettlementVisibility: vi.fn(),
 }))
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
@@ -52,6 +53,24 @@ function editorField(wrapper: ReturnType<typeof mount>, label: string) {
 }
 
 describe('PeoplePage', () => {
+  it('saves client income visibility independently of grading and PII', async () => {
+    mocks.setSettlementVisibility.mockResolvedValue({ user_id: 330, settlement_visible: false })
+    const pending = { ...completeProfile, job_grade: '', status: 'pending' }
+    mocks.listProfiles.mockResolvedValue({ items: [pending], total: 1 })
+    mocks.getProfile.mockResolvedValue(pending)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings/people', component: PeoplePage }] })
+    await router.push('/settings/people')
+    const wrapper = mount(PeoplePage, { global: { plugins: [router] } })
+    await flushPromises()
+    await wrapper.get('[role="switch"]').trigger('click')
+    const save = wrapper.findAll('button').find((button) => button.text() === '保存展示权限')!
+    await save.trigger('click')
+    await flushPromises()
+    expect(mocks.setSettlementVisibility).toHaveBeenCalledWith(330, false)
+    expect(mocks.upsertProfile).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('工资和计件记录保持不变')
+    wrapper.unmount()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.bootstrap.mockResolvedValue({ capabilities: ['asset.workbench.profile.manage'] })

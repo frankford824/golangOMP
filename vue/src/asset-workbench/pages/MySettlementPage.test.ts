@@ -54,6 +54,40 @@ const supplements = [
 ]
 
 describe('MySettlementPage supplement deletion', () => {
+  it('shows estimates, frozen batches, pending pricing and separate supplement counts', async () => {
+    mocks.mySettlement.mockResolvedValue({ generated_at: '2026-10-20T10:00:00Z', estimated_net_amount: 35, supplements: [], months: [{ business_month: '2026-10', item_count: 2, page_count: 2, gross_amount: 30, deduction_amount: 2, welfare_amount: 1, adjustment_amount: 1, supplement_amount: 5, net_amount: 35, confirmed: false, settlement_state: 'partially_confirmed', confirmed_net_amount: 10, pending_confirmation_amount: 20, estimated_amount: 5, pending_pricing_count: 3, supplement_item_count: 1, supplement_page_count: 1 }] })
+    const wrapper = mount(MySettlementPage)
+    await flushPromises()
+    expect(wrapper.text()).toContain('本月预计收入')
+    expect(wrapper.text()).toContain('部分确认')
+    expect(wrapper.text()).toContain('3 个作品待定级或未计价')
+    expect(wrapper.text()).toContain('预估不等于已发放')
+    expect(wrapper.findAll('.aw-pay-slip')[1]!.text()).toContain('1 个作品')
+    wrapper.unmount()
+  })
+
+  it('polls visible pages, pauses in background and removes old income on permission denial', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let visibility = 'visible'
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
+    const wrapper = mount(MySettlementPage)
+    try {
+      await flushPromises()
+      expect(mocks.mySettlement).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(mocks.mySettlement).toHaveBeenCalledTimes(2)
+      visibility = 'hidden'
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(mocks.mySettlement).toHaveBeenCalledTimes(2)
+      visibility = 'visible'
+      mocks.mySettlement.mockRejectedValue(Object.assign(new Error('closed'), { status: 403 }))
+      document.dispatchEvent(new Event('visibilitychange'))
+      await flushPromises()
+      expect(wrapper.text()).toContain('结算页面暂未开放')
+      expect(wrapper.find('.aw-simple-income__amount').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('¥3.42')
+    } finally { wrapper.unmount(); vi.useRealTimers(); delete (document as unknown as Record<string, unknown>).visibilityState }
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.mySettlement.mockResolvedValue({

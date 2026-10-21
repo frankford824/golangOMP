@@ -30,6 +30,9 @@ const saving = ref(false)
 const hrSaving = ref(false)
 const profileDetailLoading = ref(false)
 const profileDetailError = ref('')
+const settlementVisible = ref(true)
+const visibilitySaving = ref(false)
+const visibilityNotice = ref('')
 const notice = ref('')
 const selectedProfile = ref<AssetWorkbenchProfile | null>(null)
 const route = useRoute()
@@ -161,6 +164,8 @@ async function saveProfile() {
 }
 
 function fillHRForm(profile: AssetWorkbenchProfile, includePII: boolean) {
+  settlementVisible.value = profile.settlement_visible !== false
+  visibilityNotice.value = ''
   Object.assign(hrForm, {
     worker_type: profile.worker_type || 'parttime',
     job_grade: profile.job_grade || '',
@@ -207,6 +212,24 @@ function clearSelectedProfile() {
   profileDetailLoading.value = false
   profileDetailError.value = ''
   selectedProfile.value = null
+}
+
+async function saveSettlementVisibility() {
+  const profile = selectedProfile.value
+  if (!profile || visibilitySaving.value) return
+  const visible = settlementVisible.value
+  visibilitySaving.value = true
+  visibilityNotice.value = ''
+  try {
+    await assetWorkbenchApi.setSettlementVisibility(profile.user_id, visible)
+    profiles.value = profiles.value.map((row) => row.user_id === profile.user_id ? { ...row, settlement_visible: visible } : row)
+    if (selectedProfile.value?.user_id === profile.user_id) {
+      selectedProfile.value = { ...selectedProfile.value, settlement_visible: visible }
+      visibilityNotice.value = visible ? '已开放该人员的客户端结算页。' : '已关闭该人员的客户端结算页；工资和计件记录保持不变。'
+    }
+  } catch (err) {
+    if (selectedProfile.value?.user_id === profile.user_id) visibilityNotice.value = err instanceof Error ? err.message : '展示权限保存失败，请重试。'
+  } finally { visibilitySaving.value = false }
 }
 
 async function goToPendingSubmissions() {
@@ -344,6 +367,23 @@ onMounted(() => {
           </div>
           <div v-if="profileDetailLoading" class="aw-inline-alert">正在读取完整人员资料，请稍候。</div>
           <div v-else-if="profileDetailError" class="aw-inline-alert">{{ profileDetailError }}</div>
+          <div class="aw-panel">
+            <div class="aw-panel__head">
+              <div>
+                <h4>客户端结算展示</h4>
+                <p class="aw-copy">仅影响此人的“看收入”页面及其中的补录入口；不影响上传、计件金额和管理端结算。客户端在刷新、重新进入或30秒内同步。</p>
+              </div>
+              <span class="aw-chip" :class="selectedProfile.settlement_visible === false ? 'aw-chip--neutral' : 'aw-chip--success'">{{ selectedProfile.settlement_visible === false ? '已关闭' : '已开放' }}</span>
+            </div>
+            <div class="aw-inline-actions">
+              <div class="aw-toggle-control">
+                <button class="aw-switch-button" :class="{ 'is-on': settlementVisible }" type="button" role="switch" aria-label="允许此人查看客户端结算页" :aria-checked="settlementVisible" :disabled="visibilitySaving || profileDetailLoading || !!profileDetailError" @click="settlementVisible = !settlementVisible"><span aria-hidden="true" /></button>
+                <span>允许此人查看客户端结算页</span>
+              </div>
+              <button class="aw-secondary-button" type="button" :disabled="visibilitySaving || profileDetailLoading || !!profileDetailError || settlementVisible === (selectedProfile.settlement_visible !== false)" @click="saveSettlementVisibility">{{ visibilitySaving ? '保存中' : '保存展示权限' }}</button>
+            </div>
+            <p v-if="visibilityNotice" role="status" class="aw-copy">{{ visibilityNotice }}</p>
+          </div>
           <div class="aw-form-grid">
             <label>
               人员类型

@@ -223,6 +223,7 @@ export function canAccessAssetWorkbenchRoute(
   bootstrap: AssetWorkbenchBootstrap | null,
   access: AssetWorkbenchRouteAccess | undefined,
 ): boolean {
+  if (access === assetWorkbenchRouteAccess['/my-settlement'] && bootstrap?.profile?.settlement_visible === false) return false
   if (!access || access.anyAuthenticated) return true
   if (!bootstrap) return true
   if (!bootstrap.is_admin) {

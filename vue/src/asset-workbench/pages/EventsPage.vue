@@ -20,6 +20,7 @@ const eventFilterOptions = [
   { value: 'all', label: '全部事件' },
   { value: 'profile.pii_viewed', label: '查看完整资料' },
   { value: 'profile.upserted', label: '更新人员资料' },
+  { value: 'settlement.visibility_changed', label: '调整客户端结算展示' },
   { value: 'submission.created', label: '提交作品' },
   { value: 'system_asset.downloaded', label: '下载素材' },
   { value: 'system_asset.batch_downloaded', label: '批量下载素材' },

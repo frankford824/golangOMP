@@ -113,6 +113,7 @@ components:
           description: Full value for self/detail responses; masked in the profile list response.
         onboarded_at: { type: string, format: date-time, nullable: true }
         grade_hidden: { type: boolean }
+        settlement_visible: { type: boolean, default: true, description: Owner income-page display permission. Changed only through the dedicated administrator endpoint; never affects earned amounts. }
         status: { type: string, enum: [pending, active, suspended] }
         pii_completed: { type: boolean }
         created_at: { type: string, format: date-time }
@@ -18095,10 +18096,52 @@ paths:
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden, including permission closed before the linked upload was recorded }
+  /v1/asset-workbench/profiles/{user_id}/settlement-visibility:
+    patch:
+      summary: Set a person's client income-page visibility
+      description: Personnel/settlement administrators can independently hide or show the owner's income page. Defaults to visible. Does not modify pricing, earned amounts, upload permissions or administrator settlement access. Changes are audited. Self-profile updates cannot change this setting.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [HRAdmin, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: user_id
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visible]
+              properties:
+                visible: { type: boolean }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Saved display permission
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [user_id, settlement_visible]
+                    properties:
+                      user_id: { type: integer, format: int64 }
+                      settlement_visible: { type: boolean }
+        '400': { description: Invalid personnel id or missing boolean }
+        '401': { description: Unauthenticated }
+        '403': { description: Not a personnel or settlement administrator }
+        '404': { description: Personnel profile not found }
   /v1/asset-workbench/settlement/my:
     get:
       summary: Get my asset-workbench settlement and supplement upload state
-      description: Returns only the authenticated user's income rows, current-month supplement permission, and current-month supplement records with linked files for query and preview.
+      description: Owner-scoped consistent snapshot of all months. Combines unsettled priced works and approved unbatched supplements with generated and confirmed ledger snapshots exactly once. Excludes voided works, draft/voided supplements and cancelled batches. Unpriced works are counted separately. A month is confirmed only when no pending works or batches remain. Confirmation is not proof of bank payment. Denied when the owner's settlement_visible flag is false. Current-month active supplements include all rows, without a first-page limit.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -18117,6 +18160,8 @@ paths:
                     properties:
                       current_month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
                       estimated_net_amount: { type: number }
+                      generated_at: { type: string, format: date-time }
+                      refresh_after_seconds: { type: integer, minimum: 1, description: Suggested visible-page polling interval, currently 30 seconds. }
                       months:
                         type: array
                         items:
@@ -18132,6 +18177,13 @@ paths:
                             adjustment_amount: { type: number }
                             net_amount: { type: number }
                             confirmed: { type: boolean }
+                            settlement_state: { type: string, enum: [accumulating, pending_confirmation, partially_confirmed, confirmed] }
+                            confirmed_net_amount: { type: number }
+                            pending_confirmation_amount: { type: number }
+                            estimated_amount: { type: number }
+                            pending_pricing_count: { type: integer, minimum: 0 }
+                            supplement_item_count: { type: integer, minimum: 0 }
+                            supplement_page_count: { type: integer, minimum: 0 }
                       supplement_permission: *AssetWorkbenchSupplementPermissionRow
                       supplements:
                         type: array

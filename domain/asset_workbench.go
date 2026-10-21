@@ -130,6 +130,7 @@ const (
 
 	AssetWorkbenchEventProfileUpserted             = "profile.upserted"
 	AssetWorkbenchEventProfilePIIViewed            = "profile.pii_viewed"
+	AssetWorkbenchEventSettlementVisibilityChanged = "settlement.visibility_changed"
 	AssetWorkbenchEventPriceCreated                = "price.created"
 	AssetWorkbenchEventPriceUpdated                = "price.updated"
 	AssetWorkbenchEventPriceSuperseded             = "price.superseded"
@@ -212,25 +213,26 @@ const (
 const AssetWorkbenchEventSettlementConfirmationReversed = "settlement.confirmation_reversed"
 
 type AssetWorkbenchProfile struct {
-	ID            int64      `json:"id" db:"id"`
-	UserID        int64      `json:"user_id" db:"user_id"`
-	WorkerType    string     `json:"worker_type" db:"worker_type"`
-	JobGrade      string     `json:"job_grade" db:"job_grade"`
-	RealName      string     `json:"real_name" db:"real_name"`
-	Phone         *string    `json:"phone,omitempty" db:"phone"`
-	Province      string     `json:"province" db:"province"`
-	City          string     `json:"city" db:"city"`
-	IDCard        *string    `json:"id_card,omitempty" db:"id_card"`
-	Gender        string     `json:"gender" db:"gender"`
-	AlipayAccount string     `json:"alipay_account" db:"alipay_account"`
-	OnboardedAt   *time.Time `json:"onboarded_at,omitempty" db:"onboarded_at"`
-	GradeHidden   bool       `json:"grade_hidden" db:"grade_hidden"`
-	Status        string     `json:"status" db:"status"`
-	PIICompleted  bool       `json:"pii_completed" db:"pii_completed"`
-	CreatedBy     *int64     `json:"created_by,omitempty" db:"created_by"`
-	UpdatedBy     *int64     `json:"updated_by,omitempty" db:"updated_by"`
-	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
+	ID                int64      `json:"id" db:"id"`
+	UserID            int64      `json:"user_id" db:"user_id"`
+	WorkerType        string     `json:"worker_type" db:"worker_type"`
+	JobGrade          string     `json:"job_grade" db:"job_grade"`
+	RealName          string     `json:"real_name" db:"real_name"`
+	Phone             *string    `json:"phone,omitempty" db:"phone"`
+	Province          string     `json:"province" db:"province"`
+	City              string     `json:"city" db:"city"`
+	IDCard            *string    `json:"id_card,omitempty" db:"id_card"`
+	Gender            string     `json:"gender" db:"gender"`
+	AlipayAccount     string     `json:"alipay_account" db:"alipay_account"`
+	OnboardedAt       *time.Time `json:"onboarded_at,omitempty" db:"onboarded_at"`
+	GradeHidden       bool       `json:"grade_hidden" db:"grade_hidden"`
+	SettlementVisible *bool      `json:"settlement_visible,omitempty" db:"settlement_visible"`
+	Status            string     `json:"status" db:"status"`
+	PIICompleted      bool       `json:"pii_completed" db:"pii_completed"`
+	CreatedBy         *int64     `json:"created_by,omitempty" db:"created_by"`
+	UpdatedBy         *int64     `json:"updated_by,omitempty" db:"updated_by"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchGradePeriod struct {

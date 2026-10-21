@@ -42,6 +42,12 @@ describe('asset workbench access rules', () => {
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/account'))).toBe(true)
   })
 
+  it('denies a direct income route when this person has visibility disabled', () => {
+    const user = bootstrap({ is_admin: false, profile: { settlement_visible: false } as never, capabilities: ['asset.workbench.submit'] })
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/my-settlement'))).toBe(false)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload'))).toBe(true)
+  })
+
   it('keeps capability-gated simple routes closed when the capability is missing', () => {
     const user = bootstrap({ is_admin: false, capabilities: [] })
 
