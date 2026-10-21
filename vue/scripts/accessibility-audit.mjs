@@ -132,7 +132,7 @@ const pages = [
     path: '/cost-rules',
     ready: '.cost-manager-page',
     prepare: async (page) => {
-      await page.getByRole('button', { name: '新增规则' }).click()
+      await page.getByRole('button', { name: '新增方案', exact: true }).click()
       await page.waitForSelector('.modal-card form, form.modal-card', { state: 'visible' })
       await page.waitForTimeout(200)
     },
