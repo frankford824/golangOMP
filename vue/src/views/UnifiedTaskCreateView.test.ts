@@ -63,6 +63,28 @@ async function mountNewDesignBatch(names: string[]) {
 }
 
 describe('UnifiedTaskCreateView', () => {
+  it('blocks an unsynced IID before creating any task and retains the entered rows', async () => {
+    mocks.getIids.mockResolvedValue({ data: { data: [] } })
+    const wrapper = await mountNewDesignBatch(['定制喷绘布新设计'])
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+    expect(mocks.addTask).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('未匹配到已同步的 ERP 款式')
+    expect(wrapper.text()).toContain('定制喷绘布新设计')
+    wrapper.unmount()
+  })
+
+  it('does not misreport an IID query error as an invalid code or create a task', async () => {
+    mocks.getIids.mockRejectedValue(new Error('offline'))
+    const wrapper = await mountNewDesignBatch(['定制喷绘布新设计'])
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+    expect(mocks.addTask).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('暂时无法核对款式编码')
+    expect(wrapper.text()).not.toContain('未匹配到已同步的 ERP 款式')
+    wrapper.unmount()
+  })
+
   it('blocks duplicate rows before submission, locates the row, and accepts a genuine correction', async () => {
     const wrapper = await mountNewDesignBatch(['挖挖乐', '挖福运', '挖挖乐'])
     expect(wrapper.get('.validation-dock .primary-button').attributes('disabled')).toBeDefined()

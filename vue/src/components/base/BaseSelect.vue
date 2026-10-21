@@ -93,8 +93,9 @@
                 v-if="!displayedOptions.length"
                 class="px-3 py-2 text-center text-xs text-[rgb(var(--yb-text-muted))]"
               >
-                无匹配结果
+                {{ emptyText }}
               </p>
+              <slot v-if="!displayedOptions.length" name="empty-actions" />
               <p
                 v-else-if="hiddenOptionCount > 0"
                 class="px-3 py-2 text-center text-xs text-[rgb(var(--yb-text-muted))]"
@@ -162,6 +163,11 @@ const props = withDefaults(
     filterable?: boolean
     filterPlaceholder?: string
     maxDisplayedOptions?: number
+    /** Server search may match SKU or product names absent from the option label. */
+    remoteFilter?: boolean
+    emptyText?: string
+    /** Preserve a value while remote results change without making it selectable. */
+    valueLabel?: string
   }>(),
   {
     disabled: false,
@@ -170,6 +176,8 @@ const props = withDefaults(
     filterable: false,
     filterPlaceholder: '输入关键字筛选',
     maxDisplayedOptions: 160,
+    remoteFilter: false,
+    emptyText: '无匹配结果',
   },
 )
 
@@ -203,7 +211,7 @@ const panelStyle = ref<Record<string, string>>({})
 let positionFrame: number | null = null
 
 const filteredOptions = computed(() => {
-  if (!props.filterable) return props.options
+  if (!props.filterable || props.remoteFilter) return props.options
   const q = filterQuery.value.trim().toLowerCase()
   if (!q) return props.options
   return props.options.filter((opt) => {
@@ -225,7 +233,7 @@ const hiddenOptionCount = computed(() =>
 
 const selectedLabel = computed(() => {
   const match = props.options.find((opt) => opt.value === props.modelValue)
-  return match?.label ?? ''
+  return match?.label ?? props.valueLabel ?? ''
 })
 
 const showClear = computed(

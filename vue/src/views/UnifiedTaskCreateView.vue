@@ -253,6 +253,7 @@ import {
 import { useTaskDraft } from '@/composables/useTaskDraft'
 import { useTasksStore } from '@/stores/tasks'
 import { erpApi } from '@/services/api/erpApi'
+import { isValidErpIid } from '@/services/erpIidCatalog'
 import { planningSkuApi, type PlanningSKUCreateResult } from '@/services/api/planningSkuApi'
 import { batchSkuApi, formatBatchViolationMessage, normalizeBatchPreviewRow, type BatchPreviewRow, type BatchViolation } from '@/services/api/batchSkuApi'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
@@ -999,13 +1000,6 @@ async function importComposeExcel(event: Event) {
   finally { input.value = '' }
 }
 
-function unwrapIIDRows(raw: unknown): Array<Record<string, unknown>> {
-  const root = (raw ?? {}) as Record<string, unknown>
-  if (Array.isArray(root.data)) return root.data as Array<Record<string, unknown>>
-  const nested = root.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : root
-  return Array.isArray(nested.data) ? nested.data as Array<Record<string, unknown>> : Array.isArray(nested.items) ? nested.items as Array<Record<string, unknown>> : []
-}
-
 async function validateIIDsBeforeSubmit(candidates: ComposeRow[]): Promise<ComposeViolation[]> {
   const needsIID = intent.value === 'new_design' || (intent.value === 'planning_sku' && common.erp_sync_mode === 'async')
   if (!needsIID) return []
@@ -1017,9 +1011,8 @@ async function validateIIDsBeforeSubmit(candidates: ComposeRow[]): Promise<Compo
   }
   const checks = await Promise.all([...byIID].map(async ([iid, matchedRows]) => {
     try {
-      const response = await erpApi.getIids({ q: iid, page: 1, page_size: 200 })
-      const found = unwrapIIDRows(response.data).some((item) => String(item.i_id ?? item.label ?? '').trim().toLowerCase() === iid.toLowerCase())
-      return found ? [] : matchedRows.map((row) => ({ row_id: row.id, row_index: candidates.indexOf(row), field: 'product_i_id' as const, message: `款式编码 ${iid} 未匹配到 ERP 可选项` }))
+      const found = await isValidErpIid(iid)
+      return found ? [] : matchedRows.map((row) => ({ row_id: row.id, row_index: candidates.indexOf(row), field: 'product_i_id' as const, message: `款式编码 ${iid} 未匹配到已同步的 ERP 款式，请重新选择或联系管理员补同步` }))
     } catch {
       return matchedRows.map((row) => ({ row_id: row.id, row_index: candidates.indexOf(row), field: 'product_i_id' as const, message: `暂时无法核对款式编码 ${iid}，请稍后重试` }))
     }
