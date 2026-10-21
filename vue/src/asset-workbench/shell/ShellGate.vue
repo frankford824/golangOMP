@@ -1,16 +1,34 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useAssetWorkbenchBootstrap } from '../app/useAssetWorkbenchBootstrap'
 import SimpleShell from './SimpleShell.vue'
 import WorkbenchShell from './WorkbenchShell.vue'
 
-const { bootstrap, loading, error, entry, entryLoading, entryError, loadEntry } = useAssetWorkbenchBootstrap()
+const { bootstrap, loading, error, entry, entryLoading, entryError, loadEntry, refresh } = useAssetWorkbenchBootstrap()
+const route = useRoute()
+const router = useRouter()
+let permissionTimer: ReturnType<typeof setInterval> | undefined
+function refreshPermissions() {
+  if (document.visibilityState !== 'hidden') void refresh({ force: true, background: true })
+}
+watch(() => bootstrap.value?.profile?.settlement_visible, (visible) => {
+  if (visible === false && route.path === '/my-settlement') void router.replace('/403')
+})
 const isAdmin = computed(() => bootstrap.value?.is_admin === true)
 const blockedState = computed(() => entry.value && entry.value.state !== 'ready' ? entry.value : null)
 
 onMounted(() => {
   void loadEntry()
+  permissionTimer = setInterval(refreshPermissions, 30_000)
+  window.addEventListener('focus', refreshPermissions)
+  document.addEventListener('visibilitychange', refreshPermissions)
+})
+onBeforeUnmount(() => {
+  clearInterval(permissionTimer)
+  window.removeEventListener('focus', refreshPermissions)
+  document.removeEventListener('visibilitychange', refreshPermissions)
 })
 </script>
 

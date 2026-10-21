@@ -226,7 +226,9 @@ router.beforeEach(async (to) => {
   const session = useAssetWorkbenchSessionStore()
   const entry = await session.loadEntry()
   if (entry && entry.state !== 'ready') return true
-  const bootstrap = session.bootstrap ?? (await session.refresh())
+  const bootstrap = to.path === '/my-settlement'
+    ? await session.refresh({ force: true })
+    : session.bootstrap ?? (await session.refresh())
 
   if (to.path === '/settings') {
     const settingsPath = firstAccessibleSettingsPath(bootstrap)

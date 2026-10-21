@@ -529,6 +529,10 @@ type settlementBatchRepo struct {
 	events                []*domain.AssetWorkbenchEvent
 }
 
+func (r *settlementBatchRepo) ListReservedSettlementSources(context.Context, repo.Tx, string) ([]*domain.AssetWorkbenchSettlementItem, error) {
+	return nil, nil
+}
+
 func (r *settlementBatchRepo) ListErrorRecordsByMonth(context.Context, string) ([]*domain.AssetWorkbenchErrorRecord, error) {
 	return nil, nil
 }

@@ -75,8 +75,8 @@ func TestProfileInsertAndUpdateStayBoundToUserID(t *testing.T) {
 			}
 			now := time.Now()
 			mock.ExpectQuery(regexp.QuoteMeta(assetWorkbenchProfileSelect() + ` WHERE user_id = ?`)).WithArgs(int64(77)).WillReturnRows(sqlmock.NewRows([]string{
-				"id", "user_id", "worker_type", "job_grade", "real_name", "phone", "province", "city", "id_card", "gender", "alipay_account", "onboarded_at", "grade_hidden", "status", "pii_completed", "created_by", "updated_by", "created_at", "updated_at",
-			}).AddRow(12, 77, "parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, 1, 1, now, now))
+				"id", "user_id", "worker_type", "job_grade", "real_name", "phone", "province", "city", "id_card", "gender", "alipay_account", "onboarded_at", "grade_hidden", "status", "pii_completed", "created_by", "updated_by", "created_at", "updated_at", "settlement_visible",
+			}).AddRow(12, 77, "parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, 1, 1, now, now, true))
 			mock.ExpectCommit()
 			mysqlDB := New(db)
 			actorID := int64(1)

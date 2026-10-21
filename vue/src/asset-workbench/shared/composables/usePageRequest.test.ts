@@ -6,6 +6,24 @@ import { describe, expect, it } from 'vitest'
 import { usePageRequest } from './usePageRequest'
 
 describe('usePageRequest', () => {
+  it('ignores late responses after a newer request or reset', async () => {
+    const responses: Array<(value: string) => void> = []
+    const Host = defineComponent({ setup() { return usePageRequest(() => new Promise<string>((resolve) => responses.push(resolve))) }, template: '<div />' })
+    const wrapper = mount(Host)
+    const older = wrapper.vm.run()
+    const newer = wrapper.vm.run()
+    responses[1]!('new')
+    await newer
+    responses[0]!('old')
+    await older
+    expect(wrapper.vm.data).toBe('new')
+    const last = wrapper.vm.run()
+    wrapper.vm.reset()
+    responses[2]!('private old data')
+    await last
+    expect(wrapper.vm.data).toBeNull()
+    wrapper.unmount()
+  })
   it('loads data and clears the loading state', async () => {
     const Host = defineComponent({
       setup() {

@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { HandCoins, HardDrive, ImagePlus, Table2, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
+import { canAccessPath } from '@aw/app/access'
 import GlobalDownloadCenter from '../shared/download/GlobalDownloadCenter.vue'
 import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
@@ -34,7 +35,7 @@ const navItems = [
 ]
 const visibleNavItems = computed(() => {
   const capabilities = new Set(props.bootstrap?.capabilities ?? [])
-  return navItems.filter((item) => !item.capabilities || item.capabilities.some((capability) => capabilities.has(capability)))
+  return navItems.filter((item) => canAccessPath(props.bootstrap, item.to) && (!item.capabilities || item.capabilities.some((capability) => capabilities.has(capability))))
 })
 </script>
 

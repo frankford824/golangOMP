@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { HttpAppError } from '@/services/http'
 import { Eye, FolderOpen, Gift, Images, RefreshCw, Trash2, Upload, WalletCards, X } from 'lucide-vue-next'
 
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
@@ -15,18 +16,46 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
+import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 const settlementRequest = usePageRequest<MySettlementResult>(
-  () => assetWorkbenchApi.mySettlement(),
+  async (signal) => {
+    try { return await assetWorkbenchApi.mySettlement(signal) }
+    catch (err) {
+      if ([401, 403].includes((err as HttpAppError).status ?? 0)) {
+        settlementRequest.reset()
+        accessClosed.value = true
+      }
+      throw err
+    }
+  },
   null,
   '收入加载失败',
 )
 const loading = settlementRequest.loading
 const error = settlementRequest.error
 const result = settlementRequest.data
+const accessClosed = ref(false)
+let refreshTimer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
+const updatedLabel = computed(() => formatShanghaiDateTime(result.value?.generated_at, '尚未更新'))
+
+function settlementStateLabel(month: MySettlementMonthRow) {
+  return { accumulating: '累计中', pending_confirmation: '待确认', partially_confirmed: '部分确认', confirmed: '已确认' }[month.settlement_state ?? (month.confirmed ? 'confirmed' : 'accumulating')]
+}
+
+async function refreshIncome() {
+  if (document.visibilityState === 'hidden' || loading.value || accessClosed.value || disposed) return
+  await settlementRequest.run()
+}
+function resumeIncome() { void refreshIncome() }
+async function pollIncome() {
+  await refreshIncome()
+  if (!disposed && !accessClosed.value) refreshTimer = setTimeout(pollIncome, Math.max(15, result.value?.refresh_after_seconds ?? 30) * 1000)
+}
 
 const currentAmount = computed(() => formatMoney(result.value?.estimated_net_amount ?? 0))
 const months = computed(() => result.value?.months ?? [])
@@ -92,10 +121,6 @@ function normalPieceworkAmount(month: MySettlementMonthRow) {
 
 function supplementAmount(month: MySettlementMonthRow) {
   return month.supplement_amount
-}
-
-function supplementLabel(month: MySettlementMonthRow) {
-  return month.supplement_amount > 0 ? '有补交' : '0'
 }
 
 function todayDate() {
@@ -326,6 +351,15 @@ async function load() {
 
 onMounted(() => {
   void load()
+  refreshTimer = setTimeout(pollIncome, 30_000)
+  window.addEventListener('focus', resumeIncome)
+  document.addEventListener('visibilitychange', resumeIncome)
+})
+onBeforeUnmount(() => {
+  disposed = true
+  clearTimeout(refreshTimer)
+  window.removeEventListener('focus', resumeIncome)
+  document.removeEventListener('visibilitychange', resumeIncome)
 })
 </script>
 
@@ -335,15 +369,17 @@ onMounted(() => {
       <div class="aw-console-hero__head">
         <div>
           <p class="aw-eyebrow">我的收入</p>
-          <h1 class="aw-console-hero__title">这个月能拿</h1>
+          <h1 class="aw-console-hero__title">本月预计收入</h1>
         </div>
         <button class="aw-console-button" type="button" :disabled="loading" @click="load">
           <RefreshCw :size="16" aria-hidden="true" />
           <span>刷新</span>
         </button>
       </div>
-      <div class="aw-simple-income__amount">{{ currentAmount }}</div>
-      <p class="aw-simple-income__hint">这里只显示你的金额。每个月固定两条：正常作品工资、补交作品工资。</p>
+      <div v-if="!accessClosed" class="aw-simple-income__amount">{{ result ? currentAmount : '—' }}</div>
+      <p v-if="accessClosed" role="alert">结算页面暂未开放，请联系管理员。</p>
+      <p v-else class="aw-simple-income__hint">预估不等于已发放；已确认也不代表实际到账。页面可见时约每30秒更新，回到页面时刷新。</p>
+      <p v-if="!accessClosed" class="aw-copy">北京时间更新于：{{ updatedLabel }}{{ error ? '；更新失败，当前为上次成功快照，请重试。' : '' }}</p>
     </div>
 
     <div class="aw-data-surface">
@@ -364,10 +400,10 @@ onMounted(() => {
             <header class="aw-simple-income__month">
               <div>
                 <strong>{{ formatMonthLabel(month.business_month) }}</strong>
-                <small>{{ month.confirmed ? '这个月已经确认' : '这个月还在累计' }}</small>
+                <small>{{ month.confirmed ? '本月记录已确认，不代表实际到账' : '包含累计中或待确认记录，金额仍可能变化' }}</small>
               </div>
               <span class="aw-chip" :class="month.confirmed ? 'aw-chip--success' : 'aw-chip--warn'">
-                {{ month.confirmed ? '已确认' : '进行中' }}
+                {{ settlementStateLabel(month) }}
               </span>
             </header>
 
@@ -378,8 +414,9 @@ onMounted(() => {
                 </div>
                 <div class="aw-pay-slip__copy">
                   <strong>正常作品工资</strong>
-                  <span>{{ formatInt(month.item_count) }} 个作品 · {{ formatInt(month.page_count) }} 张</span>
+                  <span>{{ formatInt(month.item_count) }} 个作品 · {{ formatInt(month.page_count) }} 个计价单位</span>
                   <small v-if="month.deduction_amount > 0">已扣 {{ formatMoney(month.deduction_amount) }}</small>
+                  <small>计件毛额 {{ formatMoney(month.gross_amount) }} · 福利 {{ formatMoney(month.welfare_amount) }} · 调整 {{ formatMoney(month.adjustment_amount) }}</small>
                 </div>
                 <b class="aw-cell-money">{{ formatMoney(normalPieceworkAmount(month)) }}</b>
               </section>
@@ -391,12 +428,14 @@ onMounted(() => {
                 <div class="aw-pay-slip__copy">
                   <strong>补交作品工资</strong>
                   <span>漏交后补的作品会单独列在这里</span>
-                  <small>{{ supplementLabel(month) }}</small>
+                  <small>{{ formatInt(month.supplement_item_count ?? 0) }} 个作品 · {{ formatInt(month.supplement_page_count ?? 0) }} 个计价单位</small>
                 </div>
                 <b class="aw-cell-money">{{ formatMoney(supplementAmount(month)) }}</b>
               </section>
             </div>
 
+            <p v-if="month.pending_pricing_count" class="aw-inline-alert">另有 {{ formatInt(month.pending_pricing_count) }} 个作品待定级或未计价，尚未计入金额，请联系管理员核对。</p>
+            <p class="aw-copy">累计中 {{ formatMoney(month.estimated_amount ?? 0) }} · 待确认 {{ formatMoney(month.pending_confirmation_amount ?? 0) }} · 已确认 {{ formatMoney(month.confirmed_net_amount ?? 0) }}</p>
             <footer class="aw-simple-income__total">
               <span>这个月合计</span>
               <strong>{{ formatMoney(month.net_amount) }}</strong>

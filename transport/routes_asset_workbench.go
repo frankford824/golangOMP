@@ -44,6 +44,7 @@ func registerAssetWorkbenchRoutes(
 		group.GET("/profiles", access(group, http.MethodGet, "/profiles", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.ListProfiles)
 		group.GET("/profiles/:user_id", access(group, http.MethodGet, "/profiles/:user_id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.GetProfile)
 		group.PATCH("/profiles/:user_id", access(group, http.MethodPatch, "/profiles/:user_id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.UpsertProfile)
+		group.PATCH("/profiles/:user_id/settlement-visibility", access(group, http.MethodPatch, "/profiles/:user_id/settlement-visibility", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.SetSettlementVisibility)
 		group.GET("/members", access(group, http.MethodGet, "/members", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.ListMembers)
 		group.PATCH("/members/:user_id/identity", access(group, http.MethodPatch, "/members/:user_id/identity", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.UpdateMemberIdentity)
 		group.PATCH("/members/:user_id/roles", access(group, http.MethodPatch, "/members/:user_id/roles", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.UpdateMemberRoles)

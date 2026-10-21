@@ -227,6 +227,36 @@ func (h *AssetWorkbenchHandler) GetProfile(c *gin.Context) {
 	respondOK(c, result)
 }
 
+type settlementVisibilityResponse struct {
+	UserID            int64 `json:"user_id"`
+	SettlementVisible bool  `json:"settlement_visible"`
+}
+
+func (h *AssetWorkbenchHandler) SetSettlementVisibility(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "Invalid personnel id.", nil))
+		return
+	}
+	var req struct {
+		Visible *bool  `json:"visible"`
+		Reason  string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Visible == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "visible must be an explicit boolean.", nil))
+		return
+	}
+	if appErr := h.svc.SetSettlementVisibility(c.Request.Context(), actor, userID, *req.Visible, req.Reason); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, settlementVisibilityResponse{UserID: userID, SettlementVisible: *req.Visible})
+}
+
 func (h *AssetWorkbenchHandler) UpsertProfile(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

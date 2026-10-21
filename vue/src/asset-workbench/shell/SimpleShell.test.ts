@@ -10,6 +10,12 @@ vi.mock('vue-router', () => ({
 }))
 
 describe('SimpleShell personal upload ledger entry', () => {
+  it('hides only income navigation when settlement visibility is disabled', () => {
+    const wrapper = shallowMount(SimpleShell, { props: { bootstrap: { profile: { settlement_visible: false }, capabilities: ['asset.workbench.submit'] } as never }, global: { stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } } })
+    expect(wrapper.find('a[href="/my-settlement"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/upload"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
   it.each([true, false])('shows upload ledger only for submitters: %s', (submitter) => {
     const wrapper = shallowMount(SimpleShell, { props: { bootstrap: { capabilities: submitter ? ['asset.workbench.submit'] : ['asset.workbench.material.download'] } as never },
       global: { stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } } })

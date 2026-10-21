@@ -4503,7 +4503,7 @@ func uniqueExprForAlias(alias, expr string) string {
 
 func assetWorkbenchProfileSelect() string {
 	return `SELECT id, user_id, worker_type, job_grade, real_name, phone, province, city, id_card, gender,
-		alipay_account, onboarded_at, grade_hidden, status, pii_completed, created_by, updated_by, created_at, updated_at
+		alipay_account, onboarded_at, grade_hidden, status, pii_completed, created_by, updated_by, created_at, updated_at, settlement_visible
 		FROM asset_workbench_profiles`
 }
 
@@ -4822,10 +4822,11 @@ func scanAssetWorkbenchProfile(scanner interface{ Scan(...interface{}) error }) 
 	var phone, idCard sql.NullString
 	var onboardedAt sql.NullTime
 	var createdBy, updatedBy sql.NullInt64
+	var settlementVisible bool
 	if err := scanner.Scan(
 		&item.ID, &item.UserID, &item.WorkerType, &item.JobGrade, &item.RealName, &phone,
 		&item.Province, &item.City, &idCard, &item.Gender, &item.AlipayAccount, &onboardedAt,
-		&item.GradeHidden, &item.Status, &item.PIICompleted, &createdBy, &updatedBy, &item.CreatedAt, &item.UpdatedAt,
+		&item.GradeHidden, &item.Status, &item.PIICompleted, &createdBy, &updatedBy, &item.CreatedAt, &item.UpdatedAt, &settlementVisible,
 	); err != nil {
 		return nil, err
 	}
@@ -4834,6 +4835,7 @@ func scanAssetWorkbenchProfile(scanner interface{ Scan(...interface{}) error }) 
 	item.OnboardedAt = fromNullTime(onboardedAt)
 	item.CreatedBy = fromNullInt64(createdBy)
 	item.UpdatedBy = fromNullInt64(updatedBy)
+	item.SettlementVisible = &settlementVisible
 	return &item, nil
 }
 

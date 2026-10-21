@@ -16780,6 +16780,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/asset-workbench/profiles/{user_id}/settlement-visibility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set a person's client income-page visibility
+         * @description Personnel/settlement administrators can independently hide or show the owner's income page. Defaults to visible. Does not modify pricing, earned amounts, upload permissions or administrator settlement access. Changes are audited. Self-profile updates cannot change this setting.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    user_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        visible: boolean;
+                        reason?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved display permission */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                /** Format: int64 */
+                                user_id: number;
+                                settlement_visible: boolean;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid personnel id or missing boolean */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not a personnel or settlement administrator */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Personnel profile not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
     "/v1/asset-workbench/settlement/my": {
         parameters: {
             query?: never;
@@ -16789,7 +16871,7 @@ export interface paths {
         };
         /**
          * Get my asset-workbench settlement and supplement upload state
-         * @description Returns only the authenticated user's income rows, current-month supplement permission, and current-month supplement records with linked files for query and preview.
+         * @description Owner-scoped consistent snapshot of all months. Combines unsettled priced works and approved unbatched supplements with generated and confirmed ledger snapshots exactly once. Excludes voided works, draft/voided supplements and cancelled batches. Unpriced works are counted separately. A month is confirmed only when no pending works or batches remain. Confirmation is not proof of bank payment. Denied when the owner's settlement_visible flag is false. Current-month active supplements include all rows, without a first-page limit.
          */
         get: {
             parameters: {
@@ -16810,6 +16892,10 @@ export interface paths {
                             data?: {
                                 current_month?: string;
                                 estimated_net_amount?: number;
+                                /** Format: date-time */
+                                generated_at?: string;
+                                /** @description Suggested visible-page polling interval */
+                                refresh_after_seconds?: number;
                                 months?: {
                                     business_month?: string;
                                     item_count?: number;
@@ -16821,6 +16907,14 @@ export interface paths {
                                     adjustment_amount?: number;
                                     net_amount?: number;
                                     confirmed?: boolean;
+                                    /** @enum {string} */
+                                    settlement_state?: "accumulating" | "pending_confirmation" | "partially_confirmed" | "confirmed";
+                                    confirmed_net_amount?: number;
+                                    pending_confirmation_amount?: number;
+                                    estimated_amount?: number;
+                                    pending_pricing_count?: number;
+                                    supplement_item_count?: number;
+                                    supplement_page_count?: number;
                                 }[];
                                 supplement_permission?: {
                                     id?: number;
@@ -19052,6 +19146,11 @@ export interface components {
             /** Format: date-time */
             onboarded_at?: string | null;
             grade_hidden: boolean;
+            /**
+             * @description Owner income-page display permission. Changed only through the dedicated administrator endpoint; never affects earned amounts.
+             * @default true
+             */
+            settlement_visible: boolean;
             /** @enum {string} */
             status: "pending" | "active" | "suspended";
             pii_completed: boolean;
@@ -24095,7 +24194,9 @@ export interface components {
             cost_price: string | null;
             /** Format: date */
             as_of: string;
+            /** @description ISO date or the original JST opening marker 开始, which means an unbounded lower interval boundary. Creation and modification timestamps never determine this boundary. Current catalog-price fallback is disabled; only stored JST history is admitted. */
             begin_date?: string;
+            /** @description Inclusive source interval end date; absent means an open upper boundary. */
             end_date?: string;
             remark?: string;
         };

@@ -25,6 +25,7 @@ export interface AssetWorkbenchProfile {
   alipay_account?: string
   onboarded_at?: string
   grade_hidden?: boolean
+  settlement_visible?: boolean
   status: string
   pii_completed: boolean
 }
@@ -415,6 +416,13 @@ export interface SettlementBatchDetail {
 }
 
 export interface MySettlementMonthRow {
+  settlement_state?: 'accumulating' | 'pending_confirmation' | 'partially_confirmed' | 'confirmed'
+  confirmed_net_amount?: number
+  pending_confirmation_amount?: number
+  estimated_amount?: number
+  pending_pricing_count?: number
+  supplement_item_count?: number
+  supplement_page_count?: number
   business_month: string
   item_count: number
   page_count: number
@@ -428,6 +436,8 @@ export interface MySettlementMonthRow {
 }
 
 export interface MySettlementResult {
+  generated_at?: string
+  refresh_after_seconds?: number
   current_month: string
   estimated_net_amount: number
   months: MySettlementMonthRow[]
@@ -1576,6 +1586,11 @@ export const assetWorkbenchApi = {
 
   async mySettlement(signal?: AbortSignal): Promise<MySettlementResult> {
     const res = await http.get<ApiEnvelope<MySettlementResult>>('/v1/asset-workbench/settlement/my', { signal })
+    return unwrap(res.data)
+  },
+
+  async setSettlementVisibility(userID: number, visible: boolean): Promise<{ user_id: number; settlement_visible: boolean }> {
+    const res = await http.patch<ApiEnvelope<{ user_id: number; settlement_visible: boolean }>>(`/v1/asset-workbench/profiles/${userID}/settlement-visibility`, { visible, reason: '人员管理调整客户端结算页展示' })
     return unwrap(res.data)
   },
 
