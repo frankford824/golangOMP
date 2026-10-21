@@ -156,7 +156,7 @@
       </div>
     </section>
 
-    <button class="calculator-toggle" :aria-expanded="calculatorOpen" aria-controls="cost-calculator" @click="calculatorOpen=!calculatorOpen">{{calculatorOpen?'收起':'试算'}}</button>
+    <button class="calculator-toggle" :aria-expanded="calculatorOpen" :aria-controls="calculatorOpen ? 'cost-calculator' : undefined" @click="calculatorOpen=!calculatorOpen">{{calculatorOpen?'收起':'试算'}}</button>
     <Teleport to="body">
       <div v-if="ruleDialogOpen" class="modal-layer" @keydown.esc="closeRuleEditor">
         <button class="modal-mask" aria-label="关闭规则编辑" @click="closeRuleEditor" />
