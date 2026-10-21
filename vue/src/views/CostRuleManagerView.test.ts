@@ -59,6 +59,21 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('references the calculator ARIA target only while its panel is mounted', async () => {
+    const wrapper = mount(CostRuleManagerView)
+    await flushPromises()
+    const toggle = wrapper.get('.calculator-toggle')
+    expect(toggle.attributes('aria-controls')).toBeUndefined()
+    expect(wrapper.find('#cost-calculator').exists()).toBe(false)
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-controls')).toBe('cost-calculator')
+    expect(wrapper.find('#cost-calculator').exists()).toBe(true)
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-controls')).toBeUndefined()
+    expect(wrapper.find('#cost-calculator').exists()).toBe(false)
+    expect(mocks.createCostRule).not.toHaveBeenCalled()
+    expect(mocks.updateCostRule).not.toHaveBeenCalled()
+  })
   it('requires confirmation to retire a price without repricing old SKUs',async()=>{
     const wrapper=mount(CostRuleManagerView);await flushPromises()
     await wrapper.findAll('button').find(b=>b.text()==='停用此计价')!.trigger('click');expect(mocks.updateCostRule).not.toHaveBeenCalled()
