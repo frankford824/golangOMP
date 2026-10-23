@@ -115,3 +115,12 @@ func TestMaintenanceRequiresBothPermissionsBeforeAnyRead(t *testing.T) {
 		t.Fatalf("permission bypass %v", err)
 	}
 }
+
+func TestMaintenanceFilingUsesCorrectedMemberDimensions(t *testing.T) {
+	detail := &domain.TaskDetail{Width: float64Ptr(999), Height: float64Ptr(888), Area: float64Ptr(777)}
+	item := &domain.TaskSKUItem{ID: 10, SKUCode: "SKU", ProductNameSnapshot: "corrected", VariantJSON: json.RawMessage(`{"product_i_id":"KT","width":20,"height":30,"area":0.06,"size_text":"20×30cm"}`)}
+	payload, err := buildBatchSKUItemERPBridgeProductUpsertPayload(&domain.Task{ID: 71, TaskType: domain.TaskTypeNewProductDevelopment}, detail, item, 1, "", "business_info_patch")
+	if err != nil || payload.BusinessInfo == nil || *payload.BusinessInfo.Width != 20 || *payload.BusinessInfo.Height != 30 || *payload.BusinessInfo.Area != .06 || *detail.Width != 999 {
+		t.Fatalf("wrong member dimensions or mutated header: %+v %v", payload.BusinessInfo, err)
+	}
+}

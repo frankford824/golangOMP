@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"workflow/domain"
@@ -124,12 +125,17 @@ func TestCostMaintenanceIntegration(t *testing.T) {
 	if width != 20 || target != changed.ID {
 		t.Fatalf("null dimension or durable metadata scope: %v %v", width, target)
 	}
+	var shortName, style string
+	db.QueryRow(`SELECT product_short_name,JSON_UNQUOTE(JSON_EXTRACT(product_selection_snapshot_json,'$.erp_product.i_id')) FROM task_details WHERE task_id=71`).Scan(&shortName, &style)
+	if shortName != "renamed" || style != "KT" {
+		t.Fatalf("original-product metadata projection lost: %s %s", shortName, style)
+	}
 	rows, err = r.List(ctx, repo.CostMaintenanceFilter{PageSize: 50})
 	if err != nil || !rows[0].BaseSyncRequired {
 		t.Fatal("pending metadata was hidden behind cost convergence", err)
 	}
 	exec(`INSERT INTO tasks(id,task_no,task_type,task_status,source_mode,sku_code,creator_id,primary_sku_code,batch_item_count,product_name_snapshot) VALUES(72,'QA-MAINT-OLD','original_product_development','Completed','test','QA-MAINT-OLD',1,'QA-MAINT-OLD',1,'historical')`)
-	exec(`INSERT INTO task_details(task_id,demand_text,copy_text,remark,matched_mapping_rule_json,product_selection_snapshot_json,spec_text,change_request,design_requirement,reference_images_json,reference_link,cost_price,width,height,area) VALUES(72,'','','','{}','{}','','','','[]','',7.77,40,50,.2)`)
+	exec(`INSERT INTO task_details(task_id,demand_text,copy_text,remark,matched_mapping_rule_json,product_selection_snapshot_json,spec_text,change_request,design_requirement,reference_images_json,reference_link,cost_price,width,height,area) VALUES(72,'','','','{}','{}','','','','[]','',7.77,NULL,NULL,NULL)`)
 	path := os.Getenv("TEST_COST_MAINTENANCE_MIGRATION")
 	if path == "" {
 		path = "../../db/migrations/145_cost_maintenance_historical_skus.sql"
@@ -150,5 +156,36 @@ func TestCostMaintenanceIntegration(t *testing.T) {
 	db.QueryRow(`SELECT d.cost_price,s.cost_price,cs.status FROM task_details d JOIN task_sku_items s ON s.task_id=d.task_id JOIN sku_cost_sync_states cs ON cs.sku_code=s.sku_code WHERE d.task_id=72`).Scan(&original, &canonical, &state)
 	if original != 7.77 || canonical != original || state != "conflict" {
 		t.Fatalf("historical preservation failed %v %v %s", original, canonical, state)
+	}
+	raw, e = os.ReadFile(filepath.Join(filepath.Dir(path), "146_cost_maintenance_unknown_dimensions.sql"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, statement := range strings.Split(string(raw), ";") {
+		if strings.TrimSpace(statement) != "" {
+			exec(statement)
+		}
+	}
+	var unknown int
+	db.QueryRow(`SELECT COUNT(*) FROM task_sku_items WHERE task_id=72 AND JSON_TYPE(JSON_EXTRACT(variant_json,'$.width')) IS NULL`).Scan(&unknown)
+	if unknown != 1 {
+		t.Fatal("unknown width was not kept absent")
+	}
+	exec(`INSERT INTO tasks(id,task_no,task_type,task_status,source_mode,sku_code,creator_id,primary_sku_code,batch_item_count,product_name_snapshot) VALUES(73,'QA-MAINT-NEW','original_product_development','Completed','test','QA-MAINT-NEW',1,'QA-MAINT-NEW',1,'new completion')`)
+	exec(`INSERT INTO task_details(task_id,demand_text,copy_text,remark,matched_mapping_rule_json,product_selection_snapshot_json,spec_text,change_request,design_requirement,reference_images_json,reference_link,cost_price) VALUES(73,'','','','{}','{}','','','','[]','',8.88)`)
+	tx, sqlTx, err = wrapper.BeginTx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ensureCompletedCostSKU(ctx, tx, 73); err != nil {
+		t.Fatal(err)
+	}
+	if err = sqlTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	// Regression: migration and future completion must both remain compatible
+	// with the existing strict numeric dashboard materialization.
+	if err = NewProductManagementRepo(wrapper).RefreshReadModel(ctx); err != nil {
+		t.Fatalf("cost dashboard refresh regressed: %v", err)
 	}
 }

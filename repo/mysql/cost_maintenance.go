@@ -138,6 +138,9 @@ func (r *costMaintenanceRepo) Save(ctx context.Context, tx repo.Tx, item *domain
 		if _, err := q.ExecContext(ctx, `UPDATE tasks SET product_name_snapshot=? WHERE id=?`, item.ProductNameSnapshot, item.TaskID); err != nil {
 			return err
 		}
+		if _, err := q.ExecContext(ctx, `UPDATE task_details SET product_short_name=COALESCE(NULLIF(?,''),product_short_name),size_text=COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(?,'$.size_text')),'null'),size_text),product_selection_snapshot_json=IF(?='',product_selection_snapshot_json,JSON_MERGE_PATCH(IF(JSON_VALID(product_selection_snapshot_json),product_selection_snapshot_json,JSON_OBJECT()),JSON_OBJECT('erp_product',JSON_OBJECT('i_id',?)))),erp_sync_required=1,erp_sync_version=erp_sync_version+1 WHERE task_id=?`, item.ProductShortName, item.VariantJSON, item.ProductIID, item.ProductIID, item.TaskID); err != nil {
+			return err
+		}
 		// Primary detail mirrors only explicitly supplied SKU dimensions; complex
 		// per-SKU cost_input remains authoritative in variant_json.
 		if _, err := q.ExecContext(ctx, `UPDATE task_details SET width=COALESCE(CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(?, '$.width')),'null') AS DECIMAL(14,4)),width),height=COALESCE(CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(?,'$.height')),'null') AS DECIMAL(14,4)),height),area=COALESCE(CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(?,'$.area')),'null') AS DECIMAL(14,6)),area),updated_at=UTC_TIMESTAMP() WHERE task_id=?`, item.VariantJSON, item.VariantJSON, item.VariantJSON, item.TaskID); err != nil {

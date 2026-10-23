@@ -500,6 +500,27 @@ func buildBatchSKUItemERPBridgeProductUpsertPayload(task *domain.Task, detail *d
 	if task == nil || detail == nil || item == nil {
 		return domain.ERPProductUpsertPayload{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "task, task_detail, and sku item are required", nil)
 	}
+	// A maintained SKU's specifications take precedence over the shared task
+	// header. Never resend another batch member's dimensions after a correction.
+	shadow := *detail
+	if w, h, a := taskSKUItemVariantDimensions(item); w != nil || h != nil || a != nil {
+		if w != nil {
+			shadow.Width = w
+		}
+		if h != nil {
+			shadow.Height = h
+		}
+		if a != nil {
+			shadow.Area = a
+		}
+	}
+	if text := taskSKUItemVariantString(item, "size_text"); text != "" {
+		shadow.SizeText = text
+	}
+	if text := taskSKUItemVariantString(item, "spec_text"); text != "" {
+		shadow.SpecText = text
+	}
+	detail = &shadow
 	skuCode := strings.TrimSpace(item.SKUCode)
 	if skuCode == "" {
 		return domain.ERPProductUpsertPayload{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "batch filing requires sku_code", map[string]interface{}{"task_id": task.ID, "sequence_no": item.SequenceNo})

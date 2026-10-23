@@ -15,7 +15,7 @@ func ensureCompletedCostSKU(ctx context.Context, tx repo.Tx, taskID int64) error
  SELECT t.id,1,t.sku_code,IF(d.filing_status='filed','filed','generated'),d.filing_status,d.filing_status,0,d.erp_sync_version,d.last_filed_at,t.product_name_snapshot,d.product_short_name,
  COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(d.product_selection_snapshot_json,'$.erp_product.i_id')),''),''),d.category_code,d.quantity,d.design_requirement,COALESCE(d.reference_file_refs_json,'[]'),'cost_maintenance_completion',
  d.cost_price,d.estimated_cost,d.cost_rule_id,d.cost_rule_name,d.cost_rule_source,d.matched_rule_version,d.requires_manual_review,d.manual_cost_override,d.manual_cost_override_reason,d.override_actor,d.override_at,
- JSON_OBJECT('width',d.width,'height',d.height,'area',d.area,'size_text',d.size_text,'product_i_id',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(d.product_selection_snapshot_json,'$.erp_product.i_id')),''))
+ JSON_MERGE_PATCH(JSON_OBJECT(),JSON_OBJECT('width',d.width,'height',d.height,'area',d.area,'size_text',d.size_text,'product_i_id',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(d.product_selection_snapshot_json,'$.erp_product.i_id')),'')))
  FROM tasks t JOIN task_details d ON d.task_id=t.id
  WHERE t.id=? AND t.task_type='original_product_development' AND t.sku_code<>''
  AND NOT EXISTS(SELECT 1 FROM task_sku_items s WHERE s.task_id=t.id OR s.sku_code=t.sku_code)

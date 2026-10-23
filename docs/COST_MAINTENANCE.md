@@ -36,6 +36,10 @@ authorities remain `transport/http.go` and `docs/api/openapi.yaml`.
   historical states are quarantined for explicit review, not sent to ERP.
   Future original-product completion establishes the same identity inside the
   existing finalization transaction, without introducing a new completion path.
+- Migration 146 removes only unknown/null dimension keys from newly canonicalized
+  records and schedules a read-only ERP baseline observation for unreviewed
+  historical codes. It never approves a price. New completion writes omit unknown
+  dimensions directly, so the existing strict numeric read model remains valid.
 
 Validation: full `scripts/agent-check.sh`; focused frontend unit tests and
 `npm run build:prod`; isolated MySQL `TestCostMaintenanceIntegration`; desktop
