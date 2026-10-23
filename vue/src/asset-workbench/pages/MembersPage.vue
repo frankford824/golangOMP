@@ -15,6 +15,8 @@ const savingUserId = ref<number | null>(null)
 const notice = ref('')
 const query = ref('')
 const statusFilter = ref('active')
+const page = ref(1)
+const pageSize = 50
 const members = ref<WorkbenchMemberRow[]>([])
 const lookupQuery = ref('')
 const lookupResults = ref<WorkbenchMemberRow[]>([])
@@ -30,17 +32,17 @@ const mergePreview = ref<AccountMergePreview | null>(null)
 const mergeChoices = ref<Record<string, string>>({})
 const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/members')
 const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
-const membersRequest = usePageRequest<WorkbenchMemberRow[]>(
-  async () => {
+const membersRequest = usePageRequest<{ items: WorkbenchMemberRow[]; total: number }>(
+  async (signal) => {
     const params: Record<string, unknown> = {
       q: query.value,
-      page_size: 200,
+      page: page.value,
+      page_size: pageSize,
     }
     if (statusFilter.value !== 'all') params.status = statusFilter.value
-    const result = await assetWorkbenchApi.listMembers(params)
-    return result.items
+    return assetWorkbenchApi.listMembers(params, signal)
   },
-  [],
+  { items: [], total: 0 },
   '成员加载失败',
 )
 const loading = membersRequest.loading
@@ -54,7 +56,8 @@ const statusOptions = [
   { value: 'all', label: '全部' },
 ]
 
-const total = computed(() => members.value.length)
+const total = computed(() => membersRequest.data.value?.total ?? 0)
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const canChangeRoles = computed(() =>
   (bootstrap.value?.capabilities ?? []).includes('asset.workbench.member.identity'),
 )
@@ -76,7 +79,23 @@ function statusMeta(status?: string) {
 }
 
 async function loadMembers() {
-  members.value = (await membersRequest.run()) ?? []
+  let result = await membersRequest.run()
+  if (!error.value && page.value > pageCount.value) {
+    page.value = pageCount.value
+    result = await membersRequest.run()
+  }
+  members.value = result?.items ?? []
+}
+
+async function applyFilters() {
+  page.value = 1
+  await loadMembers()
+}
+
+async function changePage(next: number) {
+  if (next < 1 || next > pageCount.value || loading.value) return
+  page.value = next
+  await loadMembers()
 }
 
 async function loadPage() {
@@ -298,15 +317,15 @@ function refreshFromOtherApp() {
         <div class="aw-form-grid">
           <label>
             成员状态
-            <select v-model="statusFilter" @change="loadMembers">
+            <select v-model="statusFilter" @change="applyFilters">
               <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
           <label>
             搜索成员
-            <input v-model="query" placeholder="输入姓名、账号或手机号" @keydown.enter="loadMembers" />
+            <input v-model="query" placeholder="输入姓名、账号或手机号" @keydown.enter="applyFilters" />
           </label>
-          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="loading" @click="loadMembers">
+          <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="loading" @click="applyFilters">
             <IconfontActionIcon name="search" :size="16" />
             搜索
           </button>
@@ -427,6 +446,11 @@ function refreshFromOtherApp() {
           <p v-if="members.length === 0" class="aw-inline-alert">没有找到成员</p>
         </div>
       </AsyncBoundary>
+      <div class="aw-inline-actions" aria-label="成员列表分页">
+        <button class="aw-secondary-button" type="button" :disabled="loading || page <= 1" @click="changePage(page - 1)">上一页</button>
+        <span class="aw-copy">第 {{ page }} / {{ pageCount }} 页 · 共 {{ total }} 人</span>
+        <button class="aw-secondary-button" type="button" :disabled="loading || page >= pageCount" @click="changePage(page + 1)">下一页</button>
+      </div>
     </section>
 
     <section v-if="disableTarget" class="aw-panel">
