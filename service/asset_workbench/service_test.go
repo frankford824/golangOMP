@@ -768,6 +768,10 @@ func (r *roleBackfillAccessRepo) GetProfileByUserID(context.Context, int64) (*do
 	return nil, sql.ErrNoRows
 }
 
+func (r *roleBackfillAccessRepo) LockMembership(ctx context.Context, _ repo.Tx, app string, userID int64) (*domain.AppMembership, error) {
+	return r.GetMembership(ctx, app, userID)
+}
+
 type memberRoleUpdateRepo struct {
 	repo.AssetWorkbenchRepo
 	listFilters []repo.AssetWorkbenchMemberFilter
@@ -823,14 +827,14 @@ type memberRoleUpdateUserRepo struct {
 	replacedRoles  []domain.Role
 }
 
-func (r *memberRoleUpdateUserRepo) ListRoles(_ context.Context, userID int64) ([]domain.Role, error) {
+func (r *memberRoleUpdateUserRepo) ListWorkbenchRoles(_ context.Context, userID int64) ([]domain.Role, error) {
 	if userID != 302 {
 		return nil, sql.ErrNoRows
 	}
 	return append([]domain.Role{}, r.roles...), nil
 }
 
-func (r *memberRoleUpdateUserRepo) ReplaceRoles(_ context.Context, _ repo.Tx, userID int64, roles []domain.Role) error {
+func (r *memberRoleUpdateUserRepo) ReplaceWorkbenchRoles(_ context.Context, _ repo.Tx, userID, actorID int64, roles []domain.Role, expected *int64, reason string) error {
 	r.replacedUserID = userID
 	r.replacedRoles = append([]domain.Role{}, roles...)
 	r.roles = append([]domain.Role{}, roles...)
@@ -3378,8 +3382,9 @@ func TestUpdateMemberRolesReloadsMemberByUserID(t *testing.T) {
 		ID:    1,
 		Roles: []domain.Role{domain.RoleSuperAdmin},
 	}, 302, UpdateMemberRolesParams{
-		Roles:  []domain.Role{domain.RoleAssetSubmitter, domain.RoleAssetManager},
-		Reason: "workbench role update",
+		Roles:                  []domain.Role{domain.RoleAssetSubmitter, domain.RoleAssetManager},
+		Reason:                 "workbench role update",
+		ExpectedPolicyRevision: func() *int64 { value := int64(0); return &value }(),
 	})
 	if appErr != nil {
 		t.Fatalf("UpdateMemberRoles() error = %+v", appErr)

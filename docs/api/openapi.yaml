@@ -15129,7 +15129,7 @@ paths:
   /v1/asset-workbench/members:
     get:
       summary: List asset workbench members
-      description: Returns members from app_memberships, including pending, active, disabled, and merged states.
+      description: Returns workbench memberships and active users with effective asset_workbench.use grants, even before their first login. Explicit disabled/merged membership states take precedence. Roles come from the same auth assignments and organization policies as main-ops, never legacy user_roles.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -15180,6 +15180,8 @@ paths:
                           type: array
                           items: { type: string }
                         can_edit_roles: { type: boolean }
+                        policy_revision: { type: integer, format: int64, description: Current shared authorization revision; send as expected_policy_revision when editing roles. }
+                        roles_managed_externally: { type: boolean, description: Includes inherited organization roles; edit those at their policy source in main-ops. }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/members/{user_id}/identity:
@@ -15214,7 +15216,7 @@ paths:
   /v1/asset-workbench/members/{user_id}/roles:
     patch:
       summary: Update asset workbench member roles
-      description: SuperAdmin-only endpoint for composable business capabilities.
+      description: SuperAdmin-only endpoint. Updates only the four workbench-owned direct auth assignments and the shared policy revision atomically with the identity audit. Preserves other applications' roles, custom grants, and existing selected-org scopes. Inherited organization roles must be edited at their policy source. A stale expected_policy_revision returns 409 without changes.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -15231,12 +15233,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [roles]
+              required: [roles, expected_policy_revision]
               properties:
                 roles:
                   type: array
                   items: { type: string, enum: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement] }
                 reason: { type: string }
+                expected_policy_revision: { type: integer, format: int64, minimum: 0, description: Shared policy_revision from the member list. A stale revision is rejected without changes. }
       responses:
         '200':
           description: Updated member
@@ -15264,11 +15267,13 @@ paths:
                         type: array
                         items: { type: string }
                       can_edit_roles: { type: boolean }
+                      policy_revision: { type: integer, format: int64 }
+                      roles_managed_externally: { type: boolean }
                       created_at: { type: string, format: date-time }
                       updated_at: { type: string, format: date-time }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
-        '409': { description: Membership is not active }
+        '409': { description: Membership is not active, role is inherited or archived, or the shared policy revision changed. }
   /v1/asset-workbench/accounts/merge/preview:
     post:
       summary: Preview asset workbench account merge

@@ -212,6 +212,8 @@ export interface WorkbenchMemberRow {
   roles?: string[]
   role_labels?: string[]
   can_edit_roles?: boolean
+  policy_revision?: number
+  roles_managed_externally?: boolean
 }
 
 export interface WorkbenchGroupMemberRow {
@@ -1425,10 +1427,10 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async updateMemberRoles(userId: number, roles: string[], reason?: string, signal?: AbortSignal): Promise<WorkbenchMemberRow> {
+  async updateMemberRoles(userId: number, roles: string[], reason?: string, expectedPolicyRevision?: number, signal?: AbortSignal): Promise<WorkbenchMemberRow> {
     const res = await http.patch<ApiEnvelope<WorkbenchMemberRow>>(
       `/v1/asset-workbench/members/${userId}/roles`,
-      { roles, reason },
+      { roles, reason, expected_policy_revision: expectedPolicyRevision },
       { signal },
     )
     return unwrap(res.data)

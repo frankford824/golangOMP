@@ -162,8 +162,7 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 	where := []string{}
 	args := []interface{}{}
 	if !allUsers {
-		where = append(where, "am.app_code = ?")
-		args = append(args, domain.AssetWorkbenchAppCode)
+		where = append(where, "(am.app_code = 'asset_workbench' OR (u.status = 'active' AND "+workbenchPermissionSQL("u", domain.PermissionAssetWorkbenchUse)+"))")
 	}
 	if filter.UserID > 0 {
 		where = append(where, "u.id = ?")
@@ -175,10 +174,10 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 		args = append(args, like, like, like, like, like)
 	}
 	if v := strings.TrimSpace(filter.Status); v != "" && !allUsers {
-		where = append(where, "am.status = ?")
+		where = append(where, workbenchMembershipStatusSQL()+" = ?")
 		args = append(args, v)
 	} else if lookup && !allUsers {
-		where = append(where, "am.status = ?")
+		where = append(where, workbenchMembershipStatusSQL()+" = ?")
 		args = append(args, domain.AppMembershipStatusActive)
 	}
 	if v := strings.TrimSpace(filter.Identity); v != "" {
@@ -210,7 +209,6 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
 	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchMemberSelect()+`
 		WHERE `+strings.Join(where, " AND ")+`
-		GROUP BY u.id, am.status, p.id
 		ORDER BY
 			CASE WHEN p.real_name IS NULL OR p.real_name = '' THEN 1 ELSE 0 END ASC,
 			p.real_name ASC,
@@ -234,7 +232,20 @@ func (r *assetWorkbenchRepo) listMembers(ctx context.Context, filter repo.AssetW
 
 func (r *assetWorkbenchRepo) GetMembership(ctx context.Context, appCode string, userID int64) (*domain.AppMembership, error) {
 	row := r.db.db.QueryRowContext(ctx, appMembershipSelect()+` WHERE app_code = ? AND user_id = ?`, appCode, userID)
-	return scanAppMembership(row)
+	membership, err := scanAppMembership(row)
+	if !errors.Is(err, sql.ErrNoRows) || appCode != domain.AssetWorkbenchAppCode {
+		return membership, err
+	}
+	// Read-through for historical grants and organization changes; no employee
+	// visit is necessary to discover or manage this account.
+	var granted bool
+	if err := r.db.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.status = 'active' AND `+workbenchPermissionSQL("u", domain.PermissionAssetWorkbenchUse)+`)`, userID).Scan(&granted); err != nil {
+		return nil, err
+	}
+	if !granted {
+		return nil, sql.ErrNoRows
+	}
+	return &domain.AppMembership{AppCode: appCode, UserID: userID, Status: domain.AppMembershipStatusActive, IdentityType: domain.AppMembershipIdentityStaff, Source: domain.AppMembershipSourceMainOpsOpened}, nil
 }
 
 func (r *assetWorkbenchRepo) LockMembership(ctx context.Context, tx repo.Tx, appCode string, userID int64) (*domain.AppMembership, error) {
@@ -289,6 +300,13 @@ func (r *assetWorkbenchRepo) RequestMembership(ctx context.Context, tx repo.Tx, 
 }
 
 func (r *assetWorkbenchRepo) OpenMembership(ctx context.Context, tx repo.Tx, params repo.AssetWorkbenchAccessOpenParams) (*domain.AppMembership, error) {
+	current, err := r.LockMembership(ctx, tx, domain.AssetWorkbenchAppCode, params.UserID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if current != nil && current.Status == domain.AppMembershipStatusMerged {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "合并账号不可重新开通，请管理主账号。", nil)
+	}
 	openedBy := &params.OpenedBy
 	membership := &domain.AppMembership{
 		AppCode:      domain.AssetWorkbenchAppCode,
@@ -302,6 +320,11 @@ func (r *assetWorkbenchRepo) OpenMembership(ctx context.Context, tx repo.Tx, par
 }
 
 func (r *assetWorkbenchRepo) DisableMembership(ctx context.Context, tx repo.Tx, appCode string, userID int64, disabledBy int64, reason string, lastRoles []domain.Role) (*domain.AppMembership, error) {
+	if appCode == domain.AssetWorkbenchAppCode {
+		if err := syncWorkbenchMemberships(ctx, tx, userID, disabledBy); err != nil {
+			return nil, err
+		}
+	}
 	raw, _ := json.Marshal(lastRoles)
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE app_memberships
@@ -4558,12 +4581,7 @@ func assetWorkbenchAccountLinkSelect() string {
 }
 
 func assetWorkbenchAdminExistsSQL() string {
-	return fmt.Sprintf(`EXISTS (
-		SELECT 1
-		FROM user_roles aw_admin_roles
-		WHERE aw_admin_roles.user_id = u.id
-		  AND aw_admin_roles.role IN ('%s', '%s', '%s')
-	)`, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement)
+	return "(" + workbenchPermissionSQL("u", domain.PermissionAssetWorkbenchMembers) + " OR " + workbenchPermissionSQL("u", domain.PermissionAssetWorkbenchTemplates) + " OR " + workbenchPermissionSQL("u", domain.PermissionAssetWorkbenchSettlement) + " OR " + workbenchPermissionSQL("u", domain.PermissionAssetWorkbenchProfiles) + ")"
 }
 
 func assetWorkbenchMemberSelect() string {
@@ -4573,16 +4591,20 @@ func assetWorkbenchMemberSelect() string {
 		       COALESCE(NULLIF(p.real_name, ''), u.display_name, u.username, ''),
 		       COALESCE(p.worker_type, ''),
 		       COALESCE(p.job_grade, ''),
-		       COALESCE(am.status, ''),
+		       ` + workbenchMembershipStatusSQL() + `,
 		       COALESCE(p.pii_completed, 0),
 		       CASE WHEN ` + assetWorkbenchAdminExistsSQL() + ` THEN 'admin' ELSE 'normal' END,
-		       COALESCE(GROUP_CONCAT(DISTINCT ur.role ORDER BY ur.role SEPARATOR ','), ''),
+		       COALESCE((SELECT GROUP_CONCAT(DISTINCT ` + workbenchRoleCaseSQL() + ` ORDER BY ar.code SEPARATOR ',')
+		         FROM auth_roles ar WHERE ar.archived_at IS NULL AND ar.id IN (` + workbenchGrantedRoleSQL("u") + `)), ''),
 		       COALESCE(p.created_at, u.created_at),
-		       COALESCE(p.updated_at, u.updated_at)
+		       COALESCE(p.updated_at, u.updated_at),
+		       (SELECT policy_revision FROM auth_policy_state WHERE singleton_id = 1),
+		       EXISTS (SELECT 1 FROM auth_org_role_policies op JOIN auth_roles ar ON ar.id = op.role_id AND ar.archived_at IS NULL
+		         WHERE op.enabled = 1 AND ar.code IN ('asset_submitter','asset_manager','asset_template_admin','asset_settlement') AND
+		         ((op.subject_type = 'department' AND op.subject_id = u.department_id) OR (op.subject_type = 'team' AND op.subject_id = u.team_id)))
 		FROM users u
 		LEFT JOIN app_memberships am ON am.user_id = u.id AND am.app_code = 'asset_workbench'
-		LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id
-		LEFT JOIN user_roles ur ON ur.user_id = u.id`
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id`
 }
 
 func assetWorkbenchGradePeriodSelect() string {
@@ -4888,6 +4910,8 @@ func scanAssetWorkbenchMember(scanner interface{ Scan(...interface{}) error }) (
 		&rolesCSV,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.PolicyRevision,
+		&item.RolesManagedExternally,
 	); err != nil {
 		return nil, err
 	}

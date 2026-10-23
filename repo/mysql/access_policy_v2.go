@@ -259,6 +259,9 @@ func (r *AccessPolicyRepo) ArchiveRole(ctx context.Context, tx repo.Tx, roleID, 
 }
 
 func (r *AccessPolicyRepo) ReplaceRolePermissions(ctx context.Context, tx repo.Tx, roleID int64, permissions []domain.AccessRolePermission) error {
+	if _, err := r.LockPolicyRevision(ctx, tx); err != nil {
+		return err
+	}
 	if _, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM auth_role_permissions WHERE role_id = ?`, roleID); err != nil {
 		return fmt.Errorf("delete role permissions: %w", err)
 	}
@@ -273,10 +276,13 @@ func (r *AccessPolicyRepo) ReplaceRolePermissions(ctx context.Context, tx repo.T
 			return fmt.Errorf("insert role permission %s: %w", permission.Code, err)
 		}
 	}
-	return nil
+	return syncWorkbenchMemberships(ctx, tx, 0, 0)
 }
 
 func (r *AccessPolicyRepo) ReplaceUserAssignments(ctx context.Context, tx repo.Tx, userID, actorID int64, assignments []domain.AccessAssignment) error {
+	if _, err := r.LockPolicyRevision(ctx, tx); err != nil {
+		return err
+	}
 	if _, err := Unwrap(tx).ExecContext(ctx, `
 		DELETE s FROM auth_assignment_scope_subjects s
 		JOIN auth_user_role_assignments a ON a.id = s.assignment_id
@@ -307,7 +313,7 @@ func (r *AccessPolicyRepo) ReplaceUserAssignments(ctx context.Context, tx repo.T
 			}
 		}
 	}
-	return nil
+	return syncWorkbenchMemberships(ctx, tx, userID, actorID)
 }
 
 // EnsureExplicitRoleAssignment is used only at identity creation/config-sync
@@ -698,6 +704,9 @@ func (r *AccessPolicyRepo) GetOrgPolicy(ctx context.Context, subjectType domain.
 }
 
 func (r *AccessPolicyRepo) ReplaceOrgPolicies(ctx context.Context, tx repo.Tx, subjectType domain.AccessSubjectType, subjectID, actorID int64, policies []domain.AccessOrgPolicy) error {
+	if _, err := r.LockPolicyRevision(ctx, tx); err != nil {
+		return err
+	}
 	if _, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM auth_org_role_policies WHERE subject_type = ? AND subject_id = ?`, subjectType, subjectID); err != nil {
 		return fmt.Errorf("delete org access policies: %w", err)
 	}
@@ -711,5 +720,5 @@ func (r *AccessPolicyRepo) ReplaceOrgPolicies(ctx context.Context, tx repo.Tx, s
 			return fmt.Errorf("insert org access policy: %w", err)
 		}
 	}
-	return nil
+	return syncWorkbenchMemberships(ctx, tx, 0, actorID)
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { RefreshCw, ShieldCheck, UserRound } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
@@ -104,8 +104,9 @@ async function toggleRole(member: WorkbenchMemberRow, role: string, checked: boo
   error.value = ''
   notice.value = ''
   try {
-    const updated = await assetWorkbenchApi.updateMemberRoles(member.user_id, Array.from(roles), 'workbench role update')
+    const updated = await assetWorkbenchApi.updateMemberRoles(member.user_id, Array.from(roles), 'workbench role update', member.policy_revision)
     Object.assign(member, updated)
+    await loadMembers()
     notice.value = `${memberName(member)} 的可用功能已更新`
   } catch (err) {
     error.value = err instanceof Error ? err.message : '功能更新失败'
@@ -255,7 +256,13 @@ async function confirmMerge() {
 
 onMounted(() => {
   void loadPage()
+  window.addEventListener('focus', refreshFromOtherApp)
 })
+onBeforeUnmount(() => window.removeEventListener('focus', refreshFromOtherApp))
+
+function refreshFromOtherApp() {
+  if (!loading.value && savingUserId.value === null && !disableTarget.value && !selectedLookupUser.value) void loadPage()
+}
 </script>
 
 <template>
@@ -277,6 +284,7 @@ onMounted(() => {
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="!canChangeRoles" class="aw-inline-alert">当前账号只能查看成员，不会显示开通、停用、恢复或合并操作。</p>
+    <p class="aw-copy">与运营系统使用同一套角色授权，保存后无需员工登录即可维护。切回此页会刷新成员；组织继承角色请在运营系统调整。</p>
 
     <div class="aw-two-column">
       <section class="aw-panel">
@@ -392,7 +400,7 @@ onMounted(() => {
                 <input
                   type="checkbox"
                   :checked="memberRoles(member).has(role)"
-                  :disabled="!canChangeRoles || member.status !== 'active' || savingUserId === member.user_id"
+                  :disabled="!canChangeRoles || member.can_edit_roles === false || member.status !== 'active' || savingUserId !== null"
                   @change="toggleRole(member, role, ($event.target as HTMLInputElement).checked)"
                 />
                 <span>{{ roleDisplayName(role) }}</span>
@@ -414,6 +422,7 @@ onMounted(() => {
                 恢复
               </button>
             </div>
+            <p v-if="member.roles_managed_externally" class="aw-copy">包含组织继承角色，请在运营系统维护。</p>
           </article>
           <p v-if="members.length === 0" class="aw-inline-alert">没有找到成员</p>
         </div>

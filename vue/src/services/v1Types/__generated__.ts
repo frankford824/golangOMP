@@ -12474,7 +12474,7 @@ export interface paths {
         };
         /**
          * List asset workbench members
-         * @description Returns members from app_memberships, including pending, active, disabled, and merged states.
+         * @description Returns workbench memberships and active users with effective asset_workbench.use grants, even before their first login. Explicit disabled/merged membership states take precedence. Roles come from the same auth assignments and organization policies as main-ops, never legacy user_roles.
          */
         get: {
             parameters: {
@@ -12511,6 +12511,13 @@ export interface paths {
                                 roles?: string[];
                                 role_labels?: string[];
                                 can_edit_roles?: boolean;
+                                /**
+                                 * Format: int64
+                                 * @description Current shared authorization revision; send as expected_policy_revision when editing roles.
+                                 */
+                                policy_revision?: number;
+                                /** @description Includes inherited organization roles; edit those at their policy source in main-ops. */
+                                roles_managed_externally?: boolean;
                             }[];
                         };
                     };
@@ -12622,7 +12629,7 @@ export interface paths {
         head?: never;
         /**
          * Update asset workbench member roles
-         * @description SuperAdmin-only endpoint for composable business capabilities.
+         * @description SuperAdmin-only endpoint. Updates only the four workbench-owned direct auth assignments and the shared policy revision atomically with the identity audit. Preserves other applications' roles, custom grants, and existing selected-org scopes. Inherited organization roles must be edited at their policy source. A stale expected_policy_revision returns 409 without changes.
          */
         patch: {
             parameters: {
@@ -12638,6 +12645,11 @@ export interface paths {
                     "application/json": {
                         roles: ("AssetSubmitter" | "AssetManager" | "AssetTemplateAdmin" | "AssetSettlement")[];
                         reason?: string;
+                        /**
+                         * Format: int64
+                         * @description Shared policy_revision from the member list. A stale revision is rejected without changes.
+                         */
+                        expected_policy_revision: number;
                     };
                 };
             };
@@ -12662,6 +12674,9 @@ export interface paths {
                                 roles?: string[];
                                 role_labels?: string[];
                                 can_edit_roles?: boolean;
+                                /** Format: int64 */
+                                policy_revision?: number;
+                                roles_managed_externally?: boolean;
                                 /** Format: date-time */
                                 created_at?: string;
                                 /** Format: date-time */
