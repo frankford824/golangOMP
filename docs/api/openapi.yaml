@@ -1219,6 +1219,63 @@ components:
         remark: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    CostMaintenanceRow:
+      type: object
+      required: [id, task_id, sku_code, product_name, style_code, revision, status, token, updated_at]
+      properties:
+        id: { type: integer, format: int64 }
+        task_id: { type: integer, format: int64 }
+        sku_code: { type: string }
+        product_name: { type: string }
+        style_code: { type: string }
+        width_cm: { type: number, nullable: true }
+        height_cm: { type: number, nullable: true }
+        area_m2: { type: number, nullable: true }
+        size_text: { type: string }
+        cost_input:
+          allOf: [{ $ref: '#/components/schemas/CostInput' }]
+          nullable: true
+        cost_price: { type: number, nullable: true, description: Canonical reviewed or unreviewed system cost, four decimal places. }
+        erp_cost: { type: number, nullable: true, description: Last observed ERP cost, not necessarily a fresh ERP read. }
+        revision: { type: integer, format: int64 }
+        status: { type: string, enum: [baseline, observe, pending, retry, synced, conflict, no_price] }
+        token: { type: string, description: Opaque optimistic baseline covering identity, specifications, price and revision. }
+        updated_at: { type: string, format: date-time }
+    CostMaintenanceRequest:
+      type: object
+      required: [action, token, revision, erp_cost]
+      properties:
+        action: { type: string, enum: [confirm, modify] }
+        token: { type: string }
+        revision: { type: integer, format: int64, minimum: 1 }
+        erp_cost: { type: number, nullable: true }
+        reason_code: { type: string, enum: [area_incorrect, style_binding_incorrect, cost_incorrect, other], description: Required for modify; other requires reason_detail. }
+        reason_detail: { type: string, maxLength: 200 }
+        product_name: { type: string }
+        style_code: { type: string, maxLength: 128, description: Changes only this SKU's explicit style identity. Target must already have an active cost-rule binding. }
+        width_cm: { type: number, exclusiveMinimum: true, minimum: 0 }
+        height_cm: { type: number, exclusiveMinimum: true, minimum: 0 }
+        area_m2: { type: number, exclusiveMinimum: true, minimum: 0 }
+        cost_input: { $ref: '#/components/schemas/CostInput' }
+        cost_price: { type: number, minimum: 0, maximum: 1000000000 }
+    CostMaintenanceLog:
+      type: object
+      properties:
+        id: { type: string }
+        task_id: { type: integer, format: int64 }
+        operator_id: { type: integer, format: int64, nullable: true }
+        operator_name: { type: string }
+        created_at: { type: string, format: date-time }
+        payload:
+          type: object
+          properties:
+            sku_code: { type: string }
+            sku_item_id: { type: integer, format: int64 }
+            action: { type: string, enum: [confirm, modify] }
+            reason_code: { type: string }
+            reason_detail: { type: string }
+            before: { $ref: '#/components/schemas/CostMaintenanceRow' }
+            after: { $ref: '#/components/schemas/CostMaintenanceRow' }
     CostRuleType:
       type: string
       enum: [cost_model, fixed_unit_price, area_threshold_surcharge, minimum_billable_area, size_based_formula, manual_quote, special_process_surcharge]
@@ -10723,6 +10780,78 @@ paths:
           description: Invalid category mapping payload
         '404':
           description: Category-to-ERP mapping not found
+  /v1/cost-management/sku-costs:
+    get:
+      summary: List completed system SKU costs for daily maintenance
+      description: Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Keyset pagination avoids full-count scans. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [catalog.view]
+      parameters:
+        - { in: query, name: keyword, schema: { type: string } }
+        - { in: query, name: status, schema: { type: string } }
+        - { in: query, name: before_id, schema: { type: integer, format: int64 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Bounded current page, next_before_id zero means end.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CostMaintenanceRow' } }
+                  next_before_id: { type: integer, format: int64 }
+                  refreshed_at: { type: string, format: date-time }
+  /v1/cost-management/sku-costs/{id}/maintain:
+    post:
+      summary: Confirm or modify one completed SKU with audit and ERP reconciliation
+      description: Requires BOTH catalog.manage and erp.manage. Confirm carries no editable fields and approves the currently displayed system price. Modify requires a structured reason; changes identity/specifications and/or price with before/after audit. Canonical fields, mirrors, audit and durable cost-sync intent commit atomically. Direct ERP availability and the displayed ERP baseline are checked before commit. Stale local or ERP data returns 409 without changes. System commit precedes eventual ERP convergence; ERP changes become explicit conflicts. Product metadata edits queue the existing base-data worker; cost-only confirmation never replays product metadata. Does not change task workflow, source assets, stock or historical snapshots.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [catalog.manage, erp.manage]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CostMaintenanceRequest' }
+      responses:
+        '200':
+          description: System change committed; ERP convergence remains visible in status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CostMaintenanceRow' }
+        '400': { description: Invalid fields or missing reason. }
+        '403': { description: Missing maintenance or ERP management permission. }
+        '404': { description: Completed SKU not found. }
+        '409': { description: Local fields or ERP baseline changed; no write committed. }
+  /v1/cost-management/maintenance-logs:
+    get:
+      summary: Query append-only SKU maintenance history
+      description: Includes confirmations and modifications, structured reason codes, actor, time and before/after values. Dedicated SKU and reason indexes support subsequent statistics. Page numbers over 200 require a narrower SKU/reason filter.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [catalog.view]
+      parameters:
+        - { in: query, name: keyword, schema: { type: string, description: SKU prefix } }
+        - { in: query, name: reason_code, schema: { type: string } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Maintenance audit page.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CostMaintenanceLog' } }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
   /v1/cost-rules:
     get:
       summary: List cost rules

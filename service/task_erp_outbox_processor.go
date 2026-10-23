@@ -80,9 +80,10 @@ func (p *taskERPOutboxProcessor) ProcessTaskERPOutbox(ctx context.Context, item 
 }
 
 type taskFilingOutboxPayload struct {
-	TaskID     int64  `json:"task_id"`
-	OperatorID int64  `json:"operator_id"`
-	Source     string `json:"source"`
+	TargetSKUItemIDs []int64 `json:"target_sku_item_ids"`
+	TaskID           int64   `json:"task_id"`
+	OperatorID       int64   `json:"operator_id"`
+	Source           string  `json:"source"`
 }
 
 func decodeTaskFilingOutboxParams(item repo.TaskERPOutboxItem) (TriggerTaskFilingParams, error) {
@@ -123,10 +124,11 @@ func decodeTaskFilingOutboxParams(item repo.TaskERPOutboxItem) (TriggerTaskFilin
 		return TriggerTaskFilingParams{}, fmt.Errorf("unsupported task filing ERP source %q", payload.Source)
 	}
 	return TriggerTaskFilingParams{
-		TaskID:     item.TaskID,
-		OperatorID: payload.OperatorID,
-		Source:     source,
-		Force:      force,
+		TargetSKUItemIDs: payload.TargetSKUItemIDs,
+		TaskID:           item.TaskID,
+		OperatorID:       payload.OperatorID,
+		Source:           source,
+		Force:            force,
 	}, nil
 }
 

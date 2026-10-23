@@ -34,9 +34,10 @@ const pages = [
   {
     name: 'cost-rules',
     path: '/cost-rules',
-    ready: '.cost-manager-page',
-    countSelector: '.rule-card',
-    minItems: 80,
+    ready: '.maintenance-table',
+    countSelector: '.maintenance-table tbody tr',
+    minItems: 50,
+    maxItems: 50,
     maxNodes: 24_000,
     maxReadyMs: defaultMaxReadyMs,
   },

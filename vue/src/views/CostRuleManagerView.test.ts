@@ -48,6 +48,7 @@ vi.mock('@/services/api/erpApi',()=>({erpApi:{getIids:mocks.erp}}))
 
 import CostRuleManagerView from './CostRuleManagerView.vue'
 import {emptyCostInput,emptyCostModel} from '@/domain/cost-model'
+function mountRuleView(options:Record<string,any>={}){return mount(CostRuleManagerView,{...options,props:{...options.props,initialTab:'schemes'}})}
 
 const previewRun = {
   id: 7,
@@ -60,7 +61,7 @@ const previewRun = {
 
 describe('CostRuleManagerView', () => {
   it('references the calculator ARIA target only while its panel is mounted', async () => {
-    const wrapper = mount(CostRuleManagerView)
+    const wrapper = mountRuleView({props:{initialTab:'schemes'}})
     await flushPromises()
     const toggle = wrapper.get('.calculator-toggle')
     expect(toggle.attributes('aria-controls')).toBeUndefined()
@@ -75,7 +76,7 @@ describe('CostRuleManagerView', () => {
     expect(mocks.updateCostRule).not.toHaveBeenCalled()
   })
   it('requires confirmation to retire a price without repricing old SKUs',async()=>{
-    const wrapper=mount(CostRuleManagerView);await flushPromises()
+    const wrapper=mountRuleView({props:{initialTab:'schemes'}});await flushPromises()
     await wrapper.findAll('button').find(b=>b.text()==='停用此计价')!.trigger('click');expect(mocks.updateCostRule).not.toHaveBeenCalled()
     await wrapper.findAll('button').find(b=>b.text()==='确认停用（保留历史）')!.trigger('click');await flushPromises()
     expect(mocks.updateCostRule).toHaveBeenCalledWith(11,expect.objectContaining({is_active:false}))
@@ -83,7 +84,7 @@ describe('CostRuleManagerView', () => {
   })
   it('clears a previous end date explicitly when choosing long term validity',async()=>{
     mocks.listCostRules.mockResolvedValue({data:{data:[{rule_id:11,rule_name:'KT',category_code:'KT_BOARD',rule_type:'fixed_unit_price',base_price:12,is_active:true,effective_to:'2027-01-01T00:00:00Z'}]}})
-    const wrapper=mount(CostRuleManagerView,{attachTo:document.body});await flushPromises()
+    const wrapper=mountRuleView({attachTo:document.body});await flushPromises()
     await wrapper.findAll('button').find(b=>b.text()==='编辑名称 / 价格 / 时间')!.trigger('click');await flushPromises()
     const end=document.querySelectorAll<HTMLSelectElement>('.price-timing select')[1]!
     end.value='never';end.dispatchEvent(new Event('change',{bubbles:true}));await flushPromises()
@@ -92,7 +93,7 @@ describe('CostRuleManagerView', () => {
   })
   it('renders print prices as two editable business fields without exposing internal configuration',async()=>{
     mocks.listCostRules.mockResolvedValue({data:{data:[{rule_id:11,rule_name:'A4打印',category_code:'KT_BOARD',rule_type:'size_based_formula',formula_expression:'print_side:single=0.3,double=0.4',priority:10,is_active:true,source:'phase_020_sample'}]}})
-    const wrapper=mount(CostRuleManagerView,{attachTo:document.body});await flushPromises()
+    const wrapper=mountRuleView({attachTo:document.body});await flushPromises()
     expect(wrapper.text()).toContain('单面 0.3 元/张，双面 0.4 元/张')
     expect(wrapper.text()).not.toContain('print_side:')
     await wrapper.findAll('button').find(b=>b.text()==='编辑名称 / 价格 / 时间')!.trigger('click');await flushPromises()
@@ -103,7 +104,7 @@ describe('CostRuleManagerView', () => {
   })
   it('previews an unsaved unified model with structured input without saving it', async () => {
     mocks.listCostRules.mockResolvedValue({data:{data:[{rule_id:11,rule_name:'KT方案',category_code:'KT_BOARD',rule_type:'cost_model',is_active:true,formula_expression:JSON.stringify({...emptyCostModel(),material:'KT',unit_price:12.5})}]}})
-    const wrapper=mount(CostRuleManagerView)
+    const wrapper=mountRuleView({props:{initialTab:'schemes'}})
     await flushPromises()
     await wrapper.findAll('button').find(b=>b.text()==='编辑方案价格')?.trigger('click')
     await flushPromises()
@@ -136,7 +137,7 @@ describe('CostRuleManagerView', () => {
   })
 
   it('shows rule bindings, ERP differences, and previews cost without writing data', async () => {
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
 
     expect(wrapper.text()).toContain('KT 板')
@@ -163,7 +164,7 @@ describe('CostRuleManagerView', () => {
         ],
       },
     })
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
 
     await wrapper.get('.group-search select').setValue('all')
@@ -184,7 +185,7 @@ describe('CostRuleManagerView', () => {
       match_count: 18,
       example_sku_code: 'SKU-18',
     }] })
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
 
     expect(wrapper.text()).toContain('需要选择方案')
@@ -196,7 +197,7 @@ describe('CostRuleManagerView', () => {
   })
 
   it('requires an explicit update before ERP synchronization', async () => {
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
 
     await wrapper.findAll('button').find((button) => button.text() === '查看影响')?.trigger('click')
@@ -211,7 +212,7 @@ describe('CostRuleManagerView', () => {
   })
 
   it('allows an obsolete preview to be cancelled before creating a replacement', async () => {
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
 
     await wrapper.findAll('button').find((button) => button.text() === '取消预览')?.trigger('click')
@@ -222,7 +223,7 @@ describe('CostRuleManagerView', () => {
   })
 
   it('saves a rule and creates only an impact preview', async () => {
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '编辑名称 / 价格 / 时间')?.trigger('click')
     await flushPromises()
@@ -238,7 +239,7 @@ describe('CostRuleManagerView', () => {
   })
 
   it('creates an exact impact preview from normalized SKU codes', async () => {
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
     await wrapper.get('.exact-run-builder textarea').setValue('DZA000036, DZA000037\nDZA000036')
     await wrapper.get('.exact-run-builder button').trigger('click')
@@ -264,7 +265,7 @@ describe('CostRuleManagerView', () => {
       priority: 10,
       is_active: true,
     }] } })
-    const wrapper = mount(CostRuleManagerView, { attachTo: document.body })
+    const wrapper = mountRuleView( { attachTo: document.body })
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '编辑名称 / 价格 / 时间')?.trigger('click')
     await flushPromises()

@@ -1841,6 +1841,7 @@ func (r *TaskResourceGroupRepo) CompleteModules(ctx context.Context, tx repo.Tx,
 
 func (r *TaskResourceGroupRepo) EnqueueTaskFinalized(ctx context.Context, tx repo.Tx, taskID, workflowRevision int64, enqueueFiling, enqueueImageSync bool) error {
 	sqlTx := Unwrap(tx)
+	if err:=ensureCompletedCostSKU(ctx,tx,taskID);err!=nil{return err}
 	if enqueueFiling {
 		if _, err := sqlTx.ExecContext(ctx, `
 			INSERT INTO task_erp_outbox (task_id, job_type, dedupe_key, payload_json)

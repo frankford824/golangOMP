@@ -5546,6 +5546,178 @@ export interface paths {
         };
         trace?: never;
     };
+    "/v1/cost-management/sku-costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List completed system SKU costs for daily maintenance
+         * @description Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Keyset pagination avoids full-count scans. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    keyword?: string;
+                    status?: string;
+                    before_id?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Bounded current page, next_before_id zero means end. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["CostMaintenanceRow"][];
+                            /** Format: int64 */
+                            next_before_id?: number;
+                            /** Format: date-time */
+                            refreshed_at?: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cost-management/sku-costs/{id}/maintain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm or modify one completed SKU with audit and ERP reconciliation
+         * @description Requires BOTH catalog.manage and erp.manage. Confirm carries no editable fields and approves the currently displayed system price. Modify requires a structured reason; changes identity/specifications and/or price with before/after audit. Canonical fields, mirrors, audit and durable cost-sync intent commit atomically. Direct ERP availability and the displayed ERP baseline are checked before commit. Stale local or ERP data returns 409 without changes. System commit precedes eventual ERP convergence; ERP changes become explicit conflicts. Product metadata edits queue the existing base-data worker; cost-only confirmation never replays product metadata. Does not change task workflow, source assets, stock or historical snapshots.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CostMaintenanceRequest"];
+                };
+            };
+            responses: {
+                /** @description System change committed; ERP convergence remains visible in status. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["CostMaintenanceRow"];
+                        };
+                    };
+                };
+                /** @description Invalid fields or missing reason. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing maintenance or ERP management permission. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Completed SKU not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Local fields or ERP baseline changed; no write committed. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cost-management/maintenance-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Query append-only SKU maintenance history
+         * @description Includes confirmations and modifications, structured reason codes, actor, time and before/after values. Dedicated SKU and reason indexes support subsequent statistics. Page numbers over 200 require a narrower SKU/reason filter.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    keyword?: string;
+                    reason_code?: string;
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Maintenance audit page. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: components["schemas"]["CostMaintenanceLog"][];
+                            pagination?: components["schemas"]["PaginationMeta"];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/cost-rules": {
         parameters: {
             query?: never;
@@ -21312,6 +21484,75 @@ export interface components {
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
+        };
+        CostMaintenanceRow: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            task_id: number;
+            sku_code: string;
+            product_name: string;
+            style_code: string;
+            width_cm?: number | null;
+            height_cm?: number | null;
+            area_m2?: number | null;
+            size_text?: string;
+            cost_input?: components["schemas"]["CostInput"] | null;
+            /** @description Canonical reviewed or unreviewed system cost */
+            cost_price?: number | null;
+            /** @description Last observed ERP cost */
+            erp_cost?: number | null;
+            /** Format: int64 */
+            revision: number;
+            /** @enum {string} */
+            status: "baseline" | "observe" | "pending" | "retry" | "synced" | "conflict" | "no_price";
+            /** @description Opaque optimistic baseline covering identity */
+            token: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CostMaintenanceRequest: {
+            /** @enum {string} */
+            action: "confirm" | "modify";
+            token: string;
+            /** Format: int64 */
+            revision: number;
+            erp_cost: number | null;
+            /**
+             * @description Required for modify; other requires reason_detail.
+             * @enum {string}
+             */
+            reason_code?: "area_incorrect" | "style_binding_incorrect" | "cost_incorrect" | "other";
+            reason_detail?: string;
+            product_name?: string;
+            /** @description Changes only this SKU's explicit style identity. Target must already have an active cost-rule binding. */
+            style_code?: string;
+            width_cm?: number;
+            height_cm?: number;
+            area_m2?: number;
+            cost_input?: components["schemas"]["CostInput"];
+            cost_price?: number;
+        };
+        CostMaintenanceLog: {
+            id?: string;
+            /** Format: int64 */
+            task_id?: number;
+            /** Format: int64 */
+            operator_id?: number | null;
+            operator_name?: string;
+            /** Format: date-time */
+            created_at?: string;
+            payload?: {
+                sku_code?: string;
+                /** Format: int64 */
+                sku_item_id?: number;
+                /** @enum {string} */
+                action?: "confirm" | "modify";
+                reason_code?: string;
+                reason_detail?: string;
+                before?: components["schemas"]["CostMaintenanceRow"];
+                after?: components["schemas"]["CostMaintenanceRow"];
+            };
         };
         /** @enum {string} */
         CostRuleType: "cost_model" | "fixed_unit_price" | "area_threshold_surcharge" | "minimum_billable_area" | "size_based_formula" | "manual_quote" | "special_process_surcharge";

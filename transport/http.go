@@ -161,6 +161,9 @@ func NewRouter(
 	if productManagementH != nil {
 		costManagementGroup := v1.Group("/cost-management")
 		{
+			costManagementGroup.GET("/sku-costs", capabilityAccess(costManagementGroup, http.MethodGet, "/sku-costs", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), productManagementH.ListMaintenance)
+			costManagementGroup.POST("/sku-costs/:id/maintain", capabilityAccess(costManagementGroup, http.MethodPost, "/sku-costs/{id}/maintain", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage, domain.PermissionERPManage), productManagementH.MaintainCost)
+			costManagementGroup.GET("/maintenance-logs", capabilityAccess(costManagementGroup, http.MethodGet, "/maintenance-logs", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), productManagementH.MaintenanceLogs)
 			costManagementGroup.GET("/dashboard", capabilityAccess(costManagementGroup, http.MethodGet, "/dashboard", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), productManagementH.CostDashboard)
 			costManagementGroup.POST("/recalculation-runs", capabilityAccess(costManagementGroup, http.MethodPost, "/recalculation-runs", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), productManagementH.CreateCostRecalculationRun)
 			costManagementGroup.GET("/recalculation-runs", capabilityAccess(costManagementGroup, http.MethodGet, "/recalculation-runs", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), productManagementH.ListCostRecalculationRuns)

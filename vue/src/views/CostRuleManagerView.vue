@@ -3,13 +3,17 @@
     <header class="yb-page-surface yb-page-header-row">
       <div class="yb-page-heading-copy">
         <h1 class="yb-page-title">成本规则</h1>
-        <p class="yb-page-subtitle">选择方案，维护价格与款式，查看关联 SKU。</p>
+        <p class="yb-page-subtitle">核对已完成编码的成本，维护价格、规格与款式。</p>
       </div>
-      <div class="header-actions">
+      <div v-if="entryTab==='schemes'" class="header-actions">
         <button class="secondary" :disabled="loading" @click="loadAll">{{ loading ? '刷新中…' : '刷新数据' }}</button>
         <button class="primary" @click="openRuleEditor()">新增方案</button>
       </div>
     </header>
+
+    <nav class="workspace-tabs" aria-label="成本维护入口"><button :class="{active:entryTab==='costs'}" @click="entryTab='costs'">编码成本</button><button :class="{active:entryTab==='schemes'}" @click="openSchemes">方案与绑定</button></nav>
+    <CostMaintenanceList v-if="entryTab==='costs'" />
+    <div v-show="entryTab==='schemes'">
 
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
     <div v-if="notice" class="message notice" role="status">{{ notice }}</div>
@@ -157,6 +161,7 @@
     </section>
 
     <button class="calculator-toggle" :aria-expanded="calculatorOpen" :aria-controls="calculatorOpen ? 'cost-calculator' : undefined" @click="calculatorOpen=!calculatorOpen">{{calculatorOpen?'收起':'试算'}}</button>
+    </div>
     <Teleport to="body">
       <div v-if="ruleDialogOpen" class="modal-layer" @keydown.esc="closeRuleEditor">
         <button class="modal-mask" aria-label="关闭规则编辑" @click="closeRuleEditor" />
@@ -241,6 +246,7 @@ import CostModelEditor from '@/components/cost/CostModelEditor.vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
 import CostBoundSKUList from '@/components/cost/CostBoundSKUList.vue'
 import CostSyncPanel from '@/components/cost/CostSyncPanel.vue'
+import CostMaintenanceList from '@/components/cost/CostMaintenanceList.vue'
 import '@/components/cost/cost-manager-workspace.css'
 import {ruleDescription,printPrices,keywordPrice} from '@/domain/cost-rule-presentation'
 import {chinaDateInput,pricingWindow,pricingWindowLabel} from '@/domain/cost-rule-timing'
@@ -316,6 +322,10 @@ const candidateKeyword = ref('')
 const preview = ref<CostRulePreviewResponse | null>(null)
 const ruleDraft = reactive<RuleDraft>(emptyRuleDraft())
 const calculator = reactive({ rule_group: '', width: 1, height: 1, area: null as number | null, quantity: 1, process: '' })
+const props=defineProps<{initialTab?:'costs'|'schemes'}>()
+const entryTab=ref(props.initialTab||'costs')
+let schemesLoaded=false
+async function openSchemes(){entryTab.value='schemes';if(!schemesLoaded){await loadAll();schemesLoaded=true}}
 const workspaceTab=ref('方案与绑定')
 const groupSearch=ref('')
 const groupScope=ref('bound'),bindingSearch=ref(''),calculatorOpen=ref(false),dataRevision=ref(0)
@@ -557,7 +567,7 @@ async function syncRunERP(id: number) {
   finally { runActionBusy.value = null }
 }
 
-onMounted(loadAll)
+onMounted(()=>{if(entryTab.value==='schemes'){schemesLoaded=true;loadAll()}})
 </script>
 
 <style scoped>

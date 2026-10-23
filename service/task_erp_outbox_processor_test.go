@@ -15,6 +15,13 @@ type taskERPOutboxFilingStub struct {
 	err    *domain.AppError
 }
 
+func TestMaintenanceOutboxRetainsExactSKUScope(t *testing.T) {
+	p, err := decodeTaskFilingOutboxParams(repo.TaskERPOutboxItem{TaskID: 71, Payload: json.RawMessage(`{"task_id":71,"source":"business_info_patch","target_sku_item_ids":[10]}`)})
+	if err != nil || !p.Force || len(p.TargetSKUItemIDs) != 1 || p.TargetSKUItemIDs[0] != 10 {
+		t.Fatalf("maintenance became a whole-task replay: %+v %v", p, err)
+	}
+}
+
 func (s *taskERPOutboxFilingStub) TriggerFiling(_ context.Context, params TriggerTaskFilingParams) (*domain.TaskFilingStatusView, *domain.AppError) {
 	s.params = params
 	return s.view, s.err

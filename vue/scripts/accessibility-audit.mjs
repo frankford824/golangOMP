@@ -128,10 +128,16 @@ const pages = [
     },
   },
   {
+    name: 'completed-sku-costs',
+    path: '/cost-rules',
+    ready: '.maintenance-table',
+  },
+  {
     name: 'cost-rule-editor',
     path: '/cost-rules',
     ready: '.cost-manager-page',
     prepare: async (page) => {
+      await page.getByRole('navigation', { name: '成本维护入口' }).getByRole('button', { name: '方案与绑定', exact: true }).click()
       await page.getByRole('button', { name: '新增方案', exact: true }).click()
       await page.waitForSelector('.modal-card form, form.modal-card', { state: 'visible' })
       await page.waitForTimeout(200)

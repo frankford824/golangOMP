@@ -384,6 +384,7 @@ func main() {
 		costNotify = costSyncSvc.Notify
 	}
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
+		service.WithTaskCostMaintenanceRepo(mysqlrepo.NewCostMaintenanceRepo(mdb)),
 		service.WithTaskCostSyncNotifier(costNotify),
 		service.WithTaskCostSyncService(costSyncSvc),
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
@@ -592,6 +593,7 @@ func main() {
 	// V7 handlers
 	erpBridgeH := handler.NewERPBridgeHandler(erpBridgeSvc)
 	productManagementH := handler.NewProductManagementHandler(productManagementSvc, costRecalculationSvc)
+	productManagementH.SetCostMaintenanceService(taskSvc.(service.CostMaintenanceService))
 	categoryH := handler.NewCategoryHandler(categorySvc)
 	categoryMappingH := handler.NewCategoryERPMappingHandler(categoryMappingSvc)
 	costRuleH := handler.NewCostRuleHandler(costRuleSvc)

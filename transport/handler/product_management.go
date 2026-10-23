@@ -11,8 +11,9 @@ import (
 )
 
 type ProductManagementHandler struct {
-	svc     service.ProductManagementService
-	costRun service.CostRecalculationService
+	maintenance service.CostMaintenanceService
+	svc         service.ProductManagementService
+	costRun     service.CostRecalculationService
 }
 
 func NewProductManagementHandler(svc service.ProductManagementService, costRun ...service.CostRecalculationService) *ProductManagementHandler {
