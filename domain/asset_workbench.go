@@ -455,20 +455,22 @@ type AssetWorkbenchBatchJob struct {
 }
 
 type AssetWorkbenchMember struct {
-	UserID       int64     `json:"user_id"`
-	Username     string    `json:"username"`
-	DisplayName  string    `json:"display_name"`
-	RealName     string    `json:"real_name"`
-	WorkerType   string    `json:"worker_type"`
-	JobGrade     string    `json:"job_grade"`
-	Status       string    `json:"status"`
-	PIICompleted bool      `json:"pii_completed"`
-	Identity     string    `json:"identity"`
-	Roles        []Role    `json:"roles,omitempty"`
-	RoleLabels   []string  `json:"role_labels,omitempty"`
-	CanEditRoles bool      `json:"can_edit_roles"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	UserID                 int64     `json:"user_id"`
+	Username               string    `json:"username"`
+	DisplayName            string    `json:"display_name"`
+	RealName               string    `json:"real_name"`
+	WorkerType             string    `json:"worker_type"`
+	JobGrade               string    `json:"job_grade"`
+	Status                 string    `json:"status"`
+	PIICompleted           bool      `json:"pii_completed"`
+	Identity               string    `json:"identity"`
+	Roles                  []Role    `json:"roles,omitempty"`
+	RoleLabels             []string  `json:"role_labels,omitempty"`
+	CanEditRoles           bool      `json:"can_edit_roles"`
+	PolicyRevision         int64     `json:"policy_revision"`
+	RolesManagedExternally bool      `json:"roles_managed_externally"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 type AppMembership struct {

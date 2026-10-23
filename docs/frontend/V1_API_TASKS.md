@@ -8318,7 +8318,7 @@ curl -X PATCH https://api.example.com/v1/asset-workbench/profiles/<user_id> \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns members from app_memberships, including pending, active, disabled, and merged states.
+- `GET`: Returns workbench memberships and active users with effective asset_workbench.use grants, even before their first login. Explicit disabled/merged membership states take precedence. Roles come from the same auth assignments and organization policies as main-ops, never legacy user_roles.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -8440,7 +8440,7 @@ curl -X PATCH https://api.example.com/v1/asset-workbench/members/<user_id>/ident
 ### 简介
 支持方法: PATCH。
 
-- `PATCH`: SuperAdmin-only endpoint for composable business capabilities.
+- `PATCH`: SuperAdmin-only endpoint. Updates only the four workbench-owned direct auth assignments and the shared policy revision atomically with the identity audit. Preserves other applications' roles, custom grants, and existing selected-org scopes. Inherited organization roles must be edited at their policy source. A stale expected_policy_revision returns 409 without changes.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -8460,6 +8460,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `roles` | array<enum(AssetSubmitter/AssetManager/AssetTemplateAdmin/AssetSettlement)> | 是 | - |
 | `reason` | string | 否 | - |
+| `expected_policy_revision` | integer | 是 | Shared policy_revision from the member list. A stale revision is rejected without changes. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

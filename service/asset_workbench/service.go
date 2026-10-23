@@ -63,6 +63,7 @@ type Service struct {
 	cfg             Config
 	repo            repo.AssetWorkbenchRepo
 	userRepo        repo.UserRepo
+	roleStore       WorkbenchRoleStore
 	sessionRevoker  UserSessionRevoker
 	notifications   ProfileCompletionNotifier
 	tx              repo.TxRunner
@@ -102,6 +103,12 @@ type ResourceGroupMaterialSearcher interface {
 
 type EffectiveAccessResolver interface {
 	EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, *domain.AppError)
+}
+
+// Both applications edit auth_* assignments, never legacy user_roles.
+type WorkbenchRoleStore interface {
+	ListWorkbenchRoles(context.Context, int64) ([]domain.Role, error)
+	ReplaceWorkbenchRoles(context.Context, repo.Tx, int64, int64, []domain.Role, *int64, string) error
 }
 
 type SystemMaterialBrowser interface {
@@ -178,6 +185,7 @@ func WithRepository(workbenchRepo repo.AssetWorkbenchRepo, tx repo.TxRunner) Opt
 func WithUserRepository(userRepo repo.UserRepo) Option {
 	return func(s *Service) {
 		s.userRepo = userRepo
+		s.roleStore, _ = userRepo.(WorkbenchRoleStore)
 	}
 }
 
@@ -351,8 +359,9 @@ type AccessDisableParams struct {
 }
 
 type UpdateMemberRolesParams struct {
-	Roles  []domain.Role `json:"roles"`
-	Reason string        `json:"reason"`
+	Roles                  []domain.Role `json:"roles"`
+	Reason                 string        `json:"reason"`
+	ExpectedPolicyRevision *int64        `json:"expected_policy_revision,omitempty"`
 }
 
 type AccountMergePreviewParams struct {
@@ -1250,6 +1259,9 @@ func (s *Service) ResolveAssetWorkbenchAccess(ctx context.Context, actor domain.
 		reason := ""
 		identityType := domain.AppMembershipIdentityStaff
 		switch {
+		case actor.EffectiveAccess != nil && actor.EffectiveAccess.Has(domain.PermissionAssetWorkbenchUse):
+			source = domain.AppMembershipSourceMainOpsOpened
+			reason = "显式权限授权，补齐工作台开通状态"
 		case actorHasAny(actor, domain.RoleSuperAdmin, domain.RoleHRAdmin):
 			source = domain.AppMembershipSourceGlobalAdminAuto
 			reason = "全局管理角色自动开通资产工作台"
@@ -1260,6 +1272,14 @@ func (s *Service) ResolveAssetWorkbenchAccess(ctx context.Context, actor domain.
 		if source != "" {
 			var opened *domain.AppMembership
 			if txErr := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+				// Never undo a concurrent disable or account merge.
+				current, lockErr := s.repo.LockMembership(ctx, tx, domain.AssetWorkbenchAppCode, actor.ID)
+				if lockErr == nil && current != nil {
+					return nil
+				}
+				if lockErr != nil && !errors.Is(lockErr, sql.ErrNoRows) {
+					return lockErr
+				}
 				openedBy := actor.ID
 				var upsertErr error
 				opened, upsertErr = s.repo.UpsertMembership(ctx, tx, &domain.AppMembership{
@@ -1295,6 +1315,10 @@ func (s *Service) ResolveAssetWorkbenchAccess(ctx context.Context, actor domain.
 		IsAdminShell:     isAssetWorkbenchAdmin(actor),
 	}
 	if status == domain.AppMembershipStatusActive {
+		if actor.EffectiveAccess != nil && !actor.EffectiveAccess.Has(domain.PermissionAssetWorkbenchUse) {
+			access.DeniedReason = "资产工作台权限已撤销，请联系管理员。"
+			return access, nil
+		}
 		access.IsEnabled = true
 		return access, nil
 	}
@@ -1503,7 +1527,7 @@ func (s *Service) OpenAccess(ctx context.Context, actor domain.RequestActor, par
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if s.userRepo == nil || s.tx == nil {
+	if s.roleStore == nil || s.tx == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench user role repository is not configured.", nil)
 	}
 	if params.UserID <= 0 {
@@ -1524,14 +1548,19 @@ func (s *Service) OpenAccess(ctx context.Context, actor domain.RequestActor, par
 	if currentMembership != nil && currentMembership.Status == domain.AppMembershipStatusDisabled && !actorHasAny(actor, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can restore disabled workbench access.", nil)
 	}
-	currentRoles, err := s.userRepo.ListRoles(ctx, params.UserID)
+	if currentMembership != nil && currentMembership.Status == domain.AppMembershipStatusMerged {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "合并账号不可重新开通，请管理主账号。", nil)
+	}
+	currentRoles, err := s.roleStore.ListWorkbenchRoles(ctx, params.UserID)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load user roles.", err.Error())
 	}
-	nextRoles := mergeAssetWorkbenchRoles(currentRoles, roles)
+	// Opening access adds grants; it must not silently revoke management roles
+	// already assigned in main-ops to an existing member.
+	nextRoles := domain.NormalizeRoleValues(append(append([]domain.Role{}, currentRoles...), roles...))
 	var membership *domain.AppMembership
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.userRepo.ReplaceRoles(ctx, tx, params.UserID, nextRoles); err != nil {
+		if err := s.roleStore.ReplaceWorkbenchRoles(ctx, tx, params.UserID, actor.ID, nextRoles, nil, params.Reason); err != nil {
 			return err
 		}
 		var err error
@@ -1565,7 +1594,7 @@ func (s *Service) DisableAccess(ctx context.Context, actor domain.RequestActor, 
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if s.userRepo == nil || s.tx == nil {
+	if s.roleStore == nil || s.tx == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench user role repository is not configured.", nil)
 	}
 	if !actorHasAny(actor, domain.RoleSuperAdmin) {
@@ -1578,7 +1607,7 @@ func (s *Service) DisableAccess(ctx context.Context, actor domain.RequestActor, 
 	if reason == "" {
 		return nil, domain.NewAppError(domain.ErrCodeReasonRequired, "A disable reason is required.", nil)
 	}
-	currentRoles, err := s.userRepo.ListRoles(ctx, params.UserID)
+	currentRoles, err := s.roleStore.ListWorkbenchRoles(ctx, params.UserID)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load user roles.", err.Error())
 	}
@@ -1590,7 +1619,7 @@ func (s *Service) DisableAccess(ctx context.Context, actor domain.RequestActor, 
 		if err != nil {
 			return err
 		}
-		if err := s.userRepo.ReplaceRoles(ctx, tx, params.UserID, nextRoles); err != nil {
+		if err := s.roleStore.ReplaceWorkbenchRoles(ctx, tx, params.UserID, actor.ID, nextRoles, nil, reason); err != nil {
 			return err
 		}
 		return s.appendIdentityEvent(ctx, tx, actor.ID, params.UserID, domain.AppIdentityActionAccessDisabled, map[string]interface{}{
@@ -1612,11 +1641,14 @@ func (s *Service) UpdateMemberRoles(ctx context.Context, actor domain.RequestAct
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if s.userRepo == nil || s.tx == nil {
+	if s.roleStore == nil || s.tx == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench user role repository is not configured.", nil)
 	}
 	if !actorHasAny(actor, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only super admins can change workbench roles.", nil)
+	}
+	if params.ExpectedPolicyRevision == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "请刷新成员列表后提交权限版本。", nil)
 	}
 	if userID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required.", nil)
@@ -1628,13 +1660,13 @@ func (s *Service) UpdateMemberRoles(ctx context.Context, actor domain.RequestAct
 	if membership.Status != domain.AppMembershipStatusActive {
 		return nil, domain.NewAppError(domain.ErrCodeConflict, "Only active workbench members can change roles.", map[string]string{"status": membership.Status})
 	}
-	currentRoles, err := s.userRepo.ListRoles(ctx, userID)
+	currentRoles, err := s.roleStore.ListWorkbenchRoles(ctx, userID)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load user roles.", err.Error())
 	}
 	nextRoles := mergeAssetWorkbenchRoles(removeAssetWorkbenchRoles(currentRoles), normalizeAssetWorkbenchRoleSet(params.Roles, true))
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.userRepo.ReplaceRoles(ctx, tx, userID, nextRoles); err != nil {
+		if err := s.roleStore.ReplaceWorkbenchRoles(ctx, tx, userID, actor.ID, nextRoles, params.ExpectedPolicyRevision, params.Reason); err != nil {
 			return err
 		}
 		return s.appendIdentityEvent(ctx, tx, actor.ID, userID, domain.AppIdentityActionRolesUpdated, map[string]interface{}{
@@ -1643,6 +1675,12 @@ func (s *Service) UpdateMemberRoles(ctx context.Context, actor domain.RequestAct
 			"roles": nextRoles,
 		}, strings.TrimSpace(params.Reason))
 	}); err != nil {
+		if errors.Is(err, repo.ErrConflict) {
+			return nil, domain.NewAppError(domain.ErrCodeConflict, "权限已在另一端更新，请刷新成员后重试。", nil)
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update asset workbench member roles.", err.Error())
 	}
 	member, appErr := s.loadMemberByID(ctx, actor, userID)
@@ -1710,11 +1748,14 @@ func (s *Service) MergeAccounts(ctx context.Context, actor domain.RequestActor, 
 	if err != nil || canonicalUser == nil {
 		return nil, domain.NewAppError(domain.ErrCodeNotFound, "Canonical user not found.", nil)
 	}
-	sourceRoles, err := s.userRepo.ListRoles(ctx, params.SourceUserID)
+	if s.roleStore == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Explicit workbench role store is not configured.", nil)
+	}
+	sourceRoles, err := s.roleStore.ListWorkbenchRoles(ctx, params.SourceUserID)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load source roles.", err.Error())
 	}
-	canonicalRoles, err := s.userRepo.ListRoles(ctx, params.CanonicalUserID)
+	canonicalRoles, err := s.roleStore.ListWorkbenchRoles(ctx, params.CanonicalUserID)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load canonical roles.", err.Error())
 	}
@@ -1766,10 +1807,10 @@ func (s *Service) MergeAccounts(ctx context.Context, actor domain.RequestActor, 
 			return err
 		}
 		nextCanonicalRoles := mergeAssetWorkbenchRoles(canonicalRoles, sourceAssetRoles)
-		if err := s.userRepo.ReplaceRoles(ctx, tx, params.CanonicalUserID, nextCanonicalRoles); err != nil {
+		if err := s.roleStore.ReplaceWorkbenchRoles(ctx, tx, params.CanonicalUserID, actor.ID, nextCanonicalRoles, nil, params.Reason); err != nil {
 			return err
 		}
-		if err := s.userRepo.ReplaceRoles(ctx, tx, params.SourceUserID, removeAssetWorkbenchRoles(sourceRoles)); err != nil {
+		if err := s.roleStore.ReplaceWorkbenchRoles(ctx, tx, params.SourceUserID, actor.ID, removeAssetWorkbenchRoles(sourceRoles), nil, params.Reason); err != nil {
 			return err
 		}
 		if err := s.repo.MergeProfiles(ctx, tx, params.SourceUserID, params.CanonicalUserID, params.ProfileChoices, actor.ID); err != nil {
@@ -12142,7 +12183,60 @@ func asAppError(err error) *domain.AppError {
 }
 
 func actorHasAny(actor domain.RequestActor, roles ...domain.Role) bool {
+	if actor.EffectiveAccess != nil {
+		// Legacy role-shaped call sites are resolved by their actual explicit
+		// capability. The protected SuperAdmin exception is never inferred from
+		// a stale user_roles entry or from an arbitrary custom role's name.
+		for _, role := range roles {
+			var permission domain.PermissionCode
+			switch role {
+			case domain.RoleAssetSubmitter:
+				permission = domain.PermissionAssetWorkbenchSubmit
+			case domain.RoleAssetManager:
+				permission = domain.PermissionAssetManage
+			case domain.RoleAssetTemplateAdmin:
+				permission = domain.PermissionAssetWorkbenchTemplates
+			case domain.RoleAssetSettlement:
+				permission = domain.PermissionAssetWorkbenchSettlement
+			case domain.RoleHRAdmin:
+				permission = domain.PermissionAssetWorkbenchProfiles
+			case domain.RoleSuperAdmin:
+				if actor.EffectiveAccess.Has(domain.PermissionSystemManage) {
+					for _, assignment := range actor.EffectiveAccess.Assignments {
+						if assignment.RoleCode == "super_admin" {
+							return true
+						}
+					}
+				}
+			}
+			if permission != "" && actor.EffectiveAccess.Has(permission) {
+				return true
+			}
+		}
+		return len(roles) == 0
+	}
 	return domain.ActorHasAnyRole(actor, roles)
+}
+
+func explicitWorkbenchRoles(effective *domain.EffectiveAccess) []domain.Role {
+	var roles []domain.Role
+	for _, assignment := range effective.Assignments {
+		switch assignment.RoleCode {
+		case "super_admin":
+			roles = append(roles, domain.RoleSuperAdmin)
+		case "asset_profile_admin":
+			roles = append(roles, domain.RoleHRAdmin)
+		case "asset_submitter":
+			roles = append(roles, domain.RoleAssetSubmitter)
+		case "asset_manager":
+			roles = append(roles, domain.RoleAssetManager)
+		case "asset_template_admin":
+			roles = append(roles, domain.RoleAssetTemplateAdmin)
+		case "asset_settlement":
+			roles = append(roles, domain.RoleAssetSettlement)
+		}
+	}
+	return domain.NormalizeRoleValues(roles)
 }
 
 func isAssetWorkbenchAdmin(actor domain.RequestActor) bool {
@@ -12167,6 +12261,32 @@ func assetWorkbenchRolesForService() []domain.Role {
 }
 
 func assetWorkbenchCapabilities(actor domain.RequestActor) []string {
+	if actor.EffectiveAccess != nil {
+		// Never append stale role-derived or frontend-config actions to an
+		// explicit policy. Each UI action reflects its real backend capability.
+		mapping := map[domain.PermissionCode][]string{
+			domain.PermissionAssetWorkbenchUse:        {"asset.workbench.bootstrap", "asset.workbench.profile", "asset.workbench.settlement.self"},
+			domain.PermissionAssetWorkbenchSubmit:     {"asset.workbench.submit"},
+			domain.PermissionAssetDownload:            {"asset.workbench.material.download", "asset.workbench.download"},
+			domain.PermissionAssetWorkbenchMembers:    {"asset.workbench.member.manage"},
+			domain.PermissionAssetWorkbenchGroups:     {"asset.workbench.group.manage"},
+			domain.PermissionAssetManage:              {"asset.workbench.manage", "asset.workbench.system_search"},
+			domain.PermissionAssetWorkbenchTemplates:  {"asset.workbench.cost_center.manage"},
+			domain.PermissionAssetWorkbenchProfiles:   {"asset.workbench.profile.manage"},
+			domain.PermissionAssetWorkbenchSettlement: {"asset.workbench.settlement", "asset.workbench.export"},
+		}
+		var actions []string
+		for permission, aliases := range mapping {
+			if actor.EffectiveAccess.Has(permission) {
+				actions = append(actions, aliases...)
+			}
+		}
+		if actorHasAny(actor, domain.RoleSuperAdmin) && actor.EffectiveAccess.Has(domain.PermissionSystemManage) {
+			actions = append(actions, "asset.workbench.member.identity")
+		}
+		sort.Strings(actions)
+		return dedupeStrings(actions)
+	}
 	actions := append([]string{}, actor.FrontendAccess.Actions...)
 	if actorHasAny(actor, domain.RoleAssetSubmitter) {
 		actions = append(actions,
@@ -12277,6 +12397,9 @@ func normalizeMembershipIdentityType(value string) string {
 }
 
 func assetRolesFromActor(actor domain.RequestActor) []domain.Role {
+	if actor.EffectiveAccess != nil {
+		return explicitWorkbenchRoles(actor.EffectiveAccess)
+	}
 	return assetRolesFromRoles(actor.Roles)
 }
 
@@ -12335,7 +12458,7 @@ func containsManagementAssetRole(roles []domain.Role) bool {
 }
 
 func roleLabelsForActor(actor domain.RequestActor) []string {
-	return roleLabelsForRoles(actor.Roles)
+	return roleLabelsForRoles(assetRolesFromActor(actor))
 }
 
 func roleLabelsForRoles(roles []domain.Role) []string {
@@ -12372,7 +12495,7 @@ func decorateMemberForActor(member *domain.AssetWorkbenchMember, actor domain.Re
 		return
 	}
 	member.RoleLabels = roleLabelsForRoles(member.Roles)
-	member.CanEditRoles = member.Status == domain.AppMembershipStatusActive && actorHasAny(actor, domain.RoleSuperAdmin)
+	member.CanEditRoles = member.Status == domain.AppMembershipStatusActive && !member.RolesManagedExternally && actorHasAny(actor, domain.RoleSuperAdmin)
 }
 
 func (s *Service) loadMemberByID(ctx context.Context, actor domain.RequestActor, userID int64) (*domain.AssetWorkbenchMember, *domain.AppError) {
