@@ -925,6 +925,8 @@ func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain
 	if err != nil {
 		return err
 	}
+	// Full scans stamp every item with their start time. A slower, older scan
+	// must not move the watermark behind a newer scan's missing-file cutoff.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO external_asset_records (
 		  provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
@@ -944,8 +946,8 @@ func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain
 		  is_dir = VALUES(is_dir),
 		  status = 'indexed',
 		  raw_url = CASE WHEN VALUES(raw_url) <> '' THEN VALUES(raw_url) ELSE raw_url END,
-		  last_seen_at = VALUES(last_seen_at),
-		  last_scanned_at = VALUES(last_scanned_at),
+		  last_seen_at = GREATEST(COALESCE(last_seen_at, VALUES(last_seen_at)), VALUES(last_seen_at)),
+		  last_scanned_at = GREATEST(COALESCE(last_scanned_at, VALUES(last_scanned_at)), VALUES(last_scanned_at)),
 		  searchable_text = VALUES(searchable_text)`,
 		item.Provider, string(item.Kind), item.Driver, item.MountPath, hash, item.OriginPath, item.ParentPath,
 		item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir, item.RawURL,

@@ -67,6 +67,55 @@ func TestBuildExternalAssetWhereIncludesOnlyOSSReadyMissingArchiveWhenRequested(
 	}
 }
 
+func TestExternalAssetUpsertKeepsConcurrentScanWatermarksMonotonic(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expected, actual string) error {
+		if expected != "monotonic scan upsert" {
+			return sqlmock.QueryMatcherRegexp.Match(expected, actual)
+		}
+		normalized := strings.Join(strings.Fields(actual), " ")
+		for _, field := range []string{"last_seen_at", "last_scanned_at"} {
+			fragment := fmt.Sprintf("%s = GREATEST(COALESCE(%s, VALUES(%s)), VALUES(%s))", field, field, field, field)
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("older concurrent scan could regress %s: %s", field, normalized)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	olderScan := time.Date(2026, 10, 22, 4, 22, 25, 0, time.UTC)
+	modified := olderScan.Add(-24 * time.Hour)
+	item := domain.ExternalAssetUpsert{Provider: "alist", Kind: domain.ExternalAssetKindNASLocal,
+		MountPath: "/p3", OriginPath: "/p3/warehouse/image.jpg", ParentPath: "/p3/warehouse",
+		FileName: "image.jpg", FileExt: ".jpg", MimeType: "image/jpeg", FileSize: 10,
+		ScannedAt: olderScan, SourceModifiedAt: &modified}
+	hash := domain.ExternalAssetOriginHash(item.Provider, item.MountPath, item.OriginPath)
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT provider, kind, driver, mount_path, parent_path, file_size, is_dir, status").WithArgs(hash).
+		WillReturnRows(sqlmock.NewRows([]string{"provider", "kind", "driver", "mount_path", "parent_path", "file_size", "is_dir", "status", "oss_sync_status", "preview_status", "oss_original_key", "oss_preview_key", "oss_thumb_key"}).
+			AddRow("alist", "nas_local", "", "/p3", "/p3/warehouse", 10, false, "indexed", "ready", "none", "original.jpg", "", ""))
+	mock.ExpectQuery("SELECT file_size, source_modified_at").WithArgs(hash).
+		WillReturnRows(sqlmock.NewRows([]string{"file_size", "source_modified_at"}).AddRow(10, modified))
+	mock.ExpectExec("monotonic scan upsert").WithArgs(item.Provider, string(item.Kind), item.Driver, item.MountPath, hash,
+		item.OriginPath, item.ParentPath, item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir,
+		item.RawURL, olderScan, olderScan, item.SearchableText).WillReturnResult(sqlmock.NewResult(0, 1))
+	for range 2 { // /p3 and /p3/warehouse directory-presence updates.
+		mock.ExpectExec("INSERT INTO external_asset_directory_index").WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectExec("INSERT INTO external_asset_source_fingerprints").WithArgs(hash, item.FileSize, item.SourceModifiedAt, olderScan).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	repository := &externalAssetRepo{db: New(db)}
+	if err := repository.upsertExternalAsset(context.Background(), item, hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClaimPendingOSSUsesLockedLeaseSelection(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expected, actual string) error {
 		normalized := strings.Join(strings.Fields(actual), " ")
