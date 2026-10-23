@@ -124,6 +124,10 @@ func TestCostMaintenanceIntegration(t *testing.T) {
 	if width != 20 || target != changed.ID {
 		t.Fatalf("null dimension or durable metadata scope: %v %v", width, target)
 	}
+	rows, err = r.List(ctx, repo.CostMaintenanceFilter{PageSize: 50})
+	if err != nil || !rows[0].BaseSyncRequired {
+		t.Fatal("pending metadata was hidden behind cost convergence", err)
+	}
 	exec(`INSERT INTO tasks(id,task_no,task_type,task_status,source_mode,sku_code,creator_id,primary_sku_code,batch_item_count,product_name_snapshot) VALUES(72,'QA-MAINT-OLD','original_product_development','Completed','test','QA-MAINT-OLD',1,'QA-MAINT-OLD',1,'historical')`)
 	exec(`INSERT INTO task_details(task_id,demand_text,copy_text,remark,matched_mapping_rule_json,product_selection_snapshot_json,spec_text,change_request,design_requirement,reference_images_json,reference_link,cost_price,width,height,area) VALUES(72,'','','','{}','{}','','','','[]','',7.77,40,50,.2)`)
 	path := os.Getenv("TEST_COST_MAINTENANCE_MIGRATION")

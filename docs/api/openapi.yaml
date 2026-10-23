@@ -1240,6 +1240,8 @@ components:
         revision: { type: integer, format: int64 }
         status: { type: string, enum: [baseline, observe, pending, retry, synced, conflict, no_price] }
         token: { type: string, description: Opaque optimistic baseline covering identity, specifications, price and revision. }
+        base_sync_required: { type: boolean, description: Product metadata delivery remains pending independently of cost reconciliation. }
+        base_sync_error: { type: string, description: Latest product metadata delivery failure, if any. A synced cost does not imply metadata has been delivered. }
         updated_at: { type: string, format: date-time }
     CostMaintenanceRequest:
       type: object

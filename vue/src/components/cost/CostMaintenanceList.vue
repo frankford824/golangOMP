@@ -61,6 +61,7 @@
               ><small v-if="row.status === 'conflict'"
                 >ERP {{ money(row.erp_cost) }} 元</small
               >
+              <small v-if="row.base_sync_required" :title="row.base_sync_error || '名称与规格资料正在同步'">{{row.base_sync_error ? '资料同步失败' : '资料待同步'}}</small>
             </td>
             <td class="row-actions">
               <button

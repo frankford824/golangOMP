@@ -21508,6 +21508,10 @@ export interface components {
             status: "baseline" | "observe" | "pending" | "retry" | "synced" | "conflict" | "no_price";
             /** @description Opaque optimistic baseline covering identity */
             token: string;
+            /** @description Product metadata delivery remains pending independently of cost reconciliation. */
+            base_sync_required?: boolean;
+            /** @description Latest product metadata delivery failure */
+            base_sync_error?: string;
             /** Format: date-time */
             updated_at: string;
         };

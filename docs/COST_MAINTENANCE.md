@@ -20,7 +20,8 @@ authorities remain `transport/http.go` and `docs/api/openapi.yaml`.
   a fresh review. Missing/unavailable ERP is never treated as a zero price.
 - System commit is immediately effective. The existing cost worker delivers
   price-only updates and marks convergence only after direct ERP readback.
-  Name/specification changes also queue the existing base-data worker. ERP
+  Name/specification changes also queue the existing base-data worker. Their
+  pending/failure state is shown separately from successful cost readback. ERP
   changes enter explicit conflict review; the drawer can adopt the displayed
   ERP price after another direct baseline check. No last-writer-wins overwrite.
 - Width/height use centimetres; area uses square metres. Existing structured

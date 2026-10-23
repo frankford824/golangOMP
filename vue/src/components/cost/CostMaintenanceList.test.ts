@@ -47,6 +47,11 @@ beforeEach(() => {
   mocks.logs.mockResolvedValue({ data: [], pagination: { total: 0 } });
 });
 describe("completed SKU maintenance", () => {
+  it('distinguishes metadata delivery from a reconciled price',async()=>{
+    mocks.list.mockResolvedValue({data:[{...row,status:'synced',base_sync_required:true,base_sync_error:'ERP资料发送失败'}],next_before_id:0,refreshed_at:row.updated_at})
+    const w=mount(CostMaintenanceList,{global:{stubs:{Teleport:true}}});await flushPromises()
+    expect(w.text()).toContain('ERP 已回读一致');expect(w.text()).toContain('资料同步失败')
+  })
   it("confirms exactly the displayed system price baseline without editing product fields", async () => {
     const w = mount(CostMaintenanceList, {
       global: { stubs: { Teleport: true } },
