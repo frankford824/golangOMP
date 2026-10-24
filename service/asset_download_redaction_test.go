@@ -42,6 +42,7 @@ func TestRedactTaskReadModelDownloadsCopiesNestedValues(t *testing.T) {
 			AssetID:              "task-ref",
 			URL:                  &downloadURL,
 			DownloadURL:          &downloadURL,
+			ThumbnailURL:         &downloadURL,
 			StorageKey:           "tasks/90/task-ref.png",
 			DownloadURLExpiresAt: &expiresAt,
 		}},
@@ -113,6 +114,7 @@ func TestRedactTaskEventDownloadsRemovesAssetFieldsOnly(t *testing.T) {
 				"presigned_url":"https://objects.example/ref?presigned=secret",
 				"url":"https://objects.example/ref",
 				"download_url":"https://objects.example/ref?signature=secret",
+				"thumbnail_url":"https://objects.example/thumb?signature=thumbnail-secret",
 				"download_url_expires_at":"2026-07-27T00:00:00Z"
 			}],
 			"documentation_url":"https://docs.example/keep"
@@ -126,6 +128,7 @@ func TestRedactTaskEventDownloadsRemovesAssetFieldsOnly(t *testing.T) {
 	payload := string(events[0].Payload)
 	for _, forbidden := range []string{
 		"download_url",
+		"thumbnail_url",
 		"storage_key",
 		"file_path",
 		"object_key",
@@ -151,6 +154,19 @@ func TestRedactAssetDownloadJSONFailsClosedForInvalidHistory(t *testing.T) {
 	got := RedactAssetDownloadJSON(json.RawMessage(`{"download_url":"secret"`))
 	if string(got) != "{}" {
 		t.Fatalf("RedactAssetDownloadJSON(invalid) = %s, want {}", got)
+	}
+}
+
+func TestRedactThumbnailOnlyPayloadAndUnauthorizedReference(t *testing.T) {
+	raw := RedactAssetDownloadJSON(json.RawMessage(`{"thumbnail_url":"https://objects.example/private","label":"reference"}`))
+	if strings.Contains(string(raw), "thumbnail_url") {
+		t.Fatal("thumbnail-only payload leaked its signed locator")
+	}
+	u := "https://objects.example/private"
+	refs := []domain.ReferenceFileRef{{AssetID: "ref", ThumbnailURL: &u}}
+	got := RedactReferenceFileRefDownloads(refs)
+	if got[0].ThumbnailURL != nil || refs[0].ThumbnailURL == nil {
+		t.Fatal("thumbnail redaction leaked or mutated input")
 	}
 }
 

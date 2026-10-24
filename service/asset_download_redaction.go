@@ -51,6 +51,7 @@ func RedactReferenceFileRefDownloads(refs []domain.ReferenceFileRef) []domain.Re
 	for index := range out {
 		out[index].URL = nil
 		out[index].DownloadURL = nil
+		out[index].ThumbnailURL = nil
 		out[index].StorageKey = ""
 		out[index].DownloadURLExpiresAt = nil
 	}
@@ -243,6 +244,7 @@ func redactAssetDownloadJSONValue(value interface{}) {
 		}
 	case map[string]interface{}:
 		_, hasDownloadURL := typed["download_url"]
+		_, hasThumbnailURL := typed["thumbnail_url"]
 		_, hasStorageKey := typed["storage_key"]
 		_, hasFilePath := typed["file_path"]
 		_, hasObjectKey := typed["object_key"]
@@ -250,7 +252,7 @@ func redactAssetDownloadJSONValue(value interface{}) {
 		_, hasPresignedURL := typed["presigned_url"]
 		_, hasAssetID := typed["asset_id"]
 		_, hasRefID := typed["ref_id"]
-		isAssetObject := hasDownloadURL ||
+		isAssetObject := hasDownloadURL || hasThumbnailURL ||
 			hasStorageKey ||
 			hasFilePath ||
 			hasObjectKey ||
@@ -260,6 +262,7 @@ func redactAssetDownloadJSONValue(value interface{}) {
 			hasRefID
 		if isAssetObject {
 			delete(typed, "download_url")
+			delete(typed, "thumbnail_url")
 			delete(typed, "download_url_expires_at")
 			delete(typed, "storage_key")
 			delete(typed, "file_path")
