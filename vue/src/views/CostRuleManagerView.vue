@@ -22,7 +22,7 @@
     <CostSyncPanel v-if="workspaceTab==='成本同步'" />
     <section v-show="workspaceTab==='方案与绑定'" class="cost-layout">
       <aside class="rule-groups" aria-label="成本规则分组">
-        <label class="group-search">搜索材质 / 款式编码<input v-model.trim="groupSearch" placeholder="输入编码或名称" /></label>
+        <label class="group-search">搜索方案 / 款式编码<input v-model.trim="groupSearch" placeholder="输入方案名称或款式编码" /></label>
         <label class="group-search">显示范围<select v-model="groupScope"><option value="bound">已绑定款式的方案</option><option value="all">全部方案（含未绑定）</option></select></label>
         <header><span>计价方案</span><b>{{ filteredGroups.length }}</b></header>
         <button
@@ -165,14 +165,14 @@
     <Teleport to="body">
       <div v-if="ruleDialogOpen" class="modal-layer" @keydown.esc="closeRuleEditor">
         <button class="modal-mask" aria-label="关闭规则编辑" @click="closeRuleEditor" />
-        <form class="modal-card" @submit.prevent="saveRule">
-          <header><div><p class="eyebrow">{{ ruleDraft.rule_id ? '调整现有规则' : '新增计算规则' }}</p><h2>{{ ruleDraft.rule_id ? '编辑规则' : '新建规则' }}</h2></div><button type="button" class="close" @click="closeRuleEditor">×</button></header>
+        <form class="modal-card" role="dialog" aria-modal="true" aria-labelledby="cost-rule-editor-title" @submit.prevent="saveRule">
+          <header><div><p class="eyebrow">{{ ruleDraft.rule_id ? '调整现有规则' : '新增计算规则' }}</p><h2 id="cost-rule-editor-title">{{ ruleDraft.rule_type==='cost_model' ? (ruleDraft.rule_id?'编辑方案':'新增方案') : (ruleDraft.rule_id?'编辑收费项':'新增收费项') }}</h2></div><button type="button" class="close" @click="closeRuleEditor">×</button></header>
           <div class="form-grid">
-            <label class="span-2">规则名称<input v-model.trim="ruleDraft.rule_name" required placeholder="例如：KT 板面积计价" /></label>
-            <label>适用材质 / 方案<select v-model="ruleDraft.category_code" required :disabled="!!ruleDraft.rule_id"><option value="">请选择</option><option v-for="group in availableCategories" :key="group.code" :value="group.code">{{group.name}}</option></select></label>
+            <label class="span-2">{{ruleDraft.rule_type==='cost_model'?'方案名称':'收费项名称'}}<input v-model.trim="ruleDraft.rule_name" required placeholder="例如：KT 板面积计价" /></label>
+            <label>{{ruleDraft.rule_type==='cost_model'?'基础材质':'所属方案'}}<select v-model="ruleDraft.category_code" required :disabled="!!ruleDraft.rule_id"><option value="">请选择</option><option v-for="group in availableCategories" :key="group.code" :value="group.code">{{group.name}}</option></select></label>
             <label v-if="ruleDraft.rule_type!=='cost_model'">计算方式<select v-model="ruleDraft.rule_type"><option v-for="item in ruleTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
             <CostModelEditor v-if="ruleDraft.rule_type==='cost_model'" v-model="newModelJSON" hide-material class="span-2" />
-            <template v-if="ruleDraft.rule_type==='fixed_unit_price'"><label>每平方米价格（元）<input v-model.number="ruleDraft.base_price" required type="number" min="0" step="0.01" /></label><label>价格调整倍数<input v-model.number="ruleDraft.tax_multiplier" type="number" min="0.0001" step="0.01" placeholder="不调整填 1" /></label></template>
+            <template v-if="ruleDraft.rule_type==='fixed_unit_price'"><label>每平方米价格（元）<input v-model.number="ruleDraft.base_price" required type="number" min="0" step="0.01" /></label><label>价格调整倍数<input v-model.number="ruleDraft.tax_multiplier" type="number" min="0.0001" step="any" placeholder="不调整填 1" /><small>不调整填 1；1.1 表示基础价格 × 1.1。</small></label></template>
             <label v-if="ruleDraft.rule_type==='minimum_billable_area'">不足多少平方米按此面积收费<input v-model.number="ruleDraft.min_area" required type="number" min="0" step="0.001" /></label>
             <template v-if="ruleDraft.rule_type==='area_threshold_surcharge'"><label>面积小于（平方米）<input v-model.number="ruleDraft.area_threshold" required type="number" min="0" step="0.001" /></label><label>每平方米另加（元）<input v-model.number="ruleDraft.surcharge_amount" required type="number" min="0" step="0.01" /></label></template>
             <template v-if="ruleDraft.rule_type==='special_process_surcharge'"><label>收费工艺名称<input v-model.trim="ruleDraft.special_process_keyword" required placeholder="例如：开槽" /></label><label>该工艺另加（元）<input v-model.number="ruleDraft.special_process_price" required type="number" min="0" step="0.01" /></label></template>
@@ -196,13 +196,21 @@
         </form>
       </div>
 
-      <div v-if="bindingDialogOpen" class="modal-layer" @keydown.esc="bindingDialogOpen = false">
-        <button class="modal-mask" aria-label="关闭款式绑定" @click="bindingDialogOpen = false" />
+      <div v-if="bindingDialogOpen" class="modal-layer" @keydown.esc="!savingBinding && (bindingDialogOpen = false)">
+        <button class="modal-mask" aria-label="关闭款式绑定" :disabled="savingBinding" @click="bindingDialogOpen = false" />
         <section class="modal-card binding-dialog" role="dialog" aria-modal="true" aria-labelledby="binding-title">
-          <header><div><p class="eyebrow">款式与规则</p><h2 id="binding-title">绑定到“{{ selectedGroup?.name }}”</h2></div><button class="close" @click="bindingDialogOpen = false">×</button></header>
-          <label class="dialog-search">搜索款式编码<input v-model.trim="candidateKeyword" placeholder="输入款式编码或名称" @keyup.enter="loadCandidates" /><button class="secondary" @click="loadCandidates">搜索</button></label>
+          <header><div><p class="eyebrow">款式与方案</p><h2 id="binding-title">绑定到“{{ selectedGroup?.name }}”</h2></div><button class="close" :disabled="savingBinding" @click="bindingDialogOpen = false">×</button></header>
+          <label class="dialog-search">搜索款式编码<input v-model.trim="candidateKeyword" placeholder="输入款式编码或名称，例如 UV" @keyup.enter="loadCandidates()" /><button class="secondary" :disabled="stylesLoading || savingBinding" @click="loadCandidates()">{{stylesLoading ? '搜索中…' : '搜索'}}</button></label>
+          <p v-if="error" class="message error" role="alert">{{error}}</p>
+          <p v-if="notice" class="message notice" role="status">{{notice}}</p>
+          <div class="bulk-binding">
+            <label><input type="checkbox" :checked="selectableStyles.length>0 && selectableStyles.every(iid=>selectedStyles.includes(iid))" :disabled="stylesLoading || savingBinding || !selectableStyles.length" @change="selectCurrentStyles(($event.target as HTMLInputElement).checked)" />选择本页可绑定款式</label>
+            <button class="primary" :disabled="savingBinding || stylesLoading || !selectedStyles.length" @click="bindSelectedStyles">{{savingBinding ? `正在绑定 ${bindingProgress}/${selectedStyles.length}` : bulkConfirmed ? `确认绑定（含 ${movingStyles.length} 项改绑）` : `绑定已选 ${selectedStyles.length} 项`}}</button>
+            <small v-if="bulkConfirmed">以下款式将从原方案改绑到“{{selectedGroup?.name}}”：{{movingStyles.join('、')}}。已有金额保持原值。</small>
+          </div>
+          <div class="binding-pagination"><span>ERP 款式 {{styleTotal}} 项 · 第 {{stylePage}} 页 · 已选 {{selectedStyles.length}} 项（最多100项）</span><button class="secondary" :disabled="stylesLoading || savingBinding || stylePage<=1" @click="loadCandidates(stylePage-1)">上一页</button><button class="secondary" :disabled="stylesLoading || savingBinding || stylePage*50>=styleTotal" @click="loadCandidates(stylePage+1)">下一页</button></div>
           <div class="candidate-list">
-            <article v-for="style in erpStyles" :key="`erp-${style.i_id}`"><span><strong>{{style.i_id}}</strong><small>{{style.label||style.category_name||'ERP 款式'}} · {{boundStyleName(style.i_id)}}</small></span><button class="primary" :disabled="savingBinding || bindingForStyle(style.i_id)?.rule_group===selectedGroupCode" @click="bindStyle(style.i_id)">{{pendingStyle===style.i_id?'确认改绑到本方案':bindingForStyle(style.i_id)?'改绑':'绑定'}}</button></article>
+            <article v-for="style in erpStyles" :key="`erp-${style.i_id}`"><label class="binding-option"><input v-model="selectedStyles" type="checkbox" :value="style.i_id" :aria-label="`选择款式 ${style.i_id}`" :disabled="savingBinding || stylesLoading || bindingForStyle(style.i_id)?.rule_group===selectedGroupCode || (!selectedStyles.includes(style.i_id) && selectedStyles.length>=100)" /><span><strong>{{style.i_id}}</strong><small>{{style.label||style.category_name||'ERP 款式'}} · {{boundStyleName(style.i_id)}}</small></span></label><button class="primary" :disabled="savingBinding || bindingForStyle(style.i_id)?.rule_group===selectedGroupCode" @click="bindStyle(style.i_id)">{{bindingForStyle(style.i_id)?.rule_group===selectedGroupCode?'已绑定':pendingStyle===style.i_id?'确认改绑到本方案':bindingForStyle(style.i_id)?'改绑':'绑定'}}</button></article>
             <article v-for="candidate in candidates" :key="candidate.normalized_i_id">
               <span>
                 <strong>{{ candidate.i_id_raw || candidate.display_i_id || candidate.erp_i_id || candidate.product_i_id || candidate.normalized_i_id }}</strong>
@@ -211,7 +219,7 @@
               </span>
               <button class="primary" :disabled="savingBinding" @click="bindCandidate(candidate)">{{ candidateConfidence(candidate) === 'conflict' ? '确认绑定此组' : '绑定' }}</button>
             </article>
-            <div v-if="!candidates.length && !erpStyles.length" class="empty-large">没有找到待绑定款式。</div>
+            <p v-if="stylesLoading" role="status">正在读取款式…</p><div v-else-if="!candidates.length && !erpStyles.length" class="empty-large">没有找到待绑定款式。</div>
           </div>
         </section>
       </div>
@@ -302,6 +310,10 @@ const rules = ref<CostRuleRow[]>([])
 const bindings = ref<CostRuleBinding[]>([])
 const candidates = ref<UnboundCostRuleCandidate[]>([])
 const erpStyles=ref<Array<{i_id:string;label?:string;category_name?:string}>>([]),pendingStyle=ref(''),unbindID=ref<number|null>(null)
+const stylePage=ref(1),styleTotal=ref(0),stylesLoading=ref(false),styleQuery=ref('')
+const selectedStyles=ref<string[]>([]),bulkConfirmed=ref(false),bindingProgress=ref(0)
+const movingStyles=computed(()=>selectedStyles.value.filter(iid=>{const binding=bindingForStyle(iid);return binding&&binding.rule_group!==selectedGroupCode.value}))
+watch(selectedStyles,()=>{bulkConfirmed.value=false},{deep:true})
 const runs = ref<CostRecalculationRun[]>([])
 const costDashboard = ref<ProductCostDashboardResponse>({ total_count: 0, groups: [], tags: [] })
 const selectedRun = ref<CostRecalculationRun | null>(null)
@@ -328,7 +340,7 @@ let schemesLoaded=false
 async function openSchemes(){entryTab.value='schemes';if(!schemesLoaded){await loadAll();schemesLoaded=true}}
 const workspaceTab=ref('方案与绑定')
 const groupSearch=ref('')
-const groupScope=ref('bound'),bindingSearch=ref(''),calculatorOpen=ref(false),dataRevision=ref(0)
+const groupScope=ref('all'),bindingSearch=ref(''),calculatorOpen=ref(false),dataRevision=ref(0)
 const newModelJSON=ref(JSON.stringify(emptyCostModel())),confirmedPrice=ref(false)
 const startMode=ref('now'),endMode=ref('never'),startsAt=ref(''),endsAt=ref(''),timingEdited=ref(false),retiringRule=ref<number|null>(null)
 const materialOptions=ref<Array<{code:string;name:string}>>([])
@@ -342,12 +354,12 @@ const selectedModel=computed(()=>selectedGroup.value?.rules.filter(isEffectiveMo
 const calculatorUsesModel=computed(()=>rules.value.some(r=>r.category_code===calculator.rule_group&&isEffectiveModel(r)))
 function activeBindingCount(code:string){return bindings.value.filter(b=>b.rule_group===code&&b.is_active).length}
 function effectiveRules(items:CostRuleRow[]){const active=items.filter(r=>r.is_active!==false&&(!r.governance_status||r.governance_status==='effective'));const replaced=new Set(active.map(r=>r.supersedes_rule_id).filter(Boolean));return active.filter(r=>!replaced.has(r.rule_id))}
-const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(groupScope.value==='all'||(activeBindingCount(g.code)>0&&effectiveRules(g.rules).length>0))&&(!groupSearch.value||`${g.name} ${g.code} ${bindings.value.filter(b=>b.is_active&&b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase()))))
+const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(groupScope.value==='all'||(activeBindingCount(g.code)>0&&effectiveRules(g.rules).length>0))&&(!groupSearch.value||`${g.name} ${g.code} ${g.rules.map(r=>r.rule_name).join(' ')} ${bindings.value.filter(b=>b.is_active&&b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase()))))
 const currentRules=computed(()=>effectiveRules(selectedGroup.value?.rules||[]))
 const scheduledRules=computed(()=>selectedGroup.value?.rules.filter(r=>r.is_active&&r.governance_status==='scheduled')||[])
 const historicalRules=computed(()=>selectedGroup.value?.rules.filter(r=>!currentRules.value.includes(r)&&!scheduledRules.value.includes(r))||[])
 const filteredBindings=computed(()=>selectedBindings.value.filter(b=>`${b.i_id_raw} ${b.display_name}`.toLowerCase().includes(bindingSearch.value.toLowerCase())))
-watch(selectedGroupCode,()=>{modelEditing.value=false;preview.value=null})
+watch(selectedGroupCode,()=>{modelEditing.value=false;preview.value=null;selectedStyles.value=[];bulkConfirmed.value=false})
 watch([modelJSON,modelInput,calculator],()=>{preview.value=null},{deep:true})
 function ruleStateLabel(rule:CostRuleRow){if(!rule.is_active)return '已停用';if(rule.governance_status==='expired'||rule.governance_status==='scheduled')return '暂未使用';if(rule.source?.endsWith('_sample'))return '价格待核定';return '使用中'}
 function startModel(rule?:CostRuleRow){
@@ -375,7 +387,7 @@ const ruleGroups = computed(() => {
   return Array.from(grouped, ([code, groupRules]) => ({ code, name: groupDisplayName(groupRules, code), rules: groupRules.sort((a, b) => (a.priority || 0) - (b.priority || 0)) }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 })
-const selectedGroup = computed(() => ruleGroups.value.find((group) => group.code === selectedGroupCode.value) || ruleGroups.value[0] || null)
+const selectedGroup = computed(() => ruleGroups.value.find((group) => group.code === selectedGroupCode.value) || null)
 const selectedBindings = computed(() => bindings.value.filter((binding) => binding.rule_group === selectedGroup.value?.code && binding.is_active))
 watch(filteredGroups,groups=>{if(!groups.some(g=>g.code===selectedGroupCode.value))selectedGroupCode.value=groups[0]?.code||''})
 const candidateStats = computed(() => candidates.value.reduce((result, candidate) => {
@@ -396,6 +408,8 @@ watch(selectedGroup, (group) => {
 function emptyRuleDraft(group = ''): RuleDraft { return { rule_name: '', category_code: group, rule_type: 'fixed_unit_price', is_active: true, priority: 100 } }
 function replaceDraft(next: RuleDraft) { for (const key of Object.keys(ruleDraft)) delete (ruleDraft as Record<string, unknown>)[key]; Object.assign(ruleDraft, next) }
 function groupDisplayName(groupRules: CostRuleRow[], code: string) {
+  const model = groupRules.filter(isEffectiveModel).sort((a,b)=>(b.rule_version||1)-(a.rule_version||1)||b.rule_id-a.rule_id)[0]
+  if(model?.rule_name)return model.rule_name
   const family = groupRules.map((rule) => String(rule.product_family || '').trim().toLowerCase()).find(Boolean) || ''
   const familyLabel = ({ board: '板材制作', cloth: '布艺制作', photo: '照片与印刷', paper: '纸张印刷' } as Record<string, string>)[family]
   const ruleLabel = groupRules.map((rule) => String(rule.rule_name || '').replace(/(?:基础单价|最低计价面积|面积加价|小面积附加|工艺加价)$/u, '').trim()).find(Boolean)
@@ -467,12 +481,44 @@ async function saveRule() {
   finally { savingRule.value = false }
 }
 
-async function loadCandidates() {
+const selectableStyles=computed(()=>erpStyles.value.filter(style=>bindingForStyle(style.i_id)?.rule_group!==selectedGroupCode.value).map(style=>style.i_id))
+function selectCurrentStyles(checked:boolean){
+ const page=new Set(selectableStyles.value)
+ selectedStyles.value=checked?[...new Set([...selectedStyles.value,...page])].slice(0,100):selectedStyles.value.filter(iid=>!page.has(iid))
+}
+watch(bindingDialogOpen,open=>{if(open){selectedStyles.value=[];error.value='';notice.value='';void loadCandidates()}})
+async function loadCandidates(page=1) {
+  if(stylesLoading.value||savingBinding.value)return
+  stylesLoading.value=true;error.value=''
+  const keyword=candidateKeyword.value
+  if(keyword!==styleQuery.value){selectedStyles.value=[];styleQuery.value=keyword;page=1}
   try {
-    const [old,erp]=await Promise.all([costManagementApi.listUnboundCostRuleCandidates({ keyword: candidateKeyword.value, page: 1, page_size: 100 }),erpApi.getIids({q:candidateKeyword.value,page:1,page_size:100})])
-    candidates.value=old.data||[];erpStyles.value=erp.data?.data||[];pendingStyle.value=''
+    const [old,erp]=await Promise.all([costManagementApi.listUnboundCostRuleCandidates({ keyword, page: 1, page_size: 100 }),erpApi.getIids({q:keyword,page,page_size:50})])
+    candidates.value=old.data||[];erpStyles.value=erp.data?.data||[];styleTotal.value=erp.data?.pagination?.total??erpStyles.value.length;stylePage.value=page;pendingStyle.value=''
   }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '待绑定款式加载失败。' }
+  finally {stylesLoading.value=false}
+}
+async function bindSelectedStyles(){
+ if(!selectedGroup.value||savingBinding.value||!selectedStyles.value.length)return
+ if(movingStyles.value.length&&!bulkConfirmed.value){bulkConfirmed.value=true;return}
+ const target=selectedGroupCode.value, items=[...selectedStyles.value]
+ let done=0,failed='';savingBinding.value=true;bindingProgress.value=0;error.value='';notice.value=''
+ try{
+  for(const iid of items){
+   const existing=bindingForStyle(iid)
+   if(existing?.rule_group!==target){
+    if(existing)await costManagementApi.updateCostRuleBinding(existing.id,{rule_group:target})
+    else await costManagementApi.createCostRuleBinding({i_id_raw:iid,rule_group:target,display_name:iid,is_active:true,source:'manual'})
+   }
+   done++;bindingProgress.value=done
+  }
+ }catch(cause){failed=cause instanceof Error?cause.message:'绑定失败'}
+ finally{
+  await loadAll();selectedStyles.value=items.slice(done);bulkConfirmed.value=false;savingBinding.value=false
+  if(failed)error.value=`已完成 ${done}/${items.length} 项；${items[done]} 绑定失败：${failed}。剩余项保留勾选，可核对后重试。`
+  else notice.value=`已绑定 ${done} 个款式，历史金额保持原值。`
+ }
 }
 async function retireRule(rule:CostRuleRow){
  if(retiringRule.value!==rule.rule_id){retiringRule.value=rule.rule_id;return}

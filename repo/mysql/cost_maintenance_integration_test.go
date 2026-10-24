@@ -66,6 +66,10 @@ func TestCostMaintenanceIntegration(t *testing.T) {
 	if string(rows[0].ReviewJSON) != "{}" {
 		t.Fatalf("new SKU unexpectedly has a maintenance audit: %s", rows[0].ReviewJSON)
 	}
+	reviewCandidates, e := r.List(ctx, repo.CostMaintenanceFilter{PageSize: 50, ReviewState: "reviewed"})
+	if e != nil || len(reviewCandidates) != 0 {
+		t.Fatalf("unreviewed SKU entered the reviewed candidates: %v", e)
+	}
 	for _, commit := range []bool{false, true} {
 		tx, sqlTx, err = wrapper.BeginTx(ctx)
 		if err != nil {
@@ -103,6 +107,10 @@ func TestCostMaintenanceIntegration(t *testing.T) {
 		listed, listErr := r.List(ctx, repo.CostMaintenanceFilter{PageSize: 50})
 		if listErr != nil || len(listed) != 1 {
 			t.Fatalf("read committed review: %v", listErr)
+		}
+		reviewCandidates, listErr = r.List(ctx, repo.CostMaintenanceFilter{PageSize: 50, ReviewState: "reviewed"})
+		if listErr != nil || (len(reviewCandidates) == 1) != commit {
+			t.Fatalf("review candidate filter lost audit atomicity: %v", listErr)
 		}
 		var audit struct {
 			After struct {

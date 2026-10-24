@@ -4183,6 +4183,7 @@ curl -X PATCH https://api.example.com/v1/cost-rule-bindings/<id> \
 |---|---|---|---|---|
 | `keyword` | query | string | 否 | - |
 | `status` | query | string | 否 | - |
+| `review_state` | query | enum(pending/reviewed/all) | 否 | Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review. |
 | `before_id` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 

@@ -112,17 +112,42 @@ func normalizeMaintenanceFilter(f repo.CostMaintenanceFilter) repo.CostMaintenan
 }
 func (s *taskService) ListCostMaintenance(ctx context.Context, f repo.CostMaintenanceFilter) (*domain.CostMaintenanceList, *domain.AppError) {
 	f = normalizeMaintenanceFilter(f)
-	rows, err := s.costMaintenance.List(ctx, f)
-	if err != nil {
-		return nil, infraError("list completed SKU costs", err)
+	if f.ReviewState == "" {
+		f.ReviewState = "pending"
 	}
-	result := &domain.CostMaintenanceList{Data: rows, RefreshedAt: time.Now().UTC()}
-	if len(rows) > f.PageSize {
-		result.Data = rows[:f.PageSize]
-		result.NextBeforeID = result.Data[len(result.Data)-1].SortID
+	if f.ReviewState != "pending" && f.ReviewState != "reviewed" && f.ReviewState != "all" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "确认状态无效", nil)
 	}
-	for _, r := range result.Data {
-		hydrateMaintenanceRow(r)
+	// Match the visible human-audit predicate before choosing the page. Bounded
+	// keyset batches avoid empty pages after a run of already-reviewed SKUs.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := &domain.CostMaintenanceList{Data: []*domain.CostMaintenanceRow{}, RefreshedAt: time.Now().UTC()}
+	batch := f
+	if f.ReviewState != "all" {
+		batch.PageSize = 100
+	}
+	for {
+		rows, err := s.costMaintenance.List(ctx, batch)
+		if err != nil {
+			return nil, infraError("list completed SKU costs", err)
+		}
+		for _, r := range rows {
+			hydrateMaintenanceRow(r)
+			reviewed := r.Reviewed && r.Status != "conflict"
+			if f.ReviewState == "pending" && reviewed || f.ReviewState == "reviewed" && !reviewed {
+				continue
+			}
+			if len(result.Data) == f.PageSize {
+				result.NextBeforeID = result.Data[len(result.Data)-1].SortID
+				return result, nil
+			}
+			result.Data = append(result.Data, r)
+		}
+		if len(rows) <= batch.PageSize {
+			break
+		}
+		batch.BeforeID = rows[len(rows)-1].SortID
 	}
 	return result, nil
 }

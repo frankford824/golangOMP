@@ -13,6 +13,11 @@ authorities remain `transport/http.go` and `docs/api/openapi.yaml`.
   Modification sends only changed fields and requires one of `area_incorrect`,
   `style_binding_incorrect`, `cost_incorrect`, `other`. Other requires text.
   Both `catalog.manage` and `erp.manage`, including task scope, are required.
+- The default list shows **待确认** only. **已确认** and **全部编码** remain
+  available as a separate review filter from ERP delivery status. The server
+  applies the same current-audit predicate before choosing keyset page boundaries,
+  scanning bounded batches under a five-second read budget. Completed confirmations
+  disappear immediately from the pending view, including if its refresh fails.
 - `reviewed` derives from the latest committed maintenance audit matching the
   current business values. An unchanged reviewed row shows **已确认** instead of
   another confirmation button, including while ERP delivery is pending and after
@@ -51,3 +56,12 @@ Validation: full `scripts/agent-check.sh`; focused frontend unit tests and
 and mobile browser checks for editing, log viewing and overflow. Integration
 tests require `TEST_COST_SYNC_DSN` targeting `codex_cost_sync_test_*` and use
 synthetic fixture data only.
+
+Scheme maintenance: the sidebar uses the effective unified model name before old
+fee-item names, searches every rule name and defaults to showing unbound schemes.
+The binding dialog offers ERP-style pagination and selection up to 100 styles.
+Existing bindings to another scheme require an explicit move review; partial
+failures show progress and retain unprocessed selections. Bindings use the existing
+POST/PATCH contracts and do not reprice historical SKUs. Legacy price multipliers
+accept decimal factors such as 1.1 without a mismatched HTML step base, and the
+saved factor is shown in the rule summary.

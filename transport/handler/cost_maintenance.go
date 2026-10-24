@@ -17,7 +17,7 @@ func maintenanceFilter(c *gin.Context) repo.CostMaintenanceFilter {
 	before, _ := strconv.ParseInt(c.Query("before_id"), 10, 64)
 	page, _ := strconv.Atoi(c.Query("page"))
 	size, _ := strconv.Atoi(c.Query("page_size"))
-	return repo.CostMaintenanceFilter{Keyword: strings.TrimSpace(c.Query("keyword")), Status: strings.TrimSpace(c.Query("status")), Reason: strings.TrimSpace(c.Query("reason_code")), BeforeID: before, Page: page, PageSize: size}
+	return repo.CostMaintenanceFilter{Keyword: strings.TrimSpace(c.Query("keyword")), Status: strings.TrimSpace(c.Query("status")), ReviewState: strings.TrimSpace(c.Query("review_state")), Reason: strings.TrimSpace(c.Query("reason_code")), BeforeID: before, Page: page, PageSize: size}
 }
 func (h *ProductManagementHandler) ListMaintenance(c *gin.Context) {
 	if h.maintenance == nil {

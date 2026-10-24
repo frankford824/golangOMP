@@ -5562,6 +5562,8 @@ export interface paths {
                 query?: {
                     keyword?: string;
                     status?: string;
+                    /** @description Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review. */
+                    review_state?: "pending" | "reviewed" | "all";
                     before_id?: number;
                     page_size?: number;
                 };

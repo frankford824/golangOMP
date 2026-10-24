@@ -60,6 +60,81 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('finds the current unbound UV scheme by name even when old rules sort first',async()=>{
+    mocks.listBindings.mockResolvedValue({data:[]})
+    mocks.listCostRules.mockResolvedValue({data:{data:[
+      {rule_id:31,rule_name:'教师节亚克力面积成本',category_code:'ACRYLIC',rule_type:'size_based_formula',formula_expression:'keyword_area_unit_price:教师节=264',priority:10,is_active:true},
+      {rule_id:63,rule_name:'UV系列打印操作',category_code:'ACRYLIC',rule_type:'cost_model',formula_expression:JSON.stringify({...emptyCostModel(),material:'亚克力',unit_price:12}),priority:100,is_active:true},
+    ]}})
+    const w=mountRuleView();await flushPromises()
+    expect((w.get('.rule-groups select').element as HTMLSelectElement).value).toBe('all')
+    expect(w.get('.rule-groups').text()).toContain('UV系列打印操作')
+    await w.get('.group-search input').setValue('UV')
+    expect(w.findAll('.rule-groups>button')).toHaveLength(1)
+    expect(w.get('.workspace-heading h2').text()).toBe('UV系列打印操作')
+    await w.get('.group-search input').setValue('教师节')
+    expect(w.findAll('.rule-groups>button')).toHaveLength(1)
+    await w.get('.group-search input').setValue('不存在的方案');await flushPromises()
+    expect(w.findAll('.rule-groups>button')).toHaveLength(0)
+    expect(w.find('.binding-panel').exists()).toBe(false)
+  })
+  it('accepts multiplier 1.1 and displays the saved factor after refreshing',async()=>{
+    const rule={rule_id:32,rule_name:'常规PP背胶面积成本',category_code:'PP_STICKY',rule_type:'fixed_unit_price',base_price:8,tax_multiplier:null,is_active:true}
+    mocks.listCostRules.mockResolvedValue({data:{data:[rule]}})
+    mocks.updateCostRule.mockImplementationOnce(async(_id:number,payload:Record<string,unknown>)=>{
+      mocks.listCostRules.mockResolvedValue({data:{data:[{...rule,...payload}]}});return {}
+    })
+    const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
+    await w.findAll('button').find(b=>b.text()==='编辑名称 / 价格 / 时间')!.trigger('click');await flushPromises()
+    const input=w.get('input[placeholder="不调整填 1"]');await input.setValue('1.1')
+    expect((input.element as HTMLInputElement).validity.valid).toBe(true)
+    await w.get('form.modal-card').trigger('submit');await flushPromises()
+    expect(mocks.updateCostRule).toHaveBeenCalledWith(32,expect.objectContaining({base_price:8,tax_multiplier:1.1}))
+    expect(w.get('.rule-copy p').text()).toContain('价格倍率 × 1.1')
+    expect(mocks.applyRun).not.toHaveBeenCalled();expect(mocks.syncRun).not.toHaveBeenCalled()
+  })
+  it('binds selected ERP styles together without repricing existing SKUs',async()=>{
+    mocks.erp.mockResolvedValue({data:{data:[{i_id:'UV-A'},{i_id:'UV-B'}],pagination:{total:2}}})
+    const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
+    await w.findAll('button').find(b=>b.text()==='绑定新款式')!.trigger('click');await flushPromises()
+    await w.get('input[aria-label="选择款式 UV-A"]').setValue(true)
+    await w.get('input[aria-label="选择款式 UV-B"]').setValue(true)
+    await w.get('.bulk-binding button').trigger('click');await flushPromises()
+    expect(mocks.createBinding).toHaveBeenCalledTimes(2)
+    expect(mocks.createBinding).toHaveBeenCalledWith(expect.objectContaining({i_id_raw:'UV-A',rule_group:'KT_BOARD'}))
+    expect(mocks.createBinding).toHaveBeenCalledWith(expect.objectContaining({i_id_raw:'UV-B',rule_group:'KT_BOARD'}))
+    expect(w.get('.binding-dialog').text()).toContain('已绑定 2 个款式')
+    expect(mocks.applyRun).not.toHaveBeenCalled();expect(mocks.syncRun).not.toHaveBeenCalled()
+  })
+  it('reviews a bulk move explicitly and retains the failed selection after partial success',async()=>{
+    mocks.listBindings.mockResolvedValue({data:[{id:22,i_id_raw:'UV-A',normalized_i_id:'UV-A',rule_group:'OLD_GROUP',is_active:true}]})
+    mocks.erp.mockResolvedValue({data:{data:[{i_id:'UV-A'},{i_id:'UV-B'}],pagination:{total:2}}})
+    mocks.createBinding.mockRejectedValueOnce(new Error('网络失败'))
+    const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
+    await w.findAll('button').find(b=>b.text()==='绑定新款式')!.trigger('click');await flushPromises()
+    await w.get('input[aria-label="选择款式 UV-A"]').setValue(true)
+    await w.get('input[aria-label="选择款式 UV-B"]').setValue(true)
+    await w.get('.bulk-binding button').trigger('click');await flushPromises()
+    expect(mocks.updateBinding).not.toHaveBeenCalled();expect(mocks.createBinding).not.toHaveBeenCalled()
+    expect(w.get('.bulk-binding').text()).toContain('UV-A')
+    await w.get('.bulk-binding button').trigger('click');await flushPromises()
+    expect(mocks.updateBinding).toHaveBeenCalledWith(22,{rule_group:'KT_BOARD'})
+    expect(w.get('.binding-dialog').text()).toContain('已完成 1/2 项')
+    expect((w.get('input[aria-label="选择款式 UV-B"]').element as HTMLInputElement).checked).toBe(true)
+    expect((w.get('input[aria-label="选择款式 UV-A"]').element as HTMLInputElement).checked).toBe(false)
+  })
+  it('paginates ERP styles and resets page and selection for a new search',async()=>{
+    mocks.erp.mockResolvedValue({data:{data:[{i_id:'UV-A'}],pagination:{total:51}}})
+    const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
+    await w.findAll('button').find(b=>b.text()==='绑定新款式')!.trigger('click');await flushPromises()
+    await w.get('input[aria-label="选择款式 UV-A"]').setValue(true)
+    await w.get('.binding-pagination').findAll('button').find(b=>b.text()==='下一页')!.trigger('click');await flushPromises()
+    expect(mocks.erp).toHaveBeenLastCalledWith({q:'',page:2,page_size:50})
+    await w.get('.dialog-search input').setValue('UV');await w.get('.dialog-search button').trigger('click');await flushPromises()
+    expect(mocks.erp).toHaveBeenLastCalledWith({q:'UV',page:1,page_size:50})
+    expect((w.get('input[aria-label="选择款式 UV-A"]').element as HTMLInputElement).checked).toBe(false)
+  })
+
   it('references the calculator ARIA target only while its panel is mounted', async () => {
     const wrapper = mountRuleView({props:{initialTab:'schemes'}})
     await flushPromises()

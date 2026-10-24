@@ -7,7 +7,12 @@
           id="cost-keyword"
           v-model.trim="keyword"
           placeholder="搜索编码 / 名称 / 款式"
-        /><label class="sr-only" for="cost-status">同步状态</label
+        /><label class="sr-only" for="cost-review-state">确认状态</label>
+        <select id="cost-review-state" v-model="reviewState" @change="search">
+          <option value="pending">待确认</option>
+          <option value="reviewed">已确认</option>
+          <option value="all">全部编码</option>
+        </select><label class="sr-only" for="cost-status">同步状态</label
         ><select id="cost-status" v-model="status" @change="search">
           <option value="">全部状态</option>
           <option
@@ -102,7 +107,7 @@
                   ? "正在读取已完成编码…"
                   : error
                     ? "暂未取得数据，请重试。"
-                    : "没有匹配的已完成编码。"
+                  : reviewState === 'pending' ? "当前没有待确认的编码，可切换筛选查看已确认记录。" : "没有匹配的已完成编码。"
               }}
             </td>
           </tr>
@@ -450,6 +455,7 @@ const permission = usePermission(),
 const rows = ref<MaintenanceRow[]>([]),
   keyword = ref(""),
   status = ref(""),
+  reviewState = ref<"pending" | "reviewed" | "all">("pending"),
   pageSize = ref(50),
   cursors = ref([0]),
   nextID = ref(0),
@@ -547,6 +553,7 @@ async function load(background = false) {
       {
         keyword: keyword.value,
         status: status.value,
+        review_state: reviewState.value,
         before_id: cursors.value.at(-1),
         page_size: pageSize.value,
       },
@@ -589,9 +596,7 @@ async function confirm(row: MaintenanceRow) {
       revision: row.revision,
       erp_cost: row.erp_cost,
     });
-    rows.value = rows.value.map((current) =>
-      current.id === row.id ? updated : current,
-    );
+    applyCommittedRow(updated);
     notice.value = `${row.sku_code} 已确认，系统已生效；ERP 状态以回读结果为准。`;
     await load();
   } catch (e) {
@@ -599,6 +604,11 @@ async function confirm(row: MaintenanceRow) {
   } finally {
     busyID.value = null;
   }
+}
+function applyCommittedRow(updated: MaintenanceRow) {
+  const reviewed = updated.reviewed && updated.status !== "conflict";
+  const matches = reviewState.value === "all" || (reviewState.value === "reviewed" ? reviewed : !reviewed);
+  rows.value = rows.value.flatMap((current) => current.id === updated.id ? (matches ? [updated] : []) : [current]);
 }
 function edit(row: MaintenanceRow) {
   focusBefore = document.activeElement as HTMLElement;
@@ -727,7 +737,7 @@ async function save() {
   editError.value = "";
   try {
     const row = selected.value;
-    await costMaintenanceApi.maintain(row.id, {
+    const updated = await costMaintenanceApi.maintain(row.id, {
       action: "modify",
       token: row.token,
       revision: row.revision,
@@ -736,6 +746,7 @@ async function save() {
       reason_detail: reasonDetail.value,
       ...modification(),
     });
+    applyCommittedRow(updated);
     notice.value = `${row.sku_code} 已保存并记录日志，等待 ERP 同步核对。`;
     saving.value = false;
     closeEditor();

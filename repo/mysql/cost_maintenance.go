@@ -45,6 +45,10 @@ func (r *costMaintenanceRepo) List(ctx context.Context, f repo.CostMaintenanceFi
 		where += ` AND COALESCE(cs.status,'baseline')=?`
 		args = append(args, f.Status)
 	}
+	if f.ReviewState == "reviewed" {
+		// Human review requires audit evidence; the service verifies current values.
+		where += ` AND EXISTS(SELECT 1 FROM cost_maintenance_logs e WHERE e.sku_code=s.sku_code AND e.sku_item_id=s.id)`
+	}
 	args = append(args, f.PageSize+1)
 	rows, err := r.db.db.QueryContext(ctx, `SELECT `+maintenanceColumns+where+` ORDER BY t.id DESC,s.sequence_no DESC LIMIT ?`, args...)
 	if err != nil {

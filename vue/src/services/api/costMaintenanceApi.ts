@@ -71,6 +71,7 @@ export const costMaintenanceApi = {
     params: {
       keyword?: string;
       status?: string;
+      review_state?: "pending" | "reviewed" | "all";
       before_id?: number;
       page_size?: number;
     },

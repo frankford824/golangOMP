@@ -7,6 +7,7 @@ import (
 
 type CostMaintenanceFilter struct {
 	Keyword, Status, Reason string
+	ReviewState             string
 	BeforeID                int64
 	Page, PageSize          int
 }

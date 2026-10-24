@@ -52,6 +52,17 @@ beforeEach(() => {
   mocks.logs.mockResolvedValue({ data: [], pagination: { total: 0 } });
 });
 describe("completed SKU maintenance", () => {
+  it("defaults to pending and resets the cursor when switching to reviewed or all",async()=>{
+    mocks.list.mockResolvedValue({data:[row],next_before_id:10,refreshed_at:row.updated_at});
+    const w=mount(CostMaintenanceList);await flushPromises();
+    expect(mocks.list.mock.calls[0][0]).toMatchObject({review_state:"pending",before_id:0});
+    await w.findAll("button").find(b=>b.text()==="下一页")!.trigger("click");await flushPromises();
+    await w.get("#cost-review-state").setValue("reviewed");await flushPromises();
+    expect(mocks.list.mock.calls.at(-1)?.[0]).toMatchObject({review_state:"reviewed",before_id:0});
+    await w.get("#cost-review-state").setValue("all");await flushPromises();
+    expect(mocks.list.mock.calls.at(-1)?.[0]).toMatchObject({review_state:"all",before_id:0});
+  });
+
   it.each(["pending", "synced"])(
     "replaces confirmation with a persistent reviewed label while %s and keeps editing available",
     async (status) => {
@@ -87,7 +98,7 @@ describe("completed SKU maintenance", () => {
         .attributes("disabled"),
     ).toBeUndefined();
   });
-  it("keeps the committed review visible if the subsequent refresh fails", async () => {
+  it("removes a committed review from pending even if the subsequent refresh fails", async () => {
     mocks.list
       .mockResolvedValueOnce({
         data: [row],
@@ -102,7 +113,7 @@ describe("completed SKU maintenance", () => {
       .find((b) => b.text() === "确认")!
       .trigger("click");
     await flushPromises();
-    expect(w.get(".maintenance-reviewed").text()).toBe("已确认");
+    expect(w.find(".maintenance-reviewed").exists()).toBe(false);
     expect(w.findAll("button").some((b) => b.text() === "确认")).toBe(false);
     expect(mocks.maintain).toHaveBeenCalledTimes(1);
   });
@@ -135,7 +146,7 @@ describe("completed SKU maintenance", () => {
         refreshed_at: row.updated_at,
       })
       .mockResolvedValue({
-        data: [{ ...row, reviewed: true, status: "pending" }],
+        data: [],
         next_before_id: 0,
         refreshed_at: row.updated_at,
       });
@@ -156,7 +167,7 @@ describe("completed SKU maintenance", () => {
     });
     expect(w.text()).toContain("系统已生效");
     expect(mocks.list).toHaveBeenCalledTimes(2);
-    expect(w.get(".maintenance-reviewed").text()).toBe("已确认");
+    expect(w.find(".maintenance-reviewed").exists()).toBe(false);
     expect(w.findAll("button").some((b) => b.text() === "确认")).toBe(false);
   });
   it("requires a reason and submits only changed fields", async () => {

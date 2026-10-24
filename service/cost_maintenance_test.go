@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -184,5 +185,92 @@ func TestMaintenanceFilingUsesCorrectedMemberDimensions(t *testing.T) {
 	payload, err := buildBatchSKUItemERPBridgeProductUpsertPayload(&domain.Task{ID: 71, TaskType: domain.TaskTypeNewProductDevelopment}, detail, item, 1, "", "business_info_patch")
 	if err != nil || payload.BusinessInfo == nil || *payload.BusinessInfo.Width != 20 || *payload.BusinessInfo.Height != 30 || *payload.BusinessInfo.Area != .06 || *detail.Width != 999 {
 		t.Fatalf("wrong member dimensions or mutated header: %+v %v", payload.BusinessInfo, err)
+	}
+}
+
+type maintenanceListingStub struct {
+	repo.CostMaintenanceRepo
+	rows  []*domain.CostMaintenanceRow
+	calls []repo.CostMaintenanceFilter
+}
+
+func (m *maintenanceListingStub) List(ctx context.Context, f repo.CostMaintenanceFilter) ([]*domain.CostMaintenanceRow, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.calls = append(m.calls, f)
+	out := []*domain.CostMaintenanceRow{}
+	for _, r := range m.rows {
+		if f.BeforeID > 0 && r.SortID >= f.BeforeID {
+			continue
+		}
+		c := *r
+		out = append(out, &c)
+		if len(out) == f.PageSize+1 {
+			break
+		}
+	}
+	return out, nil
+}
+func TestMaintenanceReviewFilteringPrecedesKeysetPagination(t *testing.T) {
+	m := &maintenanceListingStub{}
+	for id := int64(230); id >= 1; id-- {
+		row := &domain.CostMaintenanceRow{ID: id, TaskID: id, SortID: id, SKUCode: fmt.Sprint(id), ProductName: "name", ProductIID: "KT", CostPrice: float64Ptr(3.3), Status: "synced"}
+		hydrateMaintenanceRow(row)
+		if id >= 26 {
+			row.ReviewJSON, _ = json.Marshal(map[string]interface{}{"action": "confirm", "after": row})
+		}
+		if id == 200 {
+			row.Status = "conflict"
+		}
+		m.rows = append(m.rows, row)
+	}
+	s := &taskService{costMaintenance: m}
+	seen := map[int64]bool{}
+	f := repo.CostMaintenanceFilter{PageSize: 10}
+	for {
+		page, err := s.ListCostMaintenance(context.Background(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Data) == 0 {
+			t.Fatal("filtered pagination produced an empty page before EOF")
+		}
+		for _, row := range page.Data {
+			if seen[row.ID] {
+				t.Fatalf("duplicate SKU %d", row.ID)
+			}
+			if row.Reviewed && row.Status != "conflict" {
+				t.Fatal("default list leaked a reviewed SKU")
+			}
+			seen[row.ID] = true
+		}
+		if page.NextBeforeID == 0 {
+			break
+		}
+		if f.BeforeID > 0 && page.NextBeforeID >= f.BeforeID {
+			t.Fatal("cursor did not advance")
+		}
+		f.BeforeID = page.NextBeforeID
+	}
+	if len(seen) != 26 || len(m.calls) < 3 {
+		t.Fatalf("lost pending SKUs after reviewed prefix: count=%d calls=%d", len(seen), len(m.calls))
+	}
+	checked, err := s.ListCostMaintenance(context.Background(), repo.CostMaintenanceFilter{PageSize: 100, ReviewState: "reviewed"})
+	if err != nil || len(checked.Data) != 100 {
+		t.Fatalf("reviewed list: %v %v", checked, err)
+	}
+	for _, row := range checked.Data {
+		if !row.Reviewed || row.Status == "conflict" || seen[row.ID] {
+			t.Fatal("reviewed and pending scopes overlap")
+		}
+	}
+	all, err := s.ListCostMaintenance(context.Background(), repo.CostMaintenanceFilter{PageSize: 100, ReviewState: "all"})
+	if err != nil || len(all.Data) != 100 || all.NextBeforeID != 131 {
+		t.Fatalf("all list pagination changed: %v %v", all, err)
+	}
+	_, err = s.ListCostMaintenance(context.Background(), repo.CostMaintenanceFilter{ReviewState: "unknown"})
+	if err == nil || err.Code != domain.ErrCodeInvalidRequest {
+		t.Fatal("invalid review filter accepted")
 	}
 }

@@ -10804,6 +10804,10 @@ paths:
       parameters:
         - { in: query, name: keyword, schema: { type: string } }
         - { in: query, name: status, schema: { type: string } }
+        - in: query
+          name: review_state
+          description: Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review.
+          schema: { type: string, enum: [pending, reviewed, all], default: pending }
         - { in: query, name: before_id, schema: { type: integer, format: int64 } }
         - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
       responses:
