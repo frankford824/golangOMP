@@ -29,3 +29,10 @@
 .binding-dialog .binding-option input,.binding-dialog .bulk-binding input{width:16px;height:16px;flex:0 0 auto;accent-color:rgb(var(--yb-brand))}
 .binding-dialog .binding-option span{display:grid;gap:5px;min-width:0}
 .binding-dialog .binding-pagination span{flex:1;color:rgb(var(--yb-text-muted))}
+
+.binding-dialog .binding-search-form{display:grid;gap:6px;padding:0 20px;font-size:13px}
+.binding-dialog .binding-search-form>div{display:flex;gap:8px;align-items:center}
+.binding-dialog .binding-search-form input{flex:1;min-width:0;width:auto}
+.binding-dialog .binding-search-form button{flex:0 0 auto}
+.binding-dialog .bulk-binding,.binding-dialog .binding-pagination{padding:0 20px;box-sizing:border-box;margin:0}
+.binding-dialog button:disabled{opacity:.45;cursor:default}
