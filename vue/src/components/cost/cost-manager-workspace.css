@@ -61,7 +61,7 @@
 #app .cost-manager-page .binding-chips small{font-size:12px;line-height:18px}
 #app .cost-manager-page .bound-skus h2{font-size:16px;font-weight:600;line-height:24px}
 #app .cost-manager-page .bound-skus table,#app .cost-manager-page .bound-skus td strong{font-size:13px;line-height:20px}
-#app .cost-manager-page .bound-skus td:last-child{font-variant-numeric:tabular-nums;text-align:right}
+#app .cost-manager-page .bound-skus :is(th,td):last-child{font-variant-numeric:tabular-nums;text-align:right}
 #app .cost-manager-page .calculator-toggle{width:auto;height:40px;min-height:40px;padding:0 14px;border-radius:10px;font-size:14px;font-weight:500}
 #app .cost-manager-page .floating-calculator label{font-size:13px;line-height:20px}
 #app .cost-manager-page .floating-calculator .preview-result strong{font-size:24px;font-weight:600;line-height:32px;font-variant-numeric:tabular-nums}
