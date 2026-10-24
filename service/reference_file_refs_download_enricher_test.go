@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,6 +9,54 @@ import (
 
 	"workflow/domain"
 )
+
+func TestReferenceFileRefsEnricherSignsReducedThumbnailWithoutChangingOriginal(t *testing.T) {
+	now := time.Date(2026, 10, 24, 1, 0, 0, 0, time.UTC)
+	oss := newReferenceFileRefsTestOSS(now)
+	size := int64(355605)
+	input := []domain.ReferenceFileRef{{AssetID: "reference-uuid", Filename: "SKU05.jpg", MimeType: "image/jpeg", FileSize: &size, StorageKey: "tasks/refs/SKU05.jpg", ThumbnailURL: stringPtr("https://untrusted.example/old.png")}}
+	got := NewReferenceFileRefsEnricher(oss, nil).EnrichAll(input)[0]
+	if got.ThumbnailURL == nil {
+		t.Fatal("missing thumbnail_url for UUID reference")
+	}
+	u, err := url.Parse(*got.ThumbnailURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := u.Query().Get("x-oss-process")
+	if !strings.Contains(process, "resize,w_480,m_lfit") || !strings.Contains(process, "format,webp") || u.Query().Get("Signature") == "" {
+		t.Fatalf("thumbnail not reduced and signed: %s", process)
+	}
+	if got.DownloadURL == nil || *got.DownloadURL != oss.PresignPreviewURL(input[0].StorageKey).DownloadURL {
+		t.Fatal("original download changed")
+	}
+	if input[0].ThumbnailURL == nil || *input[0].ThumbnailURL != "https://untrusted.example/old.png" {
+		t.Fatal("caller slice mutated")
+	}
+}
+
+func TestReferenceFileRefsEnricherNeverFallsBackToOriginalForUnsupportedThumbnail(t *testing.T) {
+	oss := newReferenceFileRefsTestOSS(time.Now())
+	oversize := int64(200 * 1024 * 1024)
+	refs := []domain.ReferenceFileRef{
+		{AssetID: "pdf", Filename: "source.pdf", StorageKey: "tasks/source.pdf", ThumbnailURL: stringPtr("https://untrusted.example/pdf")},
+		{AssetID: "large", Filename: "large.jpg", FileSize: &oversize, StorageKey: "tasks/large.jpg", ThumbnailURL: stringPtr("https://untrusted.example/large")},
+	}
+	for _, got := range NewReferenceFileRefsEnricher(oss, nil).EnrichAll(refs) {
+		if got.ThumbnailURL != nil {
+			t.Fatal("unsafe original/unsupported thumbnail fallback")
+		}
+	}
+}
+
+func TestReferenceFileRefsEnricherClearsReplayedThumbnailWithoutSigner(t *testing.T) {
+	ref := domain.ReferenceFileRef{AssetID: "uuid", ThumbnailURL: stringPtr("https://untrusted.example/a.jpg")}
+	for _, enricher := range []*ReferenceFileRefsEnricher{nil, NewReferenceFileRefsEnricher(nil, nil), NewReferenceFileRefsEnricher(NewOSSDirectService(OSSDirectConfig{Enabled: false}), nil)} {
+		if got := enricher.EnrichAll([]domain.ReferenceFileRef{ref}); got[0].ThumbnailURL != nil {
+			t.Fatal("replayed thumbnail URL survived")
+		}
+	}
+}
 
 func TestReferenceFileRefsEnricherOSSDisabledReturnsInputUnchanged(t *testing.T) {
 	input := []domain.ReferenceFileRef{{

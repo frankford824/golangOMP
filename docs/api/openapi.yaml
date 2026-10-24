@@ -2829,6 +2829,11 @@ components:
           type: string
           nullable: true
           description: Signed download URL. For OSS Direct-backed references, this URL is short-lived (default 15 minutes, see download_url_expires_at). Consumers SHOULD refresh via GET /v1/tasks/{id} when the URL expires or when a 403/404 is observed.
+        thumbnail_url:
+          type: string
+          nullable: true
+          readOnly: true
+          description: Server-signed 480px thumbnail for supported task reference images, including UUID pre-task uploads. Shares download_url_expires_at; refresh task detail after expiry or an image error. Never substitute download_url when absent. Supplied or persisted thumbnail URLs are discarded and regenerated during authorized task reads.
         storage_key:
           type: string
           nullable: true

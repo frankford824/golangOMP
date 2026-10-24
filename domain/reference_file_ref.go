@@ -25,6 +25,7 @@ type ReferenceFileRef struct {
 	FileSize             *int64     `json:"file_size,omitempty"`
 	URL                  *string    `json:"url,omitempty"`
 	DownloadURL          *string    `json:"download_url,omitempty"`
+	ThumbnailURL         *string    `json:"thumbnail_url,omitempty"`
 	Source               string     `json:"source,omitempty"`
 	Status               string     `json:"status,omitempty"`
 	StorageKey           string     `json:"storage_key,omitempty"`

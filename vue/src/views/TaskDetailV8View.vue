@@ -50,6 +50,7 @@
         @open-resources="openWorkspace('resources')"
         @open-attachments="openWorkspace('attachments')"
         @open-workflow="openWorkspace('workflow')"
+        @refresh-references="refreshReferencePreviews"
       />
       <section v-if="isRetouch && retouchMaterialRows.length" class="retouch-materials" aria-label="待修素材">
         <header>
@@ -812,6 +813,25 @@ function eventTitle(item: TaskEvent) {
   return '任务信息已更新'
 }
 function eventActor(item: TaskEvent) { return item.operator_name || item.actor_name || '系统' }
+
+let referenceRefreshPending = false
+async function refreshReferencePreviews() {
+  if (referenceRefreshPending) return
+  const id = taskId.value
+  referenceRefreshPending = true
+  try {
+    const response = await tasksApi.getDetail(String(id))
+    if (id !== taskId.value || !task.value) return
+    const envelope = unwrap<Record<string, unknown>>(response) || {}
+    if (!Array.isArray(envelope.reference_file_refs)) throw new Error('参考图地址刷新结果异常，已保留原列表。')
+    const refreshed = mergeDetailEnvelopeIntoTaskRaw(envelope)
+    task.value = { ...task.value, reference_file_refs: refreshed.reference_file_refs || [] } as V8Task
+    aggregate.value = { ...aggregate.value, reference_file_refs: envelope.reference_file_refs,
+      ...(Array.isArray(envelope.retouch_requirements) ? { retouch_requirements: envelope.retouch_requirements } : {}) }
+  } catch (cause) {
+    if (id === taskId.value) error.value = resolveApiUserMessage(cause, { fallback: '参考图地址刷新失败，请稍后重试。' })
+  } finally { referenceRefreshPending = false }
+}
 
 async function load() {
   if (!Number.isInteger(taskId.value) || taskId.value <= 0) { error.value = '任务 ID 无效。'; return }

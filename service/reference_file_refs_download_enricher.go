@@ -24,12 +24,18 @@ func NewReferenceFileRefsEnricher(oss *OSSDirectService, nowFn func() time.Time)
 }
 
 func (e *ReferenceFileRefsEnricher) EnrichAll(refs []domain.ReferenceFileRef) []domain.ReferenceFileRef {
-	if e == nil || e.ossDirect == nil || !e.ossDirect.Enabled() {
-		return refs
+	if refs == nil {
+		return nil
 	}
-
 	out := make([]domain.ReferenceFileRef, len(refs))
 	copy(out, refs)
+	// Never replay a caller-supplied or persisted temporary preview URL.
+	for i := range out {
+		out[i].ThumbnailURL = nil
+	}
+	if e == nil || e.ossDirect == nil || !e.ossDirect.Enabled() {
+		return out
+	}
 
 	for i := range out {
 		ref := out[i]
@@ -57,6 +63,15 @@ func (e *ReferenceFileRefsEnricher) EnrichAll(refs []domain.ReferenceFileRef) []
 		ref.DownloadURL = stringPtr(presigned.DownloadURL)
 		ref.URL = stringPtr(presigned.DownloadURL)
 		ref.DownloadURLExpiresAt = &expiresAt
+		var fileSize int64
+		if ref.FileSize != nil {
+			fileSize = *ref.FileSize
+		}
+		if process, supported := OSSIMGThumbnailProcessForSize(ref.Filename, ref.MimeType, fileSize); supported {
+			if thumbnail := e.ossDirect.PresignPreviewURLWithProcess(storageKey, process); thumbnail != nil {
+				ref.ThumbnailURL = stringPtr(thumbnail.DownloadURL)
+			}
+		}
 		out[i] = ref
 	}
 

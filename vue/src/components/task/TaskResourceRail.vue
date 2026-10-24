@@ -6,11 +6,11 @@
     </header>
     <div class="rail-grid">
       <article class="rail-column references">
-        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button type="button" @click="openAllReferences">参考资料总览</button></div>
+        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button v-if="failedThumbnails.size" type="button" @click="retryThumbnails">重试缩略图</button><button type="button" @click="openAllReferences">参考资料总览</button></div>
         <div v-if="resourceReferences.length" class="media-strip">
           <button v-for="(file,index) in resourceReferences.slice(0,4)" :key="referenceKey(file,index)" type="button" @click="openReference(file)">
             <AssetPreviewMedia
-              v-if="referencePreviewable(file) && referencePreview(file)"
+              v-if="referencePreviewable(file) && referencePreview(file) && taskAssetID(file)"
               class="resource-preview"
               :task-asset-id="taskAssetID(file)"
               :fallback-src="referencePreview(file)"
@@ -18,6 +18,10 @@
               img-class="resource-preview-shell"
               inner-img-class="resource-preview-img"
             />
+            <template v-else-if="referencePreviewable(file) && referenceThumbnail(file)">
+              <img v-if="!failedThumbnails.has(referenceThumbnail(file))" :src="referenceThumbnail(file)" :alt="referenceName(file)" class="reference-thumbnail" loading="lazy" decoding="async" @error="thumbnailFailed(referenceThumbnail(file))" />
+              <span v-else class="reference-thumbnail-error">缩略图暂不可用</span>
+            </template>
             <FileText v-else :size="23" aria-hidden="true" />
             <span>{{ referenceName(file) }}</span>
           </button>
@@ -82,7 +86,13 @@ import type { ReferenceFileRef } from '@/services/api/assetsApi'
 type SourceWithStage = ResourceFile & { stage: string }
 type RailReference = (ResourceReference | ReferenceFileRef) & { source?: 'task' | 'resource'; preview_url?: string | null }
 const props = defineProps<{ bundle: ResourceBundle; taskStatus: string; taskType: string; taskReferences?: ReferenceFileRef[]; canOperate?: boolean; actionLabel?: string }>()
-const emit = defineEmits<{ openResources: []; openAttachments: []; openWorkflow: [] }>()
+const emit = defineEmits<{ openResources: []; openAttachments: []; openWorkflow: []; refreshReferences: [] }>()
+const failedThumbnails = ref(new Set<string>())
+function referenceThumbnail(file: RailReference): string {
+  return file.source === 'task' && 'thumbnail_url' in file && typeof file.thumbnail_url === 'string' ? file.thumbnail_url.trim() : ''
+}
+function thumbnailFailed(url: string) { failedThumbnails.value = new Set([...failedThumbnails.value, url]) }
+function retryThumbnails() { failedThumbnails.value = new Set(); emit('refreshReferences') }
 const groups = computed(() => props.bundle.groups || [])
 const resourceReferences = computed<RailReference[]>(() => {
   const seen = new Set<string>()
@@ -180,5 +190,7 @@ function sourceStageLabel(stage: string) { return stage === 'audit' ? '审核确
 </script>
 
 <style scoped>
+.reference-thumbnail { width:100%;height:58px;object-fit:contain; }
+.reference-thumbnail-error { display:grid;place-items:center;height:58px;font-size:11px;color:rgb(var(--yb-text-muted)); }
 .resource-rail{overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:15px;background:rgb(var(--yb-surface));box-shadow:0 5px 18px rgb(var(--yb-shadow)/.045)}.resource-rail>header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 15px;border-bottom:1px solid rgb(var(--yb-border))}.resource-rail header p{margin:0;color:rgb(var(--yb-brand));font-size:10px;font-weight:850;letter-spacing:.08em}.resource-rail h2{margin:3px 0 0;font-size:16px}.resource-rail header button,.resource-rail>footer button,.column-head button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:11px;font-weight:720;cursor:pointer}.rail-grid{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr);align-items:stretch}.rail-column{min-width:0;padding:12px 14px}.rail-column+.rail-arrow+.rail-column{border-left:1px solid rgb(var(--yb-border))}.rail-arrow{align-self:center;color:rgb(var(--yb-text-faint))}.column-head{min-height:37px;display:flex;align-items:center;gap:9px}.column-head>span:first-child{display:grid;flex:0 0 auto;width:28px;height:28px;place-items:center;border-radius:8px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font:800 11px var(--yb-font-data)}.column-head>div{min-width:0;display:grid}.column-head strong{font-size:12px}.column-head small{color:rgb(var(--yb-text-muted));font-size:10px}.column-head button,.column-head>svg{margin-left:auto}.media-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}.media-strip button{min-width:0;display:grid;grid-template-rows:58px auto;gap:5px;border:0;padding:0;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer}.media-strip :deep(.resource-preview-shell),.media-strip button>svg{width:100%;height:58px;border-radius:7px;background:rgb(var(--yb-surface-muted));object-fit:cover}.media-strip :deep(.resource-preview-img){width:100%;height:100%;border-radius:inherit;object-fit:cover}.resource-preview{pointer-events:none}.media-strip button>svg{padding:16px;color:rgb(var(--yb-text-muted))}.media-strip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.file-strip{display:grid;gap:6px;margin-top:9px}.file-strip>div{min-width:0;display:flex;align-items:center;gap:8px;border:1px solid rgb(var(--yb-border));border-radius:8px;padding:7px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-brand))}.file-strip>div>span{min-width:0;display:grid}.file-strip strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgb(var(--yb-text));font-size:10px}.file-strip small{color:rgb(var(--yb-text-muted));font-size:9px}.locked{background:rgb(var(--yb-surface-soft))}.locked-copy{display:flex;align-items:center;gap:9px;margin-top:9px;border:1px dashed rgb(var(--yb-border-strong));border-radius:8px;padding:11px;color:rgb(var(--yb-text-muted))}.locked-copy>span{display:grid}.locked-copy strong{color:rgb(var(--yb-text));font-size:11px}.locked-copy small{font-size:9px;line-height:1.45}.empty-copy{margin:13px 0 0;color:rgb(var(--yb-text-muted));font-size:10px}.resource-rail>footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 15px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-brand-soft)/.36);color:rgb(var(--yb-text-muted));font-size:11px}.resource-rail>footer button{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}@media(max-width:1000px){.rail-grid{grid-template-columns:1fr}.rail-arrow{transform:rotate(90deg);justify-self:center}.rail-column+.rail-arrow+.rail-column{border-top:1px solid rgb(var(--yb-border));border-left:0}.media-strip button{grid-template-rows:72px auto}.media-strip :deep(.resource-preview-shell),.media-strip button>svg{height:72px}}@media(max-width:620px){.resource-rail>header,.resource-rail>footer{align-items:flex-start;flex-direction:column}.resource-rail>header button,.resource-rail>footer button{width:100%}.media-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.media-strip button{grid-template-rows:86px auto}.media-strip :deep(.resource-preview-shell),.media-strip button>svg{height:86px}}
 </style>

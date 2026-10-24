@@ -84,6 +84,20 @@ function dialog() {
 }
 
 describe('TaskDetailV8View business context', () => {
+  it('renews task reference thumbnails without reloading unrelated task or cost state', async () => {
+    const refs = [{ asset_id: 'reference-uuid', filename: 'reference.jpg', mime_type: 'image/jpeg', thumbnail_url: 'https://objects.example/thumbnail-old.webp', download_url: 'https://objects.example/original.jpg' }]
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, reference_file_refs: refs, events: [] } } })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('.reference-thumbnail').trigger('error')
+    mocks.getDetail.mockResolvedValueOnce({ data: { data: { task: baseTask, reference_file_refs: [{ ...refs[0], thumbnail_url: 'https://objects.example/thumbnail-new.webp' }] } } })
+    await wrapper.findAll('button').find(button => button.text() === '重试缩略图')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.reference-thumbnail').attributes('src')).toBe('https://objects.example/thumbnail-new.webp')
+    expect(mocks.getById).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()

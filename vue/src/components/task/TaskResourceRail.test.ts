@@ -65,6 +65,29 @@ const bundle: ResourceBundle = {
 }
 
 describe('TaskResourceRail', () => {
+  it('renders server-issued UUID reference thumbnails without using the original as a thumbnail', async () => {
+    const thumbnail = 'https://objects.example/thumb.webp?signature=server'
+    const wrapper = mount(TaskResourceRail, { props: { bundle: { task_id: 9128, workflow_revision: 1, groups: [] }, taskStatus: 'InProgress', taskType: 'new_product_development', taskReferences: [{ asset_id: 'uuid-reference', filename: 'picture.jpg', mime_type: 'image/jpeg', thumbnail_url: thumbnail, download_url: 'https://objects.example/original.jpg' }] } })
+    expect(wrapper.get('.reference-thumbnail').attributes('src')).toBe(thumbnail)
+    expect(wrapper.find('.asset-preview-media-stub').exists()).toBe(false)
+    await wrapper.get('.reference-thumbnail').trigger('error')
+    expect(wrapper.find('.reference-thumbnail').exists()).toBe(false)
+    expect(wrapper.text()).toContain('缩略图暂不可用')
+    const retry = wrapper.findAll('button').find(button => button.text() === '重试缩略图')!
+    await retry.trigger('click')
+    expect(wrapper.emitted('refreshReferences')).toHaveLength(1)
+    await wrapper.setProps({ taskReferences: [{ asset_id: 'uuid-reference', filename: 'picture.jpg', mime_type: 'image/jpeg', thumbnail_url: thumbnail + '-renewed', download_url: 'https://objects.example/original.jpg' }] })
+    expect(wrapper.get('.reference-thumbnail').attributes('src')).toBe(thumbnail + '-renewed')
+    await wrapper.get('.media-strip > button').trigger('click')
+    expect(wrapper.get('.lightbox-stub').attributes('data-open')).toBe('true')
+  })
+
+  it('does not turn an original link into a thumbnail when the server omits thumbnail_url', () => {
+    const wrapper = mount(TaskResourceRail, { props: { bundle: { task_id: 9128, workflow_revision: 1, groups: [] }, taskStatus: 'InProgress', taskType: 'new_product_development', taskReferences: [{ asset_id: 'uuid-reference', filename: 'picture.jpg', download_url: 'https://objects.example/original.jpg' }] } })
+    expect(wrapper.find('.reference-thumbnail').exists()).toBe(false)
+    expect(wrapper.find('.asset-preview-media-stub').exists()).toBe(false)
+  })
+
   it('uses current scoped revision references with stable order and de-duplication', () => {
     const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed', taskType: 'retouch_task' } })
 

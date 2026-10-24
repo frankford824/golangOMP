@@ -165,6 +165,8 @@ export interface ReferenceFileRef {
   file_size?: number | null
   /** 规范业务文件访问入口；勿使用已废弃的 `url` */
   download_url?: string | null
+  /** Server-issued reduced preview; refresh task detail to renew its signature. */
+  thumbnail_url?: string | null
   source?: string
   status?: string
   /** 后端 v1.18+：OSS object key，用于 re-sign；不要拿来解析文件名 */
