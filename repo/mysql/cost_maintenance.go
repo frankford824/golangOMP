@@ -15,14 +15,15 @@ type costMaintenanceRepo struct{ db *DB }
 func NewCostMaintenanceRepo(db *DB) repo.CostMaintenanceRepo { return &costMaintenanceRepo{db} }
 
 const maintenanceColumns = `s.id,s.task_id,s.sku_code,s.product_name_snapshot,COALESCE(s.variant_json,JSON_OBJECT()),s.product_i_id,s.cost_price,s.updated_at,
- COALESCE(cs.revision,0),cs.erp_cost,COALESCE(cs.status,'baseline'),d.width,d.height,d.area,COALESCE(d.size_text,''),t.id*1000+s.sequence_no,s.erp_sync_required,COALESCE(s.filing_error_message,'')`
+ COALESCE(cs.revision,0),cs.erp_cost,COALESCE(cs.status,'baseline'),d.width,d.height,d.area,COALESCE(d.size_text,''),t.id*1000+s.sequence_no,s.erp_sync_required,COALESCE(s.filing_error_message,''),
+ COALESCE((SELECT e.payload FROM cost_maintenance_logs e WHERE e.sku_code=s.sku_code AND e.sku_item_id=s.id ORDER BY e.id DESC LIMIT 1),JSON_OBJECT())`
 const maintenanceFrom = ` FROM task_sku_items s JOIN tasks t ON t.id=s.task_id
  LEFT JOIN task_details d ON d.task_id=s.task_id AND (t.batch_item_count=1 OR t.primary_sku_code=s.sku_code OR t.sku_code=s.sku_code) LEFT JOIN sku_cost_sync_states cs ON cs.sku_code=s.sku_code
  WHERE (t.task_status IN ('Completed','Archived') OR EXISTS(SELECT 1 FROM tasks history WHERE history.sku_code=s.sku_code AND history.task_status IN ('Completed','Archived'))) AND s.sku_code<>''`
 
 func scanMaintenanceRow(s interface{ Scan(...interface{}) error }) (*domain.CostMaintenanceRow, error) {
 	r := new(domain.CostMaintenanceRow)
-	err := s.Scan(&r.ID, &r.TaskID, &r.SKUCode, &r.ProductName, &r.VariantJSON, &r.ProductIID, &r.CostPrice, &r.UpdatedAt, &r.Revision, &r.ERPCost, &r.Status, &r.DetailWidth, &r.DetailHeight, &r.DetailArea, &r.DetailSize, &r.SortID, &r.BaseSyncRequired, &r.BaseSyncError)
+	err := s.Scan(&r.ID, &r.TaskID, &r.SKUCode, &r.ProductName, &r.VariantJSON, &r.ProductIID, &r.CostPrice, &r.UpdatedAt, &r.Revision, &r.ERPCost, &r.Status, &r.DetailWidth, &r.DetailHeight, &r.DetailArea, &r.DetailSize, &r.SortID, &r.BaseSyncRequired, &r.BaseSyncError, &r.ReviewJSON)
 	return r, err
 }
 func (r *costMaintenanceRepo) List(ctx context.Context, f repo.CostMaintenanceFilter) ([]*domain.CostMaintenanceRow, error) {

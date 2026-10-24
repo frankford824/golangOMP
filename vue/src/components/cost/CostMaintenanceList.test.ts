@@ -31,6 +31,7 @@ const row = {
   erp_cost: 3.3,
   revision: 2,
   status: "baseline",
+  reviewed: false,
   token: "visible-baseline",
   updated_at: "2026-10-23T00:00:00Z",
 };
@@ -43,16 +44,101 @@ beforeEach(() => {
     next_before_id: 0,
     refreshed_at: "2026-10-23T00:00:00Z",
   });
-  mocks.maintain.mockResolvedValue({ ...row, status: "pending" });
+  mocks.maintain.mockResolvedValue({
+    ...row,
+    reviewed: true,
+    status: "pending",
+  });
   mocks.logs.mockResolvedValue({ data: [], pagination: { total: 0 } });
 });
 describe("completed SKU maintenance", () => {
-  it('distinguishes metadata delivery from a reconciled price',async()=>{
-    mocks.list.mockResolvedValue({data:[{...row,status:'synced',base_sync_required:true,base_sync_error:'ERP资料发送失败'}],next_before_id:0,refreshed_at:row.updated_at})
-    const w=mount(CostMaintenanceList,{global:{stubs:{Teleport:true}}});await flushPromises()
-    expect(w.text()).toContain('ERP 已回读一致');expect(w.text()).toContain('资料同步失败')
-  })
+  it.each(["pending", "synced"])(
+    "replaces confirmation with a persistent reviewed label while %s and keeps editing available",
+    async (status) => {
+      mocks.list.mockResolvedValue({
+        data: [{ ...row, reviewed: true, status }],
+        next_before_id: 0,
+        refreshed_at: row.updated_at,
+      });
+      const w = mount(CostMaintenanceList, {
+        global: { stubs: { Teleport: true } },
+      });
+      await flushPromises();
+      expect(w.findAll("button").some((b) => b.text() === "确认")).toBe(false);
+      expect(w.get(".maintenance-reviewed").text()).toBe("已确认");
+      const edit = w.findAll("button").find((b) => b.text() === "修改")!;
+      expect(edit.attributes("disabled")).toBeUndefined();
+      await edit.trigger("click");
+      expect(w.get('form[role="dialog"]').text()).toContain("修改编码");
+    },
+  );
+  it("still allows explicit conflict resolution after an earlier human review", async () => {
+    mocks.list.mockResolvedValue({
+      data: [{ ...row, reviewed: true, status: "conflict" }],
+      next_before_id: 0,
+      refreshed_at: row.updated_at,
+    });
+    const w = mount(CostMaintenanceList);
+    await flushPromises();
+    expect(
+      w
+        .findAll("button")
+        .find((b) => b.text() === "确认")!
+        .attributes("disabled"),
+    ).toBeUndefined();
+  });
+  it("keeps the committed review visible if the subsequent refresh fails", async () => {
+    mocks.list
+      .mockResolvedValueOnce({
+        data: [row],
+        next_before_id: 0,
+        refreshed_at: row.updated_at,
+      })
+      .mockRejectedValueOnce(new Error("读取失败"));
+    const w = mount(CostMaintenanceList);
+    await flushPromises();
+    await w
+      .findAll("button")
+      .find((b) => b.text() === "确认")!
+      .trigger("click");
+    await flushPromises();
+    expect(w.get(".maintenance-reviewed").text()).toBe("已确认");
+    expect(w.findAll("button").some((b) => b.text() === "确认")).toBe(false);
+    expect(mocks.maintain).toHaveBeenCalledTimes(1);
+  });
+  it("distinguishes metadata delivery from a reconciled price", async () => {
+    mocks.list.mockResolvedValue({
+      data: [
+        {
+          ...row,
+          status: "synced",
+          base_sync_required: true,
+          base_sync_error: "ERP资料发送失败",
+        },
+      ],
+      next_before_id: 0,
+      refreshed_at: row.updated_at,
+    });
+    const w = mount(CostMaintenanceList, {
+      global: { stubs: { Teleport: true } },
+    });
+    await flushPromises();
+    expect(w.text()).toContain("ERP 已回读一致");
+    expect(w.text()).toContain("资料同步失败");
+    expect(w.findAll("button").some((b) => b.text() === "确认")).toBe(true);
+  });
   it("confirms exactly the displayed system price baseline without editing product fields", async () => {
+    mocks.list
+      .mockResolvedValueOnce({
+        data: [row],
+        next_before_id: 0,
+        refreshed_at: row.updated_at,
+      })
+      .mockResolvedValue({
+        data: [{ ...row, reviewed: true, status: "pending" }],
+        next_before_id: 0,
+        refreshed_at: row.updated_at,
+      });
     const w = mount(CostMaintenanceList, {
       global: { stubs: { Teleport: true } },
     });
@@ -70,6 +156,8 @@ describe("completed SKU maintenance", () => {
     });
     expect(w.text()).toContain("系统已生效");
     expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(w.get(".maintenance-reviewed").text()).toBe("已确认");
+    expect(w.findAll("button").some((b) => b.text() === "确认")).toBe(false);
   });
   it("requires a reason and submits only changed fields", async () => {
     const w = mount(CostMaintenanceList, {

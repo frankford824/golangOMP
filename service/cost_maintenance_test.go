@@ -30,8 +30,9 @@ func (m *maintenanceStoreStub) Save(_ context.Context, _ repo.Tx, item *domain.T
 func (m *maintenanceStoreStub) Project(context.Context, repo.Tx, *domain.TaskSKUItem) error {
 	return nil
 }
-func (m *maintenanceStoreStub) AppendLog(context.Context, repo.Tx, int64, int64, string, string, string, int64, interface{}) error {
+func (m *maintenanceStoreStub) AppendLog(_ context.Context, _ repo.Tx, _, _ int64, _, _, _ string, _ int64, payload interface{}) error {
 	m.logged++
+	m.row.ReviewJSON, _ = json.Marshal(payload)
 	return nil
 }
 
@@ -54,7 +55,8 @@ func TestMaintenanceConfirmationIsAtomicIntentAndNeverBusinessReplay(t *testing.
 		{"empty modification", "modify", nil, "", float64Ptr(9.9), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := &maintenanceStoreStub{row: row}
+			copy := *row
+			m := &maintenanceStoreStub{row: &copy}
 			store := &manualCostStoreStub{costSyncStoreStub: costSyncStoreStub{state: &domain.CostSyncState{Revision: 2, LocalCost: float64Ptr(3.3)}}}
 			sync := NewCostSyncService(store, costObserverStub{get: func() (*domain.ERPProduct, error) { return &domain.ERPProduct{SKUID: "SKU", CostPrice: tc.erp}, nil }})
 			s := NewTaskService(r, &prdTaskAssetRepo{}, &prdTaskEventRepo{}, nil, prdCodeRuleService{}, step04TxRunner{}, WithTaskCostSyncService(sync), WithTaskCostMaintenanceRepo(m)).(*taskService)
@@ -65,12 +67,15 @@ func TestMaintenanceConfirmationIsAtomicIntentAndNeverBusinessReplay(t *testing.
 			if tc.token != "" {
 				token = tc.token
 			}
-			_, err := s.MaintainCost(ctx, 10, domain.CostMaintenanceRequest{Action: tc.action, Token: token, Revision: 2, ERPCost: float64Ptr(9.9), ReasonCode: "cost_incorrect", CostPrice: tc.price})
+			result, err := s.MaintainCost(ctx, 10, domain.CostMaintenanceRequest{Action: tc.action, Token: token, Revision: 2, ERPCost: float64Ptr(9.9), ReasonCode: "cost_incorrect", CostPrice: tc.price})
 			if (err == nil) != tc.want {
 				t.Fatalf("unexpected result %v", err)
 			}
 			if tc.want && (m.saved != 1 || m.logged != 1 || m.business) {
 				t.Fatalf("intent/audit/business replay: %+v", m)
+			}
+			if tc.want && !result.Reviewed {
+				t.Fatal("committed human review was not returned to the list")
 			}
 			if !tc.want && (m.saved != 0 || m.logged != 0) {
 				t.Fatal("rejected operation wrote data")
@@ -105,6 +110,63 @@ func TestMaintenanceValidationAndDimensionUnits(t *testing.T) {
 	r.ProductName = "new"
 	if maintenanceToken(r) == token {
 		t.Fatal("name change did not invalidate edit")
+	}
+}
+
+func TestMaintenanceReviewTracksHumanAuditAndCurrentBusinessValues(t *testing.T) {
+	original := domain.CostMaintenanceRow{ID: 10, TaskID: 71, SKUCode: "SKU", ProductName: "原名称", ProductIID: "KT", VariantJSON: json.RawMessage(`{"width":20,"height":30}`), CostPrice: float64Ptr(3.3), ERPCost: float64Ptr(3.3), Revision: 2, Status: "synced", UpdatedAt: time.Now()}
+	hydrateMaintenanceRow(&original)
+	if original.Reviewed {
+		t.Fatal("ERP convergence must not imply human review")
+	}
+	for _, action := range []string{"confirm", "modify"} {
+		audit, err := json.Marshal(map[string]interface{}{"action": action, "after": original})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			name   string
+			change func(*domain.CostMaintenanceRow)
+			want   bool
+		}{
+			{"unchanged after reload", func(*domain.CostMaintenanceRow) {}, true},
+			{"delivery pending", func(r *domain.CostMaintenanceRow) {
+				r.Status = "pending"
+				r.ERPCost = float64Ptr(9.9)
+				r.Revision++
+				r.UpdatedAt = r.UpdatedAt.Add(time.Hour)
+				r.BaseSyncRequired = true
+			}, true},
+			{"name changed", func(r *domain.CostMaintenanceRow) { r.ProductName = "新名称" }, false},
+			{"style changed", func(r *domain.CostMaintenanceRow) { r.ProductIID = "NEW" }, false},
+			{"dimensions changed", func(r *domain.CostMaintenanceRow) { r.VariantJSON = json.RawMessage(`{"width":40,"height":30}`) }, false},
+			{"area changed", func(r *domain.CostMaintenanceRow) {
+				r.VariantJSON = json.RawMessage(`{"width":20,"height":30,"area":0.12}`)
+			}, false},
+			{"specification changed", func(r *domain.CostMaintenanceRow) {
+				r.VariantJSON = json.RawMessage(`{"cost_input":{"area_mode":"total","area_m2":0.12,"pieces":1}}`)
+			}, false},
+			{"price changed", func(r *domain.CostMaintenanceRow) { r.CostPrice = float64Ptr(4.4) }, false},
+			{"price removed", func(r *domain.CostMaintenanceRow) { r.CostPrice = nil }, false},
+		} {
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				r := original
+				r.ReviewJSON = audit
+				tc.change(&r)
+				hydrateMaintenanceRow(&r)
+				if r.Reviewed != tc.want {
+					t.Fatalf("reviewed=%v want=%v", r.Reviewed, tc.want)
+				}
+			})
+		}
+	}
+	for _, raw := range []string{`{}`, `null`, `{"action":"confirm"}`, `{"action":"automatic","after":{}}`, `invalid`} {
+		r := original
+		r.ReviewJSON = json.RawMessage(raw)
+		hydrateMaintenanceRow(&r)
+		if r.Reviewed {
+			t.Fatalf("invalid or incomplete audit counted as human review: %s", raw)
+		}
 	}
 }
 

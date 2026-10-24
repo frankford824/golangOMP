@@ -1239,6 +1239,13 @@ components:
         erp_cost: { type: number, nullable: true, description: Last observed ERP cost, not necessarily a fresh ERP read. }
         revision: { type: integer, format: int64 }
         status: { type: string, enum: [baseline, observe, pending, retry, synced, conflict, no_price] }
+        reviewed:
+          type: boolean
+          description: >-
+            Latest committed human confirm or modify audit matches the current SKU
+            identity, name, style, dimensions, specifications and cost. Independent
+            of ERP delivery status. Business value changes require a new review.
+            Omitted in historical audit snapshots.
         token: { type: string, description: Opaque optimistic baseline covering identity, specifications, price and revision. }
         base_sync_required: { type: boolean, description: Product metadata delivery remains pending independently of cost reconciliation. }
         base_sync_error: { type: string, description: Latest product metadata delivery failure, if any. A synced cost does not imply metadata has been delivered. }

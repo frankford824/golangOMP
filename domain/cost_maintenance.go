@@ -23,6 +23,7 @@ type CostMaintenanceRow struct {
 	ERPCost          *float64        `json:"erp_cost"`
 	Revision         int64           `json:"revision"`
 	Status           string          `json:"status"`
+	Reviewed         bool            `json:"reviewed"`
 	BaseSyncRequired bool            `json:"base_sync_required"`
 	BaseSyncError    string          `json:"base_sync_error"`
 	Token            string          `json:"token"`
@@ -34,6 +35,7 @@ type CostMaintenanceRow struct {
 	DetailArea       *float64        `json:"-"`
 	DetailSize       string          `json:"-"`
 	SortID           int64           `json:"-"`
+	ReviewJSON       json.RawMessage `json:"-"`
 }
 
 type CostMaintenanceRequest struct {

@@ -21506,6 +21506,8 @@ export interface components {
             revision: number;
             /** @enum {string} */
             status: "baseline" | "observe" | "pending" | "retry" | "synced" | "conflict" | "no_price";
+            /** @description Latest committed human confirm or modify audit matches the current SKU identity, name, style, dimensions, specifications and cost. Independent of ERP delivery status. Business value changes require a new review. Omitted in historical audit snapshots. */
+            reviewed?: boolean;
             /** @description Opaque optimistic baseline covering identity */
             token: string;
             /** @description Product metadata delivery remains pending independently of cost reconciliation. */

@@ -63,6 +63,9 @@ func TestCostMaintenanceIntegration(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("canonical list %+v %v", rows, err)
 	}
+	if string(rows[0].ReviewJSON) != "{}" {
+		t.Fatalf("new SKU unexpectedly has a maintenance audit: %s", rows[0].ReviewJSON)
+	}
 	for _, commit := range []bool{false, true} {
 		tx, sqlTx, err = wrapper.BeginTx(ctx)
 		if err != nil {
@@ -96,6 +99,18 @@ func TestCostMaintenanceIntegration(t *testing.T) {
 		db.QueryRow(`SELECT COUNT(*) FROM cost_maintenance_logs`).Scan(&count)
 		if commit && (cost != 4.4 || count != 1) || !commit && (cost != 3.3 || count != 0) {
 			t.Fatalf("partial commit cost=%v logs=%d commit=%v", cost, count, commit)
+		}
+		listed, listErr := r.List(ctx, repo.CostMaintenanceFilter{PageSize: 50})
+		if listErr != nil || len(listed) != 1 {
+			t.Fatalf("read committed review: %v", listErr)
+		}
+		var audit struct {
+			After struct {
+				CostPrice *float64 `json:"cost_price"`
+			} `json:"after"`
+		}
+		if err = json.Unmarshal(listed[0].ReviewJSON, &audit); err != nil || (audit.After.CostPrice != nil) != commit {
+			t.Fatalf("review did not follow atomic commit/rollback: %s %v", listed[0].ReviewJSON, err)
 		}
 	}
 	var outboxCount int

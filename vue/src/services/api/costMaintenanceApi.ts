@@ -16,6 +16,7 @@ export interface MaintenanceRow {
   erp_cost: number | null;
   revision: number;
   status: string;
+  reviewed: boolean;
   base_sync_required?: boolean;
   base_sync_error?: string;
   token: string;

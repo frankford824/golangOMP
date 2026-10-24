@@ -13,6 +13,11 @@ authorities remain `transport/http.go` and `docs/api/openapi.yaml`.
   Modification sends only changed fields and requires one of `area_incorrect`,
   `style_binding_incorrect`, `cost_incorrect`, `other`. Other requires text.
   Both `catalog.manage` and `erp.manage`, including task scope, are required.
+- `reviewed` derives from the latest committed maintenance audit matching the
+  current business values. An unchanged reviewed row shows **已确认** instead of
+  another confirmation button, including while ERP delivery is pending and after
+  reload. **修改** remains available. ERP convergence alone never implies human
+  review. Changed values or an ERP conflict allow a fresh confirmation.
 - The server checks the displayed local token and a direct ERP price baseline,
   locks/rechecks canonical data, then commits the change, current read mirrors,
   calculation snapshot, task event and dedicated maintenance log together.

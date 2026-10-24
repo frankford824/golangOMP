@@ -61,10 +61,22 @@
               ><small v-if="row.status === 'conflict'"
                 >ERP {{ money(row.erp_cost) }} 元</small
               >
-              <small v-if="row.base_sync_required" :title="row.base_sync_error || '名称与规格资料正在同步'">{{row.base_sync_error ? '资料同步失败' : '资料待同步'}}</small>
+              <small
+                v-if="row.base_sync_required"
+                :title="row.base_sync_error || '名称与规格资料正在同步'"
+                >{{
+                  row.base_sync_error ? "资料同步失败" : "资料待同步"
+                }}</small
+              >
             </td>
             <td class="row-actions">
+              <span
+                v-if="row.reviewed && row.status !== 'conflict'"
+                class="maintenance-reviewed"
+                >已确认</span
+              >
               <button
+                v-else
                 :disabled="
                   !canEdit ||
                   busyID !== null ||
@@ -571,12 +583,15 @@ async function confirm(row: MaintenanceRow) {
   error.value = "";
   notice.value = "";
   try {
-    await costMaintenanceApi.maintain(row.id, {
+    const updated = await costMaintenanceApi.maintain(row.id, {
       action: "confirm",
       token: row.token,
       revision: row.revision,
       erp_cost: row.erp_cost,
     });
+    rows.value = rows.value.map((current) =>
+      current.id === row.id ? updated : current,
+    );
     notice.value = `${row.sku_code} 已确认，系统已生效；ERP 状态以回读结果为准。`;
     await load();
   } catch (e) {

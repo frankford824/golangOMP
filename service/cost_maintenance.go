@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -78,6 +79,26 @@ func hydrateMaintenanceRow(r *domain.CostMaintenanceRow) {
 		a := *r.WidthCM * *r.HeightCM / 10000
 		r.AreaM2 = &a
 	}
+	r.Reviewed = maintenanceReviewMatches(r)
+}
+
+// Human review is independent of ERP convergence. Read the latest committed
+// audit snapshot so existing confirmations survive reloads without a backfill.
+// Runtime timestamps, revisions and delivery states do not change that review;
+// a change to any reviewed business value does.
+func maintenanceReviewMatches(r *domain.CostMaintenanceRow) bool {
+	var log struct {
+		Action string                     `json:"action"`
+		After  *domain.CostMaintenanceRow `json:"after"`
+	}
+	if json.Unmarshal(r.ReviewJSON, &log) != nil || log.After == nil || (log.Action != "confirm" && log.Action != "modify") || !domain.ValidObservedCost(r.CostPrice) || !domain.EqualCost(r.CostPrice, log.After.CostPrice) {
+		return false
+	}
+	values := func(v *domain.CostMaintenanceRow) []byte {
+		raw, _ := json.Marshal([]interface{}{v.ID, v.TaskID, v.SKUCode, v.ProductName, v.StyleCode, v.WidthCM, v.HeightCM, v.AreaM2, v.SizeText, v.CostInput})
+		return raw
+	}
+	return bytes.Equal(values(r), values(log.After))
 }
 func normalizeMaintenanceFilter(f repo.CostMaintenanceFilter) repo.CostMaintenanceFilter {
 	f.Keyword = strings.TrimSpace(f.Keyword)
@@ -340,12 +361,16 @@ func (s *taskService) MaintainCost(ctx context.Context, id int64, p domain.CostM
 		if e = edit.Stage(ctx, tx, actor.ID, reason); e != nil {
 			return e
 		}
-		after := *before
-		after.ProductName = item.ProductNameSnapshot
-		after.VariantJSON = item.VariantJSON
-		after.CostPrice = item.CostPrice
-		hydrateMaintenanceRow(&after)
-		payload := map[string]interface{}{"sku_code": item.SKUCode, "sku_item_id": id, "action": p.Action, "reason_code": p.ReasonCode, "reason_detail": strings.TrimSpace(p.ReasonDetail), "before": before, "after": &after}
+		after, e := s.costMaintenance.LockRow(ctx, tx, id)
+		if e != nil {
+			return e
+		}
+		if after == nil {
+			return domain.ErrNotFound
+		}
+		hydrateMaintenanceRow(after)
+		after.Reviewed = true
+		payload := map[string]interface{}{"sku_code": item.SKUCode, "sku_item_id": id, "action": p.Action, "reason_code": p.ReasonCode, "reason_detail": strings.TrimSpace(p.ReasonDetail), "before": before, "after": after}
 		if e = s.costMaintenance.AppendLog(ctx, tx, task.ID, id, item.SKUCode, p.Action, p.ReasonCode, actor.ID, payload); e != nil {
 			return e
 		}
@@ -367,6 +392,7 @@ func (s *taskService) MaintainCost(ctx context.Context, id int64, p domain.CostM
 	before.Status = "pending"
 	before.Token = ""
 	hydrateMaintenanceRow(before)
+	before.Reviewed = true
 	var current *domain.CostMaintenanceRow
 	if readErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error { var e error; current, e = s.costMaintenance.LockRow(ctx, tx, id); return e }); readErr == nil && current != nil {
 		hydrateMaintenanceRow(current)
