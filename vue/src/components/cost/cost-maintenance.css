@@ -386,3 +386,13 @@
     gap: 8px;
   }
 }
+
+/* Shared text and icon alignment for maintenance actions and drawers. */
+.maintenance button,.maintenance-drawer button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;font:500 14px/20px var(--yb-font-text)}
+.maintenance button svg,.maintenance-drawer button svg{display:block;flex:0 0 auto}
+.maintenance input,.maintenance select,.maintenance-drawer input,.maintenance-drawer select,.maintenance-drawer textarea{font:400 14px/20px var(--yb-font-text)}
+.maintenance-drawer h2{font:600 18px/24px var(--yb-font-text)}
+.maintenance-drawer label{font-size:13px;font-weight:500;line-height:20px}
+.maintenance-drawer button.maintenance-close{width:36px;height:36px;min-height:36px;padding:0;flex:0 0 auto}
+.maintenance .maintenance-tools>div{display:flex;gap:10px;align-items:center}
+.maintenance .maintenance-footer>div{flex-wrap:wrap;gap:8px;justify-content:flex-end}

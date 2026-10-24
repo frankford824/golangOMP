@@ -60,6 +60,17 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('names a legacy scheme from its base price instead of its minimum-area fee',async()=>{
+    mocks.listCostRules.mockResolvedValue({data:{data:[
+      {rule_id:51,rule_name:'常规覆膜KT板小面积保底',category_code:'KT_FILM',rule_type:'minimum_billable_area',min_area:.15,priority:5,is_active:true},
+      {rule_id:52,rule_name:'常规覆膜KT板基础单价',category_code:'KT_FILM',rule_type:'fixed_unit_price',base_price:13,tax_multiplier:1.1,priority:10,is_active:true},
+    ]}})
+    const w=mountRuleView();await flushPromises()
+    expect(w.get('.workspace-heading h2').text()).toBe('常规覆膜KT板')
+    expect(w.findAll('.rule-card')).toHaveLength(2)
+    expect(mocks.createCostRule).not.toHaveBeenCalled();expect(mocks.updateCostRule).not.toHaveBeenCalled()
+  })
+
   it('finds the current unbound UV scheme by name even when old rules sort first',async()=>{
     mocks.listBindings.mockResolvedValue({data:[]})
     mocks.listCostRules.mockResolvedValue({data:{data:[
@@ -72,6 +83,10 @@ describe('CostRuleManagerView', () => {
     await w.get('.group-search input').setValue('UV')
     expect(w.findAll('.rule-groups>button')).toHaveLength(1)
     expect(w.get('.workspace-heading h2').text()).toBe('UV系列打印操作')
+    expect(w.findAll('.rule-card')).toHaveLength(1)
+    expect(w.get('.rule-card').text()).not.toContain('教师节')
+    expect(w.get('.legacy-scheme-items').text()).toContain('当前统一方案不使用')
+    expect(w.get('.legacy-scheme-items').text()).toContain('教师节亚克力面积成本')
     await w.get('.group-search input').setValue('教师节')
     expect(w.findAll('.rule-groups>button')).toHaveLength(1)
     await w.get('.group-search input').setValue('不存在的方案');await flushPromises()

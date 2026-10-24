@@ -22,12 +22,12 @@
           >
             {{ label }}
           </option></select
-        ><button type="submit">查询</button>
+        ><button type="submit"><Search :size="16" :stroke-width="1.75" aria-hidden="true" />查询</button>
       </form>
       <div>
-        <button @click="openLogs">修改日志</button
+        <button @click="openLogs"><History :size="16" :stroke-width="1.75" aria-hidden="true" />修改日志</button
         ><button :disabled="loading" @click="load()">
-          {{ loading ? "刷新中…" : "刷新" }}
+          <RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? "刷新中…" : "刷新" }}
         </button>
       </div>
     </div>
@@ -130,9 +130,9 @@
             <option :value="100">100 条</option>
           </select></label
         ><button :disabled="cursors.length <= 1 || loading" @click="previous">
-          上一页</button
+          <ChevronLeft :size="16" :stroke-width="1.75" aria-hidden="true" />上一页</button
         ><span>第 {{ cursors.length }} 页</span
-        ><button :disabled="!nextID || loading" @click="next">下一页</button>
+        ><button :disabled="!nextID || loading" @click="next"><ChevronRight :size="16" :stroke-width="1.75" aria-hidden="true" />下一页</button>
       </div>
     </footer>
     <p v-if="!canEdit" class="permission-note">
@@ -168,10 +168,11 @@
             <button
               type="button"
               aria-label="关闭"
+              class="maintenance-close"
               :disabled="saving"
               @click="closeEditor"
             >
-              ×
+              <X :size="18" :stroke-width="1.75" aria-hidden="true" />
             </button>
           </header>
           <div class="drawer-body">
@@ -330,7 +331,7 @@
               <h2 id="maintenance-logs-title">维护日志</h2>
               <p>确认与修改均留痕，支持按原因筛选</p>
             </div>
-            <button aria-label="关闭日志" @click="logsOpen = false">×</button>
+            <button class="maintenance-close" aria-label="关闭日志" @click="logsOpen = false"><X :size="18" :stroke-width="1.75" aria-hidden="true" /></button>
           </header>
           <div class="drawer-body">
             <form
@@ -360,7 +361,7 @@
                 >
                   {{ label }}
                 </option></select
-              ><button>查询</button>
+              ><button><Search :size="16" :stroke-width="1.75" aria-hidden="true" />查询</button>
             </form>
             <p v-if="logError" role="alert" class="maintenance-error">
               {{ logError }}
@@ -409,7 +410,7 @@
                 loadLogs();
               "
             >
-              上一页</button
+              <ChevronLeft :size="16" :stroke-width="1.75" aria-hidden="true" />上一页</button
             ><button
               :disabled="logPage * 50 >= logTotal || logsLoading"
               @click="
@@ -417,7 +418,7 @@
                 loadLogs();
               "
             >
-              下一页
+              <ChevronRight :size="16" :stroke-width="1.75" aria-hidden="true" />下一页
             </button>
           </footer>
         </section>
@@ -436,6 +437,7 @@ import {
   reactive,
   ref,
 } from "vue";
+import { Search, History, RefreshCw, X, ChevronLeft, ChevronRight } from "lucide-vue-next";
 import { usePermission } from "@/composables/usePermission";
 import CostInputFields from "./CostInputFields.vue";
 import { emptyCostInput } from "@/domain/cost-model";

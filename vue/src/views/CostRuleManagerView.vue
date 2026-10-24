@@ -6,19 +6,19 @@
         <p class="yb-page-subtitle">核对已完成编码的成本，维护价格、规格与款式。</p>
       </div>
       <div v-if="entryTab==='schemes'" class="header-actions">
-        <button class="secondary" :disabled="loading" @click="loadAll">{{ loading ? '刷新中…' : '刷新数据' }}</button>
-        <button class="primary" @click="openRuleEditor()">新增方案</button>
+        <button class="secondary" :disabled="loading" @click="loadAll"><RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? '刷新中…' : '刷新数据' }}</button>
+        <button class="primary" @click="openRuleEditor()"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />新增方案</button>
       </div>
     </header>
 
-    <nav class="workspace-tabs" aria-label="成本维护入口"><button :class="{active:entryTab==='costs'}" @click="entryTab='costs'">编码成本</button><button :class="{active:entryTab==='schemes'}" @click="openSchemes">方案与绑定</button></nav>
+    <nav class="workspace-tabs" aria-label="成本维护入口"><button :class="{active:entryTab==='costs'}" @click="entryTab='costs'"><ListChecks :size="16" :stroke-width="1.75" aria-hidden="true" />编码成本</button><button :class="{active:entryTab==='schemes'}" @click="openSchemes"><Layers3 :size="16" :stroke-width="1.75" aria-hidden="true" />方案与绑定</button></nav>
     <CostMaintenanceList v-if="entryTab==='costs'" />
     <div v-show="entryTab==='schemes'">
 
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
     <div v-if="notice" class="message notice" role="status">{{ notice }}</div>
 
-    <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','绑定检查','成本同步','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab">{{tab}}</button></nav>
+    <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','绑定检查','成本同步','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab"><component :is="workspaceIcons[tab]" :size="16" :stroke-width="1.75" aria-hidden="true" />{{tab}}</button></nav>
     <CostSyncPanel v-if="workspaceTab==='成本同步'" />
     <section v-show="workspaceTab==='方案与绑定'" class="cost-layout">
       <aside class="rule-groups" aria-label="成本规则分组">
@@ -42,7 +42,7 @@
             <h2>{{ selectedGroup?.name || '成本计算规则' }}</h2>
             <p>{{ selectedGroup ? `${selectedBindings.length} 个款式已绑定此方案` : '从左侧选择方案查看。' }}</p>
           </div>
-          <button v-if="selectedGroup && !selectedModel" class="secondary" @click="openRuleEditor(undefined, selectedGroup.code)">添加收费项</button>
+          <button v-if="selectedGroup && !selectedModel" class="secondary" @click="openRuleEditor(undefined, selectedGroup.code)"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />添加收费项</button>
         </header>
 
         <section v-if="selectedModel || modelEditing" class="model-workspace">
@@ -56,7 +56,6 @@
         </section>
         <div v-if="selectedGroup" class="rule-list">
           <article v-for="rule in currentRules" :key="rule.rule_id" class="rule-card">
-            <div class="rule-icon" aria-hidden="true">{{ ruleTypeIcon(rule.rule_type) }}</div>
             <div class="rule-copy">
               <div><strong>{{ rule.rule_name || '未命名规则' }}</strong><span>{{ ruleStateLabel(rule) }}</span></div>
               <p>{{ ruleSummary(rule) }}</p>
@@ -66,13 +65,14 @@
           </article>
           <div v-if="!currentRules.length" class="empty-large">此方案暂无启用的价格。</div>
           <section v-if="scheduledRules.length" class="scheduled-prices"><h3>即将生效</h3><article v-for="rule in scheduledRules" :key="rule.rule_id"><strong>{{rule.rule_name}}</strong><p>{{ruleSummary(rule)}}</p><small>{{pricingWindowLabel(rule)}}</small><button class="text-button" @click="openRuleEditor(rule)">调整计划</button></article></section>
+          <details v-if="shadowedRules.length" class="legacy-scheme-items"><summary><ChevronDown :size="16" :stroke-width="1.75" aria-hidden="true" />旧收费项（当前统一方案不使用，{{shadowedRules.length}} 项）</summary><p>保留原配置供核对；当前计算按上方统一方案执行。</p><article v-for="rule in shadowedRules" :key="rule.rule_id"><strong>{{rule.rule_name}}</strong><p>{{ruleSummary(rule)}}</p><button class="text-button" @click="openRuleEditor(rule)">查看 / 调整</button></article></details>
           <details v-if="historicalRules.length"><summary>已停用、到期或历史价格（{{historicalRules.length}}）</summary><article v-for="rule in historicalRules" :key="rule.rule_id"><p>{{rule.rule_name}}：{{ruleSummary(rule)}}</p><small>{{pricingWindowLabel(rule)}}</small><button class="text-button" @click="openRuleEditor(rule)">查看 / 调整</button></article></details>
         </div>
 
         <section v-if="selectedGroup" class="binding-panel">
           <header>
             <div><h3>绑定款式</h3><p>绑定后，新计价使用本方案；已有金额不会自动改变。</p></div>
-            <button class="secondary" @click="bindingDialogOpen = true">绑定新款式</button>
+            <button class="secondary" @click="bindingDialogOpen = true"><Link2 :size="16" :stroke-width="1.75" aria-hidden="true" />绑定新款式</button>
           </header>
           <label class="binding-search">查找已绑定款式<input v-model.trim="bindingSearch" placeholder="款式编码或名称" /></label>
           <div class="binding-chips">
@@ -160,13 +160,13 @@
       </div>
     </section>
 
-    <button class="calculator-toggle" :aria-expanded="calculatorOpen" :aria-controls="calculatorOpen ? 'cost-calculator' : undefined" @click="calculatorOpen=!calculatorOpen">{{calculatorOpen?'收起':'试算'}}</button>
+    <button class="calculator-toggle" :aria-expanded="calculatorOpen" :aria-controls="calculatorOpen ? 'cost-calculator' : undefined" @click="calculatorOpen=!calculatorOpen"><Calculator :size="18" :stroke-width="1.75" aria-hidden="true" />{{calculatorOpen?'收起':'试算'}}</button>
     </div>
     <Teleport to="body">
       <div v-if="ruleDialogOpen" class="modal-layer" @keydown.esc="closeRuleEditor">
         <button class="modal-mask" aria-label="关闭规则编辑" @click="closeRuleEditor" />
-        <form class="modal-card" role="dialog" aria-modal="true" aria-labelledby="cost-rule-editor-title" @submit.prevent="saveRule">
-          <header><div><p class="eyebrow">{{ ruleDraft.rule_id ? '调整现有规则' : '新增计算规则' }}</p><h2 id="cost-rule-editor-title">{{ ruleDraft.rule_type==='cost_model' ? (ruleDraft.rule_id?'编辑方案':'新增方案') : (ruleDraft.rule_id?'编辑收费项':'新增收费项') }}</h2></div><button type="button" class="close" @click="closeRuleEditor">×</button></header>
+        <form class="modal-card cost-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="cost-rule-editor-title" @submit.prevent="saveRule">
+          <header><div><p class="eyebrow">{{ ruleDraft.rule_id ? '调整现有规则' : '新增计算规则' }}</p><h2 id="cost-rule-editor-title">{{ ruleDraft.rule_type==='cost_model' ? (ruleDraft.rule_id?'编辑方案':'新增方案') : (ruleDraft.rule_id?'编辑收费项':'新增收费项') }}</h2></div><button type="button" class="close" aria-label="关闭规则编辑窗口" @click="closeRuleEditor"><X :size="18" :stroke-width="1.75" aria-hidden="true" /></button></header>
           <div class="form-grid">
             <label class="span-2">{{ruleDraft.rule_type==='cost_model'?'方案名称':'收费项名称'}}<input v-model.trim="ruleDraft.rule_name" required placeholder="例如：KT 板面积计价" /></label>
             <label>{{ruleDraft.rule_type==='cost_model'?'基础材质':'所属方案'}}<select v-model="ruleDraft.category_code" required :disabled="!!ruleDraft.rule_id"><option value="">请选择</option><option v-for="group in availableCategories" :key="group.code" :value="group.code">{{group.name}}</option></select></label>
@@ -182,7 +182,7 @@
               <p v-else class="span-2">{{ruleDescription(ruleDraft)}}。此特殊计价方式暂不支持修改价格；可维护名称与启用状态，或另建明确单价的方案。</p>
             </template>
             <label class="switch-row"><input v-model="ruleDraft.is_active" type="checkbox" /> 当前启用</label>
-            <details class="price-timing span-2" :open="!!ruleDraft.effective_from || !!ruleDraft.effective_to"><summary>生效时间：{{startMode==='now'?'立即':'指定时间'}} · {{endMode==='never'?'长期有效':'指定结束时间'}}（点击调整）</summary><div class="price-timing-fields">
+            <details class="price-timing span-2" :open="!!ruleDraft.effective_from || !!ruleDraft.effective_to"><summary><ChevronDown :size="16" :stroke-width="1.75" aria-hidden="true" />生效时间：{{startMode==='now'?'立即':'指定时间'}} · {{endMode==='never'?'长期有效':'指定结束时间'}}（点击调整）</summary><div class="price-timing-fields">
               <label>开始使用<select v-model="startMode" @change="timingEdited=true"><option value="now">立即</option><option value="scheduled">指定时间</option></select></label>
               <label v-if="startMode==='scheduled'">开始时间（北京时间）<input v-model="startsAt" required type="datetime-local" @input="timingEdited=true" /></label>
               <label>结束使用<select v-model="endMode" @change="timingEdited=true"><option value="never">长期有效</option><option value="scheduled">指定时间</option></select></label>
@@ -198,8 +198,8 @@
 
       <div v-if="bindingDialogOpen" class="modal-layer" @keydown.esc="!savingBinding && (bindingDialogOpen = false)">
         <button class="modal-mask" aria-label="关闭款式绑定" :disabled="savingBinding" @click="bindingDialogOpen = false" />
-        <section class="modal-card binding-dialog" role="dialog" aria-modal="true" aria-labelledby="binding-title">
-          <header><div><p class="eyebrow">款式与方案</p><h2 id="binding-title">绑定到“{{ selectedGroup?.name }}”</h2></div><button class="close" :disabled="savingBinding" @click="bindingDialogOpen = false">×</button></header>
+        <section class="modal-card cost-rule-dialog binding-dialog" role="dialog" aria-modal="true" aria-labelledby="binding-title">
+          <header><div><p class="eyebrow">款式与方案</p><h2 id="binding-title">绑定到“{{ selectedGroup?.name }}”</h2></div><button class="close" aria-label="关闭款式绑定窗口" :disabled="savingBinding" @click="bindingDialogOpen = false"><X :size="18" :stroke-width="1.75" aria-hidden="true" /></button></header>
           <form class="binding-search-form" @submit.prevent="loadCandidates()"><label for="cost-binding-keyword">搜索款式编码</label><div><input id="cost-binding-keyword" v-model.trim="candidateKeyword" placeholder="输入款式编码或名称，例如 UV" /><button type="submit" class="secondary" :disabled="stylesLoading || savingBinding">{{stylesLoading ? '搜索中…' : '搜索'}}</button></div></form>
           <p v-if="error" class="message error" role="alert">{{error}}</p>
           <p v-if="notice" class="message notice" role="status">{{notice}}</p>
@@ -226,8 +226,8 @@
 
       <div v-if="runDialogOpen" class="modal-layer" @keydown.esc="runDialogOpen = false">
         <button class="modal-mask" aria-label="关闭成本影响明细" @click="runDialogOpen = false" />
-        <section class="modal-card run-dialog" role="dialog" aria-modal="true" aria-labelledby="run-dialog-title">
-          <header><div><p class="eyebrow">应用前核对</p><h2 id="run-dialog-title">{{ selectedRun?.run_no || '成本影响明细' }}</h2></div><button class="close" @click="runDialogOpen = false">×</button></header>
+        <section class="modal-card cost-rule-dialog run-dialog" role="dialog" aria-modal="true" aria-labelledby="run-dialog-title">
+          <header><div><p class="eyebrow">应用前核对</p><h2 id="run-dialog-title">{{ selectedRun?.run_no || '成本影响明细' }}</h2></div><button class="close" aria-label="关闭成本影响明细窗口" @click="runDialogOpen = false"><X :size="18" :stroke-width="1.75" aria-hidden="true" /></button></header>
           <div class="run-detail-list">
             <article v-for="item in selectedRun?.items || []" :key="item.id">
               <div><strong>{{ item.sku_code || '未命名 SKU' }}</strong><small>{{ item.task_no || '未关联任务号' }}</small><small v-if="item.conflict_reason || item.skip_reason" class="warning">{{ item.conflict_reason || item.skip_reason }}</small></div>
@@ -250,6 +250,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { Calculator, CheckCheck, History, Layers3, Link2, ListChecks, Plus, RefreshCw, X, ChevronDown } from 'lucide-vue-next'
 import CostModelEditor from '@/components/cost/CostModelEditor.vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
 import CostBoundSKUList from '@/components/cost/CostBoundSKUList.vue'
@@ -339,6 +340,7 @@ const entryTab=ref(props.initialTab||'costs')
 let schemesLoaded=false
 async function openSchemes(){entryTab.value='schemes';if(!schemesLoaded){await loadAll();schemesLoaded=true}}
 const workspaceTab=ref('方案与绑定')
+const workspaceIcons:Record<string,typeof Layers3>={'方案与绑定':Layers3,'绑定检查':Link2,'成本同步':CheckCheck,'更新记录':History}
 const groupSearch=ref('')
 const groupScope=ref('all'),bindingSearch=ref(''),calculatorOpen=ref(false),dataRevision=ref(0)
 const newModelJSON=ref(JSON.stringify(emptyCostModel())),confirmedPrice=ref(false)
@@ -355,9 +357,11 @@ const calculatorUsesModel=computed(()=>rules.value.some(r=>r.category_code===cal
 function activeBindingCount(code:string){return bindings.value.filter(b=>b.rule_group===code&&b.is_active).length}
 function effectiveRules(items:CostRuleRow[]){const active=items.filter(r=>r.is_active!==false&&(!r.governance_status||r.governance_status==='effective'));const replaced=new Set(active.map(r=>r.supersedes_rule_id).filter(Boolean));return active.filter(r=>!replaced.has(r.rule_id))}
 const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(groupScope.value==='all'||(activeBindingCount(g.code)>0&&effectiveRules(g.rules).length>0))&&(!groupSearch.value||`${g.name} ${g.code} ${g.rules.map(r=>r.rule_name).join(' ')} ${bindings.value.filter(b=>b.is_active&&b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase()))))
-const currentRules=computed(()=>effectiveRules(selectedGroup.value?.rules||[]))
+const activeGroupRules=computed(()=>effectiveRules(selectedGroup.value?.rules||[]))
+const currentRules=computed(()=>selectedModel.value ? activeGroupRules.value.filter(r=>r.rule_type==='cost_model') : activeGroupRules.value)
+const shadowedRules=computed(()=>selectedModel.value ? activeGroupRules.value.filter(r=>r.rule_type!=='cost_model') : [])
 const scheduledRules=computed(()=>selectedGroup.value?.rules.filter(r=>r.is_active&&r.governance_status==='scheduled')||[])
-const historicalRules=computed(()=>selectedGroup.value?.rules.filter(r=>!currentRules.value.includes(r)&&!scheduledRules.value.includes(r))||[])
+const historicalRules=computed(()=>selectedGroup.value?.rules.filter(r=>!currentRules.value.includes(r)&&!scheduledRules.value.includes(r)&&!shadowedRules.value.includes(r))||[])
 const filteredBindings=computed(()=>selectedBindings.value.filter(b=>`${b.i_id_raw} ${b.display_name}`.toLowerCase().includes(bindingSearch.value.toLowerCase())))
 watch(selectedGroupCode,()=>{modelEditing.value=false;preview.value=null;selectedStyles.value=[];bulkConfirmed.value=false})
 watch([modelJSON,modelInput,calculator],()=>{preview.value=null},{deep:true})
@@ -412,10 +416,12 @@ function groupDisplayName(groupRules: CostRuleRow[], code: string) {
   if(model?.rule_name)return model.rule_name
   const family = groupRules.map((rule) => String(rule.product_family || '').trim().toLowerCase()).find(Boolean) || ''
   const familyLabel = ({ board: '板材制作', cloth: '布艺制作', photo: '照片与印刷', paper: '纸张印刷' } as Record<string, string>)[family]
-  const ruleLabel = groupRules.map((rule) => String(rule.rule_name || '').replace(/(?:基础单价|最低计价面积|面积加价|小面积附加|工艺加价)$/u, '').trim()).find(Boolean)
+  const base = effectiveRules(groupRules).find(rule=>rule.rule_type==='fixed_unit_price')
+  const namedRules = base ? [base,...groupRules.filter(rule=>rule!==base)] : groupRules
+  const ruleLabel = namedRules.map((rule) => String(rule.rule_name || '').replace(/(?:基础单价|最低计价面积|面积加价|小面积附加|工艺加价)$/u, '').trim()).find(Boolean)
   return ruleLabel || familyLabel || code
 }
-function ruleTypeIcon(type: string) { return ({ fixed_unit_price: '¥', area_threshold_surcharge: '㎡', minimum_billable_area: '▣', size_based_formula: '×', special_process_surcharge: '+', manual_quote: '人' } as Record<string, string>)[type] || '•' }
+
 function ruleSummary(rule: CostRuleRow) {return ruleDescription(rule)}
 
 async function loadAll() {

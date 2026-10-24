@@ -36,3 +36,60 @@
 .binding-dialog .binding-search-form button{flex:0 0 auto}
 .binding-dialog .bulk-binding,.binding-dialog .binding-pagination{padding:0 20px;box-sizing:border-box;margin:0}
 .binding-dialog button:disabled{opacity:.45;cursor:default}
+
+/* Cost workspace typography and icon geometry, including teleported dialogs. */
+#app .cost-manager-page{font:400 14px/1.5 var(--yb-font-text)}
+#app .cost-manager-page h2{font-size:18px;font-weight:600;line-height:24px}
+#app .cost-manager-page h3{font-size:14px;font-weight:600;line-height:20px}
+#app .cost-manager-page button{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:500 14px/20px var(--yb-font-text);min-height:36px}
+#app .cost-manager-page button svg{display:block;flex:0 0 auto}
+#app .cost-manager-page input,#app .cost-manager-page select,#app .cost-manager-page textarea{font:400 14px/20px var(--yb-font-text)}
+#app .cost-manager-page .workspace-tabs button{padding:7px 12px;border-radius:8px}
+#app .cost-manager-page .workspace-heading p,#app .cost-manager-page .binding-panel p{font-size:12px;line-height:18px}
+#app .cost-manager-page .rule-groups>button{justify-content:flex-start;padding:12px 14px;min-height:64px}
+#app .cost-manager-page .rule-groups>button strong{font-size:14px;font-weight:600;line-height:20px}
+#app .cost-manager-page .rule-groups>button small{font-size:12px;line-height:18px}
+#app .cost-manager-page .group-search{font-size:13px;line-height:20px}
+#app .cost-manager-page .rule-copy>div{min-height:32px;align-items:center}
+#app .cost-manager-page .rule-copy strong{font-size:14px;font-weight:600;line-height:20px}
+#app .cost-manager-page .rule-copy p{font-size:14px;line-height:20px;margin:6px 0}
+#app .cost-manager-page .rule-copy small{font-size:12px;line-height:18px}
+#app .cost-manager-page .rule-copy>div>span{font-size:12px;line-height:18px;padding:2px 6px}
+#app .cost-manager-page .price-actions{align-items:center;gap:6px}
+#app .cost-manager-page .price-actions button{font-size:13px;font-weight:500;min-height:32px;padding:4px 6px}
+#app .cost-manager-page .binding-chips b{font-size:14px;font-weight:600;line-height:20px}
+#app .cost-manager-page .binding-chips small{font-size:12px;line-height:18px}
+#app .cost-manager-page .bound-skus h2{font-size:16px;font-weight:600;line-height:24px}
+#app .cost-manager-page .bound-skus table,#app .cost-manager-page .bound-skus td strong{font-size:13px;line-height:20px}
+#app .cost-manager-page .bound-skus td:last-child{font-variant-numeric:tabular-nums;text-align:right}
+#app .cost-manager-page .calculator-toggle{width:auto;height:40px;min-height:40px;padding:0 14px;border-radius:10px;font-size:14px;font-weight:500}
+#app .cost-manager-page .floating-calculator label{font-size:13px;line-height:20px}
+#app .cost-manager-page .floating-calculator .preview-result strong{font-size:24px;font-weight:600;line-height:32px;font-variant-numeric:tabular-nums}
+#app .cost-manager-page .legacy-scheme-items{font-size:13px;line-height:20px;color:rgb(var(--yb-text-secondary))}
+#app .cost-manager-page .legacy-scheme-items>summary{display:flex;align-items:center;gap:8px;min-height:32px;cursor:pointer;list-style:none}
+#app .cost-manager-page .legacy-scheme-items>summary::-webkit-details-marker{display:none}
+#app .cost-manager-page .legacy-scheme-items>summary svg{flex:0 0 auto;transform:rotate(-90deg)}
+#app .cost-manager-page .legacy-scheme-items[open]>summary svg{transform:rotate(0)}
+#app .cost-manager-page .legacy-scheme-items article{padding:10px 0;border-top:1px solid rgb(var(--yb-border))}
+body .modal-card.cost-rule-dialog{font:400 14px/20px var(--yb-font-text);border-radius:12px}
+body .modal-card.cost-rule-dialog>header h2{font:600 18px/24px var(--yb-font-text);margin:4px 0 0}
+body .modal-card.cost-rule-dialog .eyebrow{font-size:12px;font-weight:500;line-height:18px;letter-spacing:0}
+body .modal-card.cost-rule-dialog button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;font:500 14px/20px var(--yb-font-text);border-radius:8px}
+body .modal-card.cost-rule-dialog button svg{display:block;flex:0 0 auto}
+body .modal-card.cost-rule-dialog button.close{width:36px;height:36px;padding:0;flex:0 0 auto}
+body .modal-card.cost-rule-dialog :is(.form-grid,.model-editor,.cost-inputs) label{font:500 13px/20px var(--yb-font-text);gap:6px}
+body .modal-card.cost-rule-dialog :is(.form-grid,.model-editor,.cost-inputs) :is(input,select,textarea){font:400 14px/20px var(--yb-font-text)}
+body .modal-card.cost-rule-dialog .form-grid :is(input:not([type="checkbox"]),select){min-height:38px;padding:8px 10px;border-radius:8px}
+body .modal-card.cost-rule-dialog .form-grid{align-items:start}
+body .modal-card.cost-rule-dialog .form-grid small{font-size:12px;font-weight:400;line-height:18px}
+body .modal-card.cost-rule-dialog .switch-row{display:flex;align-items:center;gap:8px;min-height:24px}
+body .modal-card.cost-rule-dialog input[type="checkbox"]{width:16px;height:16px;min-height:16px;margin:0;flex:0 0 auto;accent-color:rgb(var(--yb-brand))}
+body .modal-card.cost-rule-dialog .price-timing summary{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;line-height:20px;list-style:none}
+body .modal-card.cost-rule-dialog .price-timing summary::-webkit-details-marker{display:none}
+body .modal-card.cost-rule-dialog .price-timing summary svg{display:block;flex:0 0 auto;transform:rotate(-90deg)}
+body .modal-card.cost-rule-dialog .price-timing[open] summary svg{transform:rotate(0)}
+body .modal-card.cost-rule-dialog .binding-search-form{font-size:13px;font-weight:500;line-height:20px}
+body .modal-card.cost-rule-dialog .binding-search-form input{font:400 14px/20px var(--yb-font-text);min-height:38px;padding:8px 10px}
+body .modal-card.cost-rule-dialog .binding-option strong{font-size:14px;font-weight:600;line-height:20px}
+body .modal-card.cost-rule-dialog .binding-option small{font-size:12px;line-height:18px}
+@media(max-width:1150px){#app .cost-manager-page .rule-card{grid-template-columns:1fr;gap:4px}#app .cost-manager-page .price-actions{justify-content:flex-start}}
