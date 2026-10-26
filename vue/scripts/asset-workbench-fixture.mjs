@@ -551,6 +551,22 @@ export const assetAuditPages = [
     },
   },
   { name: 'admin-notifications', path: '/notifications', ready: '.aw-compact-list', role: 'admin' },
+  { name: 'admin-members', path: '/settings/members', ready: '.aw-member-row', role: 'admin' },
+  {
+    name: 'admin-member-disable-dialog', path: '/settings/members', ready: '.aw-member-row', role: 'admin',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: '停用', exact: true }).click()
+      await page.getByRole('dialog', { name: '停用资产工作台访问' }).waitFor({ state: 'visible' })
+    },
+  },
+  {
+    name: 'admin-member-disable-mobile', path: '/settings/members', ready: '.aw-member-row', role: 'admin',
+    prepare: async (page) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.getByRole('button', { name: '停用', exact: true }).click()
+      await page.getByRole('dialog', { name: '停用资产工作台访问' }).waitFor({ state: 'visible' })
+    },
+  },
   { name: 'simple-home', path: '/', ready: '.aw-simple-home', role: 'simple' },
   { name: 'simple-upload', path: '/upload', ready: '.aw-dropzone', role: 'simple' },
   { name: 'simple-drive', path: '/drive?scope=operational', ready: '.aw-drive', role: 'simple' },
@@ -670,6 +686,12 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     const path = url.pathname
     if (path.endsWith('/entry')) return json(route, { state: 'ready', message: '', bootstrap })
     if (path.endsWith('/bootstrap')) return json(route, bootstrap)
+    if (path.endsWith('/members')) return paginated(route, [{
+      user_id: simpleProfile.user_id, username: 'asset-worker', display_name: simpleProfile.real_name,
+      real_name: simpleProfile.real_name, worker_type: simpleProfile.worker_type, job_grade: simpleProfile.job_grade,
+      status: 'active', pii_completed: true, roles: ['AssetSubmitter'], role_labels: ['交付人员'],
+      can_edit_roles: true, policy_revision: 1, roles_managed_externally: false,
+    }])
     if (path.endsWith('/notifications/unread-count')) return json(route, { unread_count: 1 })
     if (path.endsWith('/notifications/read-all') || /\/notifications\/\d+\/read$/.test(path)) return json(route, {})
     if (path.endsWith('/notifications')) {

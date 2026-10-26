@@ -1,20 +1,34 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const api = vi.hoisted(() => ({ listMembers: vi.fn(), updateMemberRoles: vi.fn() }))
+const api = vi.hoisted(() => ({ listMembers: vi.fn(), updateMemberRoles: vi.fn(), disableAccess: vi.fn() }))
 vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({ assetWorkbenchApi: api }))
 vi.mock('@aw/app/useRoutePageCopy', () => ({ useRoutePageCopy: () => ({ label: '成员维护', subtitle: '角色授权' }) }))
 vi.mock('@aw/app/useAssetWorkbenchBootstrap', () => ({ useAssetWorkbenchBootstrap: () => ({ bootstrap: ref({capabilities:['asset.workbench.member.identity']}), refresh: vi.fn().mockResolvedValue(undefined) }) }))
 import MembersPage from './MembersPage.vue'
 
 const member = { user_id:331,username:'never-logged-in',real_name:'新授权人员',status:'active',worker_type:'',job_grade:'',roles:['AssetSubmitter'],policy_revision:8,can_edit_roles:true }
+const dialogWrappers: ReturnType<typeof mount>[] = []
+function mountDisablePage() {
+  const wrapper = mount(MembersPage, { attachTo:document.body, global:{ stubs:{DialogPortal:{template:'<slot />'}} } })
+  dialogWrappers.push(wrapper)
+  return wrapper
+}
+afterEach(() => {
+  for (const wrapper of dialogWrappers.splice(0)) {
+    const element = wrapper.element
+    wrapper.unmount()
+    element?.remove()
+  }
+})
 describe('shared member authorization', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.listMembers.mockResolvedValue({items:[{...member}], total:1})
     api.updateMemberRoles.mockResolvedValue({...member,roles:['AssetSubmitter','AssetManager'],policy_revision:9})
+    api.disableAccess.mockReset().mockResolvedValue({})
   })
   it('sends the shared revision and refreshes all members after a change', async () => {
     const wrapper = mount(MembersPage)
@@ -70,5 +84,63 @@ describe('shared member authorization', () => {
     expect(api.listMembers).toHaveBeenLastCalledWith(expect.objectContaining({page:1,page_size:50}),expect.any(AbortSignal))
     expect(wrapper.text()).toContain('第 1 / 1 页')
     wrapper.unmount()
+  })
+  it('opens an immediately visible confirmation dialog without disabling the account, and returns focus on cancel', async () => {
+    const wrapper = mountDisablePage()
+    await flushPromises()
+    const trigger = wrapper.findAll('button').find(button=>button.text()==='停用')!
+    await trigger.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.get('[role="dialog"]')
+    expect(dialog.text()).toContain('新授权人员')
+    expect(dialog.text()).toContain('运营系统账号状态不变')
+    const reason = dialog.get('input')
+    expect(document.activeElement).toBe(reason.element)
+    expect(dialog.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(api.disableAccess).not.toHaveBeenCalled()
+    await dialog.findAll('button').find(button=>button.text()==='取消')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+    expect(api.disableAccess).not.toHaveBeenCalled()
+  })
+  it('submits the selected account and trimmed reason once, then refreshes the roster', async () => {
+    let resolveRequest!: (value:unknown)=>void
+    api.disableAccess.mockImplementation(()=>new Promise(resolve=>{resolveRequest=resolve}))
+    const wrapper = mountDisablePage()
+    await flushPromises()
+    await wrapper.findAll('button').find(button=>button.text()==='停用')!.trigger('click')
+    await flushPromises()
+    const dialog = wrapper.get('[role="dialog"]')
+    await dialog.get('input').setValue('  暂停合作  ')
+    await dialog.get('form').trigger('submit')
+    await dialog.get('form').trigger('submit')
+    expect(api.disableAccess).toHaveBeenCalledExactlyOnceWith({user_id:331,reason:'暂停合作'})
+    expect(dialog.text()).toContain('停用中…')
+    expect(dialog.findAll('button').every(button=>button.attributes('disabled')!==undefined)).toBe(true)
+    api.listMembers.mockResolvedValue({items:[],total:0})
+    resolveRequest({})
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('已停用 新授权人员 的资产工作台访问')
+    expect(api.listMembers).toHaveBeenCalledTimes(2)
+  })
+  it('keeps failure feedback beside the reason and allows retry or cancel', async () => {
+    api.disableAccess.mockRejectedValue(new Error('权限已变更，请刷新后重试'))
+    const wrapper = mountDisablePage()
+    await flushPromises()
+    await wrapper.findAll('button').find(button=>button.text()==='停用')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[role="dialog"] input').setValue('账号误开')
+    await wrapper.get('[role="dialog"] form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toContain('权限已变更')
+    expect((wrapper.get('[role="dialog"] input').element as HTMLInputElement).value).toBe('账号误开')
+    await wrapper.get('[role="dialog"]').findAll('button').find(button=>button.text()==='取消')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button=>button.text()==='停用')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"] [role="alert"]').exists()).toBe(false)
+    expect((wrapper.get('[role="dialog"] input').element as HTMLInputElement).value).toBe('')
   })
 })
