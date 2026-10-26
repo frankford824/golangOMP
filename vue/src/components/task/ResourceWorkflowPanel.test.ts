@@ -420,12 +420,13 @@ describe('ResourceWorkflowPanel action contract', () => {
           filename: '运营参考图.png',
           mime_type: 'image/png',
           download_url: 'https://example.test/reference.png',
+          thumbnail_url: 'https://example.test/reference-thumb.webp',
         }],
         allowedActions: ['task.audit.approve'],
       },
       global: {
         stubs: {
-          AssetPreviewMedia: { template: '<img class="reference-preview-stub" />' },
+          AssetPreviewMedia: { props: ['resolvedPreviewUrl', 'taskAssetId'], template: '<img class="reference-preview-stub" :data-resolved-preview="resolvedPreviewUrl" />' },
           ImagePreviewLightbox: true,
         },
       },
@@ -434,6 +435,21 @@ describe('ResourceWorkflowPanel action contract', () => {
     expect(wrapper.get('.audit-references').text()).toContain('运营参考图.png')
     expect(wrapper.get('.sku-product-name').text()).toBe('测试商品名称')
     expect(wrapper.find('.reference-preview-stub').exists()).toBe(true)
+    expect(wrapper.get('.reference-preview-stub').attributes('data-resolved-preview')).toBe('https://example.test/reference-thumb.webp')
+    wrapper.unmount()
+  })
+
+  it('refreshes audit references without submitting or resetting an edited resource mode', async () => {
+    const ref = { asset_id: 'uuid', filename: 'image.png', mime_type: 'image/png', download_url: 'https://example.test/original.png', thumbnail_url: 'https://example.test/old-thumb.webp' }
+    const wrapper = mount(ResourceWorkflowPanel, { props: { taskId: 41, taskType: 'design', bundle: bundle(), taskReferences: [ref], allowedActions: ['task.audit.approve'] }, global: { stubs: { AssetPreviewMedia: true, ImagePreviewLightbox: true } } })
+    await wrapper.findAll('.mode-control button').find(item => item.text() === '套装')!.trigger('click')
+    await button(wrapper, '刷新参考图').trigger('click')
+    expect(wrapper.emitted('refreshReferences')).toHaveLength(1)
+    await wrapper.setProps({ taskReferences: [{ ...ref, thumbnail_url: 'https://example.test/new-thumb.webp' }] })
+    expect(wrapper.get('.mode-control button.selected').text()).toBe('套装')
+    expect(mocks.auditDecision).not.toHaveBeenCalled()
+    expect(mocks.upload).not.toHaveBeenCalled()
+    expect(mocks.submitDesign).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

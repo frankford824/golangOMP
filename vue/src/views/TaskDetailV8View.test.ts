@@ -65,7 +65,7 @@ function mountView() {
       stubs: {
         WorkflowProgress: { template: '<div class="progress-stub">四步流程</div>' },
         TaskStatusTag: { template: '<span class="status-stub">状态</span>' },
-        SkuResourceMatrix: { props: ['taskReferences'], template: '<div class="matrix-stub">资源矩阵 {{ taskReferences?.length || 0 }}</div>' },
+        SkuResourceMatrix: { props: ['taskReferences','skuItems'], emits: ['refreshReferences'], template: '<div class="matrix-stub" :data-sku-references="JSON.stringify(skuItems?.map(item => item.reference_file_refs))" :data-sku-costs="JSON.stringify(skuItems?.map(item => item.cost_price))">资源矩阵 {{ taskReferences?.length || 0 }}<button class="matrix-refresh" @click="$emit(\'refreshReferences\')">刷新参考图</button></div>' },
         ResourceWorkflowPanel: { props: ['skuModeHints'], template: '<div class="workflow-stub">{{ skuModeHints?.[\'\'] ? \'任务级套装提示\' : \'审核动作\' }}</div>' },
         TaskDetailAtmosphere: { template: '<div class="atmosphere-stub" />' },
       },
@@ -84,6 +84,23 @@ function dialog() {
 }
 
 describe('TaskDetailV8View business context', () => {
+  it('refreshes per-SKU reference URLs without replacing business or cost values', async () => {
+    const item = { id: 51, sku_code: 'SKU-041', cost_price: 23.5, reference_file_refs: [{ asset_id: 'uuid', thumbnail_url: '/old-thumb.webp' }] }
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, reference_file_refs: [], sku_items: [item], events: [] } } })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'SKU 资源总览')!.trigger('click')
+    await flushPromises()
+    mocks.getDetail.mockResolvedValueOnce({ data: { data: { task: baseTask, reference_file_refs: [], sku_items: [{ ...item, cost_price: 999, reference_file_refs: [{ asset_id: 'uuid', thumbnail_url: '/new-thumb.webp' }] }] } } })
+    ;(document.body.querySelector('.matrix-refresh') as HTMLButtonElement).click()
+    await flushPromises()
+    const matrix = document.body.querySelector('.matrix-stub')!
+    expect(matrix.getAttribute('data-sku-references')).toContain('/new-thumb.webp')
+    expect(matrix.getAttribute('data-sku-costs')).toBe('[23.5]')
+    expect(mocks.getById).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('renews task reference thumbnails without reloading unrelated task or cost state', async () => {
     const refs = [{ asset_id: 'reference-uuid', filename: 'reference.jpg', mime_type: 'image/jpeg', thumbnail_url: 'https://objects.example/thumbnail-old.webp', download_url: 'https://objects.example/original.jpg' }]
     mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, reference_file_refs: refs, events: [] } } })

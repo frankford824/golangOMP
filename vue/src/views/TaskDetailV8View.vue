@@ -218,10 +218,11 @@
               :allowed-actions="task.allowed_actions || []"
               @updated="onWorkflowUpdated"
               @dirty-change="workflowDirty = $event"
+              @refresh-references="refreshReferencePreviews"
             />
           </div>
 
-          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles" :enable-revision-history="can('asset.view')" /></div>
+          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles" :enable-revision-history="can('asset.view')" @refresh-references="refreshReferencePreviews" /></div>
 
           <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
             <TaskAttachmentWorkspace
@@ -825,8 +826,24 @@ async function refreshReferencePreviews() {
     const envelope = unwrap<Record<string, unknown>>(response) || {}
     if (!Array.isArray(envelope.reference_file_refs)) throw new Error('参考图地址刷新结果异常，已保留原列表。')
     const refreshed = mergeDetailEnvelopeIntoTaskRaw(envelope)
+    // Renew only reference locators; leave costs, editing state and resource uploads intact.
+    const skuReferenceKey = (row: Record<string, unknown>) => row.id != null ? `id:${row.id}`
+      : typeof row.sku_code === 'string' ? `sku:${row.sku_code}` : ''
+    const renewedSkuRefs = new Map<string, unknown[]>()
+    if (Array.isArray(envelope.sku_items)) {
+      for (const item of envelope.sku_items as Record<string, unknown>[]) {
+        const key = skuReferenceKey(item)
+        if (key && Array.isArray(item.reference_file_refs)) renewedSkuRefs.set(key, item.reference_file_refs)
+      }
+    }
+    const renewedSkuItems = Array.isArray(aggregate.value.sku_items)
+      ? (aggregate.value.sku_items as Record<string, unknown>[]).map(item => {
+        const refs = renewedSkuRefs.get(skuReferenceKey(item))
+        return refs ? { ...item, reference_file_refs: refs } : item
+      }) : undefined
     task.value = { ...task.value, reference_file_refs: refreshed.reference_file_refs || [] } as V8Task
     aggregate.value = { ...aggregate.value, reference_file_refs: envelope.reference_file_refs,
+      ...(renewedSkuItems ? { sku_items: renewedSkuItems } : {}),
       ...(Array.isArray(envelope.retouch_requirements) ? { retouch_requirements: envelope.retouch_requirements } : {}) }
   } catch (cause) {
     if (id === taskId.value) error.value = resolveApiUserMessage(cause, { fallback: '参考图地址刷新失败，请稍后重试。' })

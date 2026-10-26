@@ -7,6 +7,7 @@
         <p>从运营参考到最终成品，只展示当前业务有效版本。</p>
       </div>
       <span class="matrix-summary">{{ bundle.groups.length }} 个资源单元</span>
+      <button type="button" class="reference-refresh-button" @click="$emit('refreshReferences')">刷新参考图</button>
     </header>
 
     <p v-if="downloadError" class="download-error" role="alert">{{ downloadError }}</p>
@@ -36,6 +37,7 @@
                   class="controlled-preview"
                   :task-asset-id="reference.formal_task_asset_id ? String(reference.formal_task_asset_id) : null"
                   :fallback-src="reference.preview_url"
+                  :resolved-preview-url="referenceThumbnailURL(reference)"
                   :alt="reference.file_name || `参考图 ${index + 1}`"
                   img-class="controlled-preview-shell"
                   inner-img-class="controlled-preview-img"
@@ -139,6 +141,7 @@ import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
 import ResourceRevisionDrawer from '@/components/task/ResourceRevisionDrawer.vue'
 import { fetchTaskAssetPreviewMeta } from '@/domain/asset-access'
+import { referenceThumbnailURL } from '@/domain/reference-thumbnail'
 import type { ResourceBundle, ResourceFile, ResourceGroup, ResourceReference, ResourceRevision, ResourceRevisionItem } from '@/services/api/resourceGroupsApi'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
@@ -155,6 +158,7 @@ interface DisplayReference {
   mime_type?: string
   preview_url?: string
   download_url?: string
+  thumbnail_url?: string
   formal_task_asset_id?: number | null
 }
 
@@ -166,6 +170,7 @@ const props = defineProps<{
 }>()
 
 const preview = reactive({ url: '', name: '', open: false })
+defineEmits<{ refreshReferences: [] }>()
 const previewItems = computed(() => preview.url ? [{
   src: preview.url,
   title: preview.name,
@@ -210,6 +215,7 @@ function toDisplayReference(value: unknown, fallbackKey: string): DisplayReferen
     mime_type: text('mime_type') || undefined,
     preview_url: previewURL || undefined,
     download_url: downloadURL || undefined,
+    thumbnail_url: text('thumbnail_url') || undefined,
     formal_task_asset_id: Number.isFinite(assetID) && assetID > 0 ? assetID : null,
   }
   file.key = referenceKey(file, fallbackKey)
@@ -338,6 +344,7 @@ async function openResourcePreview(taskAssetID?: number | null, fallbackURL?: st
 </script>
 
 <style scoped>
+.reference-refresh-button { flex-shrink:0;border:1px solid rgb(var(--yb-border));border-radius:8px;padding:7px 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:12px;cursor:pointer; }
 .visual-tile :deep(.controlled-preview-shell),.final-tile :deep(.controlled-preview-shell){width:100%;aspect-ratio:4/3;object-fit:cover;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface-muted))}.visual-tile :deep(.controlled-preview-img),.final-tile :deep(.controlled-preview-img){width:100%;height:100%;border-radius:inherit;object-fit:cover}
 .resource-matrix{display:grid;gap:18px}.matrix-head,.group-title,.group-footer{display:flex;align-items:center;justify-content:space-between;gap:16px}.eyebrow{margin:0;color:rgb(var(--yb-brand));font-size:11px;font-weight:900;letter-spacing:.13em}.matrix-head h2{margin:3px 0;font-size:22px}.matrix-head p{margin:0;color:rgb(var(--yb-text-muted))}.matrix-summary,.group-badges span{padding:6px 9px;border-radius:999px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:12px}.group-card{overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface))}.group-title{padding:16px 18px;border-bottom:1px solid rgb(var(--yb-border))}.group-title>div:first-child{display:grid;gap:4px}.sku-label{color:rgb(var(--yb-brand));font-size:12px;font-weight:850}.group-badges{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.group-badges .migration-warning{background:rgb(var(--yb-warning-soft));color:rgb(var(--yb-warning-text))}.revision-history-button{min-height:30px;padding:0 9px;border:1px solid rgb(var(--yb-border));border-radius:8px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand));font-size:11px;font-weight:760;cursor:pointer}.stage-rail{display:grid;grid-template-columns:minmax(0,.9fr) auto minmax(0,.75fr) auto minmax(0,1.25fr);gap:12px;align-items:stretch;padding:18px}.stage-card{min-width:0;display:grid;align-content:start;gap:14px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:15px;background:rgb(var(--yb-surface-soft))}.stage-card>header{display:flex;gap:10px}.stage-card h3{margin:0;font-size:14px}.stage-card header p{margin:3px 0 0;color:rgb(var(--yb-text-muted));font-size:11px}.stage-number{color:rgb(var(--yb-brand));font-size:11px;font-weight:900}.stage-arrow{align-self:center;color:rgb(var(--yb-brand));font-size:19px}.reference-grid,.final-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.final-gallery{grid-template-columns:repeat(auto-fill,minmax(88px,1fr))}.visual-tile,.final-tile{position:relative;min-width:0;display:grid;gap:6px;padding:0;border:0;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer;text-decoration:none}.visual-tile img,.final-tile img,.tile-fallback{width:100%;aspect-ratio:4/3;object-fit:cover;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface-muted))}.tile-fallback{display:grid;place-items:center;color:rgb(var(--yb-text-muted));font-weight:900}.file-download-tile .tile-fallback{border-style:dashed;color:rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft))}.is-disabled{cursor:not-allowed;opacity:.55}.tile-caption{overflow:hidden;color:rgb(var(--yb-text-muted));font-size:10px;text-overflow:ellipsis;white-space:nowrap}.order-badge,.cover-badge{position:absolute;top:6px;padding:3px 6px;border-radius:999px;background:rgb(var(--yb-surface)/.94);font-size:10px;font-weight:850}.order-badge{left:6px}.cover-badge{right:6px;color:rgb(var(--yb-brand))}.source-file-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface))}.source-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:10px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-size:11px;font-weight:900}.source-file-card div{min-width:0;display:grid;gap:4px}.source-file-card strong{overflow:hidden;font-size:12px;text-overflow:ellipsis;white-space:nowrap}.source-file-card span{color:rgb(var(--yb-text-muted));font-size:10px}.source-file-card a{color:rgb(var(--yb-brand));font-size:12px;text-decoration:none}.stage-empty{display:grid;place-items:center;min-height:100px;margin:0;border:1px dashed rgb(var(--yb-border));border-radius:11px;color:rgb(var(--yb-text-muted));font-size:12px}.group-footer{padding:12px 18px;border-top:1px solid rgb(var(--yb-border));color:rgb(var(--yb-text-muted));font-size:11px}.empty{padding:36px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:16px;color:rgb(var(--yb-text-muted))}@media(max-width:980px){.stage-rail{grid-template-columns:1fr}.stage-arrow{transform:rotate(90deg);justify-self:center}.final-gallery{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:620px){.matrix-head,.group-title,.group-footer{align-items:flex-start;flex-direction:column}.stage-rail{padding:11px}.reference-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.final-gallery{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .download-error{margin:0;padding:10px 12px;border:1px solid rgb(var(--yb-danger-border));border-radius:10px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text));font-size:12px}.file-download-button{border:0;background:transparent;color:rgb(var(--yb-brand));font:inherit;font-size:12px;cursor:pointer}.file-download-button:disabled,.file-download-tile:disabled{cursor:wait;opacity:.6}

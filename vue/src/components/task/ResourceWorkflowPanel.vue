@@ -64,7 +64,7 @@
     </aside>
 
     <section v-if="isAuditStage && auditReferences.length" class="audit-references" aria-label="审核参考图">
-      <header><div><strong>运营参考图</strong><small>审核时可直接查看原始参考资料</small></div><span>{{ auditReferences.length }} 份</span></header>
+      <header><div><strong>运营参考图</strong><small>审核时可直接查看原始参考资料</small></div><button type="button" class="quiet-button" @click="$emit('refreshReferences')">刷新参考图</button><span>{{ auditReferences.length }} 份</span></header>
       <div class="audit-reference-strip">
         <button v-for="(file, index) in auditReferences" :key="referenceIdentity(file, index)" type="button" @click="openAuditReference(file)">
           <AssetPreviewMedia
@@ -72,6 +72,7 @@
             class="audit-reference-media"
             :task-asset-id="referenceTaskAssetID(file)"
             :fallback-src="referencePreview(file)"
+            :resolved-preview-url="referenceThumbnailURL(file)"
             :alt="referenceName(file)"
             img-class="audit-reference-shell"
             inner-img-class="audit-reference-image"
@@ -261,6 +262,7 @@ import {
   UploadCloud,
 } from 'lucide-vue-next'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import { referenceThumbnailURL } from '@/domain/reference-thumbnail'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
 import type { ImagePreviewLightboxItem } from '@/components/media/imagePreviewLightbox'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
@@ -288,7 +290,7 @@ type EditorRow = {
 type WorkflowReference = (ResourceReference | ReferenceFileRef) & { preview_url?: string | null }
 
 const props = defineProps<{ taskId: number; taskType: string; businessLane?: string; bundle: ResourceBundle; referenceCount?: number; taskReferences?: ReferenceFileRef[]; skuModeHints?: Record<string, boolean>; retouchRequirements?: RetouchRequirement[]; allowedActions: string[] }>()
-const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean] }>()
+const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean]; refreshReferences: [] }>()
 const skuModeHints = computed(() => props.skuModeHints ?? {})
 const rows = ref<EditorRow[]>([])
 const changedGroups = ref(new Set<number>())

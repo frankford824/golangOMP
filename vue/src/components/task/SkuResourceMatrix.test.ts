@@ -14,9 +14,9 @@ vi.mock('@/utils/assetFileDownload', () => ({
 
 vi.mock('@/components/media/AssetPreviewMedia.vue', () => ({
   default: {
-    props: ['taskAssetId', 'fallbackSrc', 'alt'],
+    props: ['taskAssetId', 'fallbackSrc', 'alt', 'resolvedPreviewUrl'],
     emits: ['open-full'],
-    template: '<img class="asset-preview-media-stub" :data-task-asset-id="taskAssetId || undefined" :src="fallbackSrc || undefined" :alt="alt" @click.stop="$emit(\'open-full\', fallbackSrc)" />',
+    template: '<img class="asset-preview-media-stub" :data-task-asset-id="taskAssetId || undefined" :data-resolved-preview="resolvedPreviewUrl" :src="fallbackSrc || undefined" :alt="alt" @click.stop="$emit(\'open-full\', fallbackSrc)" />',
   },
 }))
 
@@ -72,6 +72,16 @@ const bundle: ResourceBundle = {
 }
 
 describe('SkuResourceMatrix', () => {
+  it('retains server thumbnails for per-SKU UUID refs and preserves controlled revision previews', async () => {
+    const wrapper = mount(SkuResourceMatrix, { props: { bundle, skuItems: [{ sku_code: 'SKU-009', reference_file_refs: [{ asset_id: 'uuid', filename: 'SKU上传.png', mime_type: 'image/png', thumbnail_url: 'https://example.test/thumbnail.webp', download_url: 'https://example.test/original.png' }] }] } })
+    const thumbnails = wrapper.findAll('.reference-stage .asset-preview-media-stub')
+    expect(thumbnails.find(item => item.attributes('alt') === 'SKU上传.png')!.attributes('data-resolved-preview')).toBe('https://example.test/thumbnail.webp')
+    expect(thumbnails.find(item => item.attributes('data-task-asset-id') === '103')!.attributes('data-resolved-preview')).toBeUndefined()
+    await wrapper.findAll('button').find(item => item.text() === '刷新参考图')!.trigger('click')
+    expect(wrapper.emitted('refreshReferences')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     mocks.download.mockReset()
     mocks.download.mockResolvedValue({ ok: true })
