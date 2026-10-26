@@ -4,6 +4,7 @@ import { RefreshCw, ShieldCheck, UserRound } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
+import MemberDisableDialog from '@aw/features/members/MemberDisableDialog.vue'
 import { assetWorkbenchApi, type AccountMergePreview, type WorkbenchMemberRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
@@ -24,7 +25,9 @@ const selectedLookupUser = ref<WorkbenchMemberRow | null>(null)
 const openRoles = ref<string[]>(['AssetSubmitter'])
 const openReason = ref('开通资产工作台')
 const disableTarget = ref<WorkbenchMemberRow | null>(null)
-const disableReason = ref('')
+const disableError = ref('')
+const memberSearch = ref<HTMLInputElement | null>(null)
+let disableTrigger: HTMLElement | null = null
 const mergeSourceId = ref('')
 const mergeCanonicalId = ref('')
 const mergeReason = ref('合并资产工作台账号')
@@ -185,27 +188,42 @@ async function openSelectedAccess() {
   }
 }
 
-function startDisable(member: WorkbenchMemberRow) {
+function startDisable(member: WorkbenchMemberRow, event: MouseEvent) {
+  if (!canChangeRoles.value || savingUserId.value !== null || member.status !== 'active') return
+  disableTrigger = event.currentTarget as HTMLElement | null
   disableTarget.value = member
-  disableReason.value = ''
+  disableError.value = ''
 }
 
-async function disableSelectedAccess() {
+function closeDisableDialog() {
+  if (savingUserId.value !== null) return
+  disableTarget.value = null
+  disableError.value = ''
+}
+
+function restoreDisableFocus() {
+  if (disableTrigger?.isConnected) disableTrigger.focus()
+  else memberSearch.value?.focus()
+  disableTrigger = null
+}
+
+async function disableSelectedAccess(reason: string) {
   const member = disableTarget.value
-  if (!member || !disableReason.value.trim()) {
-    error.value = '停用必须填写原因'
+  if (savingUserId.value !== null) return
+  if (!canChangeRoles.value || !member || !reason.trim()) {
+    disableError.value = '停用必须填写原因，并由超级管理员确认'
     return
   }
   savingUserId.value = member.user_id
-  error.value = ''
+  disableError.value = ''
   notice.value = ''
   try {
-    await assetWorkbenchApi.disableAccess({ user_id: member.user_id, reason: disableReason.value })
+    await assetWorkbenchApi.disableAccess({ user_id: member.user_id, reason: reason.trim() })
     notice.value = `已停用 ${memberName(member)} 的资产工作台访问`
     disableTarget.value = null
     await loadMembers()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '停用失败'
+    disableError.value = err instanceof Error ? err.message : '停用失败，请重试'
   } finally {
     savingUserId.value = null
   }
@@ -323,7 +341,7 @@ function refreshFromOtherApp() {
           </label>
           <label>
             搜索成员
-            <input v-model="query" placeholder="输入姓名、账号或手机号" @keydown.enter="applyFilters" />
+            <input ref="memberSearch" v-model="query" placeholder="输入姓名、账号或手机号" @keydown.enter="applyFilters" />
           </label>
           <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="loading" @click="applyFilters">
             <IconfontActionIcon name="search" :size="16" />
@@ -428,7 +446,8 @@ function refreshFromOtherApp() {
                 v-if="canChangeRoles && member.status === 'active'"
                 class="aw-secondary-button"
                 type="button"
-                @click="startDisable(member)"
+                :disabled="savingUserId !== null"
+                @click="startDisable(member, $event)"
               >
                 停用
               </button>
@@ -453,25 +472,14 @@ function refreshFromOtherApp() {
       </div>
     </section>
 
-    <section v-if="disableTarget" class="aw-panel">
-      <div class="aw-panel__head">
-        <div>
-          <p class="aw-eyebrow">停用访问</p>
-          <h3>{{ memberName(disableTarget) }}</h3>
-        </div>
-        <span class="aw-chip aw-chip--danger">需要原因</span>
-      </div>
-      <div class="aw-form-grid">
-        <label class="aw-form-grid__full">
-          停用原因
-          <input v-model="disableReason" placeholder="离职、账号误开、暂停合作" />
-        </label>
-      </div>
-      <div class="aw-inline-actions">
-        <button class="aw-primary-button" type="button" @click="disableSelectedAccess">确认停用</button>
-        <button class="aw-secondary-button" type="button" @click="disableTarget = null">取消</button>
-      </div>
-    </section>
+    <MemberDisableDialog
+      :member="disableTarget"
+      :busy="savingUserId !== null"
+      :error="disableError"
+      @close="closeDisableDialog"
+      @closed="restoreDisableFocus"
+      @confirm="disableSelectedAccess"
+    />
 
     <section v-if="canChangeRoles" class="aw-panel">
       <div class="aw-panel__head">
