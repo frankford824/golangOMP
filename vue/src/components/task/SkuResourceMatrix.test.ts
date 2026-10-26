@@ -72,6 +72,18 @@ const bundle: ResourceBundle = {
 }
 
 describe('SkuResourceMatrix', () => {
+  it('hydrates un-enriched SKU rows from the authorized task union by UUID, not filename', async () => {
+    const wrapper = mount(SkuResourceMatrix, { props: { bundle,
+      taskReferences:[{ref_id:'uuid',filename:'image.png',thumbnail_url:'https://example.test/fresh-thumb.webp',download_url:'https://example.test/fresh-original.png'}],
+      skuItems:[{sku_code:'SKU-009',reference_file_refs:[{asset_id:'uuid',filename:'SKU-specific.png',mime_type:'image/png',download_url:'https://example.test/expired-original.png'}]}] }, global:{stubs:{Teleport:true}} })
+    const image = wrapper.findAll('.reference-stage .asset-preview-media-stub').find(item=>item.attributes('alt')==='SKU-specific.png')!
+    expect(image.attributes('data-resolved-preview')).toBe('https://example.test/fresh-thumb.webp')
+    expect(image.attributes('src')).toBe('https://example.test/fresh-original.png')
+    await image.trigger('click')
+    expect(wrapper.get('.image-preview-lightbox-stub img').attributes('src')).toBe('https://example.test/fresh-original.png')
+    wrapper.unmount()
+  })
+
   it('retains server thumbnails for per-SKU UUID refs and preserves controlled revision previews', async () => {
     const wrapper = mount(SkuResourceMatrix, { props: { bundle, skuItems: [{ sku_code: 'SKU-009', reference_file_refs: [{ asset_id: 'uuid', filename: 'SKU上传.png', mime_type: 'image/png', thumbnail_url: 'https://example.test/thumbnail.webp', download_url: 'https://example.test/original.png' }] }] } })
     const thumbnails = wrapper.findAll('.reference-stage .asset-preview-media-stub')

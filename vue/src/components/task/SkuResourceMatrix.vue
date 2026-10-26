@@ -141,7 +141,7 @@ import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
 import ResourceRevisionDrawer from '@/components/task/ResourceRevisionDrawer.vue'
 import { fetchTaskAssetPreviewMeta } from '@/domain/asset-access'
-import { referenceThumbnailURL } from '@/domain/reference-thumbnail'
+import { referenceThumbnailURL, withTaskReferencePreview } from '@/domain/reference-thumbnail'
 import type { ResourceBundle, ResourceFile, ResourceGroup, ResourceReference, ResourceRevision, ResourceRevisionItem } from '@/services/api/resourceGroupsApi'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
@@ -202,7 +202,7 @@ function referenceKey(
 
 function toDisplayReference(value: unknown, fallbackKey: string): DisplayReference | null {
   if (!value || typeof value !== 'object') return null
-  const raw = value as Record<string, unknown>
+  const raw = withTaskReferencePreview(value as Record<string, unknown>, props.taskReferences || [])
   const text = (key: string) => { const item = raw[key]; return typeof item === 'string' && item.trim() ? item.trim() : '' }
   const fileName = text('file_name') || text('filename') || text('name')
   const previewURL = text('preview_url') || text('url') || text('download_url')
