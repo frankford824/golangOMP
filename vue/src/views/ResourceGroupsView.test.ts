@@ -24,8 +24,8 @@ const mountView = () => mount(ResourceGroupsView, {
     stubs: {
       Teleport: true,
       AssetPreviewMedia: {
-        props: ['assetId', 'taskAssetId', 'fallbackSrc', 'alt'],
-        template: '<img class="asset-preview-media-stub" :data-asset-id="assetId || undefined" :data-task-asset-id="taskAssetId || undefined" :src="fallbackSrc || undefined" :alt="alt" />',
+        props: ['assetId', 'taskAssetId', 'fallbackSrc', 'alt', 'openFullOnClick'],
+        template: '<img class="asset-preview-media-stub" :data-asset-id="assetId || undefined" :data-task-asset-id="taskAssetId || undefined" :src="fallbackSrc || undefined" :alt="alt" @click="openFullOnClick === false || $event.stopPropagation()" />',
       },
     },
   },
@@ -231,6 +231,10 @@ describe('ResourceGroupsView', () => {
     })
     expect(wrapper.text()).toContain('外部资源匹配')
     expect(wrapper.text()).toContain('HSC40222-final.tif')
+    await wrapper.get('.external-card img').trigger('click')
+    expect(mocks.push).toHaveBeenCalledTimes(1)
+    expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/ext-77')
+    mocks.push.mockClear()
     await wrapper.get('.external-card').trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/asset-center/ext-77')
   })
@@ -263,6 +267,10 @@ describe('ResourceGroupsView', () => {
     expect(wrapper.text()).toContain('参考图')
     expect(wrapper.get('.flat-card img').attributes('data-task-asset-id')).toBe('1002')
     expect(wrapper.get('.flat-card img').attributes('src')).toBeUndefined()
+    await wrapper.get('.flat-card img').trigger('click')
+    expect(mocks.push).toHaveBeenCalledTimes(1)
+    expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/8')
+    mocks.push.mockClear()
     await wrapper.get('.flat-card').trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
   })

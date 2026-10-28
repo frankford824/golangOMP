@@ -43,7 +43,7 @@
       <section v-else class="grid flat-grid" aria-label="匹配资源列表">
         <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
           <span class="cover">
-            <AssetPreviewMedia v-if="item.task_asset_id" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" rendition="thumbnail" />
+            <AssetPreviewMedia v-if="item.task_asset_id" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" rendition="thumbnail" :open-full-on-click="false" />
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
             <span class="mode-badge">{{ roleLabel(item.resource_role) }}</span>
           </span>
@@ -65,6 +65,7 @@
             <AssetPreviewMedia
               v-if="coverAssetID(group) > 0"
               :task-asset-id="String(coverAssetID(group))"
+              :open-full-on-click="false"
               :alt="coverName(group)"
               img-class="resource-cover-media"
               inner-img-class="resource-cover-image"
@@ -110,7 +111,7 @@
         <div class="grid external-grid">
           <button v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" @click="openExternal(asset)">
             <span class="cover">
-              <AssetPreviewMedia v-if="externalResourceID(asset)" :asset-id="externalResourceID(asset)" :alt="externalFileName(asset)" rendition="thumbnail" />
+              <AssetPreviewMedia v-if="externalResourceID(asset)" :asset-id="externalResourceID(asset)" :alt="externalFileName(asset)" rendition="thumbnail" :open-full-on-click="false" />
               <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(externalFileName(asset)) }}</span><small>外部资源</small></span>
               <span class="mode-badge">外部</span>
             </span>

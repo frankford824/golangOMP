@@ -38,7 +38,7 @@
         :class="innerImgClass"
         loading="lazy"
         decoding="async"
-        @click.stop="onOpenFull"
+        @click="onImageClick"
         @error="onImageError"
       />
       <span v-if="detailNotice" role="status">{{ detailNotice }}</span>
@@ -89,6 +89,8 @@ const props = withDefaults(
      */
     deferUntilVisible?: boolean
     rendition?: 'thumbnail' | 'preview'
+    /** 卡片导航场景交由父级处理点击，不请求详情预览。 */
+    openFullOnClick?: boolean
   }>(),
   {
     assetId: null,
@@ -99,6 +101,7 @@ const props = withDefaults(
     alt: '',
     deferUntilVisible: true,
     rendition: 'thumbnail',
+    openFullOnClick: true,
   },
 )
 
@@ -362,6 +365,12 @@ onBeforeUnmount(() => {
   clearPrepareRetryTimer()
   clearObjectUrl()
 })
+
+function onImageClick(event: MouseEvent) {
+  if (!props.openFullOnClick) return
+  event.stopPropagation()
+  void onOpenFull()
+}
 
 async function onOpenFull() {
   let u = displaySrc.value.trim()

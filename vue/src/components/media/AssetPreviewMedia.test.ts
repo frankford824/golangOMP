@@ -60,4 +60,35 @@ describe('AssetPreviewMedia', () => {
     expect(mocks.materialize).toHaveBeenCalledWith('/v1/assets/files/task-preview.webp', '24174')
     expect(wrapper.get('img.apm-img').attributes('src')).toBe('blob:task-preview')
   })
+
+  it('lets a navigation card receive image clicks without requesting a detail preview', async () => {
+    const navigate = vi.fn()
+    const wrapper = mount({
+      components: { AssetPreviewMedia },
+      setup: () => ({ navigate }),
+      template: '<button @click="navigate"><AssetPreviewMedia task-asset-id="24174" :open-full-on-click="false" /></button>',
+    })
+    await flushPromises()
+    const initialRequests = mocks.fetchTaskAssetPreview.mock.calls.length
+    await wrapper.get('img.apm-img').trigger('click')
+    expect(navigate).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchTaskAssetPreview).toHaveBeenCalledTimes(initialRequests)
+    expect(wrapper.findComponent(AssetPreviewMedia).emitted('open-full')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps standalone lightbox clicks isolated from the parent by default', async () => {
+    const navigate = vi.fn()
+    const wrapper = mount({
+      components: { AssetPreviewMedia },
+      setup: () => ({ navigate }),
+      template: '<button @click="navigate"><AssetPreviewMedia task-asset-id="24174" /></button>',
+    })
+    await flushPromises()
+    await wrapper.get('img.apm-img').trigger('click')
+    await flushPromises()
+    expect(navigate).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(AssetPreviewMedia).emitted('open-full')).toHaveLength(1)
+    wrapper.unmount()
+  })
 })
