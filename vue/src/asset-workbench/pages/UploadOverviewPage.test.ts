@@ -4,6 +4,7 @@ import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  settlementVisible: true,
   capabilities: ['asset.workbench.manage', 'asset.workbench.settlement'],
   driveDirectories: vi.fn(),
   driveFiles: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@aw/app/session.store', () => ({
-  useAssetWorkbenchSessionStore: () => ({ bootstrap: { capabilities: mocks.capabilities } }),
+  useAssetWorkbenchSessionStore: () => ({ bootstrap: { capabilities: mocks.capabilities, profile: { settlement_visible: mocks.settlementVisible } } }),
 }))
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
@@ -38,7 +39,7 @@ vi.mock('@aw/shared/drive/ArchiveVirtualThumb.vue', () => ({
 }))
 
 vi.mock('@aw/shared/preview/WorkbenchPreviewDialog.vue', () => ({
-  default: { template: '<div />' },
+  default: { props:['metaRows'], template: '<div data-testid="preview-metadata">{{ metaRows }}</div>' },
 }))
 
 import UploadOverviewPage from './UploadOverviewPage.vue'
@@ -46,9 +47,41 @@ import UploadOverviewPage from './UploadOverviewPage.vue'
 describe('UploadOverviewPage operation source', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.settlementVisible = true
     mocks.capabilities = ['asset.workbench.manage', 'asset.workbench.settlement']
     mocks.driveDirectories.mockResolvedValue([])
     mocks.listSettlementSupplements.mockResolvedValue({ items: [], total: 0, page: 1, size: 100 })
+  })
+
+  it.each([
+    { visible:false, admin:false, expected:false },
+    { visible:true, admin:false, expected:true },
+    { visible:false, admin:true, expected:true },
+  ])('applies income visibility to ledger summaries and actual amount cells: %o', async ({visible,admin,expected}) => {
+    mocks.settlementVisible = visible
+    mocks.capabilities = admin ? ['asset.workbench.manage'] : ['asset.workbench.submit']
+    mocks.driveFiles.mockResolvedValue({items:[{id:99, submission_item_id:99, original_filename:'sample.png', gross_amount:123.45, page_count:1}],total:1})
+    const wrapper = mount(UploadOverviewPage, {global:{stubs:{RouterLink:true}}})
+    await flushPromises()
+    expect(wrapper.find('.aw-upload-ledger__summary').text().includes('本页计价金额')).toBe(expected)
+    expect(wrapper.findAll('th').some(th=>th.text()==='金额')).toBe(expected)
+    expect(wrapper.text().includes('123.45')).toBe(expected)
+    expect(wrapper.text()).toContain('匹配文件')
+    await wrapper.get('button[aria-label="预览"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="preview-metadata"]').text().includes('计件金额')).toBe(expected)
+    let exported:Blob|undefined
+    const create = vi.fn((blob:Blob)=>{exported=blob;return 'blob:ledger-test'})
+    vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:create,revokeObjectURL:vi.fn()}))
+    const click = vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{})
+    await wrapper.findAll('button').find(button=>button.text().includes('导出'))!.trigger('click')
+    await flushPromises()
+    const csv = await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsText(exported!)})
+    expect(csv.includes('计件金额')).toBe(expected)
+    expect(csv.includes('123.45')).toBe(expected)
+    click.mockRestore()
+    vi.unstubAllGlobals()
+    wrapper.unmount()
   })
 
   it('marks client supplement files in the admin upload ledger and detail panel', async () => {
