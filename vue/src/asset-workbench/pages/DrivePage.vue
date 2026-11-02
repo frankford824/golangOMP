@@ -121,6 +121,7 @@ const canManageDrive = computed(() => capabilities.value.has('asset.workbench.ma
 const canPublishClientMaterials = computed(() => canManageDrive.value || capabilities.value.has('asset.publish'))
 const clientPublishedView = computed(() => !canPublishClientMaterials.value)
 const canMaintainItems = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
+const canViewAmounts = computed(() => canMaintainItems.value || session.bootstrap?.profile?.settlement_visible !== false)
 const canListUploadDirectories = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canUseOperational = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.material.download'))
 const canDeleteDriveFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
@@ -498,7 +499,7 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
               { key: 'business_month', label: '结算月', width: 104, readonly: true },
               { key: 'difficulty_class', label: '难度', width: 96, readonly: true },
               { key: 'page_count', label: '数量', width: 88, readonly: true },
-              { key: 'gross_amount', label: '计件金额', width: 110, readonly: true },
+              ...(canViewAmounts.value ? [{ key: 'gross_amount', label: '计件金额', width: 110, readonly: true }] : []),
               { key: 'qc_status', label: '质检', width: 96, kind: 'status', readonly: true },
               { key: 'pricing_status', label: '计件', width: 96, kind: 'status', readonly: true },
               { key: 'size', label: '大小', width: 110, readonly: true },
@@ -533,7 +534,7 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
                 business_month: file.business_month || '',
                 difficulty_class: file.difficulty_class || '',
                 page_count: file.page_count || '',
-                gross_amount: formatMoney(file.gross_amount || 0),
+                gross_amount: canViewAmounts.value ? formatMoney(file.gross_amount || 0) : '',
                 qc_status: statusText(file.qc_status),
                 pricing_status: statusText(file.pricing_status),
                 size: formatSize(file.file_size),
@@ -2032,7 +2033,7 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
     ['结算月份', file.business_month || '—'],
     ['难度', file.difficulty_class || '—'],
     ['数量', file.page_count ? `${file.page_count}` : '—'],
-    ['计件金额', formatMoney(file.gross_amount || 0)],
+    ...(canViewAmounts.value ? [['计件金额', formatMoney(file.gross_amount || 0)] as [string, string]] : []),
     ['质检', statusText(file.qc_status)],
     ['计件', statusText(file.pricing_status)],
     ['大小', formatSize(file.file_size)],
@@ -3739,7 +3740,7 @@ onBeforeUnmount(() => {
                   <span>目录</span>
                   <span>格式</span>
                   <span>数量</span>
-                  <span>计件金额</span>
+                  <span v-if="canViewAmounts">计件金额</span>
                   <span>状态</span>
                 </div>
                 <article
@@ -3774,7 +3775,7 @@ onBeforeUnmount(() => {
                   <span>{{ file.upload_directory_name || '未分类' }}</span>
                   <span>{{ fileFormatLabel(file) }}</span>
                   <span>{{ file.page_count || '—' }}</span>
-                  <span>{{ formatMoney(file.gross_amount || 0) }}</span>
+                  <span v-if="canViewAmounts">{{ formatMoney(file.gross_amount || 0) }}</span>
                   <span>{{ statusText(file.pricing_status) }}</span>
                 </article>
               </div>
@@ -4131,7 +4132,7 @@ onBeforeUnmount(() => {
             <div><dt>结算月份</dt><dd>{{ selectedFile.business_month || '—' }}</dd></div>
             <div><dt>难度</dt><dd>{{ selectedFile.difficulty_class || '—' }}</dd></div>
             <div><dt>数量</dt><dd>{{ selectedFile.page_count || '—' }}</dd></div>
-            <div><dt>计件金额</dt><dd>{{ formatMoney(selectedFile.gross_amount || 0) }}</dd></div>
+            <div v-if="canViewAmounts"><dt>计件金额</dt><dd>{{ formatMoney(selectedFile.gross_amount || 0) }}</dd></div>
             <div><dt>质检</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
             <div><dt>计件</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
             <div><dt>大小</dt><dd>{{ formatSize(selectedFile.file_size) }}</dd></div>
@@ -4360,7 +4361,7 @@ onBeforeUnmount(() => {
       :preview-url="previewUrl"
       :mime-type="previewMimeType"
       :filename="previewFilename"
-      :meta-rows="previewRows"
+      :meta-rows="canViewAmounts ? previewRows : previewRows.filter(([label]) => label !== '计件金额')"
       :empty-label="previewEmptyLabel"
       download-label="下载"
       windowed

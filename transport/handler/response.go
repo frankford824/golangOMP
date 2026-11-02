@@ -10,23 +10,23 @@ import (
 )
 
 func respondOK(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusOK, gin.H{"data": data})
+	c.JSON(http.StatusOK, gin.H{"data": incomeSafeResponse(c, data)})
 }
 
 func respondCreated(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusCreated, gin.H{"data": data})
+	c.JSON(http.StatusCreated, gin.H{"data": incomeSafeResponse(c, data)})
 }
 
 func respondOKWithPagination(c *gin.Context, data interface{}, pagination interface{}) {
 	c.JSON(http.StatusOK, gin.H{
-		"data":       data,
+		"data":       incomeSafeResponse(c, data),
 		"pagination": pagination,
 	})
 }
 
 func respondError(c *gin.Context, err *domain.AppError) {
 	err.TraceID = c.GetString("trace_id")
-	c.JSON(httpStatusFromCode(err.Code), domain.APIErrorResponse{Error: err})
+	c.JSON(httpStatusFromCode(err.Code), incomeSafeResponse(c, domain.APIErrorResponse{Error: err}))
 	c.Abort()
 }
 

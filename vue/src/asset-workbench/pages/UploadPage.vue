@@ -885,7 +885,7 @@ onActivated(() => {
       </div>
       <div v-else class="aw-empty-state">
         <h3>等待文件</h3>
-        <p>{{ isSimpleUser ? '支持一次交多个文件。交上去以后，可以在看收入里查看金额。' : '支持批量拖拽上传。完成后进入维护专区，管理员可以质检、修正、下载和结算。' }}</p>
+        <p>{{ isSimpleUser ? (bootstrap?.profile?.settlement_visible === false ? '支持一次交多个文件。完成后可在上传台账查看记录。' : '支持一次交多个文件。交上去以后，可以在看收入里查看金额。') : '支持批量拖拽上传。完成后进入维护专区，管理员可以质检、修正、下载和结算。' }}</p>
       </div>
     </div>
 

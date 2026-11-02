@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
 import { Boxes, HandCoins, ImagePlus } from 'lucide-vue-next'
+withDefaults(defineProps<{ incomeVisible?: boolean }>(), { incomeVisible: true })
 </script>
 
 <template>
@@ -8,7 +9,7 @@ import { Boxes, HandCoins, ImagePlus } from 'lucide-vue-next'
     <div class="aw-simple-hero">
       <p class="aw-eyebrow">今天要做什么</p>
       <h1>选一个入口就能开始</h1>
-      <p>交作品会自动套用你能选择的类型；看收入只显示你自己的金额。</p>
+      <p>{{ incomeVisible ? '交作品会自动套用你能选择的类型；看收入只显示你自己的金额。' : '交作品会自动套用你能选择的类型；可在上传台账查看和管理自己的文件。' }}</p>
     </div>
 
     <div class="aw-simple-card-grid">
@@ -21,7 +22,7 @@ import { Boxes, HandCoins, ImagePlus } from 'lucide-vue-next'
           <small>上传做好的文件</small>
         </span>
       </RouterLink>
-      <RouterLink class="aw-simple-card aw-simple-card--money" to="/my-settlement">
+      <RouterLink v-if="incomeVisible" class="aw-simple-card aw-simple-card--money" to="/my-settlement">
         <span class="aw-simple-card__icon">
           <HandCoins :size="32" aria-hidden="true" />
         </span>

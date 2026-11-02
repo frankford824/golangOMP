@@ -93,3 +93,19 @@ func TestDriveIncomeVisibilityFailsClosedOnProfileFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestClientResponseIncomePolicyPreservesAdministratorBusinessViews(t *testing.T) {
+	visible := false
+	r := &incomeDriveRepo{visible: &visible}
+	s := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
+	for _, role := range []domain.Role{domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement, domain.RoleHRAdmin} {
+		allowed, err := s.CanViewIncomeAmounts(context.Background(), domain.RequestActor{ID: 22, Roles: []domain.Role{role}})
+		if err != nil || allowed != (role != domain.RoleAssetSubmitter) {
+			t.Fatalf("role=%v allowed=%v error=%v", role, allowed, err)
+		}
+	}
+	r.profileErr = errors.New("offline")
+	if _, err := s.CanViewIncomeAmounts(context.Background(), domain.RequestActor{ID: 22, Roles: []domain.Role{domain.RoleAssetSubmitter}}); err == nil {
+		t.Fatal("visibility lookup failed open")
+	}
+}
