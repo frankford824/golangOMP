@@ -9,6 +9,17 @@ enableAutoUnmount(afterEach)
 const row={task_id:1,task_no:'RW-1',task_status:'Completed',sku_item_id:2,sku_code:'SKU-2',product_name:'测试产品',requires_area:true,missing_area:true,cost_input:emptyCostInput(),cost_price:10,cost_review_required:true,can_edit:true,token:'old'}
 beforeEach(()=>{vi.clearAllMocks();mocks.list.mockResolvedValue({data:[row],total:1,page:1,page_size:20});mocks.save.mockResolvedValue({data:[],total:0,page:1,page_size:20})})
 describe('persistent specification work',()=>{
+  it('returns to a valid page when completing the last item on the last page',async()=>{
+    mocks.list.mockResolvedValue({data:[row],total:41,page:1,page_size:20})
+    const w=mount(TaskCostSpecificationPanel,{global:{stubs:{Teleport:true}}});await flushPromises();await w.get('.spec-heading').trigger('click')
+    await w.findAll('.spec-content footer button').at(-1)!.trigger('click');await flushPromises()
+    await w.findAll('.spec-content footer button').at(-1)!.trigger('click');await flushPromises()
+    await w.get('.spec-row button').trigger('click')
+    mocks.list.mockResolvedValue({data:[row],total:40,page:2,page_size:20})
+    await w.get('form').trigger('submit');await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(undefined,2)
+    expect(w.get('.spec-content footer').text()).toContain('2 / 2')
+  })
   it('keeps completed work visible and saves geometry only',async()=>{
     const w=mount(TaskCostSpecificationPanel,{global:{stubs:{Teleport:true}}});await flushPromises()
     expect(w.get('.spec-heading').text()).toContain('我的待补计价资料')
