@@ -494,6 +494,12 @@ function buildTaskEventSummaryCn(
     return `${parts.join('，')}。`
   }
 
+  if (et === 'task.cost_specification_updated') {
+    const sku=pickField(raw,payload,'sku_code')
+    const reason=pickField(raw,payload,'reason')
+    return `${actor} 补录了计价资料${sku?`（${sku}）`:''}，原价格保留，成本待核对${reason?`；原因：${cleanInlineBusinessText(reason)}`:''}。`
+  }
+
   if (et === 'task.sku_item.updated') {
     const sku = pickFirst(raw, payload, ['sku_code', 'item_sku_code', 'target_sku_code'])
     const name = pickFirst(raw, payload, ['product_name', 'product_name_snapshot', 'item_name'])

@@ -3716,6 +3716,42 @@ components:
           additionalProperties: { type: boolean }
         hole_count: { type: integer, minimum: 0, maximum: 100000 }
         process_length_m: { type: number, minimum: 0 }
+    TaskCostSpecification:
+      type: object
+      required: [task_id, task_no, task_status, sku_item_id, sku_code, product_name, requires_area, missing_area, cost_input, cost_price, cost_review_required, can_edit, token]
+      properties:
+        task_id: { type: integer, format: int64 }
+        task_no: { type: string }
+        task_status: { type: string }
+        sku_item_id: { type: integer, format: int64, minimum: 0, description: Zero identifies the task-detail geometry before a canonical SKU row exists. }
+        sku_code: { type: string }
+        product_name: { type: string }
+        requires_area: { type: boolean }
+        missing_area: { type: boolean }
+        cost_input: { $ref: '#/components/schemas/CostInput' }
+        cost_price: { type: number, nullable: true }
+        cost_review_required: { type: boolean }
+        can_edit: { type: boolean }
+        token: { type: string, description: Optimistic token over current business geometry, price and task state. }
+    TaskCostSpecificationUpdate:
+      type: object
+      additionalProperties: false
+      required: [sku_item_id, token, reason, cost_input]
+      properties:
+        sku_item_id: { type: integer, format: int64, minimum: 0 }
+        token: { type: string, minLength: 1 }
+        reason: { type: string, minLength: 1, maxLength: 200 }
+        cost_input: { $ref: '#/components/schemas/CostInput' }
+    TaskCostSpecificationList:
+      type: object
+      required: [data, total, page, page_size]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TaskCostSpecification' }
+        total: { type: integer, format: int64 }
+        page: { type: integer }
+        page_size: { type: integer }
     CostModel:
       type: object
       description: Bounded model configuration, persisted as JSON in formula_expression when rule_type=cost_model. One active model per matched group is allowed at evaluation; multiple models fail closed. Model replaces legacy components in that group. Source names are provenance, not approval.
@@ -5820,7 +5856,7 @@ components:
     NotificationType:
       type: string
       description: "Application-scoped notification type. Main operations types and `asset_workbench_*` types are exposed through separate route families and cannot be read or marked across scopes."
-      enum: [task_assigned_to_me, task_rejected, task_pending_audit, task_closed, claim_conflict, pool_reassigned, task_cancelled, system_broadcast, task_sku_sync_failed, asset_workbench_profile_incomplete, asset_workbench_submission_created, asset_workbench_qc_updated, asset_workbench_settlement_updated, asset_workbench_supplement_access, asset_workbench_preview_failed, asset_workbench_batch_job_completed, asset_workbench_batch_job_failed]
+      enum: [task_assigned_to_me, task_rejected, task_pending_audit, task_design_ready, task_closed, claim_conflict, pool_reassigned, task_cancelled, system_broadcast, task_sku_sync_failed, asset_workbench_profile_incomplete, asset_workbench_submission_created, asset_workbench_qc_updated, asset_workbench_settlement_updated, asset_workbench_supplement_access, asset_workbench_preview_failed, asset_workbench_batch_job_completed, asset_workbench_batch_job_failed]
     Notification:
       type: object
       description: |
@@ -5831,6 +5867,8 @@ components:
         frontend must tolerate them being absent and fall back to id/code based labels.
 
         Current payload contract:
+
+        - `task_design_ready`: `task_id`, `creator_id`, `designer_id`, `workflow_revision`, `cost_specification_hint`. Sent to the task creator when design is submitted; notification read state never resolves missing specification work.
 
         - `task_assigned_to_me`: `task_id`; optional `task_no`, `task_type`, `module_key`,
           `action`, `assigned_by`, `assigned_by_name`, `designer_id`,
@@ -12004,6 +12042,65 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TaskListResponse' }
         '403': { $ref: '#/components/responses/V8Forbidden' }
+  /v1/tasks/cost-specification-todos:
+    get:
+      summary: List my persistent missing-area work after design submission
+      description: Creator-only, task.view-scoped rows in PendingAudit or Completed whose current effective scheme requires area and whose authoritative per-SKU/task geometry is incomplete. Reading notifications never clears this queue. Piece, set and manual schemes do not require area merely because dimensions are absent. No historical data is rewritten.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [task.view]
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1, maximum: 200, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Scoped persistent specification work.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskCostSpecificationList' }
+        '403': { description: Missing task.view capability. }
+  /v1/tasks/{id}/cost-specifications:
+    get:
+      summary: Read task-scoped pricing geometry and correction access
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [task.view]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, maximum: 200, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Per-SKU geometry with explicit edit access, including completed tasks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskCostSpecificationList' }
+        '403': { description: Task outside task.view scope. }
+        '404': { description: Task not found. }
+    patch:
+      summary: Correct task pricing geometry without reopening the task or changing price
+      description: Requires task.create for the creator's own drawing task within its stable scope, or scoped catalog.manage; task.view must also cover the task. Supports original-product, new-product and retouch tasks; planning/purchase tasks and Archived/Cancelled tasks are read-only. Only geometry, token and mandatory reason are accepted; processing choices, product identity, binding and monetary values are preserved. A correction becomes pending cost review. Before a canonical SKU exists, only total area is supported (minimum 0.0001 square metre). Legacy dimension mirrors are bounded to 999999.9999 centimetres and square metres. The correction appends task/audit history and never enqueues price/ERP writes or changes completion state.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [catalog.manage, task.create]
+      x-permission-mode: any
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskCostSpecificationUpdate' }
+      responses:
+        '200':
+          description: Geometry recorded; current prices remain unchanged and need review where area matters.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskCostSpecificationList' }
+        '400': { description: Invalid geometry, token or reason. }
+        '403': { description: Creator/catalog scope or task state does not permit correction. }
+        '404': { description: Task or SKU not found. }
+        '409': { description: Geometry or task changed; refresh before saving. }
   /v1/tasks/filter-options:
     get:
       summary: Get task center filter options

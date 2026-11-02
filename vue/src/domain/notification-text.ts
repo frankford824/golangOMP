@@ -98,6 +98,9 @@ export function formatNotification(
         content: actor ? `${task}已由 ${actor} 结单` : `${task}已结单`,
       }
     }
+    case 'task_design_ready': {
+      return { title:'图已完成',content:`${task}图已完成，请核对计价资料；按面积计价却缺面积的编码会保留待办。` }
+    }
     case 'claim_conflict': {
       const p = safePayload as unknown as ClaimConflictPayload
       const winner = p.winner_user_name ? `（${p.winner_user_name} 已领取）` : ''

@@ -59,13 +59,14 @@ type TaskResourceWorkflowService interface {
 }
 
 type taskResourceWorkflowService struct {
-	repo      TaskResourceGroupRepository
-	txRunner  repo.TxRunner
-	eventRepo repo.TaskEventRepo
-	finalizer *TaskFinalizer
-	ossDirect *OSSDirectService
-	profiles  taskResourceSKUProfileProvider
-	costs     taskResourceCostReconciler
+	notifications taskNotificationService
+	repo          TaskResourceGroupRepository
+	txRunner      repo.TxRunner
+	eventRepo     repo.TaskEventRepo
+	finalizer     *TaskFinalizer
+	ossDirect     *OSSDirectService
+	profiles      taskResourceSKUProfileProvider
+	costs         taskResourceCostReconciler
 }
 
 type taskResourceSKUProfileProvider interface {
@@ -90,6 +91,10 @@ type TaskFinalizer struct {
 }
 
 type TaskResourceWorkflowOption func(*taskResourceWorkflowService)
+
+func WithTaskResourceWorkflowNotifications(notifications taskNotificationService) TaskResourceWorkflowOption {
+	return func(s *taskResourceWorkflowService) { s.notifications = notifications }
+}
 
 func WithTaskResourceWorkflowOSSDirect(ossDirect *OSSDirectService) TaskResourceWorkflowOption {
 	return func(service *taskResourceWorkflowService) { service.ossDirect = ossDirect }
@@ -928,6 +933,12 @@ func (s *taskResourceWorkflowService) SubmitDesign(ctx context.Context, taskID i
 			}
 		}
 		response := &domain.ResourceBundle{TaskID: taskID, WorkflowRevision: nextWorkflowRevision}
+		if s.notifications != nil && task.CreatorID > 0 {
+			payload, _ := json.Marshal(map[string]interface{}{"task_id": taskID, "creator_id": task.CreatorID, "designer_id": actor.ID, "workflow_revision": nextWorkflowRevision, "cost_specification_hint": "图已完成，请核对计价资料；按面积计价却缺面积的编码会保留在待补资料中"})
+			if _, err := s.notifications.CreateNotification(ctx, tx, task.CreatorID, domain.NotificationTypeTaskDesignReady, payload); err != nil {
+				return err
+			}
+		}
 		return s.repo.CompleteIdempotency(ctx, tx, taskID, actor.ID, "submit_design", request.IdempotencyKey, response)
 	})
 	if txErr != nil {

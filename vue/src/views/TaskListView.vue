@@ -34,6 +34,7 @@
           </BaseButton>
         </div>
       </div>
+      <TaskCostSpecificationPanel v-if="can('task.create')" />
       <div class="task-tabs" aria-label="任务中心列表范围">
         <BaseButton
           v-for="tab in taskTabs"
@@ -580,6 +581,7 @@ import { ref, computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
+import TaskCostSpecificationPanel from '@/components/cost/TaskCostSpecificationPanel.vue'
 import type { ActiveTaskStatus, Task, TaskSkuItem } from '@/domain/types/task'
 import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'

@@ -91,6 +91,8 @@ func (n *WeComNotifier) format(ctx context.Context, notification domain.Notifica
 		operator := firstNonEmpty(payloadString(p, "closed_by_name"), n.nameByID(ctx, payloadInt64(p, "closed_by")), "系统")
 		return fmt.Sprintf("已结单 | %s\n结单人: %s", taskLabel, operator),
 			fmt.Sprintf("%s:%d", notification.NotificationType, taskID), true
+	case domain.NotificationTypeTaskDesignReady:
+		return fmt.Sprintf("图已完成 | %s\n请核对计价资料；按面积计价却缺面积的编码会保留待办。", taskLabel), fmt.Sprintf("%s:%d:%d", notification.NotificationType, taskID, payloadInt64(p, "workflow_revision")), true
 	case domain.NotificationTypeTaskSKUSyncFailed:
 		count := payloadInt64(p, "failed_count")
 		if count <= 0 {

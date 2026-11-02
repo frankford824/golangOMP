@@ -7515,6 +7515,167 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tasks/cost-specification-todos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my persistent missing-area work after design submission
+         * @description Creator-only, task.view-scoped rows in PendingAudit or Completed whose current effective scheme requires area and whose authoritative per-SKU/task geometry is incomplete. Reading notifications never clears this queue. Piece, set and manual schemes do not require area merely because dimensions are absent. No historical data is rewritten.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Scoped persistent specification work. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCostSpecificationList"];
+                    };
+                };
+                /** @description Missing task.view capability. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks/{id}/cost-specifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read task-scoped pricing geometry and correction access */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                    page_size?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-SKU geometry with explicit edit access, including completed tasks. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCostSpecificationList"];
+                    };
+                };
+                /** @description Task outside task.view scope. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Task not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Correct task pricing geometry without reopening the task or changing price
+         * @description Requires task.create for the creator's own drawing task within its stable scope, or scoped catalog.manage; task.view must also cover the task. Supports original-product, new-product and retouch tasks; planning/purchase tasks and Archived/Cancelled tasks are read-only. Only geometry, token and mandatory reason are accepted; processing choices, product identity, binding and monetary values are preserved. A correction becomes pending cost review. Before a canonical SKU exists, only total area is supported (minimum 0.0001 square metre). Legacy dimension mirrors are bounded to 999999.9999 centimetres and square metres. The correction appends task/audit history and never enqueues price/ERP writes or changes completion state.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TaskCostSpecificationUpdate"];
+                };
+            };
+            responses: {
+                /** @description Geometry recorded; current prices remain unchanged and need review where area matters. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCostSpecificationList"];
+                    };
+                };
+                /** @description Invalid geometry */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Creator/catalog scope or task state does not permit correction. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Task or SKU not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Geometry or task changed; refresh before saving. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
     "/v1/tasks/filter-options": {
         parameters: {
             query?: never;
@@ -23274,6 +23435,41 @@ export interface components {
             hole_count?: number;
             process_length_m?: number;
         };
+        TaskCostSpecification: {
+            /** Format: int64 */
+            task_id: number;
+            task_no: string;
+            task_status: string;
+            /**
+             * Format: int64
+             * @description Zero identifies the task-detail geometry before a canonical SKU row exists.
+             */
+            sku_item_id: number;
+            sku_code: string;
+            product_name: string;
+            requires_area: boolean;
+            missing_area: boolean;
+            cost_input: components["schemas"]["CostInput"];
+            cost_price: number | null;
+            cost_review_required: boolean;
+            can_edit: boolean;
+            /** @description Optimistic token over current business geometry */
+            token: string;
+        };
+        TaskCostSpecificationUpdate: {
+            /** Format: int64 */
+            sku_item_id: number;
+            token: string;
+            reason: string;
+            cost_input: components["schemas"]["CostInput"];
+        };
+        TaskCostSpecificationList: {
+            data: components["schemas"]["TaskCostSpecification"][];
+            /** Format: int64 */
+            total: number;
+            page: number;
+            page_size: number;
+        };
         /** @description Bounded model configuration, persisted as JSON in formula_expression when rule_type=cost_model. One active model per matched group is allowed at evaluation; multiple models fail closed. Model replaces legacy components in that group. Source names are provenance, not approval. */
         CostModel: {
             /** @enum {integer} */
@@ -24949,7 +25145,7 @@ export interface components {
          * @description Application-scoped notification type. Main operations types and `asset_workbench_*` types are exposed through separate route families and cannot be read or marked across scopes.
          * @enum {string}
          */
-        NotificationType: "task_assigned_to_me" | "task_rejected" | "task_pending_audit" | "task_closed" | "claim_conflict" | "pool_reassigned" | "task_cancelled" | "system_broadcast" | "task_sku_sync_failed" | "asset_workbench_profile_incomplete" | "asset_workbench_submission_created" | "asset_workbench_qc_updated" | "asset_workbench_settlement_updated" | "asset_workbench_supplement_access" | "asset_workbench_preview_failed" | "asset_workbench_batch_job_completed" | "asset_workbench_batch_job_failed";
+        NotificationType: "task_assigned_to_me" | "task_rejected" | "task_pending_audit" | "task_design_ready" | "task_closed" | "claim_conflict" | "pool_reassigned" | "task_cancelled" | "system_broadcast" | "task_sku_sync_failed" | "asset_workbench_profile_incomplete" | "asset_workbench_submission_created" | "asset_workbench_qc_updated" | "asset_workbench_settlement_updated" | "asset_workbench_supplement_access" | "asset_workbench_preview_failed" | "asset_workbench_batch_job_completed" | "asset_workbench_batch_job_failed";
         /**
          * @description Source: V1_INFORMATION_ARCHITECTURE §8.
          *
@@ -24958,6 +25154,8 @@ export interface components {
          *     frontend must tolerate them being absent and fall back to id/code based labels.
          *
          *     Current payload contract:
+         *
+         *     - `task_design_ready`: `task_id`, `creator_id`, `designer_id`, `workflow_revision`, `cost_specification_hint`. Sent to the task creator when design is submitted; notification read state never resolves missing specification work.
          *
          *     - `task_assigned_to_me`: `task_id`; optional `task_no`, `task_type`, `module_key`,
          *       `action`, `assigned_by`, `assigned_by_name`, `designer_id`,

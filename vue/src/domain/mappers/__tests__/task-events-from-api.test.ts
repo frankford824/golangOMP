@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { mapTaskEventRowToRecentEvent } from '@/domain/mappers/task-events-from-api'
 
 describe('mapTaskEventRowToRecentEvent', () => {
+  it('shows specification correction as audited geometry without claiming a price write',()=>{
+    const event=mapTaskEventRowToRecentEvent({id:1,event_type:'task.cost_specification_updated',created_at:'2026-11-01T10:00:00Z',actor_username:'运营',payload:{sku_code:'QA-SPEC-1',reason:'补录面积'}},'71')
+    expect(event.summary).toContain('补录了计价资料');expect(event.summary).toContain('原价格保留，成本待核对');expect(event.summary).not.toContain('已请求同步 ERP')
+  })
   it('hides upload session ids in task detail activity summaries', () => {
     const event = mapTaskEventRowToRecentEvent(
       {

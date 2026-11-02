@@ -408,6 +408,7 @@ func main() {
 		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
 		service.WithTaskResourceGroupInitializer(taskResourceGroupRepo),
 		service.WithTaskProductManagementCloseSyncer(productManagementSvc),
+		service.WithTaskCostSpecificationRepo(mysqlrepo.NewTaskCostSpecificationRepo(mdb)),
 		service.WithTaskNotificationService(notificationSvc))
 	taskBoardSvc := service.NewTaskBoardService(taskOperationalDashboardRepo)
 	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
@@ -544,7 +545,8 @@ func main() {
 	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo,
 		service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc),
 		service.WithTaskResourceWorkflowSKUProfiles(productManagementSvc),
-		service.WithTaskResourceWorkflowCostReconciler(productManagementSvc))
+		service.WithTaskResourceWorkflowCostReconciler(productManagementSvc),
+		service.WithTaskResourceWorkflowNotifications(notificationSvc))
 	assetWorkbenchOptions := []assetworkbench.Option{
 		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
 		assetworkbench.WithUserRepository(userRepo),

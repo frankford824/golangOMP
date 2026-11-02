@@ -251,6 +251,7 @@ type taskResourceGroupInitializer interface {
 }
 
 type taskService struct {
+	costSpecifications             repo.TaskCostSpecificationRepo
 	costMaintenance                repo.CostMaintenanceRepo
 	costSync                       *CostSyncService
 	costSyncNotify                 func()

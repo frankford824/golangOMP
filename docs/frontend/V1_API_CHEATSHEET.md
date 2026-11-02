@@ -1,10 +1,10 @@
-# V1 API 速查表(285 path · 一行一条)
+# V1 API 速查表(287 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 285 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 287 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -102,6 +102,8 @@
 | GET | `/v1/task-assets/{task_asset_id}/preview` | Get controlled preview metadata for one immutable task-asset version | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/tasks` | List tasks within explicit capability and data scope；Create task | GET:已登录 / 主流程读全量可见; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/cost-specification-todos` | List my persistent missing-area work after design submission | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, PATCH | `/v1/tasks/{id}/cost-specifications` | Read task-scoped pricing geometry and correction access；Correct task pricing geometry without reopening the task or changing price | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/filter-options` | Get task center filter options | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}` | Get task read model | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/product-info` | Get per-task product information；Patch per-task product information | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

@@ -31,6 +31,7 @@
         </div>
       </section>
 
+      <TaskCostSpecificationPanel v-if="!isPlanning" :task-id="task.id" @saved="load" />
       <section v-if="visibleSkuCodes.length > 1" class="sku-visibility-strip" aria-label="本任务全部 SKU">
         <div><span>本任务全部 SKU</span><strong>{{ visibleSkuCodes.length }} 个</strong></div>
         <ol><li v-for="sku in visibleSkuCodes" :key="sku">{{ sku }}</li></ol>
@@ -408,6 +409,7 @@ import TaskAttachmentWorkspace from '@/components/task/TaskAttachmentWorkspace.v
 import TaskResourceRail from '@/components/task/TaskResourceRail.vue'
 import TaskDetailAtmosphere from '@/components/task/TaskDetailAtmosphere.vue'
 import TaskSkuItemEditor from '@/components/task/TaskSkuItemEditor.vue'
+import TaskCostSpecificationPanel from '@/components/cost/TaskCostSpecificationPanel.vue'
 import TaskBusinessInfoEditor from '@/components/task/TaskBusinessInfoEditor.vue'
 import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import type { CostInput } from '@/domain/cost-model'

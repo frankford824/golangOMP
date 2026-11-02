@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `199` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `201` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## POST /v1/integration/asset-media/workers/claim
 
@@ -5000,6 +5000,214 @@ Content-Type: `application/json`
 ##### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/tasks/cost-specification-todos
+
+### 简介
+支持方法: GET。
+
+- `GET`: Creator-only, task.view-scoped rows in PendingAudit or Completed whose current effective scheme requires area and whose authoritative per-SKU/task geometry is incomplete. Reading notifications never clears this queue. Piece, set and manual schemes do not require area merely because dimensions are absent. No historical data is rewritten.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "task_id": "...",
+      "task_no": "...",
+      "task_status": "...",
+      "sku_item_id": "...",
+      "sku_code": "...",
+      "product_name": "..."
+    }
+  ],
+  "total": 123,
+  "page": 123,
+  "page_size": 123
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<TaskCostSpecification> | 是 | - |
+| `total` | integer | 是 | - |
+| `page` | integer | 是 | - |
+| `page_size` | integer | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | Missing task.view capability. |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/cost-specification-todos \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/tasks/{id}/cost-specifications
+
+### 简介
+支持方法: GET, PATCH。
+
+- `GET`: Read task-scoped pricing geometry and correction access
+- `PATCH`: Requires task.create for the creator's own drawing task within its stable scope, or scoped catalog.manage; task.view must also cover the task. Supports original-product, new-product and retouch tasks; planning/purchase tasks and Archived/Cancelled tasks are read-only. Only geometry, token and mandatory reason are accepted; processing choices, product identity, binding and monetary values are preserved. A correction becomes pending cost review. Before a canonical SKU exists, only total area is supported (minimum 0.0001 square metre). Legacy dimension mirrors are bounded to 999999.9999 centimetres and square metres. The correction appends task/audit history and never enqueues price/ERP writes or changes completion state.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- `PATCH` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### GET 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "task_id": "...",
+      "task_no": "...",
+      "task_status": "...",
+      "sku_item_id": "...",
+      "sku_code": "...",
+      "product_name": "..."
+    }
+  ],
+  "total": 123,
+  "page": 123,
+  "page_size": 123
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<TaskCostSpecification> | 是 | - |
+| `total` | integer | 是 | - |
+| `page` | integer | 是 | - |
+| `page_size` | integer | 是 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | Task outside task.view scope. |
+| 404 | 见 `error.code` | 见 `deny_code` | Task not found. |
+
+##### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/<id>/cost-specifications \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### PATCH 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `sku_item_id` | integer | 是 | - |
+| `token` | string | 是 | - |
+| `reason` | string | 是 | - |
+| `cost_input` | CostInput | 是 | Structured inputs for one SKU sales unit. Total/layout/face-list areas already include all pieces. Order quantity never multiplies the resulting SKU unit cost. Stored in SKU variant_json.cost_input; patch via cost_input. |
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "task_id": "...",
+      "task_no": "...",
+      "task_status": "...",
+      "sku_item_id": "...",
+      "sku_code": "...",
+      "product_name": "..."
+    }
+  ],
+  "total": 123,
+  "page": 123,
+  "page_size": 123
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<TaskCostSpecification> | 是 | - |
+| `total` | integer | 是 | - |
+| `page` | integer | 是 | - |
+| `page_size` | integer | 是 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid geometry |
+| 403 | 见 `error.code` | 见 `deny_code` | Creator/catalog scope or task state does not permit correction. |
+| 404 | 见 `error.code` | 见 `deny_code` | Task or SKU not found. |
+| 409 | 见 `error.code` | 见 `deny_code` | Geometry or task changed; refresh before saving. |
+
+##### curl 示例
+```bash
+curl -X PATCH https://api.example.com/v1/tasks/<id>/cost-specifications \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'

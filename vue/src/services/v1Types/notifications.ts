@@ -2,6 +2,7 @@ export type NotificationType =
   | 'task_assigned_to_me'
   | 'task_rejected'
   | 'task_pending_audit'
+  | 'task_design_ready'
   | 'task_closed'
   | 'claim_conflict'
   | 'pool_reassigned'

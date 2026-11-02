@@ -344,6 +344,7 @@ function displayType(item: NotificationItem): string {
   if (item.notification_type === 'system_broadcast') return '系统广播'
   if (item.notification_type === 'task_assigned_to_me') return '任务分配'
   if (item.notification_type === 'task_pending_audit') return '待审核'
+  if (item.notification_type === 'task_design_ready') return '图已完成'
   if (item.notification_type === 'task_closed') return '已结单'
   if (item.notification_type === 'task_rejected') return '任务驳回'
   if (item.notification_type === 'task_cancelled') return '任务取消'

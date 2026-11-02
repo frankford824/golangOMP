@@ -20,16 +20,17 @@
       </div>
       <button type="button" @click="draft.faces.push({width_m:0,height_m:0,count:1});emitValue()">添加一组面</button>
     </section>
-    <label v-for="(name,code) in processNames" :key="code">{{name}}<select :value="draft.processes[code] == null ? '' : String(draft.processes[code])" @change="setProcess(code,$event)"><option value="">未确认</option><option value="false">否</option><option value="true">是</option></select></label>
+    <template v-if="!dimensionsOnly"><label v-for="(name,code) in processNames" :key="code">{{name}}<select :value="draft.processes[code] == null ? '' : String(draft.processes[code])" @change="setProcess(code,$event)"><option value="">未确认</option><option value="false">否</option><option value="true">是</option></select></label>
     <label v-if="draft.processes.punch">整套孔数<input v-model.number="draft.hole_count" type="number" min="0" step="1" @input="emitValue" /></label>
     <label v-if="Object.values(draft.processes).some(Boolean)">整套加工长度（米，按米计费时填）<input v-model.number="draft.process_length_m" type="number" min="0" step="any" @input="emitValue" /></label>
+    </template>
     <small class="full">总面积、展开面积、分面面积已包含整套用料，不再乘片数。订单数量不参与单 SKU 成本。</small>
   </fieldset>
 </template>
 <script setup lang="ts">
 import {ref,watch} from 'vue'
 import {emptyCostInput,processNames,type CostInput} from '@/domain/cost-model'
-const props=defineProps<{modelValue:CostInput;disabled?:boolean}>()
+const props=defineProps<{modelValue:CostInput;disabled?:boolean;dimensionsOnly?:boolean}>()
 const emit=defineEmits<{ 'update:modelValue':[CostInput] }>()
 const draft=ref<CostInput>(emptyCostInput())
 watch(()=>props.modelValue,v=>{draft.value=JSON.parse(JSON.stringify({...emptyCostInput(),...v,faces:v?.faces||[],processes:v?.processes||{}}))},{immediate:true,deep:true})

@@ -548,6 +548,8 @@ func notificationDisplayText(ntype domain.NotificationType, p map[string]interfa
 		return notificationText{Title: "新任务分配", Content: taskLabel}
 	case domain.NotificationTypeTaskPendingAudit:
 		return notificationText{Title: "任务待审核", Content: taskLabel + "等待审核"}
+	case domain.NotificationTypeTaskDesignReady:
+		return notificationText{Title: "图已完成", Content: taskLabel + "图已完成，请核对计价资料；按面积计价却缺面积的编码会保留待办"}
 	case domain.NotificationTypeTaskClosed:
 		return notificationText{Title: "任务已结单", Content: taskLabel + "已结单"}
 	default:
