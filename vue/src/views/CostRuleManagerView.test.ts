@@ -60,6 +60,32 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('keeps schemes usable when an auxiliary dashboard fails',async()=>{
+    mocks.dashboard.mockRejectedValueOnce(Object.assign(new Error('服务暂时不可用'),{status:500}))
+    const w=mountRuleView();await flushPromises()
+    expect(w.get('.workspace-heading h2').text()).toContain('KT 板')
+    expect(w.find('.message.error').exists()).toBe(false)
+    expect(w.get('.auxiliary-warning').text()).toContain('同步概况尚未刷新')
+    expect(w.get('.binding-panel').text()).toContain('STYLE-01')
+  })
+  it('distinguishes a committed save from a failed refresh and never repeats the write',async()=>{
+    const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
+    await w.findAll('button').find(b=>b.text()==='编辑名称 / 价格 / 时间')!.trigger('click')
+    mocks.listCostRules.mockRejectedValueOnce(Object.assign(new Error('读取失败'),{status:500}))
+    await w.get('form.modal-card').trigger('submit');await flushPromises()
+    expect(mocks.updateCostRule).toHaveBeenCalledTimes(1)
+    expect(w.get('.message.notice').text()).toContain('方案已保存，但列表未能刷新')
+    expect(w.get('.message.error').text()).toContain('方案读取失败')
+    expect(mocks.createRun).not.toHaveBeenCalled()
+  })
+  it('does not automatically retry a failed price write',async()=>{
+    mocks.updateCostRule.mockRejectedValueOnce(Object.assign(new Error('暂时不可用'),{status:503}))
+    const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
+    await w.findAll('button').find(b=>b.text()==='编辑名称 / 价格 / 时间')!.trigger('click')
+    await w.get('form.modal-card').trigger('submit');await flushPromises()
+    expect(mocks.updateCostRule).toHaveBeenCalledTimes(1)
+    expect(w.find('form.modal-card').exists()).toBe(true)
+  })
   it('creates an independent UV material scheme with unquoted cells and no binding writes',async()=>{
     const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
     await w.findAll('button').find(b=>b.text()==='新增方案')!.trigger('click');await flushPromises()

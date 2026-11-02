@@ -428,6 +428,7 @@
 </template>
 
 <script setup lang="ts">
+import { retryCostRead } from '@/utils/cost-read-retry';
 import {
   computed,
   nextTick,
@@ -548,10 +549,11 @@ async function load(background = false) {
   const ticket = ++epoch;
   controller?.abort();
   controller = new AbortController();
+  const signal = controller.signal;
   loading.value = true;
   error.value = "";
   try {
-    const result = await costMaintenanceApi.list(
+    const result = await retryCostRead(() => costMaintenanceApi.list(
       {
         keyword: keyword.value,
         status: status.value,
@@ -559,8 +561,8 @@ async function load(background = false) {
         before_id: cursors.value.at(-1),
         page_size: pageSize.value,
       },
-      controller.signal,
-    );
+      signal,
+    ), signal);
     if (ticket !== epoch) return;
     rows.value = result.data || [];
     nextID.value = result.next_before_id;

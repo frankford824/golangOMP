@@ -5855,7 +5855,7 @@ export interface paths {
         head?: never;
         /**
          * Patch cost rule
-         * @description Updates one governed cost-rule skeleton entry while keeping the model extensible for later rule growth, later deactivation, and later successor-version planning. This remains configuration governance, not a formula DSL editor or approval system.
+         * @description Updates governed rule metadata. A changed cost_model expression appends an immutable successor with the same name and a higher rule_version; editing an already superseded model returns 409. Historical prices and existing bindings are retained.
          */
         patch: {
             parameters: {
@@ -5892,6 +5892,13 @@ export interface paths {
                 };
                 /** @description Cost rule not found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Model has a newer revision; refresh and edit the latest version. */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };

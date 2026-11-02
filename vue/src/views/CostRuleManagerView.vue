@@ -17,6 +17,7 @@
 
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
     <div v-if="notice" class="message notice" role="status">{{ notice }}</div>
+    <div v-if="auxiliaryError" class="message auxiliary-warning" role="status">{{auxiliaryError}}<button :disabled="loading" @click="loadAll">重试读取</button></div>
 
     <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','绑定检查','成本同步','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab"><component :is="workspaceIcons[tab]" :size="16" :stroke-width="1.75" aria-hidden="true" />{{tab}}</button></nav>
     <CostSyncPanel v-if="workspaceTab==='成本同步'" />
@@ -174,6 +175,7 @@
         <button class="modal-mask" aria-label="关闭规则编辑" @click="closeRuleEditor" />
         <form class="modal-card cost-rule-dialog" role="dialog" aria-modal="true" aria-labelledby="cost-rule-editor-title" @submit.prevent="saveRule">
           <header><div><p class="eyebrow">{{ ruleDraft.rule_id ? '调整现有规则' : '新增计算规则' }}</p><h2 id="cost-rule-editor-title">{{ ruleDraft.rule_type==='cost_model' ? (ruleDraft.rule_id?'编辑方案':'新增方案') : (ruleDraft.rule_id?'编辑收费项':'新增收费项') }}</h2></div><button type="button" class="close" aria-label="关闭规则编辑窗口" @click="closeRuleEditor"><X :size="18" :stroke-width="1.75" aria-hidden="true" /></button></header>
+          <p v-if="error" class="message error" role="alert">{{error}}</p>
           <div class="form-grid">
             <label class="span-2">{{ruleDraft.rule_type==='cost_model'?'方案名称':'收费项名称'}}<input v-model.trim="ruleDraft.rule_name" required placeholder="例如：KT 板面积计价" /></label>
             <label v-if="ruleDraft.rule_type==='cost_model'">所属大类<select v-model="ruleDraft.product_family" aria-label="方案所属大类"><option v-for="family in schemeFamilies" :key="family.code" :value="family.code">{{family.name}}</option><option v-if="ruleDraft.product_family && !schemeFamilies.some(f=>f.code===ruleDraft.product_family)" :value="ruleDraft.product_family">原分类</option></select></label>
@@ -269,6 +271,7 @@ import {ruleDescription,printPrices,keywordPrice} from '@/domain/cost-rule-prese
 import {chinaDateInput,pricingWindow,pricingWindowLabel} from '@/domain/cost-rule-timing'
 import {emptyCostModel,emptyCostInput,type CostModel} from '@/domain/cost-model'
 import { categoriesApi } from '@/services/api/categoriesApi'
+import { retryCostRead } from '@/utils/cost-read-retry'
 import { erpApi } from '@/services/api/erpApi'
 import {
   costManagementApi,
@@ -329,6 +332,8 @@ const selectedRun = ref<CostRecalculationRun | null>(null)
 const selectedGroupCode = ref('')
 const loading = ref(false)
 const error = ref('')
+const auxiliaryError = ref('')
+let loadSequence = 0
 const notice = ref('')
 const ruleDialogOpen = ref(false)
 const bindingDialogOpen = ref(false)
@@ -393,7 +398,7 @@ async function saveModel(){
   if(!selectedGroup.value)return;savingModel.value=true;error.value=''
   try {const payload={rule_name:modelName.value,category_code:selectedGroup.value.code,rule_type:'cost_model',formula_expression:modelJSON.value,is_active:true,priority:1,source:'admin_manual',governance_note:'通过统一方案编辑器保存；历史成本不自动覆盖'}
     if(modelRuleID.value)await categoriesApi.updateCostRule(modelRuleID.value,payload);else await categoriesApi.createCostRule(payload)
-    await loadAll();modelEditing.value=false;notice.value='计价方案已保存，请在右侧试算。历史成本保持原值。'
+    const refreshed=await loadAll();modelEditing.value=false;notice.value=refreshed?'计价方案已保存，请在右侧试算。历史成本保持原值。':'方案已保存，但列表未能刷新；请重试读取，无需重复保存。'
   }catch(cause){error.value=cause instanceof Error?cause.message:'方案保存失败'}finally{savingModel.value=false}
 }
 
@@ -440,28 +445,36 @@ function groupDisplayName(groupRules: CostRuleRow[], code: string) {
 function ruleSummary(rule: CostRuleRow) {return ruleDescription(rule)}
 
 async function loadAll() {
-  loading.value = true; error.value = ''; notice.value = ''
+  const sequence=++loadSequence
+  loading.value = true; error.value = ''; auxiliaryError.value = ''; notice.value = ''
   try {
-    const [ruleResponse, bindingResponse, runResponse, dashboardResponse, candidateResponse] = await Promise.all([
-      loadRulePages(),
-      loadBindingPages(),
-      costManagementApi.listCostRecalculationRuns({ page: 1, page_size: 20 }),
-      costManagementApi.getCostDashboard(),
-      costManagementApi.listUnboundCostRuleCandidates({ page: 1, page_size: 100 }),
+    const [ruleResult, bindingResult, runResult, dashboardResult, candidateResult] = await Promise.allSettled([
+      retryCostRead(loadRulePages),
+      retryCostRead(loadBindingPages),
+      retryCostRead(()=>costManagementApi.listCostRecalculationRuns({ page: 1, page_size: 20 })),
+      retryCostRead(()=>costManagementApi.getCostDashboard()),
+      retryCostRead(()=>costManagementApi.listUnboundCostRuleCandidates({ page: 1, page_size: 100 })),
     ])
-    const body = ruleResponse.data as { data?: CostRuleRow[] }
+    if(sequence!==loadSequence)return false
+    if(ruleResult.status==='rejected')throw new Error(`方案读取失败：${ruleResult.reason instanceof Error?ruleResult.reason.message:'请稍后重试'}`)
+    if(bindingResult.status==='rejected')throw new Error(`绑定读取失败：${bindingResult.reason instanceof Error?bindingResult.reason.message:'请稍后重试'}`)
+    const body = ruleResult.value.data as { data?: CostRuleRow[] }
     rules.value = body.data || []
-    bindings.value = bindingResponse.data || []
-    runs.value = runResponse.data || []
-    costDashboard.value = dashboardResponse
-    candidates.value = candidateResponse.data || []
+    bindings.value = bindingResult.value.data || []
+    const missing:string[]=[]
+    if(runResult.status==='fulfilled')runs.value=runResult.value.data||[];else missing.push('更新记录')
+    if(dashboardResult.status==='fulfilled')costDashboard.value=dashboardResult.value;else missing.push('同步概况')
+    if(candidateResult.status==='fulfilled')candidates.value=candidateResult.value.data||[];else missing.push('绑定建议')
+    if(missing.length)auxiliaryError.value=`方案与绑定已加载；${missing.join('、')}尚未刷新。`
     dataRevision.value++
     if (!selectedGroupCode.value || !filteredGroups.value.some((group) => group.code === selectedGroupCode.value)) selectedGroupCode.value = filteredGroups.value[0]?.code || ''
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '成本规则加载失败。' }
-  finally { loading.value = false }
+    return true
+  } catch (cause) { if(sequence===loadSequence)error.value = cause instanceof Error ? cause.message : '成本规则加载失败。';return false }
+  finally { if(sequence===loadSequence)loading.value = false }
 }
 
 function openRuleEditor(rule?: CostRuleRow, group = '') {
+ error.value=''
  startsAt.value=chinaDateInput(rule?.effective_from);endsAt.value=chinaDateInput(rule?.effective_to)
  startMode.value=startsAt.value?'scheduled':'now';endMode.value=endsAt.value?'scheduled':'never';timingEdited.value=false
  if(!rule && group)void categoriesApi.list({page:1,page_size:100,is_active:true}).then(response=>{materialOptions.value=(response.data.data||[]).filter(c=>c.category_code).map(c=>({code:c.category_code!,name:c.display_name||c.category_name||c.category_code!}))}).catch(()=>{})
@@ -491,8 +504,9 @@ async function saveRule() {
     familyFilter.value='all';groupSearch.value=''
     groupScope.value='all'
     ruleDialogOpen.value = false
-    await loadAll()
+    const refreshed = await loadAll()
     selectedGroupCode.value = group
+    if(!refreshed){notice.value='方案已保存，但列表未能刷新；请重试读取，无需重复保存。';return}
     if(typeof payload.effective_from==='string'&&Date.parse(payload.effective_from)>Date.now()){notice.value='价格已安排在指定时间生效；尚未重算历史 SKU。';return}
     try {
       const run = await costManagementApi.createCostRecalculationRun({ mode: 'all_matching', filters: { rule_group: group }, reason: '成本规则维护后的影响预览' })

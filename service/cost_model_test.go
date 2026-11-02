@@ -136,6 +136,10 @@ func TestCostModelRevisionPreservesHistoricalFormula(t *testing.T) {
 	if err != nil || old.FormulaExpression != original || second.RuleID == first.RuleID || second.RuleVersion != 2 || second.SupersedesRuleID == nil || *second.SupersedesRuleID != first.RuleID {
 		t.Fatalf("history changed: old=%+v new=%+v error=%v", old, second, err)
 	}
+	_, staleErr := svc.Patch(context.Background(), PatchCostRuleParams{RuleID: first.RuleID, FormulaExpression: &revised})
+	if staleErr == nil || staleErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("stale edit must require refresh: %v", staleErr)
+	}
 }
 
 func TestCostModelAreaModesAndSalesUnit(t *testing.T) {

@@ -1652,7 +1652,7 @@ curl -X POST https://api.example.com/v1/cost-rules \
 支持方法: GET, PATCH。
 
 - `GET`: Returns one governed cost-rule row with lineage read-model fields such as `previous_version`, `next_version`, `version_chain_summary`, and `supersession_depth`. This is configuration governance, not a separate approval workflow or formula platform.
-- `PATCH`: Updates one governed cost-rule skeleton entry while keeping the model extensible for later rule growth, later deactivation, and later successor-version planning. This remains configuration governance, not a formula DSL editor or approval system.
+- `PATCH`: Updates governed rule metadata. A changed cost_model expression appends an immutable successor with the same name and a higher rule_version; editing an already superseded model returns 409. Historical prices and existing bindings are retained.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1758,6 +1758,7 @@ Content-Type: `application/json`
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid cost rule payload |
+| 409 | 见 `error.code` | 见 `deny_code` | Model has a newer revision; refresh and edit the latest version. |
 | 404 | 见 `error.code` | 见 `deny_code` | Cost rule not found |
 
 ##### curl 示例

@@ -10997,7 +10997,7 @@ paths:
           description: Cost rule not found
     patch:
       summary: Patch cost rule
-      description: Updates one governed cost-rule skeleton entry while keeping the model extensible for later rule growth, later deactivation, and later successor-version planning. This remains configuration governance, not a formula DSL editor or approval system.
+      description: Updates governed rule metadata. A changed cost_model expression appends an immutable successor with the same name and a higher rule_version; editing an already superseded model returns 409. Historical prices and existing bindings are retained.
       tags: [CostRules, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.manage]
@@ -11026,6 +11026,8 @@ paths:
                     $ref: '#/components/schemas/CostRule'
         '400':
           description: Invalid cost rule payload
+        '409':
+          description: Model has a newer revision; refresh and edit the latest version.
         '404':
           description: Cost rule not found
   /v1/cost-rules/{id}/history:

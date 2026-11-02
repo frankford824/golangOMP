@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -299,6 +302,9 @@ func (s *costRuleService) Patch(ctx context.Context, p PatchCostRuleParams) (*do
 		}
 	}
 	if current.RuleType == domain.CostRuleTypeModel && rule.FormulaExpression != current.FormulaExpression {
+		if current.SupersededByRuleID != nil {
+			return nil, domain.NewAppError(domain.ErrCodeConflict, "方案已有更新版本，请刷新后编辑最新价格", nil)
+		}
 		// Keep the formula referenced by historical snapshots immutable.
 		rule.RuleID = 0
 		rule.RuleVersion = current.RuleVersion + 1
@@ -324,6 +330,10 @@ func (s *costRuleService) Patch(ctx context.Context, p PatchCostRuleParams) (*do
 			}
 			return nil
 		}); err != nil {
+			var duplicate *mysql.MySQLError
+			if errors.As(err, &duplicate) && duplicate.Number == 1062 {
+				return nil, domain.NewAppError(domain.ErrCodeConflict, "方案版本已更新，请刷新后核对最新价格再保存", nil)
+			}
 			return nil, infraError("create model revision", err)
 		}
 		return s.GetByID(ctx, id)
