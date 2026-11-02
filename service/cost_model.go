@@ -48,6 +48,21 @@ func parseCostModel(raw string) (*domain.CostModel, error) {
 		}
 		seen[p.ThicknessMM] = true
 	}
+	if len(m.VariantPrices) > 32 || (len(m.VariantPrices) > 0 && len(m.ThicknessPrices) > 0) {
+		return nil, fmt.Errorf("普通/异形价格表最多32行，不能与旧厚度档位同时使用")
+	}
+	seen = map[float64]bool{}
+	for _, p := range m.VariantPrices {
+		if !validCostNumber(p.ThicknessMM) || seen[p.ThicknessMM] || (p.ThicknessMM == 0 && len(m.VariantPrices) != 1) {
+			return nil, fmt.Errorf("厚度不能重复；不区分厚度时只能有一行价格")
+		}
+		for _, price := range []*float64{p.NormalPrice, p.IrregularPrice} {
+			if price != nil && !validCostNumber(*price) {
+				return nil, fmt.Errorf("普通/异形单价必须非负，未核价请留空")
+			}
+		}
+		seen[p.ThicknessMM] = true
+	}
 	codes := map[string]bool{}
 	for _, p := range m.Processes {
 		if p.Code != "slot" && p.Code != "punch" && p.Code != "laminate" && p.Code != "double_sided" {
@@ -101,6 +116,10 @@ func calculateCostModel(m *domain.CostModel, in domain.CostInput) (*domain.CostC
 		missing("每SKU片数必须为1至100000，孔数不能为负")
 		return c, nil
 	}
+	if in.Shape != "" && in.Shape != "normal" && in.Shape != "irregular" {
+		missing("形状必须为普通或异形")
+		return c, nil
+	}
 	area := 0.0
 	needsArea := m.Basis == "area"
 	for _, p := range m.Processes {
@@ -141,6 +160,36 @@ func calculateCostModel(m *domain.CostModel, in domain.CostInput) (*domain.CostC
 		}
 	}
 	price := m.UnitPrice
+	priceName := "基础费用"
+	if len(m.VariantPrices) > 0 {
+		if in.Shape == "" {
+			missing("请选择普通或异形")
+			return c, nil
+		}
+		var row *domain.CostVariantPrice
+		for i := range m.VariantPrices {
+			p := &m.VariantPrices[i]
+			if (p.ThicknessMM == 0 && len(m.VariantPrices) == 1) || math.Abs(p.ThicknessMM-in.ThicknessMM) < 0.000001 {
+				row = p
+				break
+			}
+		}
+		if row == nil {
+			missing("厚度未命中价格表，请核对厚度和单价")
+			return c, nil
+		}
+		selectedPrice := row.NormalPrice
+		priceName = "普通单价"
+		if in.Shape == "irregular" {
+			selectedPrice = row.IrregularPrice
+			priceName = "异形单价"
+		}
+		if selectedPrice == nil {
+			missing(priceName + "尚未填写，请先核价")
+			return c, nil
+		}
+		price = *selectedPrice
+	}
 	if len(m.ThicknessPrices) > 0 {
 		found := false
 		for _, p := range m.ThicknessPrices {
@@ -170,7 +219,7 @@ func calculateCostModel(m *domain.CostModel, in domain.CostInput) (*domain.CostC
 	add := func(name string, qty float64, u string, p, mult float64) {
 		c.Lines = append(c.Lines, domain.CostLine{Name: name, Quantity: qty, Unit: u, UnitPrice: p, Multiplier: mult, Amount: roundCostAmount(qty * p * mult)})
 	}
-	add("基础费用", q, unit, price, m.Multiplier)
+	add(priceName, q, unit, price, m.Multiplier)
 	if m.Basis == "area" && m.SmallAreaThreshold > 0 && area < m.SmallAreaThreshold {
 		add("小面积加价", q, "㎡", m.SmallAreaSurcharge, m.Multiplier)
 	}
@@ -276,6 +325,11 @@ func costModelPreview(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 		if m.Basis == "piece" {
 			in.Pieces = 0
 		}
+	}
+	if in.Shape == "irregular" && len(m.VariantPrices) == 0 {
+		resp.Explanation = "此方案未配置异形单价，请先核价"
+		resp.Calculation = &domain.CostCalculation{Status: "missing_input", Input: in, Lines: []domain.CostLine{}, Missing: []string{resp.Explanation}}
+		return out, true
 	}
 	resp.Calculation, resp.EstimatedCost = calculateCostModel(m, in)
 	resp.RequiresManualReview = resp.EstimatedCost == nil

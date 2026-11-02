@@ -1588,8 +1588,8 @@ Content-Type: `application/json`
 | `rule_name` | string | 是 | - |
 | `rule_version` | integer | 否 | Optional explicit version for this row. If omitted while `supersedes_rule_id` is provided, the backend auto-increments from the referenced rule. |
 | `category_id` | integer | 否 | - |
-| `category_code` | string | 否 | - |
-| `product_family` | string | 否 | - |
+| `category_code` | string | 否 | Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings. |
+| `product_family` | string | 否 | Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings. |
 | `rule_type` | enum(cost_model/fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 是 | - |
 | `base_price` | number | 否 | - |
 | `tax_multiplier` | number | 否 | - |
@@ -1716,8 +1716,8 @@ Content-Type: `application/json`
 | `rule_name` | string | 否 | - |
 | `rule_version` | integer | 否 | - |
 | `category_id` | integer | 否 | - |
-| `category_code` | string | 否 | - |
-| `product_family` | string | 否 | - |
+| `category_code` | string | 否 | Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings. |
+| `product_family` | string | 否 | Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings. |
 | `rule_type` | enum(cost_model/fixed_unit_price/area_threshold_surcharge/minimum_billable_area/size_based_formula/manual_quote/special_process_surcharge) | 否 | - |
 | `base_price` | number | 否 | - |
 | `tax_multiplier` | number | 否 | - |

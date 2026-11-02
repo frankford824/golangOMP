@@ -60,6 +60,31 @@ const previewRun = {
 }
 
 describe('CostRuleManagerView', () => {
+  it('creates an independent UV material scheme with unquoted cells and no binding writes',async()=>{
+    const w=mountRuleView({global:{stubs:{Teleport:true}}});await flushPromises()
+    await w.findAll('button').find(b=>b.text()==='新增方案')!.trigger('click');await flushPromises()
+    await w.get('input[placeholder="例如：KT 板面积计价"]').setValue('超透PVC')
+    await w.get('input[placeholder="例如：覆膜KT板"]').setValue('超透PVC')
+    expect((w.get('select[aria-label="方案所属大类"]').element as HTMLSelectElement).value).toBe('uv')
+    await w.get('form.modal-card').trigger('submit');await flushPromises()
+    expect(mocks.createCostRule).toHaveBeenCalledTimes(1)
+    const payload=mocks.createCostRule.mock.calls[0]![0]
+    expect(payload).toEqual(expect.objectContaining({category_code:expect.stringMatching(/^SCHEME_[0-9A-F]{32}$/),product_family:'uv',rule_name:'超透PVC'}))
+    expect(JSON.parse(payload.formula_expression).variant_prices).toEqual([{thickness_mm:0,normal_price:null,irregular_price:null}])
+    expect(mocks.updateCostRule).not.toHaveBeenCalled();expect(mocks.createBinding).not.toHaveBeenCalled();expect(mocks.updateBinding).not.toHaveBeenCalled();expect(mocks.applyRun).not.toHaveBeenCalled();expect(mocks.syncRun).not.toHaveBeenCalled()
+  })
+  it('organizes UV schemes together while retaining their distinct group and price tables',async()=>{
+    const scheme=(id:number,code:string,name:string,normal:number)=>({rule_id:id,rule_name:name,category_code:code,product_family:'uv',rule_type:'cost_model',is_active:true,formula_expression:JSON.stringify({...emptyCostModel(),material:name,variant_prices:[{thickness_mm:3,normal_price:normal,irregular_price:null}]})})
+    mocks.listCostRules.mockResolvedValue({data:{data:[scheme(1,'SCHEME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA','亚克力',20),scheme(2,'SCHEME_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB','超透PVC',10)]}})
+    const w=mountRuleView();await flushPromises()
+    await w.get('select[aria-label="筛选方案大类"]').setValue('uv')
+    expect(w.findAll('.rule-groups>button')).toHaveLength(2)
+    await w.findAll('.rule-groups>button').find(b=>b.text().includes('超透PVC'))!.trigger('click');await flushPromises()
+    expect(w.get('.variant-price-summary').text()).toContain('¥10')
+    expect(w.get('.variant-price-summary').text()).toContain('待核价')
+    expect(w.get('.variant-price-summary').text()).not.toContain('¥20')
+    expect(mocks.updateCostRule).not.toHaveBeenCalled();expect(mocks.updateBinding).not.toHaveBeenCalled()
+  })
   it('names a legacy scheme from its base price instead of its minimum-area fee',async()=>{
     mocks.listCostRules.mockResolvedValue({data:{data:[
       {rule_id:51,rule_name:'常规覆膜KT板小面积保底',category_code:'KT_FILM',rule_type:'minimum_billable_area',min_area:.15,priority:5,is_active:true},

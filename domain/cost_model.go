@@ -12,7 +12,16 @@ type CostModel struct {
 	SmallAreaThreshold float64              `json:"small_area_threshold"`
 	SmallAreaSurcharge float64              `json:"small_area_surcharge"`
 	ThicknessPrices    []CostThicknessPrice `json:"thickness_prices,omitempty"`
+	VariantPrices      []CostVariantPrice   `json:"variant_prices,omitempty"`
 	Processes          []CostProcessPrice   `json:"processes,omitempty"`
+}
+
+// CostVariantPrice replaces the base unit price for an explicitly selected shape.
+// A zero thickness means no thickness distinction. Nil prices remain unquoted.
+type CostVariantPrice struct {
+	ThicknessMM    float64  `json:"thickness_mm"`
+	NormalPrice    *float64 `json:"normal_price"`
+	IrregularPrice *float64 `json:"irregular_price"`
 }
 type CostThicknessPrice struct {
 	ThicknessMM float64 `json:"thickness_mm"`
@@ -36,7 +45,8 @@ type CostInput struct {
 	DepthM         float64         `json:"depth_m,omitempty"` // reference dimension; never guessed as layout
 	AreaM2         float64         `json:"area_m2"`
 	ThicknessMM    float64         `json:"thickness_mm"`
-	Pieces         int             `json:"pieces"` // pieces within ONE SKU, not order quantity
+	Shape          string          `json:"shape,omitempty"` // normal, irregular; empty means unconfirmed
+	Pieces         int             `json:"pieces"`          // pieces within ONE SKU, not order quantity
 	Faces          []CostFace      `json:"faces,omitempty"`
 	Processes      map[string]bool `json:"processes,omitempty"`
 	HoleCount      int             `json:"hole_count"`

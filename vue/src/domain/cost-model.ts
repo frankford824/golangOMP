@@ -1,6 +1,7 @@
 export interface CostInput {
   area_mode: 'flat' | 'faces' | 'layout' | 'total'
   width_m: number; height_m: number; area_m2: number; thickness_mm: number
+  shape?: '' | 'normal' | 'irregular'
   pieces: number; hole_count: number; process_length_m: number
   faces: Array<{ width_m: number; height_m: number; count: number }>
   processes: Record<string, boolean>
@@ -10,6 +11,7 @@ export interface CostModel {
   unit_price: number; multiplier: number; minimum: number
   small_area_threshold: number; small_area_surcharge: number
   thickness_prices: Array<{ thickness_mm: number; unit_price: number }>
+  variant_prices?: Array<{ thickness_mm: number; normal_price: number | null; irregular_price: number | null }>
   processes: Array<{code: string; unit: string; unit_price: number; multiplier: number}>
 }
 export const processNames: Record<string,string> = {slot:'开槽',punch:'打孔',laminate:'覆膜',double_sided:'双面'}

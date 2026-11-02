@@ -24,15 +24,19 @@
       <aside class="rule-groups" aria-label="成本规则分组">
         <label class="group-search">搜索方案 / 款式编码<input v-model.trim="groupSearch" placeholder="输入方案名称或款式编码" /></label>
         <label class="group-search">显示范围<select v-model="groupScope"><option value="bound">已绑定款式的方案</option><option value="all">全部方案（含未绑定）</option></select></label>
+        <label class="group-search">大类<select v-model="familyFilter" aria-label="筛选方案大类"><option value="all">全部大类</option><option v-for="family in schemeFamilies" :key="family.code" :value="family.code">{{family.name}}</option></select></label>
         <header><span>计价方案</span><b>{{ filteredGroups.length }}</b></header>
+        <template v-for="family in groupedSchemes" :key="family.code">
+        <h3 class="scheme-family-heading">{{family.name}}<span>{{family.groups.length}}</span></h3>
         <button
-          v-for="group in filteredGroups"
+          v-for="group in family.groups"
           :key="group.code"
           :class="{ active: selectedGroupCode === group.code }"
           @click="selectedGroupCode = group.code"
         >
           <span><strong>{{ group.name }}</strong><small>{{ activeBindingCount(group.code) }} 个款式</small></span>
         </button>
+        </template>
         <div v-if="!loading && !filteredGroups.length" class="empty-small">没有匹配的方案。可切换“全部方案”查看未绑定项。</div>
       </aside>
 
@@ -44,6 +48,8 @@
           </div>
           <button v-if="selectedGroup && !selectedModel" class="secondary" @click="openRuleEditor(undefined, selectedGroup.code)"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />添加收费项</button>
         </header>
+        <div v-if="selectedGroup && groupFamily(selectedGroup)==='uv'" class="uv-scheme-context"><span>UV · 各材质独立计价</span><button class="text-button" @click="openMaterialScheme('uv')"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />新增材质方案</button></div>
+        <p v-if="selectedGroup?.code==='ACRYLIC' && /UV/i.test(selectedGroup.name)" class="legacy-uv-note">这是原有共用方案，现有价格与绑定保留。可新建各材质方案，核价后自行改绑。</p>
 
         <section v-if="selectedModel || modelEditing" class="model-workspace">
           <button class="secondary" @click="startModel()">编辑方案价格</button>
@@ -59,6 +65,7 @@
             <div class="rule-copy">
               <div><strong>{{ rule.rule_name || '未命名规则' }}</strong><span>{{ ruleStateLabel(rule) }}</span></div>
               <p>{{ ruleSummary(rule) }}</p>
+              <table v-if="variantRows(rule).length" class="variant-price-summary"><thead><tr><th>厚度（mm）</th><th>普通单价</th><th>异形单价</th></tr></thead><tbody><tr v-for="(row,i) in variantRows(rule)" :key="i"><td>{{row.thickness_mm || '不分厚度'}}</td><td>{{row.normal_price==null?'待核价':`¥${row.normal_price}`}}</td><td>{{row.irregular_price==null?'待核价':`¥${row.irregular_price}`}}</td></tr></tbody></table>
               <small>{{pricingWindowLabel(rule)}}</small>
             </div>
             <div class="price-actions"><button class="text-button" @click="openRuleEditor(rule)">编辑名称 / 价格 / 时间</button><button class="text-button" :disabled="savingRule" @click="retireRule(rule)">{{retiringRule===rule.rule_id?'确认停用（保留历史）':'停用此计价'}}</button></div>
@@ -169,9 +176,10 @@
           <header><div><p class="eyebrow">{{ ruleDraft.rule_id ? '调整现有规则' : '新增计算规则' }}</p><h2 id="cost-rule-editor-title">{{ ruleDraft.rule_type==='cost_model' ? (ruleDraft.rule_id?'编辑方案':'新增方案') : (ruleDraft.rule_id?'编辑收费项':'新增收费项') }}</h2></div><button type="button" class="close" aria-label="关闭规则编辑窗口" @click="closeRuleEditor"><X :size="18" :stroke-width="1.75" aria-hidden="true" /></button></header>
           <div class="form-grid">
             <label class="span-2">{{ruleDraft.rule_type==='cost_model'?'方案名称':'收费项名称'}}<input v-model.trim="ruleDraft.rule_name" required placeholder="例如：KT 板面积计价" /></label>
-            <label>{{ruleDraft.rule_type==='cost_model'?'基础材质':'所属方案'}}<select v-model="ruleDraft.category_code" required :disabled="!!ruleDraft.rule_id"><option value="">请选择</option><option v-for="group in availableCategories" :key="group.code" :value="group.code">{{group.name}}</option></select></label>
+            <label v-if="ruleDraft.rule_type==='cost_model'">所属大类<select v-model="ruleDraft.product_family" aria-label="方案所属大类"><option v-for="family in schemeFamilies" :key="family.code" :value="family.code">{{family.name}}</option><option v-if="ruleDraft.product_family && !schemeFamilies.some(f=>f.code===ruleDraft.product_family)" :value="ruleDraft.product_family">原分类</option></select></label>
+            <label v-else>所属方案<select v-model="ruleDraft.category_code" required :disabled="!!ruleDraft.rule_id"><option value="">请选择</option><option v-for="group in availableCategories" :key="group.code" :value="group.code">{{group.name}}</option></select></label>
             <label v-if="ruleDraft.rule_type!=='cost_model'">计算方式<select v-model="ruleDraft.rule_type"><option v-for="item in ruleTypes" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-            <CostModelEditor v-if="ruleDraft.rule_type==='cost_model'" v-model="newModelJSON" hide-material class="span-2" />
+            <CostModelEditor v-if="ruleDraft.rule_type==='cost_model'" v-model="newModelJSON" class="span-2" />
             <template v-if="ruleDraft.rule_type==='fixed_unit_price'"><label>每平方米价格（元）<input v-model.number="ruleDraft.base_price" required type="number" min="0" step="0.01" /></label><label>价格调整倍数<input v-model.number="ruleDraft.tax_multiplier" type="number" min="0.0001" step="any" placeholder="不调整填 1" /><small>不调整填 1；1.1 表示基础价格 × 1.1。</small></label></template>
             <label v-if="ruleDraft.rule_type==='minimum_billable_area'">不足多少平方米按此面积收费<input v-model.number="ruleDraft.min_area" required type="number" min="0" step="0.001" /></label>
             <template v-if="ruleDraft.rule_type==='area_threshold_surcharge'"><label>面积小于（平方米）<input v-model.number="ruleDraft.area_threshold" required type="number" min="0" step="0.001" /></label><label>每平方米另加（元）<input v-model.number="ruleDraft.surcharge_amount" required type="number" min="0" step="0.01" /></label></template>
@@ -259,7 +267,7 @@ import CostMaintenanceList from '@/components/cost/CostMaintenanceList.vue'
 import '@/components/cost/cost-manager-workspace.css'
 import {ruleDescription,printPrices,keywordPrice} from '@/domain/cost-rule-presentation'
 import {chinaDateInput,pricingWindow,pricingWindowLabel} from '@/domain/cost-rule-timing'
-import {emptyCostModel,emptyCostInput} from '@/domain/cost-model'
+import {emptyCostModel,emptyCostInput,type CostModel} from '@/domain/cost-model'
 import { categoriesApi } from '@/services/api/categoriesApi'
 import { erpApi } from '@/services/api/erpApi'
 import {
@@ -342,6 +350,8 @@ async function openSchemes(){entryTab.value='schemes';if(!schemesLoaded){await l
 const workspaceTab=ref('方案与绑定')
 const workspaceIcons:Record<string,typeof Layers3>={'方案与绑定':Layers3,'绑定检查':Link2,'成本同步':CheckCheck,'更新记录':History}
 const groupSearch=ref('')
+const schemeFamilies=[{code:'uv',name:'UV'},{code:'board',name:'板材'},{code:'cloth',name:'布料'},{code:'paper',name:'纸张印刷'},{code:'other',name:'其他'}]
+const familyFilter=ref('all')
 const groupScope=ref('all'),bindingSearch=ref(''),calculatorOpen=ref(false),dataRevision=ref(0)
 const newModelJSON=ref(JSON.stringify(emptyCostModel())),confirmedPrice=ref(false)
 const startMode=ref('now'),endMode=ref('never'),startsAt=ref(''),endsAt=ref(''),timingEdited=ref(false),retiringRule=ref<number|null>(null)
@@ -356,7 +366,11 @@ const selectedModel=computed(()=>selectedGroup.value?.rules.filter(isEffectiveMo
 const calculatorUsesModel=computed(()=>rules.value.some(r=>r.category_code===calculator.rule_group&&isEffectiveModel(r)))
 function activeBindingCount(code:string){return bindings.value.filter(b=>b.rule_group===code&&b.is_active).length}
 function effectiveRules(items:CostRuleRow[]){const active=items.filter(r=>r.is_active!==false&&(!r.governance_status||r.governance_status==='effective'));const replaced=new Set(active.map(r=>r.supersedes_rule_id).filter(Boolean));return active.filter(r=>!replaced.has(r.rule_id))}
-const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(groupScope.value==='all'||(activeBindingCount(g.code)>0&&effectiveRules(g.rules).length>0))&&(!groupSearch.value||`${g.name} ${g.code} ${g.rules.map(r=>r.rule_name).join(' ')} ${bindings.value.filter(b=>b.is_active&&b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase()))))
+const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(familyFilter.value==='all'||groupFamily(g)===familyFilter.value)&&(groupScope.value==='all'||(activeBindingCount(g.code)>0&&effectiveRules(g.rules).length>0))&&(!groupSearch.value||`${groupFamily(g)==='uv'?'UV ':''}${g.name} ${g.code} ${g.rules.map(r=>r.rule_name).join(' ')} ${bindings.value.filter(b=>b.is_active&&b.rule_group===g.code).map(b=>b.i_id_raw).join(' ')}`.toLowerCase().includes(groupSearch.value.toLowerCase()))))
+const groupedSchemes=computed(()=>schemeFamilies.map(f=>({...f,groups:filteredGroups.value.filter(g=>groupFamily(g)===f.code)})).filter(f=>f.groups.length))
+function groupFamily(group:{name:string;rules:CostRuleRow[]}){const family=(group.rules.find(isEffectiveModel)?.product_family||group.rules.find(r=>r.product_family)?.product_family||'').toLowerCase();if(family==='uv'||/UV/i.test(group.name))return 'uv';return schemeFamilies.some(f=>f.code===family)?family:'other'}
+function variantRows(rule:CostRuleRow):NonNullable<CostModel['variant_prices']>{try{return JSON.parse(rule.formula_expression||'{}').variant_prices||[]}catch{return []}}
+function openMaterialScheme(family:string){openRuleEditor();ruleDraft.product_family=family}
 const activeGroupRules=computed(()=>effectiveRules(selectedGroup.value?.rules||[]))
 const currentRules=computed(()=>selectedModel.value ? activeGroupRules.value.filter(r=>r.rule_type==='cost_model') : activeGroupRules.value)
 const shadowedRules=computed(()=>selectedModel.value ? activeGroupRules.value.filter(r=>r.rule_type!=='cost_model') : [])
@@ -449,9 +463,10 @@ async function loadAll() {
 function openRuleEditor(rule?: CostRuleRow, group = '') {
  startsAt.value=chinaDateInput(rule?.effective_from);endsAt.value=chinaDateInput(rule?.effective_to)
  startMode.value=startsAt.value?'scheduled':'now';endMode.value=endsAt.value?'scheduled':'never';timingEdited.value=false
- if(!rule)void categoriesApi.list({page:1,page_size:100,is_active:true}).then(response=>{materialOptions.value=(response.data.data||[]).filter(c=>c.category_code).map(c=>({code:c.category_code!,name:c.display_name||c.category_name||c.category_code!}))}).catch(()=>{})
+ if(!rule && group)void categoriesApi.list({page:1,page_size:100,is_active:true}).then(response=>{materialOptions.value=(response.data.data||[]).filter(c=>c.category_code).map(c=>({code:c.category_code!,name:c.display_name||c.category_name||c.category_code!}))}).catch(()=>{})
  replaceDraft(rule ? { ...rule, is_active: rule.is_active !== false, priority: rule.priority ?? 100 } : {...emptyRuleDraft(group||selectedGroupCode.value),rule_type:group?'fixed_unit_price':'cost_model'})
  newModelJSON.value=rule?.rule_type==='cost_model' ? (rule.formula_expression||JSON.stringify(emptyCostModel())) : JSON.stringify(emptyCostModel());confirmedPrice.value=false
+ if(!rule && !group){ruleDraft.category_code=`SCHEME_${crypto.randomUUID().replace(/-/g,'').toUpperCase()}`;ruleDraft.product_family=familyFilter.value==='all'?'uv':familyFilter.value;newModelJSON.value=JSON.stringify({...emptyCostModel(),variant_prices:[{thickness_mm:0,normal_price:null,irregular_price:null}]})}
  const print=printPrices(rule?.formula_expression),keyword=keywordPrice(rule?.formula_expression)
  formulaKind.value=print?'print':keyword?'keyword':rule?.formula_expression?'other':'print'
  Object.assign(printDraft,print||{single:0,double:0});Object.assign(keywordDraft,keyword||{keyword:'',price:0})
@@ -463,7 +478,7 @@ async function saveRule() {
   try {
     if(!ruleDraft.rule_id&&ruleDraft.rule_type==='cost_model'&&rules.value.some(r=>r.category_code===ruleDraft.category_code&&isEffectiveModel(r)))throw new Error('此材质已有计价方案，请关闭窗口后直接编辑现有方案，避免重复收费。')
     if(ruleDraft.rule_type==='cost_model'&&ruleDraft.source?.endsWith('_sample')&&!confirmedPrice.value)throw new Error('请先核对价格并勾选确认，再改为按用料和工艺收费。')
-    if(ruleDraft.rule_type==='cost_model'){const model=JSON.parse(newModelJSON.value);model.material=availableCategories.value.find(g=>g.code===ruleDraft.category_code)?.name||model.material;ruleDraft.formula_expression=JSON.stringify(model)}
+    if(ruleDraft.rule_type==='cost_model'){const model:CostModel=JSON.parse(newModelJSON.value);if(!model.material.trim())throw new Error('请填写材质名称');ruleDraft.formula_expression=JSON.stringify(model)}
     if(ruleDraft.rule_type==='size_based_formula'&&formulaKind.value==='print')ruleDraft.formula_expression=`print_side:single=${printDraft.single},double=${printDraft.double}`
     if(ruleDraft.rule_type==='size_based_formula'&&formulaKind.value==='keyword')ruleDraft.formula_expression=`keyword_area_unit_price:${keywordDraft.keyword}=${keywordDraft.price}`
     if(confirmedPrice.value)ruleDraft.source='admin_manual'
@@ -472,6 +487,7 @@ async function saveRule() {
     if (ruleDraft.rule_id) await categoriesApi.updateCostRule(ruleDraft.rule_id, payload)
     else await categoriesApi.createCostRule(payload)
     const group = ruleDraft.category_code
+    familyFilter.value='all';groupSearch.value=''
     groupScope.value='all'
     ruleDialogOpen.value = false
     await loadAll()

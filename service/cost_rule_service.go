@@ -494,6 +494,11 @@ func (s *costRuleService) buildCostRuleDraft(ctx context.Context, ruleID int64, 
 
 func (s *costRuleService) resolveCategoryLink(ctx context.Context, categoryID *int64, categoryCode string) (*domain.Category, string, *domain.AppError) {
 	categoryCode = strings.ToUpper(strings.TrimSpace(categoryCode))
+	// Independent schemes are rule groups, not catalog categories. The reserved
+	// namespace lets users add a material without changing catalog data/bindings.
+	if categoryID == nil && independentCostSchemeCode.MatchString(categoryCode) {
+		return nil, categoryCode, nil
+	}
 	if categoryID != nil {
 		category, err := s.categoryRepo.GetByID(ctx, *categoryID)
 		if err != nil {
@@ -519,6 +524,8 @@ func (s *costRuleService) resolveCategoryLink(ctx context.Context, categoryID *i
 	}
 	return category, category.CategoryCode, nil
 }
+
+var independentCostSchemeCode = regexp.MustCompile(`^SCHEME_[0-9A-F]{32}$`)
 
 func applyFixedUnitPrice(rule *domain.CostRule, area float64, quantity int64) (*float64, bool) {
 	if rule.BasePrice == nil {

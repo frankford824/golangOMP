@@ -21595,7 +21595,9 @@ export interface components {
             /** @description Additive rule-lineage version number for the current `cost_rules` row. This is skeleton governance metadata, not a separate version table. */
             rule_version?: number;
             category_id?: number | null;
+            /** @description Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings. */
             category_code?: string;
+            /** @description Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings. */
             product_family?: string;
             rule_type?: components["schemas"]["CostRuleType"];
             /** Format: double */
@@ -23135,7 +23137,9 @@ export interface components {
             /** @description Optional explicit version for this row. If omitted while `supersedes_rule_id` is provided, the backend auto-increments from the referenced rule. */
             rule_version?: number | null;
             category_id?: number | null;
+            /** @description Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings. */
             category_code?: string;
+            /** @description Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings. */
             product_family?: string;
             rule_type: components["schemas"]["CostRuleType"];
             /** Format: double */
@@ -23169,7 +23173,9 @@ export interface components {
             rule_name?: string;
             rule_version?: number | null;
             category_id?: number | null;
+            /** @description Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings. */
             category_code?: string;
+            /** @description Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings. */
             product_family?: string;
             rule_type?: components["schemas"]["CostRuleType"];
             /** Format: double */
@@ -23247,6 +23253,11 @@ export interface components {
             depth_m?: number;
             area_m2?: number;
             thickness_mm?: number;
+            /**
+             * @description Explicit shape selection. A variant price table requires normal or irregular; missing shape never defaults to normal. Free text is never used to infer shape or its billable area.
+             * @enum {string}
+             */
+            shape?: "" | "normal" | "irregular";
             pieces?: number;
             faces?: components["schemas"]["CostFace"][];
             /** @description Explicit slot, punch, laminate, double_sided choices. Missing configured choices require confirmation; prose is never used to guess these values. */
@@ -23271,6 +23282,12 @@ export interface components {
             thickness_prices?: {
                 thickness_mm: number;
                 unit_price: number;
+            }[];
+            /** @description Optional replacement unit prices by exact thickness and explicit shape. Mutually exclusive with thickness_prices. A single row with thickness_mm=0 means no thickness distinction and cannot coexist with other rows. A null price remains unquoted; zero explicitly means free. When configured, unit_price is ignored and unmatched thickness, missing shape or an unquoted cell requires manual review. Existing models without this table keep their prior calculation for unchanged inputs. */
+            variant_prices?: {
+                thickness_mm: number;
+                normal_price: number | null;
+                irregular_price: number | null;
             }[];
             processes?: {
                 /** @enum {string} */

@@ -9,6 +9,7 @@
     </template>
     <label v-if="draft.area_mode === 'total'">整套总面积（㎡）<input v-model.number="draft.area_m2" type="number" min="0" step="any" @input="emitValue" /></label>
     <label>厚度（mm，可选）<input v-model.number="draft.thickness_mm" type="number" min="0" step="any" @input="emitValue" /></label>
+    <label>形状<select :value="draft.shape || ''" @change="setShape"><option value="">未确认</option><option value="normal">普通</option><option value="irregular">异形</option></select></label>
     <section v-if="draft.area_mode === 'faces'" class="full">
       <p>按实际用料填写每种面的尺寸。立体表面积不一定等于展开用料面积。</p>
       <div v-for="(face,i) in draft.faces" :key="i" class="face-row">
@@ -33,6 +34,7 @@ const emit=defineEmits<{ 'update:modelValue':[CostInput] }>()
 const draft=ref<CostInput>(emptyCostInput())
 watch(()=>props.modelValue,v=>{draft.value=JSON.parse(JSON.stringify({...emptyCostInput(),...v,faces:v?.faces||[],processes:v?.processes||{}}))},{immediate:true,deep:true})
 function emitValue(){emit('update:modelValue',JSON.parse(JSON.stringify(draft.value)))}
+function setShape(event:Event){const value=(event.target as HTMLSelectElement).value as CostInput['shape'];if(value)draft.value.shape=value;else delete draft.value.shape;emitValue()}
 function setProcess(code:string,e:Event){const value=(e.target as HTMLSelectElement).value;if(value==='')delete draft.value.processes[code];else draft.value.processes[code]=value==='true';emitValue()}
 </script>
 <style scoped>

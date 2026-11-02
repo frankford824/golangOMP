@@ -4,9 +4,118 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"workflow/domain"
 )
+
+func TestCostModelShapeAndThicknessPrices(t *testing.T) {
+	m := &domain.CostModel{Version: 1, Material: "超透PVC", Basis: "area", UnitPrice: 999, Multiplier: 1.1,
+		VariantPrices: []domain.CostVariantPrice{
+			{ThicknessMM: 1, NormalPrice: float64Ptr(10), IrregularPrice: float64Ptr(14)},
+			{ThicknessMM: 3, NormalPrice: float64Ptr(20)},
+		}}
+	for _, tt := range []struct {
+		name      string
+		shape     string
+		thickness float64
+		want      *float64
+	}{
+		{"normal replacement rate", "normal", 1, float64Ptr(5.5)},
+		{"irregular replacement not addition", "irregular", 1, float64Ptr(7.7)},
+		{"another thickness", "normal", 3, float64Ptr(11)},
+		{"unquoted cell never zero or normal fallback", "irregular", 3, nil},
+		{"missing thickness", "normal", 0, nil},
+		{"unknown thickness", "irregular", 2, nil},
+		{"shape must be explicit", "", 1, nil},
+		{"unsupported shape", "circle", 1, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, price := calculateCostModel(m, domain.CostInput{AreaMode: "total", AreaM2: .5, Pieces: 6, Shape: tt.shape, ThicknessMM: tt.thickness})
+			if tt.want == nil {
+				if price != nil || c.Status != "missing_input" || len(c.Missing) == 0 {
+					t.Fatalf("must require review: %+v %v", c, price)
+				}
+			} else if price == nil || math.Abs(*price-*tt.want) > .000001 || c.Status != "calculated" {
+				t.Fatalf("unexpected price: %+v %v want %v", c, price, *tt.want)
+			}
+		})
+	}
+	// A single no-thickness row applies to any supplied thickness, including zero.
+	m.VariantPrices = []domain.CostVariantPrice{{NormalPrice: float64Ptr(10), IrregularPrice: float64Ptr(0)}}
+	c, price := calculateCostModel(m, domain.CostInput{AreaMode: "total", AreaM2: 2, Pieces: 1, Shape: "irregular"})
+	if price == nil || *price != 0 || len(c.Lines) != 1 || c.Lines[0].UnitPrice != 0 {
+		t.Fatalf("explicit free price lost: %+v", c)
+	}
+}
+
+func TestCostModelVariantTableValidation(t *testing.T) {
+	for _, rows := range []string{
+		`[{"thickness_mm":-1,"normal_price":10}]`,
+		`[{"thickness_mm":1,"normal_price":-1}]`,
+		`[{"thickness_mm":1,"irregular_price":-1}]`,
+		`[{"thickness_mm":1},{"thickness_mm":1}]`,
+		`[{"thickness_mm":0},{"thickness_mm":1}]`,
+	} {
+		raw := `{"version":1,"material":"UV","basis":"area","unit_price":10,"multiplier":1,"variant_prices":` + rows + `}`
+		if _, err := parseCostModel(raw); err == nil {
+			t.Fatalf("accepted invalid table %s", rows)
+		}
+	}
+	raw := `{"version":1,"material":"UV","basis":"area","unit_price":10,"multiplier":1,"variant_prices":[{"thickness_mm":0,"normal_price":null,"irregular_price":null}]}`
+	if _, err := parseCostModel(raw); err != nil {
+		t.Fatal("unquoted cells must be saveable", err)
+	}
+	raw = strings.TrimSuffix(raw, "}") + `,"thickness_prices":[{"thickness_mm":1,"unit_price":10}]}`
+	if _, err := parseCostModel(raw); err == nil {
+		t.Fatal("two price tables accepted")
+	}
+	m := domain.CostModel{Version: 1, Material: "UV", Basis: "area", Multiplier: 1, VariantPrices: make([]domain.CostVariantPrice, 33)}
+	encoded, _ := json.Marshal(m)
+	if _, err := parseCostModel(string(encoded)); err == nil {
+		t.Fatal("unbounded table accepted")
+	}
+}
+
+func TestIndependentUVSchemesPreserveLegacyGroupAndPrices(t *testing.T) {
+	rules := newCostRuleRepoStub()
+	categories := newCategoryRepoStub()
+	categories.mustCreate(&domain.Category{CategoryID: 1, CategoryCode: "ACRYLIC", CategoryName: "亚克力", IsActive: true, Level: 1})
+	svc := NewCostRuleService(rules, categories, noopTxRunner{})
+	legacyRaw := `{"version":1,"material":"亚克力","basis":"area","unit_price":10,"multiplier":1}`
+	legacy, appErr := svc.Create(context.Background(), CreateCostRuleParams{RuleName: "UV原方案", CategoryCode: "ACRYLIC", RuleType: domain.CostRuleTypeModel, FormulaExpression: legacyRaw})
+	if appErr != nil {
+		t.Fatal(appErr)
+	}
+	for i, code := range []string{"SCHEME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "SCHEME_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"} {
+		model := &domain.CostModel{Version: 1, Material: "UV材质", Basis: "area", Multiplier: 1, VariantPrices: []domain.CostVariantPrice{{NormalPrice: float64Ptr(float64(10 + i*10)), IrregularPrice: float64Ptr(float64(14 + i*10))}}}
+		raw, _ := json.Marshal(model)
+		created, err := svc.Create(context.Background(), CreateCostRuleParams{RuleName: "独立材质", CategoryCode: code, ProductFamily: "uv", RuleType: domain.CostRuleTypeModel, FormulaExpression: string(raw)})
+		if err != nil || created.CategoryID != nil || created.CategoryCode != code {
+			t.Fatalf("independent scheme rejected: %+v %v", created, err)
+		}
+		result, err := svc.Preview(context.Background(), domain.CostRulePreviewRequest{CategoryCode: code, Input: &domain.CostInput{AreaMode: "total", AreaM2: 1, Pieces: 1, Shape: "irregular"}})
+		if err != nil || result.EstimatedCost == nil || *result.EstimatedCost != float64(14+i*10) {
+			t.Fatalf("independent pricing mixed: %+v %v", result, err)
+		}
+	}
+	unchanged, _ := svc.GetByID(context.Background(), legacy.RuleID)
+	if unchanged.FormulaExpression != legacyRaw || unchanged.CategoryCode != "ACRYLIC" {
+		t.Fatal("legacy pricing modified")
+	}
+	result, err := svc.Preview(context.Background(), domain.CostRulePreviewRequest{CategoryCode: "ACRYLIC", Area: float64Ptr(1)})
+	if err != nil || result.EstimatedCost == nil || *result.EstimatedCost != 10 {
+		t.Fatal("legacy price changed")
+	}
+	result, err = svc.Preview(context.Background(), domain.CostRulePreviewRequest{CategoryCode: "ACRYLIC", Input: &domain.CostInput{AreaMode: "total", AreaM2: 1, Pieces: 1, Shape: "irregular"}})
+	if err != nil || result.EstimatedCost != nil || !result.RequiresManualReview {
+		t.Fatal("old scheme guessed irregular price")
+	}
+	_, err = svc.Create(context.Background(), CreateCostRuleParams{RuleName: "bad", CategoryCode: "SCHEME_BAD", RuleType: domain.CostRuleTypeModel, FormulaExpression: legacyRaw})
+	if err == nil {
+		t.Fatal("malformed scheme namespace accepted")
+	}
+}
 
 func TestCostModelRevisionPreservesHistoricalFormula(t *testing.T) {
 	rules := newCostRuleRepoStub()

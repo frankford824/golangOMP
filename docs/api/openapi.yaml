@@ -1330,8 +1330,12 @@ components:
         category_id:
           type: integer
           nullable: true
-        category_code: { type: string }
-        product_family: { type: string }
+        category_code:
+          type: string
+          description: Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings.
+        product_family:
+          type: string
+          description: Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings.
         rule_type:
           $ref: '#/components/schemas/CostRuleType'
         base_price:
@@ -3526,8 +3530,12 @@ components:
         category_id:
           type: integer
           nullable: true
-        category_code: { type: string }
-        product_family: { type: string }
+        category_code:
+          type: string
+          description: Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings.
+        product_family:
+          type: string
+          description: Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings.
         rule_type:
           $ref: '#/components/schemas/CostRuleType'
         base_price:
@@ -3587,8 +3595,12 @@ components:
         category_id:
           type: integer
           nullable: true
-        category_code: { type: string }
-        product_family: { type: string }
+        category_code:
+          type: string
+          description: Existing catalog category code, or an independent scheme group in the reserved SCHEME_<32 uppercase hexadecimal characters> namespace. Independent groups use no category_id and never create or modify catalog categories or bindings.
+        product_family:
+          type: string
+          description: Display grouping only, for example uv, board, cloth, paper or other. Sharing a family does not share prices or bindings.
         rule_type:
           $ref: '#/components/schemas/CostRuleType'
         base_price:
@@ -3689,6 +3701,10 @@ components:
         depth_m: { type: number, minimum: 0 }
         area_m2: { type: number, minimum: 0 }
         thickness_mm: { type: number, minimum: 0 }
+        shape:
+          type: string
+          enum: ['', normal, irregular]
+          description: Explicit shape selection. A variant price table requires normal or irregular; missing shape never defaults to normal. Free text is never used to infer shape or its billable area.
         pieces: { type: integer, minimum: 1, maximum: 100000 }
         faces:
           type: array
@@ -3722,6 +3738,17 @@ components:
             properties:
               thickness_mm: { type: number, minimum: 0, exclusiveMinimum: true }
               unit_price: { type: number, minimum: 0 }
+        variant_prices:
+          type: array
+          maxItems: 32
+          description: Optional replacement unit prices by exact thickness and explicit shape. Mutually exclusive with thickness_prices. A single row with thickness_mm=0 means no thickness distinction and cannot coexist with other rows. A null price remains unquoted; zero explicitly means free. When configured, unit_price is ignored and unmatched thickness, missing shape or an unquoted cell requires manual review. Existing models without this table keep their prior calculation for unchanged inputs.
+          items:
+            type: object
+            required: [thickness_mm, normal_price, irregular_price]
+            properties:
+              thickness_mm: { type: number, minimum: 0 }
+              normal_price: { type: number, minimum: 0, nullable: true }
+              irregular_price: { type: number, minimum: 0, nullable: true }
         processes:
           type: array
           maxItems: 8
