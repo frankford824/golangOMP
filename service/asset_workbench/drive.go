@@ -2,6 +2,8 @@ package assetworkbench
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -9,6 +11,31 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 )
+
+// Redact only the response projection; never mutate repository rows or payroll
+// facts. Managers keep their authorized all-personnel accounting view.
+func (s *Service) redactDriveIncome(ctx context.Context, actor domain.RequestActor, items []*domain.AssetWorkbenchDriveFile) ([]*domain.AssetWorkbenchDriveFile, *domain.AppError) {
+	if len(items) == 0 || s.driveOwnerFilter(actor) == nil {
+		return items, nil
+	}
+	profile, err := s.repo.GetProfileByUserID(ctx, actor.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to check income visibility.", nil)
+	}
+	if profile == nil || profile.SettlementVisible == nil || *profile.SettlementVisible {
+		return items, nil
+	}
+	redacted := make([]*domain.AssetWorkbenchDriveFile, len(items))
+	for i, item := range items {
+		if item == nil {
+			continue
+		}
+		copy := *item
+		copy.GrossAmount = 0
+		redacted[i] = &copy
+	}
+	return redacted, nil
+}
 
 // DriveFilesResult is a paginated list of leaf image rows in the netdisk view.
 type DriveFilesResult struct {
@@ -114,6 +141,10 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list drive files.", err.Error())
 	}
+	items, appErr := s.redactDriveIncome(ctx, actor, items)
+	if appErr != nil {
+		return nil, appErr
+	}
 	return &DriveFilesResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
 }
 
@@ -201,10 +232,14 @@ func (s *Service) BrowseDriveFolder(ctx context.Context, actor domain.RequestAct
 	if end > len(directFiles) {
 		end = len(directFiles)
 	}
+	visibleFiles, appErr := s.redactDriveIncome(ctx, actor, directFiles[start:end])
+	if appErr != nil {
+		return nil, appErr
+	}
 	return &DriveFolderBrowseResult{
 		Path:      path,
 		Folders:   folders,
-		Files:     directFiles[start:end],
+		Files:     visibleFiles,
 		Total:     int64(len(directFiles)),
 		Page:      page,
 		Size:      pageSize,
@@ -231,6 +266,10 @@ func (s *Service) SearchDriveFiles(ctx context.Context, actor domain.RequestActo
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to search drive files.", err.Error())
 	}
+	items, appErr := s.redactDriveIncome(ctx, actor, items)
+	if appErr != nil {
+		return nil, appErr
+	}
 	return &DriveFilesResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
 }
 
@@ -245,7 +284,11 @@ func (s *Service) LocateDriveFile(ctx context.Context, actor domain.RequestActor
 	if err != nil {
 		return nil, mapRepoReadError(err, "File not found.", "Failed to locate drive file.")
 	}
-	return file, nil
+	items, appErr := s.redactDriveIncome(ctx, actor, []*domain.AssetWorkbenchDriveFile{file})
+	if appErr != nil {
+		return nil, appErr
+	}
+	return items[0], nil
 }
 
 func normalizeDriveFolderPath(raw string) string {

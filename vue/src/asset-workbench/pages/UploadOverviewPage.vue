@@ -39,6 +39,7 @@ const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? [
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
 const canViewAllUploads = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const personalLedger = computed(() => !canViewAllUploads.value)
+const canViewAmounts = computed(() => canViewAllUploads.value || session.bootstrap?.profile?.settlement_visible !== false)
 const canDeleteFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canMaintainFiles = computed(() => canViewAllUploads.value)
 const canViewSupplementLedger = computed(() => capabilities.value.has('asset.workbench.settlement'))
@@ -312,6 +313,7 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
     ['文件大小', formatSize(file.file_size)],
   ]
   const note = filePieceworkNote(file)
+  if (!canViewAmounts.value) rows.splice(8, 1)
   if (note) rows.splice(8, 0, ['计价说明', note])
   return rows
 }
@@ -381,7 +383,7 @@ function csvEscape(value: unknown) {
 }
 
 function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDisplayState>) {
-  return [
+  const row = [
     fileOwnerLabel(file),
     fileOperationLabel(file),
     formatDateTime(file.created_at),
@@ -395,6 +397,8 @@ function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDispla
     formatSize(file.file_size),
     filePieceworkNote(file, lookup),
   ]
+  if (!canViewAmounts.value) row.splice(8, 1)
+  return row
 }
 
 async function loadDirectories() {
@@ -895,6 +899,7 @@ async function exportCurrentFilter() {
     }
     await hydrateSupplementSources(rows)
     const header = ['创建人', '操作来源', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小', '计价说明']
+    if (!canViewAmounts.value) header.splice(8, 1)
     const exportPieceworkLookup = buildPieceworkDisplayByFileID(rows)
     const csv = [header, ...rows.map((file) => fileToExportRow(file, exportPieceworkLookup))].map((row) => row.map(csvEscape).join(',')).join('\n')
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
@@ -943,7 +948,7 @@ onBeforeUnmount(() => {
           <dt>本页计价数量</dt>
           <dd>{{ totalCount }}</dd>
         </div>
-        <div>
+        <div v-if="canViewAmounts">
           <dt>本页计价金额</dt>
           <dd>{{ formatMoney(totalAmount) }}</dd>
         </div>
@@ -1053,7 +1058,7 @@ onBeforeUnmount(() => {
             <col class="aw-upload-ledger__col-name" />
             <col class="aw-upload-ledger__col-format" />
             <col class="aw-upload-ledger__col-count" />
-            <col class="aw-upload-ledger__col-amount" />
+            <col v-if="canViewAmounts" class="aw-upload-ledger__col-amount" />
             <col class="aw-upload-ledger__col-status" />
             <col class="aw-upload-ledger__col-size" />
             <col class="aw-upload-ledger__col-actions" />
@@ -1096,7 +1101,7 @@ onBeforeUnmount(() => {
                 </button>
               </th>
               <th class="aw-upload-ledger__num">数量</th>
-              <th class="aw-upload-ledger__num">金额</th>
+              <th v-if="canViewAmounts" class="aw-upload-ledger__num">金额</th>
               <th>状态</th>
               <th class="aw-upload-ledger__num">大小</th>
               <th class="aw-upload-ledger__center">操作</th>
@@ -1107,11 +1112,11 @@ onBeforeUnmount(() => {
               <tr v-for="i in skeletonRowCount" :key="`skeleton-${i}`" class="aw-upload-ledger__row-skeleton" aria-hidden="true">
                 <td class="aw-upload-ledger__check"><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--dot" /></td>
                 <td><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--thumb" /></td>
-                <td colspan="11"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
+                <td :colspan="canViewAmounts ? 11 : 10"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
               </tr>
             </template>
             <tr v-else-if="files.length === 0">
-              <td colspan="13">
+              <td :colspan="canViewAmounts ? 13 : 12">
                 <div class="aw-upload-ledger__empty">
                   <Inbox :size="30" aria-hidden="true" />
                   <strong>没有匹配的上传记录</strong>
@@ -1185,7 +1190,7 @@ onBeforeUnmount(() => {
                 <td class="aw-upload-ledger__num">
                   <strong>{{ fileQuantityLabel(file) }}</strong>
                 </td>
-                <td class="aw-upload-ledger__num">
+                <td v-if="canViewAmounts" class="aw-upload-ledger__num">
                   <strong>{{ fileAmountLabel(file) }}</strong>
                 </td>
                 <td>
