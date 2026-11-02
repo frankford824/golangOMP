@@ -10,7 +10,7 @@ export function ruleDescription(r:ReadableRule):string {
  case 'special_process_surcharge':return `${r.special_process_keyword||'指定工艺'}：另加 ${price(r.special_process_price)}`
  case 'manual_quote':return '每个产品由工作人员确认成本，不自动报价'
  case 'size_based_formula':{const p=printPrices(r.formula_expression);if(p)return `单面 ${price(p.single)}/张，双面 ${price(p.double)}/张`;const k=keywordPrice(r.formula_expression);if(k)return `“${k.keyword}”产品每平方米 ${price(k.price)}`;return '按产品规格确认报价，请先核对适用尺寸和单价'}
- case 'cost_model':try{const m=JSON.parse(r.formula_expression||'{}');return m.basis==='manual'?'人工确认报价':m.variant_prices?.length?`${m.material} · 普通 / 异形分价${m.variant_prices.some((p:{thickness_mm:number})=>p.thickness_mm>0)?` · ${m.variant_prices.length} 个厚度档位`:''}${m.multiplier!==1?` · 倍率 × ${m.multiplier}`:''}`:`${m.material}，每${({area:'平方米',piece:'件',set:'套'} as Record<string,string>)[m.basis]||'单位'} ${price(m.unit_price)}${m.multiplier!==1?`，价格倍率 × ${m.multiplier}`:''}`}catch{return '价格信息需要核对'}
+ case 'cost_model':try{const m=JSON.parse(r.formula_expression||'{}');return m.basis==='manual'?'人工确认报价':m.variant_prices?.length?`${m.material} · 按${({area:'面积',piece:'件',set:'套'} as Record<string,string>)[m.basis]||'用料'} · 普通 / 异形分价${m.variant_prices.some((p:{thickness_mm:number})=>p.thickness_mm>0)?` · ${m.variant_prices.length} 个厚度档位`:''}${m.multiplier!==1?` · 倍率 × ${m.multiplier}`:''}`:`${m.material}，每${({area:'平方米',piece:'件',set:'套'} as Record<string,string>)[m.basis]||'单位'} ${price(m.unit_price)}${m.multiplier!==1?`，价格倍率 × ${m.multiplier}`:''}`}catch{return '价格信息需要核对'}
  default:return '价格信息需要核对'
  }
 }

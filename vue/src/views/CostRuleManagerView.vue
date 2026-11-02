@@ -65,7 +65,7 @@
             <div class="rule-copy">
               <div><strong>{{ rule.rule_name || '未命名规则' }}</strong><span>{{ ruleStateLabel(rule) }}</span></div>
               <p>{{ ruleSummary(rule) }}</p>
-              <table v-if="variantRows(rule).length" class="variant-price-summary"><thead><tr><th>厚度（mm）</th><th>普通单价</th><th>异形单价</th></tr></thead><tbody><tr v-for="(row,i) in variantRows(rule)" :key="i"><td>{{row.thickness_mm || '不分厚度'}}</td><td>{{row.normal_price==null?'待核价':`¥${row.normal_price}`}}</td><td>{{row.irregular_price==null?'待核价':`¥${row.irregular_price}`}}</td></tr></tbody></table>
+              <table v-if="variantRows(rule).length" class="variant-price-summary"><thead><tr><th>厚度（mm）</th><th>普通（元/{{variantUnit(rule)}}）</th><th>异形（元/{{variantUnit(rule)}}）</th></tr></thead><tbody><tr v-for="(row,i) in variantRows(rule)" :key="i"><td>{{row.thickness_mm || '不分厚度'}}</td><td>{{row.normal_price==null?'待核价':`¥${row.normal_price}`}}</td><td>{{row.irregular_price==null?'待核价':`¥${row.irregular_price}`}}</td></tr></tbody></table>
               <small>{{pricingWindowLabel(rule)}}</small>
             </div>
             <div class="price-actions"><button class="text-button" @click="openRuleEditor(rule)">编辑名称 / 价格 / 时间</button><button class="text-button" :disabled="savingRule" @click="retireRule(rule)">{{retiringRule===rule.rule_id?'确认停用（保留历史）':'停用此计价'}}</button></div>
@@ -370,6 +370,7 @@ const filteredGroups=computed(()=>ruleGroups.value.filter(g=>(familyFilter.value
 const groupedSchemes=computed(()=>schemeFamilies.map(f=>({...f,groups:filteredGroups.value.filter(g=>groupFamily(g)===f.code)})).filter(f=>f.groups.length))
 function groupFamily(group:{name:string;rules:CostRuleRow[]}){const family=(group.rules.find(isEffectiveModel)?.product_family||group.rules.find(r=>r.product_family)?.product_family||'').toLowerCase();if(family==='uv'||/UV/i.test(group.name))return 'uv';return schemeFamilies.some(f=>f.code===family)?family:'other'}
 function variantRows(rule:CostRuleRow):NonNullable<CostModel['variant_prices']>{try{return JSON.parse(rule.formula_expression||'{}').variant_prices||[]}catch{return []}}
+function variantUnit(rule:CostRuleRow){try{return ({area:'㎡',piece:'件',set:'套'} as Record<string,string>)[JSON.parse(rule.formula_expression||'{}').basis]||'单位'}catch{return '单位'}}
 function openMaterialScheme(family:string){openRuleEditor();ruleDraft.product_family=family}
 const activeGroupRules=computed(()=>effectiveRules(selectedGroup.value?.rules||[]))
 const currentRules=computed(()=>selectedModel.value ? activeGroupRules.value.filter(r=>r.rule_type==='cost_model') : activeGroupRules.value)

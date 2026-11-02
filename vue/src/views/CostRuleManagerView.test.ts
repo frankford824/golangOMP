@@ -82,6 +82,7 @@ describe('CostRuleManagerView', () => {
     await w.findAll('.rule-groups>button').find(b=>b.text().includes('超透PVC'))!.trigger('click');await flushPromises()
     expect(w.get('.variant-price-summary').text()).toContain('¥10')
     expect(w.get('.variant-price-summary').text()).toContain('待核价')
+    expect(w.get('.variant-price-summary thead').text()).toContain('普通（元/㎡）')
     expect(w.get('.variant-price-summary').text()).not.toContain('¥20')
     expect(mocks.updateCostRule).not.toHaveBeenCalled();expect(mocks.updateBinding).not.toHaveBeenCalled()
   })
