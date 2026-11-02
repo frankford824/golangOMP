@@ -109,7 +109,18 @@ func nextSequence(ctx context.Context, sqlTx *sql.Tx, skuID int64) (int64, error
 // If fn returns a non-nil error the transaction is silently rolled back and the
 // error is propagated unchanged so callers can use errors.Is/As normally.
 func (d *DB) RunInTx(ctx context.Context, fn func(tx repo.Tx) error) error {
-	sqlTx, err := d.db.BeginTx(ctx, nil)
+	return d.runInTx(ctx, nil, fn)
+}
+
+// Maintenance takes explicit canonical/version row locks, while locating its
+// derived mirrors with current, non-locking reads. This is transaction-scoped;
+// other callers retain the database's configured isolation level.
+func (d *DB) RunInReadCommittedTx(ctx context.Context, fn func(repo.Tx) error) error {
+	return d.runInTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, fn)
+}
+
+func (d *DB) runInTx(ctx context.Context, options *sql.TxOptions, fn func(repo.Tx) error) error {
+	sqlTx, err := d.db.BeginTx(ctx, options)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}

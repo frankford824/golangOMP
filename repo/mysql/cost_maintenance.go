@@ -107,17 +107,46 @@ func (r *costMaintenanceRepo) ListLogs(ctx context.Context, f repo.CostMaintenan
 }
 func (r *costMaintenanceRepo) Project(ctx context.Context, tx repo.Tx, item *domain.TaskSKUItem) error {
 	q := Unwrap(tx)
-	if !item.ERPSyncRequired {
-		_, err := q.ExecContext(ctx, `UPDATE erp_product_sync_records SET cost_price=?,latest_cost_snapshot_id=(SELECT MAX(id) FROM omp_sku_cost_snapshots WHERE sku_code=?) WHERE task_sku_item_id=?`, item.CostPrice, item.SKUCode, item.ID)
-		return err
-	}
-	// Update existing read mirrors in the same transaction. No full-catalog refresh.
-	_, err := q.ExecContext(ctx, `UPDATE erp_product_sync_records SET product_name=?,product_i_id=?,erp_i_id=?,cost_price=?,base_sync_status=IF(?,'queued',base_sync_status),erp_sync_status=IF(?,'queued',erp_sync_status),sync_claim_token=IF(?,'',sync_claim_token),base_sync_error='',updated_at=UTC_TIMESTAMP() WHERE task_sku_item_id=?`, item.ProductNameSnapshot, taskStyle(item), taskStyle(item), item.CostPrice, item.ERPSyncRequired, item.ERPSyncRequired, item.ERPSyncRequired, item.ID)
+	// The legacy task_sku_item_id update plan can scan unrelated mirror rows,
+	// producing a lock inversion with the background INSERT...SELECT refresh. Locate by a
+	// consistent read, then update only the matching PRIMARY keys.
+	rows, err := q.QueryContext(ctx, `SELECT id FROM erp_product_sync_records WHERE task_sku_item_id=?`, item.ID)
 	if err != nil {
 		return err
 	}
-	if _, err = q.ExecContext(ctx, `UPDATE erp_product_sync_records SET latest_cost_snapshot_id=(SELECT MAX(id) FROM omp_sku_cost_snapshots WHERE sku_code=?) WHERE task_sku_item_id=?`, item.SKUCode, item.ID); err != nil {
+	ids := []interface{}{}
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
 		return err
+	}
+	where := "id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")"
+	if !item.ERPSyncRequired {
+		if len(ids) == 0 {
+			return nil
+		}
+		args := append([]interface{}{item.CostPrice, item.SKUCode}, ids...)
+		_, err := q.ExecContext(ctx, `UPDATE erp_product_sync_records SET cost_price=?,latest_cost_snapshot_id=(SELECT MAX(id) FROM omp_sku_cost_snapshots WHERE sku_code=?) WHERE `+where, args...)
+		return err
+	}
+	// Update existing read mirrors in the same transaction. No full-catalog refresh.
+	if len(ids) > 0 {
+		args := append([]interface{}{item.ProductNameSnapshot, taskStyle(item), taskStyle(item), item.CostPrice, item.ERPSyncRequired, item.ERPSyncRequired, item.ERPSyncRequired}, ids...)
+		if _, err = q.ExecContext(ctx, `UPDATE erp_product_sync_records SET product_name=?,product_i_id=?,erp_i_id=?,cost_price=?,base_sync_status=IF(?,'queued',base_sync_status),erp_sync_status=IF(?,'queued',erp_sync_status),sync_claim_token=IF(?,'',sync_claim_token),base_sync_error='',updated_at=UTC_TIMESTAMP() WHERE `+where, args...); err != nil {
+			return err
+		}
+		args = append([]interface{}{item.SKUCode}, ids...)
+		if _, err = q.ExecContext(ctx, `UPDATE erp_product_sync_records SET latest_cost_snapshot_id=(SELECT MAX(id) FROM omp_sku_cost_snapshots WHERE sku_code=?) WHERE `+where, args...); err != nil {
+			return err
+		}
 	}
 	actor, _ := domain.RequestActorFromContext(ctx)
 	if _, err = q.ExecContext(ctx, `INSERT INTO task_erp_outbox(task_id,job_type,dedupe_key,payload_json)

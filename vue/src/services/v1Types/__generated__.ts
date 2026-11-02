@@ -5658,7 +5658,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Local fields or ERP baseline changed; no write committed. */
+                /** @description Local fields or ERP baseline changed */
                 409: {
                     headers: {
                         [name: string]: unknown;

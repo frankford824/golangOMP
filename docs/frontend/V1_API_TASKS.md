@@ -4302,7 +4302,7 @@ Content-Type: `application/json`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid fields or missing reason. |
 | 403 | 见 `error.code` | 见 `deny_code` | Missing maintenance or ERP management permission. |
 | 404 | 见 `error.code` | 见 `deny_code` | Completed SKU not found. |
-| 409 | 见 `error.code` | 见 `deny_code` | Local fields or ERP baseline changed; no write committed. |
+| 409 | 见 `error.code` | 见 `deny_code` | Local fields or ERP baseline changed |
 
 ### curl 示例
 ```bash

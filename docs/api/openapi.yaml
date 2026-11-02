@@ -10912,7 +10912,7 @@ paths:
         '400': { description: Invalid fields or missing reason. }
         '403': { description: Missing maintenance or ERP management permission. }
         '404': { description: Completed SKU not found. }
-        '409': { description: Local fields or ERP baseline changed; no write committed. }
+        '409': { description: Local fields or ERP baseline changed, or bounded deadlock recovery was exhausted; no write committed. Only completely rolled-back MySQL deadlock transactions are retried, never HTTP or external ERP writes. }
   /v1/cost-management/maintenance-logs:
     get:
       summary: Query append-only SKU maintenance history

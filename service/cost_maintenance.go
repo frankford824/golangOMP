@@ -363,7 +363,7 @@ func (s *taskService) MaintainCost(ctx context.Context, id int64, p domain.CostM
 		item.RequiresManualReview = false
 	}
 	syncDetail := len(items) == 1 || task.PrimarySKUCode == item.SKUCode || task.SKUCode == item.SKUCode
-	err = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+	err = s.runCostMaintenanceTransaction(ctx, id, func(tx repo.Tx) error {
 		locked, e := s.costMaintenance.LockRow(ctx, tx, id)
 		if e != nil {
 			return e
