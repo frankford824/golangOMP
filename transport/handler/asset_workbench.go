@@ -106,6 +106,12 @@ func (h *AssetWorkbenchHandler) RequireActiveMembership() gin.HandlerFunc {
 			respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, reason, gin.H{"membership_status": status}))
 			return
 		}
+		visible, visibilityErr := h.svc.CanViewIncomeAmounts(c.Request.Context(), actor)
+		if visibilityErr != nil {
+			respondError(c, visibilityErr)
+			return
+		}
+		c.Set(workbenchIncomeHiddenKey, !visible)
 		c.Next()
 	}
 }

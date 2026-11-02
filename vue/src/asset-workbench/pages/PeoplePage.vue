@@ -371,7 +371,7 @@ onMounted(() => {
             <div class="aw-panel__head">
               <div>
                 <h4>客户端结算展示</h4>
-                <p class="aw-copy">仅影响此人的“看收入”页面及其中的补录入口；不影响上传、计件金额和管理端结算。客户端在刷新、重新进入或30秒内同步。</p>
+                <p class="aw-copy">关闭后，普通客户端的收入页、网盘、台账、预览及导出均不展示收入金额；不影响上传、实际计件金额和管理端结算。请刷新或重新进入客户端同步展示权限。</p>
               </div>
               <span class="aw-chip" :class="selectedProfile.settlement_visible === false ? 'aw-chip--neutral' : 'aw-chip--success'">{{ selectedProfile.settlement_visible === false ? '已关闭' : '已开放' }}</span>
             </div>

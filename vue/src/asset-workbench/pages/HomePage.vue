@@ -27,6 +27,6 @@ onMounted(() => {
     @retry="bootstrapRequest.run"
   >
     <DashboardPage v-if="bootstrap?.is_admin" />
-    <SimpleHomePage v-else-if="bootstrap && !bootstrap.is_admin" />
+    <SimpleHomePage v-else-if="bootstrap && !bootstrap.is_admin" :income-visible="bootstrap.profile?.settlement_visible !== false" />
   </AsyncBoundary>
 </template>
