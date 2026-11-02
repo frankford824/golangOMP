@@ -20678,7 +20678,7 @@ export interface components {
             onboarded_at?: string | null;
             grade_hidden: boolean;
             /**
-             * @description Owner income-page display permission. Changed only through the dedicated administrator endpoint; never affects earned amounts.
+             * @description Controls ordinary client income visibility across income pages
              * @default true
              */
             settlement_visible: boolean;

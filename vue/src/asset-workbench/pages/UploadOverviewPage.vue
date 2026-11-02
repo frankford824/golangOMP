@@ -1265,7 +1265,7 @@ onBeforeUnmount(() => {
       :preview-url="previewUrl"
       :mime-type="previewMimeType"
       :empty-label="previewEmptyLabel"
-      :meta-rows="previewRows"
+      :meta-rows="canViewAmounts ? previewRows : previewRows.filter(([label]) => label !== '计件金额')"
       @close="closePreviewDialog"
       @download="handlePreviewDownload"
     />

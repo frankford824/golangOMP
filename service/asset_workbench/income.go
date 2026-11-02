@@ -42,6 +42,18 @@ func (s *Service) SetSettlementVisibility(ctx context.Context, actor domain.Requ
 
 func incomeMoney(v float64) float64 { return math.Round(v*100) / 100 }
 
+// Shared policy for all client response projections, including create results.
+func (s *Service) CanViewIncomeAmounts(ctx context.Context, actor domain.RequestActor) (bool, *domain.AppError) {
+	if isAssetWorkbenchAdmin(actor) {
+		return true, nil
+	}
+	profile, err := s.repo.GetProfileByUserID(ctx, actor.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, domain.NewAppError(domain.ErrCodeInternalError, "Failed to check income visibility.", nil)
+	}
+	return profile == nil || profile.SettlementVisible == nil || *profile.SettlementVisible, nil
+}
+
 func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor) (*MySettlementResponse, *domain.AppError) {
 	if appErr := s.requireRepo(); appErr != nil {
 		return nil, appErr

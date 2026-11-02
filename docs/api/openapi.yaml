@@ -34,7 +34,7 @@ tags:
   - name: CostRules
     description: Current cost-rule maintenance, lineage, version, effective-window and calculation-preview contract.
   - name: AssetWorkbench
-    description: Independent assets.yongbo.cloud workbench APIs for piecework submission, template assignment, member lookup, and settlement support.
+    description: Independent assets.yongbo.cloud workbench APIs for piecework submission, template assignment, member lookup, and settlement support. For ordinary client accounts with settlement_visible=false, protected JSON success and error responses redact monetary amount and unit-price values (numeric values become zero and formatted strings become empty), including nested submission snapshots, supplement results and search metadata. Counts, identifiers, original file streams and authorized administrative business views are unchanged. Personal income reads remain forbidden.
   - name: IntegrationCenter
     description: Operational machine-to-machine integration boundary for external-asset ingestion and the narrow ERP Bridge filing trace used by task business information.
 components:
@@ -113,7 +113,7 @@ components:
           description: Full value for self/detail responses; masked in the profile list response.
         onboarded_at: { type: string, format: date-time, nullable: true }
         grade_hidden: { type: boolean }
-        settlement_visible: { type: boolean, default: true, description: Owner income-page display permission. Changed only through the dedicated administrator endpoint; never affects earned amounts. }
+        settlement_visible: { type: boolean, default: true, description: Controls ordinary client income visibility across income pages, drive, ledger, previews, exports and protected JSON responses. Authorized administrator business views remain available. Changed only through the dedicated administrator endpoint; never affects earned amounts. }
         status: { type: string, enum: [pending, active, suspended] }
         pii_completed: { type: boolean }
         created_at: { type: string, format: date-time }
