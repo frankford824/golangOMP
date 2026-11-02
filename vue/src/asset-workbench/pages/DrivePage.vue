@@ -466,7 +466,7 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
       }
     : {
         id: activeMode.value === 'uploads' ? 'asset-drive-upload-overview-spreadsheet' : 'asset-drive-file-spreadsheet',
-        revision: `files:${activeMode.value}:${selectedDir.value?.key ?? 'all'}:${driveFolderPath.value}:${driveFolders.value.map((folder) => folder.path).join('|')}:${files.value.map((file) => file.id).join('|')}`,
+        revision: `files:${activeMode.value}:${selectedDir.value?.key ?? 'all'}:${driveFolderPath.value}:${driveFolders.value.map((folder) => folder.path).join('|')}:${files.value.map((file) => file.id).join('|')}:income:${canViewAmounts.value}`,
         mode: 'drive',
         title: activeMode.value === 'uploads' ? '上传总览清单模式' : '上传素材清单模式',
         description: activeMode.value === 'uploads'
