@@ -64,7 +64,7 @@ describe('DrivePage client folder deletion', () => {
     await button(wrapper,'清单模式').trigger('click')
     const source=wrapper.findComponent(SpreadsheetWorkbench).props('source')
     expect(source.sheets[0].columns.some((column:{key:string})=>column.key==='gross_amount')).toBe(visible)
-    expect(source.sheets[0].rows[0].gross_amount.includes('123.45')).toBe(visible)
+    expect(String(source.sheets[0].rows[0].gross_amount).includes('123.45')).toBe(visible)
     if(visible){
       const store=useAssetWorkbenchSessionStore()
       store.setBootstrap({...store.bootstrap,profile:{settlement_visible:false}} as never)
@@ -72,7 +72,7 @@ describe('DrivePage client folder deletion', () => {
       const changed=wrapper.findComponent(SpreadsheetWorkbench).props('source')
       expect(changed.revision).not.toBe(source.revision)
       expect(changed.sheets[0].columns.some((column:{key:string})=>column.key==='gross_amount')).toBe(false)
-      expect(wrapper.findComponent(WorkbenchPreviewDialog).props('metaRows').some(([label]:[string,string])=>label==='计件金额')).toBe(false)
+      expect((wrapper.findComponent(WorkbenchPreviewDialog).props('metaRows') ?? []).some(([label]:[string,string])=>label==='计件金额')).toBe(false)
     }
     wrapper.unmount()
   })
