@@ -13031,8 +13031,8 @@ curl -X POST https://api.example.com/v1/asset-workbench/settlement/batches/<batc
 ### 简介
 支持方法: GET, PUT。
 
-- `GET`: Lists per-person supplement switches. An enabled permission is scoped to the current Asia/Shanghai natural month and can be closed at any time.
-- `PUT`: Opens supplement entry only for the current Asia/Shanghai natural month, or closes an existing month permission. The target supplement date does not control the payroll month.
+- `GET`: Lists per-person, per-payroll-month supplement switches, including historical months. Permissions can be closed at any time; a generated or confirmed batch locks supplement entry for the whole month even if a permission remains enabled.
+- `PUT`: Opens supplement entry for a current or historical payroll month with no generated or confirmed settlement batch, or closes an existing permission. Cancelled batches do not lock the month. Future months are rejected. Opening and submission serialize with batch generation; the target supplement date does not control the payroll month.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13130,7 +13130,8 @@ Content-Type: `application/json`
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid or non-current month |
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid or future month |
+| 409 | 见 `error.code` | 见 `deny_code` | Month locked by a generated or confirmed batch |
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
 | 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
 
@@ -13156,7 +13157,7 @@ curl -X PUT https://api.example.com/v1/asset-workbench/settlement/supplement-per
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns the current Asia/Shanghai natural month for the selected person. Historical target dates are allowed, but their month never replaces the returned payroll month.
+- `GET`: Returns descending Asia/Shanghai payroll months from the current month through the earliest recorded workbench business month (at least the previous month), excluding every month with a generated or confirmed batch. Cancelled batches do not lock the month. Saving permissions and submitting supplements revalidate the month; this list is not authorization to submit.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13287,7 +13288,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/report \
 支持方法: GET, POST。
 
 - `GET`: Lists manual settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, file/work name, status, and supplement date.
-- `POST`: Creates one supplement in the current Asia/Shanghai natural month. Settlement roles may create a manual row. Asset submitters may create only their own row, must supply uploaded `upload_session_ids`, and must still have an enabled current-month permission when the transaction locks the permission row. Uploaded supplements reuse normal upload directories, pricing, file query, and preview, but their linked submission item has `entry_kind=supplement` and is excluded from normal piecework settlement.
+- `POST`: Creates one supplement in an unlocked current or historical payroll month. Future months and months with generated or confirmed batches are rejected. Settlement roles may create a manual row. Asset submitters may create only their own row, must supply uploaded `upload_session_ids`, and must still have an enabled permission for the selected month when the transaction locks the permission row. Submission serializes with batch generation and rechecks the month inside the transaction. Uploaded supplements reuse normal upload directories, pricing, file query, and preview, but their linked submission item has `entry_kind=supplement` and is excluded from normal piecework settlement. The target supplement date does not change its payroll month.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13401,6 +13402,7 @@ Content-Type: `application/json`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
 | 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 409 | 见 `error.code` | 见 `deny_code` | Month locked by a generated or confirmed batch |
 
 ##### curl 示例
 ```bash
@@ -13491,7 +13493,7 @@ curl -X PATCH https://api.example.com/v1/asset-workbench/profiles/<user_id>/sett
 ### 简介
 支持方法: GET。
 
-- `GET`: Owner-scoped consistent snapshot of all months. Combines unsettled priced works and approved unbatched supplements with generated and confirmed ledger snapshots exactly once. Excludes voided works, draft/voided supplements and cancelled batches. Unpriced works are counted separately. A month is confirmed only when no pending works or batches remain. Confirmation is not proof of bank payment. Denied when the owner's settlement_visible flag is false. Current-month active supplements include all rows, without a first-page limit.
+- `GET`: Owner-scoped consistent income snapshot of all months. Combines unsettled priced works and approved unbatched supplements with generated and confirmed ledger snapshots exactly once. Excludes voided works, draft/voided supplements and cancelled batches from income. Unpriced works are counted separately. A month is confirmed only when no pending works or batches remain. Confirmation is not proof of bank payment. Denied when the owner's settlement_visible flag is false. supplement_permissions lists enabled, unlocked current and historical month permissions; supplement_permission is the current-month subset for older clients. supplements includes all non-voided owner rows across months without a first-page limit. Permissions are rechecked at submission.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13549,7 +13551,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/my \
 ### 简介
 支持方法: POST。
 
-- `POST`: Batch-creates approved supplement rows in the current Asia/Shanghai natural month. Optional `supplement_date` cells may point to historical days. Each row still checks payee/month supplement permission and duplicate hints.
+- `POST`: Batch-creates approved supplement rows in an unlocked current or historical payroll month. Optional `supplement_date` cells do not change the payroll month. Each row rechecks the month lock, payee/month permission and duplicate hints, and serializes with settlement batch generation.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

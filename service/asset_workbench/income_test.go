@@ -18,6 +18,15 @@ type personalIncomeRepo struct {
 	visibilityUser int64
 	visible        bool
 	events         []*domain.AssetWorkbenchEvent
+	permissions    []*domain.AssetWorkbenchSupplementPermission
+	monthStates    map[string]bool
+}
+
+func (r *personalIncomeRepo) ListSupplementPermissions(context.Context, repo.AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, error) {
+	return r.permissions, int64(len(r.permissions)), nil
+}
+func (r *personalIncomeRepo) ListSettlementMonthStates(context.Context) (map[string]bool, error) {
+	return r.monthStates, nil
 }
 
 func (r *personalIncomeRepo) GetProfileByUserID(context.Context, int64) (*domain.AssetWorkbenchProfile, error) {
@@ -109,6 +118,32 @@ func TestPersonalIncomeSupplementStatusAndAllRows(t *testing.T) {
 	}
 	if len(got.Supplements) != 56 {
 		t.Fatalf("current supplements=%d, want 53 approved + draft + in_batch + settled", len(got.Supplements))
+	}
+}
+
+func TestPersonalIncomeExposesOnlyOwnerUnlockedHistoricalPermissionsAndRecords(t *testing.T) {
+	s, r, actor := incomeFixture()
+	r.permissions = []*domain.AssetWorkbenchSupplementPermission{
+		{ID: 1, PayeeUserID: 77, BusinessMonth: "2026-09", Enabled: true},
+		{ID: 2, PayeeUserID: 77, BusinessMonth: "2026-10", Enabled: true},
+		{ID: 3, PayeeUserID: 77, BusinessMonth: "2026-08", Enabled: true},
+		{ID: 4, PayeeUserID: 77, BusinessMonth: "2026-11", Enabled: true},
+		{ID: 5, PayeeUserID: 78, BusinessMonth: "2026-09", Enabled: true},
+	}
+	r.monthStates = map[string]bool{"2026-08": true}
+	r.sources.Supplements = []*domain.AssetWorkbenchSettlementSupplement{{ID: 1, PayeeUserID: 77, BusinessMonth: "2026-09", Status: "approved", GrossAmount: 12}}
+	got, err := s.MySettlement(context.Background(), actor)
+	if err != nil || len(got.SupplementPermissions) != 2 || got.SupplementPermissions[0].BusinessMonth != "2026-10" || got.SupplementPermissions[1].BusinessMonth != "2026-09" || got.SupplementPermission.BusinessMonth != "2026-10" {
+		t.Fatalf("got=%+v err=%+v", got, err)
+	}
+	if len(got.Supplements) != 1 || got.Months[0].BusinessMonth != "2026-09" || got.Months[0].SupplementAmount != 12 || got.EstimatedNetAmount != 0 {
+		t.Fatalf("historical income counted in wrong month: %+v", got)
+	}
+	// A newly generated batch hides a still-enabled permission on the next refresh.
+	r.monthStates["2026-09"] = true
+	got, err = s.MySettlement(context.Background(), actor)
+	if err != nil || len(got.SupplementPermissions) != 1 {
+		t.Fatalf("stale permission returned: %+v err=%+v", got, err)
 	}
 }
 

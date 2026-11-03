@@ -293,6 +293,8 @@ func (r *errorImportRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domai
 
 type supplementRepo struct {
 	repo.AssetWorkbenchRepo
+	monthStates     map[string]bool
+	monthTxHook     func()
 	items           []*domain.AssetWorkbenchSubmissionItem
 	supplements     []*domain.AssetWorkbenchSettlementSupplement
 	permissions     []*domain.AssetWorkbenchSupplementPermission
@@ -3452,7 +3454,7 @@ func TestUpsertSupplementPermissionWritesEvent(t *testing.T) {
 	}
 }
 
-func TestUpsertSupplementPermissionRejectsNonCurrentNaturalMonth(t *testing.T) {
+func TestUpsertSupplementPermissionRejectsFutureMonth(t *testing.T) {
 	workbenchRepo := &supplementRepo{}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
 	svc.nowFn = func() time.Time { return time.Date(2026, 7, 10, 2, 0, 0, 0, time.UTC) }
@@ -3460,18 +3462,18 @@ func TestUpsertSupplementPermissionRejectsNonCurrentNaturalMonth(t *testing.T) {
 
 	_, appErr := svc.UpsertSupplementPermission(context.Background(), actor, UpsertSupplementPermissionParams{
 		PayeeUserID:   1001,
-		BusinessMonth: "2026-06",
+		BusinessMonth: "2026-08",
 		Enabled:       true,
 	})
 	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
 		t.Fatalf("UpsertSupplementPermission() error = %+v, want invalid request", appErr)
 	}
 	if len(workbenchRepo.permissions) != 0 || len(workbenchRepo.events) != 0 {
-		t.Fatalf("permission should not be saved for a past month: permissions=%+v events=%+v", workbenchRepo.permissions, workbenchRepo.events)
+		t.Fatalf("permission should not be saved for a future month: permissions=%+v events=%+v", workbenchRepo.permissions, workbenchRepo.events)
 	}
 }
 
-func TestListSupplementEligibleMonthsReturnsCurrentNaturalMonth(t *testing.T) {
+func TestListSupplementEligibleMonthsIncludesPreviousMonth(t *testing.T) {
 	workbenchRepo := &supplementRepo{}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
 	svc.nowFn = func() time.Time { return time.Date(2026, 7, 31, 16, 30, 0, 0, time.UTC) }
@@ -3481,7 +3483,7 @@ func TestListSupplementEligibleMonthsReturnsCurrentNaturalMonth(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("ListSupplementEligibleMonths() error = %+v", appErr)
 	}
-	if len(months) != 1 || months[0] != "2026-08" {
+	if len(months) != 2 || months[0] != "2026-08" || months[1] != "2026-07" {
 		t.Fatalf("months = %+v, want Asia/Shanghai current month 2026-08", months)
 	}
 }

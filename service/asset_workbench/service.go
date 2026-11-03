@@ -961,13 +961,14 @@ type SettlementReportDifficultyMetric struct {
 }
 
 type MySettlementResponse struct {
-	GeneratedAt          time.Time                                    `json:"generated_at"`
-	RefreshAfterSeconds  int                                          `json:"refresh_after_seconds"`
-	CurrentMonth         string                                       `json:"current_month"`
-	EstimatedNetAmount   float64                                      `json:"estimated_net_amount"`
-	Months               []MySettlementMonthRow                       `json:"months"`
-	SupplementPermission *domain.AssetWorkbenchSupplementPermission   `json:"supplement_permission,omitempty"`
-	Supplements          []*domain.AssetWorkbenchSettlementSupplement `json:"supplements"`
+	GeneratedAt           time.Time                                    `json:"generated_at"`
+	RefreshAfterSeconds   int                                          `json:"refresh_after_seconds"`
+	CurrentMonth          string                                       `json:"current_month"`
+	EstimatedNetAmount    float64                                      `json:"estimated_net_amount"`
+	Months                []MySettlementMonthRow                       `json:"months"`
+	SupplementPermission  *domain.AssetWorkbenchSupplementPermission   `json:"supplement_permission,omitempty"`
+	SupplementPermissions []*domain.AssetWorkbenchSupplementPermission `json:"supplement_permissions"`
+	Supplements           []*domain.AssetWorkbenchSettlementSupplement `json:"supplements"`
 }
 
 type MySettlementMonthRow struct {
@@ -4869,7 +4870,7 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", err.Error())
 	}
 	var batch *domain.AssetWorkbenchSettlementBatch
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := s.repo.RunSettlementMonthTx(ctx, businessMonth, func(tx repo.Tx) error {
 		items, err := s.repo.LockSettleableItems(ctx, tx, businessMonth)
 		if err != nil {
 			return err
@@ -5439,7 +5440,26 @@ func (s *Service) ListSupplementEligibleMonths(ctx context.Context, actor domain
 	if payeeUserID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "payee_user_id is required.", nil)
 	}
-	return []string{s.businessMonth(s.nowFn().UTC())}, nil
+	states, err := s.repo.ListSettlementMonthStates(ctx)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load supplement months.", nil)
+	}
+	now := s.nowFn().In(s.loc)
+	current := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, s.loc)
+	first := current.AddDate(0, -1, 0)
+	for month := range states {
+		if parsed, err := time.ParseInLocation("2006-01", month, s.loc); err == nil && parsed.Before(first) {
+			first = parsed
+		}
+	}
+	months := []string{}
+	for month := current; !month.Before(first); month = month.AddDate(0, -1, 0) {
+		key := month.Format("2006-01")
+		if !states[key] {
+			months = append(months, key)
+		}
+	}
+	return months, nil
 }
 
 func (s *Service) UpsertSupplementPermission(ctx context.Context, actor domain.RequestActor, params UpsertSupplementPermissionParams) (*domain.AssetWorkbenchSupplementPermission, *domain.AppError) {
@@ -5453,15 +5473,13 @@ func (s *Service) UpsertSupplementPermission(ctx context.Context, actor domain.R
 	if appErr != nil {
 		return nil, appErr
 	}
-	if item.Enabled && item.BusinessMonth != s.businessMonth(s.nowFn().UTC()) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Supplement permission can only be opened for the current natural month.", map[string]interface{}{
-			"payee_user_id":          item.PayeeUserID,
-			"business_month":         item.BusinessMonth,
-			"current_business_month": s.businessMonth(s.nowFn().UTC()),
-		})
-	}
 	var saved *domain.AssetWorkbenchSupplementPermission
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := s.repo.RunSettlementMonthTx(ctx, item.BusinessMonth, func(tx repo.Tx) error {
+		if item.Enabled {
+			if appErr := s.ensureSupplementMonthOpen(ctx, item.BusinessMonth); appErr != nil {
+				return appErr
+			}
+		}
 		var err error
 		saved, err = s.repo.UpsertSupplementPermission(ctx, tx, item)
 		if err != nil {
@@ -5469,6 +5487,10 @@ func (s *Service) UpsertSupplementPermission(ctx context.Context, actor domain.R
 		}
 		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSupplementPermissionChanged, domain.AssetWorkbenchEntitySupplementPermission, &saved.ID, nil, saved, item.Reason)
 	}); err != nil {
+		var appErr *domain.AppError
+		if errors.As(err, &appErr) {
+			return nil, appErr
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update supplement permission.", err.Error())
 	}
 	if s.notifications != nil && saved.PayeeUserID > 0 {
@@ -5584,11 +5606,8 @@ func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.R
 	if appErr != nil {
 		return nil, appErr
 	}
-	if item.BusinessMonth != currentBusinessMonth {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Settlement supplements must be recorded in the current natural month.", map[string]interface{}{
-			"business_month":         item.BusinessMonth,
-			"current_business_month": currentBusinessMonth,
-		})
+	if appErr := s.ensureSupplementMonthOpen(ctx, item.BusinessMonth); appErr != nil {
+		return nil, appErr
 	}
 	if appErr := s.ensureDifficultyClass(ctx, item.DifficultyClass, false); appErr != nil {
 		return nil, appErr
@@ -5603,7 +5622,10 @@ func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.R
 	item.DuplicateHint = duplicateHint
 	var created *domain.AssetWorkbenchSettlementSupplement
 	var createdFiles []*domain.AssetWorkbenchSubmissionFile
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := s.repo.RunSettlementMonthTx(ctx, item.BusinessMonth, func(tx repo.Tx) error {
+		if appErr := s.ensureSupplementMonthOpen(ctx, item.BusinessMonth); appErr != nil {
+			return appErr
+		}
 		if appErr := s.ensureSupplementPermissionOpenForUpdate(ctx, tx, item.PayeeUserID, item.BusinessMonth); appErr != nil {
 			return appErr
 		}

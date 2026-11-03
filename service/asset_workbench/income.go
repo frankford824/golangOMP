@@ -146,7 +146,7 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 		if supplement == nil || supplement.PayeeUserID != actor.ID {
 			continue
 		}
-		if supplement.BusinessMonth == currentMonth && supplement.Status != domain.AssetWorkbenchSupplementStatusVoided {
+		if supplement.Status != domain.AssetWorkbenchSupplementStatusVoided {
 			currentSupplements = append(currentSupplements, supplement)
 		}
 		if supplement.Status != domain.AssetWorkbenchSupplementStatusApproved || supplement.LinkedBatchID != nil {
@@ -217,14 +217,21 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 		months = append(months, *row)
 	}
 	sort.Slice(months, func(i, j int) bool { return months[i].BusinessMonth > months[j].BusinessMonth })
-	permission, err := s.repo.GetSupplementPermission(ctx, actor.ID, currentMonth)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load supplement permission.", nil)
+	permissions, appErr := s.openSupplementPermissions(ctx, actor.ID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	var permission *domain.AssetWorkbenchSupplementPermission
+	for _, row := range permissions {
+		if row.BusinessMonth == currentMonth {
+			permission = row
+			break
+		}
 	}
 	if appErr := s.enrichSettlementSupplementFiles(ctx, currentSupplements); appErr != nil {
 		return nil, appErr
 	}
-	result := &MySettlementResponse{CurrentMonth: currentMonth, Months: months, Supplements: currentSupplements, SupplementPermission: permission, GeneratedAt: now, RefreshAfterSeconds: 30}
+	result := &MySettlementResponse{CurrentMonth: currentMonth, Months: months, Supplements: currentSupplements, SupplementPermission: permission, SupplementPermissions: permissions, GeneratedAt: now, RefreshAfterSeconds: 30}
 	if row := rows[currentMonth]; row != nil {
 		result.EstimatedNetAmount = row.NetAmount
 	}

@@ -212,7 +212,7 @@
 | GET | `/v1/asset-workbench/materials/browse` | Browse material assets as a virtual directory tree | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/settlement/batches/{batch_id}/reverse-confirmation` | Reverse one confirmed but unpaid settlement batch | POST:SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PUT | `/v1/asset-workbench/settlement/supplement-permissions` | List asset workbench supplement permissions；Open or close supplement permission for one person | GET:AssetSettlement, SuperAdmin; PUT:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/asset-workbench/settlement/supplement-eligible-months` | Get the natural month currently eligible for supplement entry | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/settlement/supplement-eligible-months` | Get unlocked current and historical months eligible for supplement entry | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/settlement/report` | Get asset workbench settlement report | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/settlement/supplements` | List asset workbench settlement supplements；Create asset workbench settlement supplement | GET:AssetSettlement, SuperAdmin; POST:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/asset-workbench/profiles/{user_id}/settlement-visibility` | Set a person's client income-page visibility | PATCH:HRAdmin, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |

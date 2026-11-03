@@ -630,6 +630,9 @@ type AssetWorkbenchRepo interface {
 	FindActiveDeductionRule(ctx context.Context, workerType, jobGrade, difficultyClass string, asOf time.Time) (*domain.AssetWorkbenchDeductionRule, error)
 
 	LockSettleableItems(ctx context.Context, tx Tx, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)
+	// Serializes supplement permission/submission and batch generation for a month across processes.
+	RunSettlementMonthTx(ctx context.Context, businessMonth string, fn func(Tx) error) error
+	ListSettlementMonthStates(ctx context.Context) (map[string]bool, error)
 	LockSettleableSupplements(ctx context.Context, tx Tx, businessMonth string) ([]*domain.AssetWorkbenchSettlementSupplement, error)
 	CreateSettlementBatch(ctx context.Context, tx Tx, batch *domain.AssetWorkbenchSettlementBatch) (*domain.AssetWorkbenchSettlementBatch, error)
 	CreateSettlementItem(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementItem) (*domain.AssetWorkbenchSettlementItem, error)

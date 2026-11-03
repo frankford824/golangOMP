@@ -17828,7 +17828,7 @@ export interface paths {
         };
         /**
          * List asset workbench supplement permissions
-         * @description Lists per-person supplement switches. An enabled permission is scoped to the current Asia/Shanghai natural month and can be closed at any time.
+         * @description Lists per-person, per-payroll-month supplement switches, including historical months. Permissions can be closed at any time; a generated or confirmed batch locks supplement entry for the whole month even if a permission remains enabled.
          */
         get: {
             parameters: {
@@ -17895,7 +17895,7 @@ export interface paths {
         };
         /**
          * Open or close supplement permission for one person
-         * @description Opens supplement entry only for the current Asia/Shanghai natural month, or closes an existing month permission. The target supplement date does not control the payroll month.
+         * @description Opens supplement entry for a current or historical payroll month with no generated or confirmed settlement batch, or closes an existing permission. Cancelled batches do not lock the month. Future months are rejected. Opening and submission serialize with batch generation; the target supplement date does not control the payroll month.
          */
         put: {
             parameters: {
@@ -17942,7 +17942,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid or non-current month */
+                /** @description Invalid or future month */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -17958,6 +17958,13 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Month locked by a generated or confirmed batch */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -17980,8 +17987,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get the natural month currently eligible for supplement entry
-         * @description Returns the current Asia/Shanghai natural month for the selected person. Historical target dates are allowed, but their month never replaces the returned payroll month.
+         * Get unlocked current and historical months eligible for supplement entry
+         * @description Returns descending Asia/Shanghai payroll months from the current month through the earliest recorded workbench business month (at least the previous month), excluding every month with a generated or confirmed batch. Cancelled batches do not lock the month. Saving permissions and submitting supplements revalidate the month; this list is not authorization to submit.
          */
         get: {
             parameters: {
@@ -18349,7 +18356,7 @@ export interface paths {
         put?: never;
         /**
          * Create asset workbench settlement supplement
-         * @description Creates one supplement in the current Asia/Shanghai natural month. Settlement roles may create a manual row. Asset submitters may create only their own row, must supply uploaded `upload_session_ids`, and must still have an enabled current-month permission when the transaction locks the permission row. Uploaded supplements reuse normal upload directories, pricing, file query, and preview, but their linked submission item has `entry_kind=supplement` and is excluded from normal piecework settlement.
+         * @description Creates one supplement in an unlocked current or historical payroll month. Future months and months with generated or confirmed batches are rejected. Settlement roles may create a manual row. Asset submitters may create only their own row, must supply uploaded `upload_session_ids`, and must still have an enabled permission for the selected month when the transaction locks the permission row. Submission serializes with batch generation and rechecks the month inside the transaction. Uploaded supplements reuse normal upload directories, pricing, file query, and preview, but their linked submission item has `entry_kind=supplement` and is excluded from normal piecework settlement. The target supplement date does not change its payroll month.
          */
         post: {
             parameters: {
@@ -18471,6 +18478,13 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description Month locked by a generated or confirmed batch */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         delete?: never;
@@ -18570,7 +18584,7 @@ export interface paths {
         };
         /**
          * Get my asset-workbench settlement and supplement upload state
-         * @description Owner-scoped consistent snapshot of all months. Combines unsettled priced works and approved unbatched supplements with generated and confirmed ledger snapshots exactly once. Excludes voided works, draft/voided supplements and cancelled batches. Unpriced works are counted separately. A month is confirmed only when no pending works or batches remain. Confirmation is not proof of bank payment. Denied when the owner's settlement_visible flag is false. Current-month active supplements include all rows, without a first-page limit.
+         * @description Owner-scoped consistent income snapshot of all months. Combines unsettled priced works and approved unbatched supplements with generated and confirmed ledger snapshots exactly once. Excludes voided works, draft/voided supplements and cancelled batches from income. Unpriced works are counted separately. A month is confirmed only when no pending works or batches remain. Confirmation is not proof of bank payment. Denied when the owner's settlement_visible flag is false. supplement_permissions lists enabled, unlocked current and historical month permissions; supplement_permission is the current-month subset for older clients. supplements includes all non-voided owner rows across months without a first-page limit. Permissions are rechecked at submission.
          */
         get: {
             parameters: {
@@ -18632,6 +18646,24 @@ export interface paths {
                                     /** Format: date-time */
                                     updated_at?: string;
                                 };
+                                /** @description Enabled owner permissions for current or historical months without a generated or confirmed batch, newest month first. */
+                                supplement_permissions?: {
+                                    id?: number;
+                                    /** @description Linked supplement upload item; null for administrator-created manual rows. */
+                                    submission_item_id?: number | null;
+                                    payee_user_id?: number;
+                                    business_month?: string;
+                                    enabled?: boolean;
+                                    reason?: string;
+                                    granted_by?: number;
+                                    revoked_by?: number | null;
+                                    /** Format: date-time */
+                                    granted_at?: string;
+                                    /** Format: date-time */
+                                    revoked_at?: string | null;
+                                    /** Format: date-time */
+                                    updated_at?: string;
+                                }[];
                                 supplements?: {
                                     id?: number;
                                     payee_user_id?: number;
@@ -18729,7 +18761,7 @@ export interface paths {
         put?: never;
         /**
          * Import monthly settlement supplements from Excel
-         * @description Batch-creates approved supplement rows in the current Asia/Shanghai natural month. Optional `supplement_date` cells may point to historical days. Each row still checks payee/month supplement permission and duplicate hints.
+         * @description Batch-creates approved supplement rows in an unlocked current or historical payroll month. Optional `supplement_date` cells do not change the payroll month. Each row rechecks the month lock, payee/month permission and duplicate hints, and serializes with settlement batch generation.
          */
         post: {
             parameters: {
