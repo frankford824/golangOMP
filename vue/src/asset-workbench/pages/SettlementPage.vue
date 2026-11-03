@@ -978,7 +978,7 @@ async function loadSupplementEligibleMonths() {
   try {
     eligibleSupplementMonths.value = await assetWorkbenchApi.listSupplementEligibleMonths(permissionForm.value.payee_user_id)
     if (eligibleSupplementMonths.value.length) {
-      supplementMonth.value = eligibleSupplementMonths.value[0]
+      supplementMonth.value = eligibleSupplementMonths.value.includes(month.value) ? month.value : eligibleSupplementMonths.value[0]
     }
     notice.value = eligibleSupplementMonths.value.length ? '已读取当前可开放月份' : '当前没有可开放的补录月份'
   } catch (err) {
@@ -1630,7 +1630,7 @@ onMounted(() => {
           <div class="aw-settlement-section__head">
             <div>
               <h3>补录管理</h3>
-              <p>员工先申请，管理员按自然月开放补录权限；权限可随时关闭。补录金额在工资条中单独成行。</p>
+              <p>管理员可开放当前或历史未结算月份；已有生成或确认批次的月份锁定，取消批次后可重新开放。补录金额在所选月工资条中单独成行。</p>
             </div>
             <div class="aw-inline-actions">
               <button class="aw-secondary-button" type="button" @click="downloadSupplementTemplate">补录模板</button>
@@ -1643,7 +1643,7 @@ onMounted(() => {
               <div class="aw-panel__head">
                 <div>
                   <h3>补录开放</h3>
-                  <p class="aw-copy">收到申请后，按人员和自然月开放；关闭后该人员不能再提交该月补录。</p>
+                  <p class="aw-copy">按人员和结算月开放；关闭权限或生成结算批次后，该人员不能再提交该月补录。</p>
                 </div>
                 <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
               </div>
@@ -1656,8 +1656,8 @@ onMounted(() => {
                 />
                 <label>
                   开放结算月
-                  <select v-model="supplementMonth" :disabled="eligibleSupplementMonths.length === 0">
-                    <option v-if="eligibleSupplementMonths.length === 0" :value="supplementMonth">{{ supplementMonth }}</option>
+                  <select v-model="supplementMonth" aria-label="开放补录结算月" :disabled="eligibleSupplementMonths.length === 0">
+                    <option v-if="eligibleSupplementMonths.length === 0" :value="supplementMonth">暂无可开放月份</option>
                     <option v-for="item in eligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
                   </select>
                 </label>
@@ -1675,9 +1675,9 @@ onMounted(() => {
               </div>
               <div class="aw-inline-actions">
                 <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
-                  读取当前月份
+                  读取可开放月份
                 </button>
-                <button class="aw-primary-button" type="button" @click="upsertSupplementPermission">保存开放设置</button>
+                <button class="aw-primary-button" type="button" :disabled="eligibleMonthsLoading || (permissionForm.enabled && eligibleSupplementMonths.length === 0)" @click="upsertSupplementPermission">保存开放设置</button>
               </div>
             </div>
 

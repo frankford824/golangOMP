@@ -54,6 +54,39 @@ const supplements = [
 ]
 
 describe('MySettlementPage supplement deletion', () => {
+  it('uploads into the selected historical payroll month and removes permission after refresh', async () => {
+    const permissions = [
+      { id: 2, payee_user_id: 1001, business_month: '2026-11', enabled: true },
+      { id: 1, payee_user_id: 1001, business_month: '2026-10', enabled: true },
+    ]
+    mocks.mySettlement.mockResolvedValue({ current_month: '2026-11', months: [], supplements: [], supplement_permissions: permissions })
+    mocks.listUploadDirectories.mockResolvedValue([{ id: 8, name: 'C类', difficulty_class: 'C', enabled: true }])
+    const wrapper = mount(MySettlementPage)
+    await flushPromises()
+    const select = wrapper.get('select[aria-describedby="supplement-month-help"]')
+    expect(select.findAll('option').map((option) => option.text())).toEqual(['2026-11', '2026-10'])
+    await select.setValue('2026-10')
+    await wrapper.get('input[type="date"]').setValue('2026-10-20')
+    const input = wrapper.get('input[aria-label="选择补录文件"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['img'], 'missing.png', { type: 'image/png' })] })
+    await input.trigger('change')
+    mocks.mySettlement.mockResolvedValue({ current_month: '2026-11', months: [], supplements: [], supplement_permissions: [] })
+    await wrapper.findAll('button').find((button) => button.text() === '上传 1 个补录作品')!.trigger('click')
+    await flushPromises()
+    expect(mocks.createSettlementSupplement).toHaveBeenCalledWith(expect.objectContaining({ business_month: '2026-10', supplement_date: '2026-10-20' }))
+    expect(mocks.uploadWorkbenchFile).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ expectedBusinessMonth: '2026-10' }))
+    expect(wrapper.find('select[aria-describedby="supplement-month-help"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('当前没有可用的补录权限')
+    wrapper.unmount()
+  })
+
+  it('does not fall back to a stale singular permission when the server returns an empty month list', async () => {
+    mocks.mySettlement.mockResolvedValue({ months: [], supplements: [], supplement_permissions: [], supplement_permission: { id: 1, payee_user_id: 1001, business_month: '2026-10', enabled: true } })
+    const wrapper = mount(MySettlementPage)
+    await flushPromises()
+    expect(wrapper.find('select[aria-describedby="supplement-month-help"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('shows estimates, frozen batches, pending pricing and separate supplement counts', async () => {
     mocks.mySettlement.mockResolvedValue({ generated_at: '2026-10-20T10:00:00Z', estimated_net_amount: 35, supplements: [], months: [{ business_month: '2026-10', item_count: 2, page_count: 2, gross_amount: 30, deduction_amount: 2, welfare_amount: 1, adjustment_amount: 1, supplement_amount: 5, net_amount: 35, confirmed: false, settlement_state: 'partially_confirmed', confirmed_net_amount: 10, pending_confirmation_amount: 20, estimated_amount: 5, pending_pricing_count: 3, supplement_item_count: 1, supplement_page_count: 1 }] })
     const wrapper = mount(MySettlementPage)

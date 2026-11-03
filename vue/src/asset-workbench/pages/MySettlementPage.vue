@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { HttpAppError } from '@/services/http'
 import { Eye, FolderOpen, Gift, Images, RefreshCw, Trash2, Upload, WalletCards, X } from 'lucide-vue-next'
 
@@ -59,7 +59,14 @@ async function pollIncome() {
 
 const currentAmount = computed(() => formatMoney(result.value?.estimated_net_amount ?? 0))
 const months = computed(() => result.value?.months ?? [])
-const supplementPermission = computed(() => result.value?.supplement_permission ?? null)
+const supplementMonth = ref('')
+const supplementPermissions = computed(() => (result.value?.supplement_permissions
+  ?? (result.value?.supplement_permission ? [result.value.supplement_permission] : []))
+  .filter((row) => row.enabled).sort((a, b) => b.business_month.localeCompare(a.business_month)))
+watch(supplementPermissions, (permissions) => {
+  if (!permissions.some((row) => row.business_month === supplementMonth.value)) supplementMonth.value = permissions[0]?.business_month ?? ''
+}, { immediate: true })
+const supplementPermission = computed(() => supplementPermissions.value.find((row) => row.business_month === supplementMonth.value) ?? null)
 const supplements = computed(() => result.value?.supplements ?? [])
 const activeSupplements = computed(() => supplements.value.filter((row) => row.status !== 'voided'))
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
@@ -92,7 +99,7 @@ const selectedDirectory = computed(() => uploadDirectories.value.find((item) => 
 const selectedSupplementItems = computed(() => selectedFiles.value.map((file) => ({ file, relativePath: driveUploadRelativePath(file) })))
 const selectedSupplementGroups = computed(() => groupDriveUploadPieceworkItems(selectedSupplementItems.value))
 const selectedSupplementWorkNames = computed(() => selectedSupplementGroups.value.map((group) => ({ name: supplementGroupName(group) })))
-const duplicateFilenames = computed(() => duplicateSupplementFileNames(selectedSupplementWorkNames.value, supplements.value))
+const duplicateFilenames = computed(() => duplicateSupplementFileNames(selectedSupplementWorkNames.value, supplements.value.filter((row) => row.business_month === supplementMonth.value)))
 const supplementUploadOpen = computed(() => Boolean(supplementPermission.value?.enabled))
 const canUploadSupplement = computed(() =>
   supplementUploadOpen.value && Boolean(selectedDirectory.value) && selectedSupplementGroups.value.length > 0 && Boolean(supplementDate.value) && !uploading.value,
@@ -454,7 +461,7 @@ onBeforeUnmount(() => {
         <div>
           <p class="aw-eyebrow">补录上传</p>
           <h3>补交遗漏作品</h3>
-          <p class="aw-copy">管理员开放当月权限后，可按正常上传目录选择计价分类；补录工资不会进入正常作品工资。</p>
+          <p class="aw-copy">选择管理员已开放的结算月补交遗漏作品；补录工资计入所选月份，单独列示。已有生成或确认批次的月份不能补录。</p>
         </div>
         <span class="aw-chip" :class="supplementUploadOpen ? 'aw-chip--success' : 'aw-chip--neutral'">
           {{ supplementUploadOpen ? `已开放 ${supplementPermission?.business_month}` : '当前未开放' }}
@@ -462,6 +469,13 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="supplementUploadOpen" class="aw-form-grid">
+        <label>
+          补录结算月
+          <select v-model="supplementMonth" :disabled="uploading" aria-describedby="supplement-month-help">
+            <option v-for="permission in supplementPermissions" :key="permission.id" :value="permission.business_month">{{ permission.business_month }}</option>
+          </select>
+          <span id="supplement-month-help" class="aw-copy">本次补录工资归入此月；补录日期不会自动改变结算月。</span>
+        </label>
         <label>
           补录日期
           <input v-model="supplementDate" type="date" aria-describedby="supplement-date-help" />
@@ -536,7 +550,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </div>
-      <p v-else class="aw-inline-alert aw-inline-alert--info">当前自然月没有补录权限；请先联系管理员申请，管理员可随时开放或关闭。</p>
+      <p v-else class="aw-inline-alert aw-inline-alert--info">当前没有可用的补录权限；请联系管理员开放尚未生成结算批次的月份。</p>
 
       <div v-if="supplementUploadOpen" class="aw-inline-actions">
         <button class="aw-primary-button" type="button" :disabled="!canUploadSupplement" @click="uploadSupplements">
@@ -588,7 +602,7 @@ onBeforeUnmount(() => {
               />
               <span>
                 <strong>{{ row.order_no }}</strong>
-                <small>{{ row.supplement_date || '未填写日期' }} · {{ row.difficulty_class }}类 · {{ formatInt(row.page_count) }} 张</small>
+                <small>结算月 {{ row.business_month }} · {{ row.supplement_date || '未填写日期' }} · {{ row.difficulty_class }}类 · {{ formatInt(row.page_count) }} 张</small>
               </span>
             </label>
             <div class="aw-supplement-row__summary">
