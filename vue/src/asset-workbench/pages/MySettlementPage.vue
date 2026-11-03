@@ -63,9 +63,6 @@ const supplementMonth = ref('')
 const supplementPermissions = computed(() => (result.value?.supplement_permissions
   ?? (result.value?.supplement_permission ? [result.value.supplement_permission] : []))
   .filter((row) => row.enabled).sort((a, b) => b.business_month.localeCompare(a.business_month)))
-watch(supplementPermissions, (permissions) => {
-  if (!permissions.some((row) => row.business_month === supplementMonth.value)) supplementMonth.value = permissions[0]?.business_month ?? ''
-}, { immediate: true })
 const supplementPermission = computed(() => supplementPermissions.value.find((row) => row.business_month === supplementMonth.value) ?? null)
 const supplements = computed(() => result.value?.supplements ?? [])
 const activeSupplements = computed(() => supplements.value.filter((row) => row.status !== 'voided'))
@@ -115,6 +112,16 @@ const deletableSupplements = computed(() => activeSupplements.value.filter((row)
 const selectedSupplements = computed(() => deletableSupplements.value.filter((row) => selectedSupplementIds.value.includes(row.id)))
 const allSupplementsSelected = computed(() => deletableSupplements.value.length > 0 && deletableSupplements.value.every((row) => selectedSupplementIds.value.includes(row.id)))
 const selectedSupplementAmount = computed(() => selectedSupplements.value.reduce((total, row) => total + row.gross_amount, 0))
+
+watch(supplementPermissions, (permissions) => {
+  if (permissions.some((row) => row.business_month === supplementMonth.value)) return
+  if (selectedFiles.value.length) {
+    supplementMonth.value = ''
+    uploadError.value = '原选择的补录月份已关闭或锁定。待上传文件已保留，请重新确认结算月后上传。'
+  } else {
+    supplementMonth.value = permissions[0]?.business_month ?? ''
+  }
+}, { immediate: true })
 
 function formatMonthLabel(month: string) {
   const [year, value] = month.split('-')
@@ -468,10 +475,11 @@ onBeforeUnmount(() => {
         </span>
       </div>
 
-      <div v-if="supplementUploadOpen" class="aw-form-grid">
+      <div v-if="supplementPermissions.length" class="aw-form-grid">
         <label>
           补录结算月
           <select v-model="supplementMonth" :disabled="uploading" aria-describedby="supplement-month-help">
+            <option value="" disabled>请重新选择结算月</option>
             <option v-for="permission in supplementPermissions" :key="permission.id" :value="permission.business_month">{{ permission.business_month }}</option>
           </select>
           <span id="supplement-month-help" class="aw-copy">本次补录工资归入此月；补录日期不会自动改变结算月。</span>

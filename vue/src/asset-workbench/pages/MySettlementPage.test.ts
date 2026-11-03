@@ -64,7 +64,7 @@ describe('MySettlementPage supplement deletion', () => {
     const wrapper = mount(MySettlementPage)
     await flushPromises()
     const select = wrapper.get('select[aria-describedby="supplement-month-help"]')
-    expect(select.findAll('option').map((option) => option.text())).toEqual(['2026-11', '2026-10'])
+    expect(select.findAll('option').filter((option) => option.attributes('disabled') === undefined).map((option) => option.text())).toEqual(['2026-11', '2026-10'])
     await select.setValue('2026-10')
     await wrapper.get('input[type="date"]').setValue('2026-10-20')
     const input = wrapper.get('input[aria-label="选择补录文件"]')
@@ -85,6 +85,31 @@ describe('MySettlementPage supplement deletion', () => {
     const wrapper = mount(MySettlementPage)
     await flushPromises()
     expect(wrapper.find('select[aria-describedby="supplement-month-help"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('retains queued files and requires an explicit new month when the selected historical permission closes', async () => {
+    const permissions = [
+      { id: 2, payee_user_id: 1001, business_month: '2026-11', enabled: true },
+      { id: 1, payee_user_id: 1001, business_month: '2026-10', enabled: true },
+    ]
+    mocks.mySettlement.mockResolvedValue({ months: [], supplements: [], supplement_permissions: permissions })
+    mocks.listUploadDirectories.mockResolvedValue([{ id: 8, name: 'C类', difficulty_class: 'C', enabled: true }])
+    const wrapper = mount(MySettlementPage)
+    await flushPromises()
+    const select = wrapper.get('select[aria-describedby="supplement-month-help"]')
+    await select.setValue('2026-10')
+    const input = wrapper.get('input[aria-label="选择补录文件"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['img'], 'october.png', { type: 'image/png' })] })
+    await input.trigger('change')
+    mocks.mySettlement.mockResolvedValue({ months: [], supplements: [], supplement_permissions: [permissions[0]] })
+    await wrapper.findAll('button').find((button) => button.text().includes('刷新'))!.trigger('click')
+    await flushPromises()
+    expect((select.element as HTMLSelectElement).value).toBe('')
+    expect(wrapper.text()).toContain('待上传文件已保留')
+    expect(wrapper.get('[aria-label="补录待上传队列"]').text()).toContain('october.png')
+    expect(wrapper.findAll('button').some((button) => button.text() === '上传 1 个补录作品')).toBe(false)
+    expect(mocks.createSettlementSupplement).not.toHaveBeenCalled()
     wrapper.unmount()
   })
   it('shows estimates, frozen batches, pending pricing and separate supplement counts', async () => {
