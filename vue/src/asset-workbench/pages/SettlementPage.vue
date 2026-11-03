@@ -1754,7 +1754,7 @@ onMounted(() => {
               <p v-if="manualSupplementDuplicateWarning" class="aw-inline-alert aw-inline-alert--warning">
                 {{ manualSupplementDuplicateWarning }}
               </p>
-              <p class="aw-copy">选择文件时，系统会保存具体文件并按上传目录自动计价；不选文件则创建手工补录。补录工资统一计入当前自然月，并在工资条中单独显示。</p>
+              <p class="aw-copy">选择文件时，系统会保存具体文件并按上传目录自动计价；不选文件则创建手工补录。补录工资计入所选结算月，并在该月工资条中单独显示。</p>
               <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
                 <span>补录 Excel 批量导入</span>
                 <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>

@@ -29,6 +29,8 @@ describe('SettlementPage supplement months', () => {
     picker.vm.$emit('selected', { id: 366 })
     await flushPromises()
     const select = wrapper.get('select[aria-label="开放补录结算月"]')
+    expect(wrapper.text()).not.toContain('补录工资统一计入当前自然月')
+    expect(wrapper.text()).toContain('补录工资计入所选结算月')
     expect(select.findAll('option').map((option) => option.text())).toEqual(['2026-11', '2026-10'])
     await select.setValue('2026-10')
     await wrapper.findAll('button').find((button) => button.text() === '保存开放设置')!.trigger('click')

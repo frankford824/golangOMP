@@ -635,7 +635,7 @@ onBeforeUnmount(() => {
         </article>
       </div>
       <div v-else class="aw-empty-state">
-        <h3>当前月还没有补录记录</h3>
+        <h3>还没有补录记录</h3>
         <p>补录权限开放后，在上方选择日期、目录和文件即可上传。</p>
       </div>
     </div>
