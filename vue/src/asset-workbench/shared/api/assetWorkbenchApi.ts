@@ -455,6 +455,7 @@ export interface MySettlementResult {
   estimated_net_amount: number
   months: MySettlementMonthRow[]
   supplement_permission?: SupplementPermissionRow
+  supplement_permissions?: SupplementPermissionRow[]
   supplements: SettlementSupplementRow[]
 }
 
