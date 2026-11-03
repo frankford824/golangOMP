@@ -960,6 +960,7 @@ async function upsertSupplementPermission() {
       reason: permissionForm.value.reason,
     })
     notice.value = saved.enabled ? `已开放 ${saved.payee_user_id} 的 ${saved.business_month} 补录` : `已关闭 ${saved.payee_user_id} 的 ${saved.business_month} 补录`
+    month.value = saved.business_month
     permissionForm.value.reason = ''
     await loadSettlement({ keepNotice: true })
   } catch (err) {
@@ -1082,6 +1083,7 @@ async function createSupplement() {
       ...(uploadedSessionID ? { upload_session_ids: [uploadedSessionID] } : {}),
     }
     await assetWorkbenchApi.createSettlementSupplement(payload)
+    month.value = selectedMonth
     notice.value = uploadedSessionID
       ? `补录文件已关联并创建，金额按上传目录自动计价，计入 ${selectedMonth} 结算`
       : `手工补录已创建，计入 ${selectedMonth} 结算`

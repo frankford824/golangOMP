@@ -36,6 +36,7 @@ describe('SettlementPage supplement months', () => {
     await wrapper.findAll('button').find((button) => button.text() === '保存开放设置')!.trigger('click')
     await flushPromises()
     expect(mocks.upsertSupplementPermission).toHaveBeenCalledWith(expect.objectContaining({ payee_user_id: 366, business_month: '2026-10', enabled: true }))
+    expect(mocks.previewSettlement).toHaveBeenLastCalledWith('2026-10')
     mocks.listSupplementEligibleMonths.mockResolvedValue([])
     await wrapper.findAll('button').find((button) => button.text() === '读取可开放月份')!.trigger('click')
     await flushPromises()
