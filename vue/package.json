@@ -37,6 +37,7 @@
     "@fontsource/material-symbols-outlined": "^5.2.45",
     "@formatjs/intl-segmenter": "^12.2.10",
     "@formkit/auto-animate": "^0.9.0",
+    "@internationalized/date": "3.12.2",
     "@univerjs/preset-sheets-core": "^0.25.1",
     "@univerjs/preset-sheets-drawing": "0.25.1",
     "axios": "^1.18.1",

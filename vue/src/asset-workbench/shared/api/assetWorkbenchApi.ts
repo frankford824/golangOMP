@@ -1963,6 +1963,11 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async driveUploadDays(params: { month: string; dir_id?: number; unassigned?: boolean; q?: string; owner?: string; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
+    const res = await http.get<ApiEnvelope<string[]>>('/v1/asset-workbench/drive/upload-days', { params, signal })
+    return unwrap(res.data)
+  },
+
   async driveFiles(
     params: {
       dir_id?: number
