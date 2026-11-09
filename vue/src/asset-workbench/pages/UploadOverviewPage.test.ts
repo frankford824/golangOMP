@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.vue'
+import UploadLedgerDateField from '@aw/features/upload/UploadLedgerDateField.vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -314,10 +315,10 @@ describe('UploadOverviewPage self-service date scope', () => {
   it('opens an own-uploads ledger with default dates but without creator, rename or move controls', async () => {
     const wrapper = mountSelfLedger()
     await flushPromises()
-    const dateInputs = wrapper.findAll('input[type="date"]')
-    const day = (dateInputs[0]!.element as HTMLInputElement).value
+    const dateInputs = wrapper.findAllComponents(UploadLedgerDateField)
+    const day = dateInputs[0]!.props('modelValue')
     expect(day).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect((dateInputs[1]!.element as HTMLInputElement).value).toBe(day)
+    expect(dateInputs[1]!.props('modelValue')).toBe(day)
     expect(mocks.driveFiles).toHaveBeenCalledWith(expect.objectContaining({ created_from: day, created_to: day, owner: undefined }), expect.any(AbortSignal))
     expect(wrapper.text()).toContain('我的上传台账')
     expect(wrapper.text()).not.toContain('全站上传台账')
@@ -334,8 +335,9 @@ describe('UploadOverviewPage self-service date scope', () => {
     const wrapper = mountSelfLedger()
     await flushPromises()
     await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
-    await wrapper.findAll('input[type="date"]')[0]!.setValue('2026-01-01')
-    await wrapper.findAll('input[type="date"]')[1]!.setValue('2026-01-02')
+    const dateInputs = wrapper.findAllComponents(UploadLedgerDateField)
+    dateInputs[0]!.vm.$emit('update:modelValue', '2026-01-01')
+    dateInputs[1]!.vm.$emit('update:modelValue', '2026-01-02')
     await wrapper.get('input[aria-label="操作原因"]').setValue('错传')
     expect(button(wrapper, '删除').attributes('disabled')).toBeDefined()
     await wrapper.get('form.aw-upload-ledger__filters').trigger('submit')
@@ -375,7 +377,7 @@ describe('UploadOverviewPage self-service date scope', () => {
   it('requires a queried date range even if all historical rows have been selected', async () => {
     const wrapper = mountSelfLedger()
     await flushPromises()
-    for (const input of wrapper.findAll('input[type="date"]')) await input.setValue('')
+    for (const input of wrapper.findAllComponents(UploadLedgerDateField)) input.vm.$emit('update:modelValue', '')
     await wrapper.get('form.aw-upload-ledger__filters').trigger('submit')
     await flushPromises()
     await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
@@ -385,7 +387,7 @@ describe('UploadOverviewPage self-service date scope', () => {
     await button(wrapper, '恢复今天').trigger('click')
     await flushPromises()
     expect(wrapper.find('[aria-label="批量操作"]').exists()).toBe(false)
-    expect((wrapper.findAll('input[type="date"]')[0]!.element as HTMLInputElement).value).not.toBe('')
+    expect(wrapper.findAllComponents(UploadLedgerDateField)[0]!.props('modelValue')).not.toBe('')
     wrapper.unmount()
   })
 })
