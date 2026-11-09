@@ -16686,50 +16686,6 @@ paths:
                       page_size: { type: integer }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
-  /v1/asset-workbench/drive/upload-days:
-    get:
-      summary: List calendar dates with matching uploads
-      description: Returns distinct Asia/Shanghai upload dates in one calendar month, across all ledger pages. Uses the same visibility and keyword, uploader, directory and operation source filters as the upload ledger. The date range selected in the ledger does not constrain this lookup.
-      tags: [AssetWorkbench, ReadyForFrontend]
-      x-api-readiness: ready_for_frontend
-      x-rbac-placeholder:
-        auth_mode: bearer_authenticated
-        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
-      parameters:
-        - in: query
-          name: month
-          required: true
-          schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' }
-        - in: query
-          name: dir_id
-          schema: { type: integer }
-        - in: query
-          name: unassigned
-          schema: { type: boolean }
-        - in: query
-          name: q
-          schema: { type: string }
-        - in: query
-          name: owner
-          schema: { type: string }
-        - in: query
-          name: operation_source
-          schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }
-      responses:
-        '200':
-          description: Matching upload dates in ascending order
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    maxItems: 31
-                    items: { type: string, format: date }
-        '400': { description: Invalid month or operation source }
-        '401': { description: Unauthenticated }
-        '403': { description: Forbidden }
   /v1/asset-workbench/drive/folder:
     get:
       summary: Browse one virtual drive folder

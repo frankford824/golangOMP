@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -327,46 +326,6 @@ func (r *assetWorkbenchRepo) DriveSearchFiles(ctx context.Context, filter repo.A
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
-}
-
-func (r *assetWorkbenchRepo) DriveUploadDays(ctx context.Context, filter repo.AssetWorkbenchDriveFilter, monthStart time.Time) ([]string, error) {
-	nextMonth := monthStart.AddDate(0, 1, 0)
-	monthEnd := nextMonth.Add(-time.Microsecond)
-	filter.CreatedFrom, filter.CreatedTo = &monthStart, &monthEnd
-
-	// Bind Shanghai day boundaries just as the ledger binds its date filter.
-	// This also works when MySQL stores DATETIME values in another timezone.
-	var bucket strings.Builder
-	bucket.WriteString("CASE")
-	bucketArgs := []interface{}{}
-	for day := monthStart; day.Before(nextMonth); day = day.AddDate(0, 0, 1) {
-		bucket.WriteString(" WHEN f.created_at <= ? THEN ?")
-		bucketArgs = append(bucketArgs, day.AddDate(0, 0, 1).Add(-time.Microsecond), day.Format("2006-01-02"))
-	}
-	bucket.WriteString(" END")
-	query := func(fullText bool) ([]string, error) {
-		base, args := buildDriveSearchBase(filter, fullText)
-		rows, err := r.db.db.QueryContext(ctx, "SELECT DISTINCT "+bucket.String()+" AS upload_day "+base+" ORDER BY upload_day", append(bucketArgs, args...)...)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		days := []string{}
-		for rows.Next() {
-			var day string
-			if err := rows.Scan(&day); err != nil {
-				return nil, err
-			}
-			days = append(days, day)
-		}
-		return days, rows.Err()
-	}
-	days, err := query(true)
-	if strings.TrimSpace(filter.Keyword) != "" && (isMySQLFullTextIndexMissing(err) ||
-		(err == nil && len(days) == 0 && externalAssetBooleanQuery(filter.Keyword) != "")) {
-		return query(false)
-	}
-	return days, err
 }
 
 func buildDriveSearchBase(filter repo.AssetWorkbenchDriveFilter, preferFullText bool) (string, []interface{}) {

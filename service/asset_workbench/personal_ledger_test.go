@@ -12,33 +12,6 @@ import (
 type personalLedgerFilterRepo struct {
 	repo.AssetWorkbenchRepo
 	filter repo.AssetWorkbenchDriveFilter
-	month  time.Time
-}
-
-func (r *personalLedgerFilterRepo) DriveUploadDays(_ context.Context, filter repo.AssetWorkbenchDriveFilter, monthStart time.Time) ([]string, error) {
-	r.filter, r.month = filter, monthStart
-	return []string{"2026-10-02"}, nil
-}
-
-func TestUploadCalendarKeepsOwnerScopeAndShanghaiMonth(t *testing.T) {
-	r := &personalLedgerFilterRepo{}
-	s := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
-	actor := domain.RequestActor{ID: 22, Roles: []domain.Role{domain.RoleAssetSubmitter}}
-	days, err := s.ListDriveUploadDays(context.Background(), actor, "2026-10", repo.AssetWorkbenchDriveFilter{
-		OwnerKeyword: "another owner", OperationSource: "client_supplement",
-	})
-	if err != nil || len(days) != 1 || days[0] != "2026-10-02" {
-		t.Fatalf("days=%v error=%v", days, err)
-	}
-	if r.filter.OwnerUserID == nil || *r.filter.OwnerUserID != actor.ID || r.filter.OperationSource != "client_supplement" {
-		t.Fatalf("incorrect calendar scope: %+v", r.filter)
-	}
-	if got := r.month.UTC().Format(time.RFC3339); got != "2026-09-30T16:00:00Z" {
-		t.Fatalf("incorrect Shanghai month boundary: %s", got)
-	}
-	if _, err := s.ListDriveUploadDays(context.Background(), actor, "2026-13", repo.AssetWorkbenchDriveFilter{}); err == nil {
-		t.Fatal("invalid month should be rejected")
-	}
 }
 
 func (r *personalLedgerFilterRepo) DriveListFiles(_ context.Context, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error) {

@@ -10,7 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
-	"workflow/repo"
 )
 
 func parseDriveDirectory(c *gin.Context) (*int64, bool) {
@@ -99,26 +98,6 @@ func (h *AssetWorkbenchHandler) DriveListFiles(c *gin.Context) {
 		return
 	}
 	respondOKWithPagination(c, result.Items, gin.H{"total": result.Total, "page": result.Page, "page_size": result.Size})
-}
-
-func (h *AssetWorkbenchHandler) DriveUploadDays(c *gin.Context) {
-	actor, ok := h.sessionActor(c)
-	if !ok {
-		return
-	}
-	dirID, unassigned := parseDriveDirectory(c)
-	days, appErr := h.svc.ListDriveUploadDays(c.Request.Context(), actor, strings.TrimSpace(c.Query("month")), repo.AssetWorkbenchDriveFilter{
-		UploadDirectoryID: dirID,
-		Unassigned:        unassigned,
-		Keyword:           c.Query("q"),
-		OwnerKeyword:      c.Query("owner"),
-		OperationSource:   strings.TrimSpace(c.Query("operation_source")),
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, days)
 }
 
 func (h *AssetWorkbenchHandler) DriveBrowseFolder(c *gin.Context) {

@@ -104,45 +104,16 @@ func (s *Service) ListDriveOrders(ctx context.Context, actor domain.RequestActor
 	return items, nil
 }
 
-func validateDriveOperationSource(source string) *domain.AppError {
-	switch strings.TrimSpace(source) {
-	case "", "normal_upload", "supplement", "client_supplement", "admin_supplement":
-		return nil
-	default:
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "operation_source must be normal_upload, supplement, client_supplement, or admin_supplement.", nil)
-	}
-}
-
-func (s *Service) ListDriveUploadDays(ctx context.Context, actor domain.RequestActor, month string, filter repo.AssetWorkbenchDriveFilter) ([]string, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
-	}
-	if appErr := validateDriveOperationSource(filter.OperationSource); appErr != nil {
-		return nil, appErr
-	}
-	location, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load upload calendar timezone.", nil)
-	}
-	start, err := time.ParseInLocation("2006-01", month, location)
-	if err != nil || start.Year() < 1000 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "month must be a valid YYYY-MM.", nil)
-	}
-	filter.OwnerUserID = s.driveOwnerFilter(actor)
-	days, err := s.repo.DriveUploadDays(ctx, filter, start)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load upload calendar.", nil)
-	}
-	return days, nil
-}
-
 func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, keyword string, ownerKeyword string, operationSource string, createdFrom *time.Time, createdTo *time.Time, sortBy string, sortDir string, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
 	page, pageSize = normalizeDrivePage(page, pageSize)
-	if appErr := validateDriveOperationSource(operationSource); appErr != nil {
-		return nil, appErr
+	operationSource = strings.TrimSpace(operationSource)
+	switch operationSource {
+	case "", "normal_upload", "supplement", "client_supplement", "admin_supplement":
+	default:
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "operation_source must be normal_upload, supplement, client_supplement, or admin_supplement.", nil)
 	}
 	filter := repo.AssetWorkbenchDriveFilter{
 		OwnerUserID:       s.driveOwnerFilter(actor),
@@ -151,7 +122,7 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 		OrderNo:           orderNo,
 		Keyword:           strings.TrimSpace(keyword),
 		OwnerKeyword:      strings.TrimSpace(ownerKeyword),
-		OperationSource:   strings.TrimSpace(operationSource),
+		OperationSource:   operationSource,
 		CreatedFrom:       createdFrom,
 		CreatedTo:         createdTo,
 		SortBy:            strings.TrimSpace(sortBy),

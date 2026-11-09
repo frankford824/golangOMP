@@ -602,7 +602,6 @@ type AssetWorkbenchRepo interface {
 	DriveListDirectories(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveDirectory, error)
 	DriveListOrders(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveOrder, error)
 	DriveListFiles(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error)
-	DriveUploadDays(ctx context.Context, filter AssetWorkbenchDriveFilter, monthStart time.Time) ([]string, error)
 	DriveSearchFiles(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error)
 	DriveLocateFile(ctx context.Context, filter AssetWorkbenchDriveFilter, fileID int64) (*domain.AssetWorkbenchDriveFile, error)
 	ListSubmissions(ctx context.Context, filter AssetWorkbenchSubmissionFilter) ([]*domain.AssetWorkbenchSubmission, int64, error)

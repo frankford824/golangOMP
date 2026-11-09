@@ -13,7 +13,6 @@ import {
   type DriveFileRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
-import UploadLedgerDateField from '@aw/features/upload/UploadLedgerDateField.vue'
 import { formatMoney } from '@aw/shared/format/number'
 import { useGlobalDownload } from '@aw/shared/download/useGlobalDownload'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
@@ -432,20 +431,9 @@ async function hydrateSupplementSources(rows: DriveFileRow[], signal?: AbortSign
   }
 }
 
-const uploadDayFilters = computed(() => ({
-  ...directoryParams(),
-  q: query.value.trim() || undefined,
-  owner: canViewAllUploads.value ? owner.value.trim() || undefined : undefined,
-  operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
-}))
-const uploadDayFilterKey = computed(() => JSON.stringify(uploadDayFilters.value))
-
-function loadUploadDays(month: string, signal: AbortSignal) {
-  return assetWorkbenchApi.driveUploadDays({ ...uploadDayFilters.value, month }, signal)
-}
-
 function currentFileFilters(): LedgerFilters {
-  return { ...uploadDayFilters.value,
+  return { ...directoryParams(), q: query.value.trim() || undefined, owner: canViewAllUploads.value ? owner.value.trim() || undefined : undefined,
+    operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
     created_from: createdFrom.value || undefined, created_to: createdTo.value || undefined, sort_by: sortBy.value, sort_dir: sortDir.value }
 }
 
@@ -998,8 +986,14 @@ onBeforeUnmount(() => {
             <option value="admin_supplement">管理员补录</option>
           </select>
         </label>
-        <UploadLedgerDateField v-model="createdFrom" label="开始日期" :max="createdTo" :filter-key="uploadDayFilterKey" :load-days="loadUploadDays" />
-        <UploadLedgerDateField v-model="createdTo" label="结束日期" :min="createdFrom" :filter-key="uploadDayFilterKey" :load-days="loadUploadDays" />
+        <label>
+          <span>开始日期</span>
+          <input v-model="createdFrom" type="date" :max="createdTo || undefined" />
+        </label>
+        <label>
+          <span>结束日期</span>
+          <input v-model="createdTo" type="date" :min="createdFrom || undefined" />
+        </label>
         <div class="aw-upload-ledger__filter-actions">
           <button class="aw-primary-button" type="submit" :disabled="loading">查询</button>
           <button v-if="personalLedger || activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">{{ personalLedger ? '恢复今天' : `重置 ${activeFilterCount}` }}</button>

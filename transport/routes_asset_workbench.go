@@ -89,7 +89,6 @@ func registerAssetWorkbenchRoutes(
 		group.GET("/drive/directories", access(group, http.MethodGet, "/drive/directories", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveListDirectories)
 		group.GET("/drive/orders", access(group, http.MethodGet, "/drive/orders", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveListOrders)
 		group.GET("/drive/files", access(group, http.MethodGet, "/drive/files", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveListFiles)
-		group.GET("/drive/upload-days", access(group, http.MethodGet, "/drive/upload-days", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveUploadDays)
 		group.GET("/drive/folder", access(group, http.MethodGet, "/drive/folder", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveBrowseFolder)
 		group.GET("/drive/search", access(group, http.MethodGet, "/drive/search", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveSearch)
 		group.GET("/drive/locate", access(group, http.MethodGet, "/drive/locate", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DriveLocate)
