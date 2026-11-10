@@ -435,6 +435,7 @@ type AssetWorkbenchErrorImportFilter struct {
 type AssetWorkbenchSettlementSupplementFilter struct {
 	PayeeUserID        *int64
 	BusinessMonth      string
+	DifficultyClass    string
 	OrderNo            string
 	Status             string
 	SupplementDate     string

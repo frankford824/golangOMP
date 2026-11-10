@@ -919,7 +919,7 @@
 
 .aw-supplement-filter-bar {
   display: grid;
-  grid-template-columns: 132px minmax(210px, 0.9fr) minmax(180px, 1fr) 124px minmax(270px, 1.2fr) auto;
+  grid-template-columns: minmax(110px, .7fr) minmax(186px, 1.3fr) minmax(100px, .65fr) minmax(155px, 1.2fr) minmax(104px, .7fr);
   align-items: end;
   gap: var(--aw-space-3);
   padding: var(--aw-space-3);
@@ -952,6 +952,7 @@
 }
 
 .aw-supplement-filter-bar__dates {
+  grid-column: 1 / 4;
   grid-template-columns: minmax(112px, 1fr) auto minmax(112px, 1fr);
   align-items: center;
 }
@@ -966,6 +967,8 @@
 }
 
 .aw-supplement-filter-bar__actions {
+  grid-column: 4 / -1;
+  justify-content: flex-end;
   align-self: end;
 }
 
@@ -1190,15 +1193,19 @@
 
 @media (max-width: 1240px) {
   .aw-supplement-filter-bar {
-    grid-template-columns: 132px minmax(210px, 1fr) minmax(190px, 1fr) 124px;
+    grid-template-columns: minmax(88px, .7fr) minmax(160px, 1.35fr) minmax(88px, .65fr);
+  }
+
+  .aw-supplement-filter-bar__name {
+    grid-column: span 2;
   }
 
   .aw-supplement-filter-bar__dates {
-    grid-column: 1 / 4;
+    grid-column: 1 / 3;
   }
 
   .aw-supplement-filter-bar__actions {
-    justify-content: flex-end;
+    grid-column: 3 / -1;
   }
 }
 
@@ -1211,6 +1218,7 @@
   .aw-supplement-console__header-actions {
     width: 100%;
     justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .aw-supplement-filter-bar {
@@ -1242,6 +1250,7 @@
     font-size: var(--aw-font-size-xs);
   }
 
+  .aw-supplement-filter-bar__name,
   .aw-supplement-filter-bar__dates,
   .aw-supplement-filter-bar__actions {
     grid-column: auto;

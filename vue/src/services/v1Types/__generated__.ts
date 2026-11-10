@@ -18300,13 +18300,15 @@ export interface paths {
         };
         /**
          * List asset workbench settlement supplements
-         * @description Lists manual settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, file/work name, status, and supplement date.
+         * @description Lists settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, difficulty class, file/work name, status, and supplement date.
          */
         get: {
             parameters: {
                 query?: {
                     business_month?: string;
                     payee_user_id?: number;
+                    /** @description Exact recorded difficulty class code, such as A, B, or C. Omit to include all classes. */
+                    difficulty_class?: string;
                     order_no?: string;
                     status?: "draft" | "approved" | "in_batch" | "settled" | "voided";
                     /** @description Exact supplement date filter. */

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Eye, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Download, Eye, RefreshCw, Trash2 } from 'lucide-vue-next'
 
 import { assetWorkbenchApi, type SettlementSupplementRow, type SubmissionFileRow } from '@aw/shared/api/assetWorkbenchApi'
+import { exportSettlementSupplementWorkbook } from '@aw/features/export/settlementExport'
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
+import { difficultyCodes } from '@aw/shared/format/difficulty'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { chipClass, supplementStatusMeta } from '@aw/shared/format/status'
 import PersonnelPicker from '@aw/shared/ui/PersonnelPicker.vue'
@@ -14,6 +16,7 @@ import { resolveApiUserMessage } from '@/utils/api-message-zh'
 const rows = ref<SettlementSupplementRow[]>([])
 const total = ref(0)
 const loading = ref(false)
+const exporting = ref(false)
 const deleting = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -21,6 +24,8 @@ const page = ref(1)
 const pageSize = ref(20)
 const businessMonth = ref(currentBusinessMonth())
 const payeeUserId = ref(0)
+const difficultyClass = ref('')
+const difficultyOptions = ref(['A', 'B', 'C'])
 const orderNo = ref('')
 const status = ref('')
 const dateFrom = ref('')
@@ -46,42 +51,68 @@ const selectedAmount = computed(() => selectedRows.value.reduce((sum, row) => su
 const allDeletableSelected = computed(() => deletableRows.value.length > 0 && deletableRows.value.every((row) => selectedIds.value.includes(row.id)))
 const canPrev = computed(() => page.value > 1)
 const canNext = computed(() => page.value * pageSize.value < total.value)
+const appliedFilters = ref<ReturnType<typeof buildFilters> | null>(null)
+const filtersChanged = computed(() => JSON.stringify(buildFilters()) !== JSON.stringify(appliedFilters.value))
 
-function buildParams() {
-  const params: Record<string, unknown> = {
-    page: page.value,
-    page_size: pageSize.value,
+function buildFilters() {
+  return {
+    business_month: businessMonth.value || undefined,
+    payee_user_id: payeeUserId.value > 0 ? payeeUserId.value : undefined,
+    difficulty_class: difficultyClass.value || undefined,
+    order_no: orderNo.value.trim() || undefined,
+    status: status.value || undefined,
+    supplement_date_from: dateFrom.value || undefined,
+    supplement_date_to: dateTo.value || undefined,
     sort_by: 'supplement_date',
     sort_dir: 'desc',
   }
-  if (businessMonth.value) params.business_month = businessMonth.value
-  if (payeeUserId.value > 0) params.payee_user_id = payeeUserId.value
-  if (orderNo.value.trim()) params.order_no = orderNo.value.trim()
-  if (status.value) params.status = status.value
-  if (dateFrom.value) params.supplement_date_from = dateFrom.value
-  if (dateTo.value) params.supplement_date_to = dateTo.value
-  return params
 }
 
-async function load(resetPage = false) {
-  if (resetPage) page.value = 1
+let loadSequence = 0
+async function load(resetPage = false, requestedPage = resetPage ? 1 : page.value) {
+  const request = ++loadSequence
+  const filters = resetPage ? buildFilters() : (appliedFilters.value ?? buildFilters())
+  const replacingFilters = JSON.stringify(filters) !== JSON.stringify(appliedFilters.value)
   loading.value = true
   error.value = ''
   try {
-    const result = await assetWorkbenchApi.listSettlementSupplements(buildParams())
+    const result = await assetWorkbenchApi.listSettlementSupplements({ ...filters, page: requestedPage, page_size: pageSize.value })
+    if (request !== loadSequence) return
+    page.value = requestedPage
+    appliedFilters.value = filters
     rows.value = result.items
     total.value = result.total
-    selectedIds.value = selectedIds.value.filter((id) => result.items.some((row) => row.id === id && ['draft', 'approved'].includes(row.status)))
+    selectedIds.value = replacingFilters ? [] : selectedIds.value.filter((id) => result.items.some((row) => row.id === id && ['draft', 'approved'].includes(row.status)))
   } catch (err) {
-    error.value = resolveApiUserMessage(err, { fallback: '补录查询失败' })
+    if (request === loadSequence) error.value = resolveApiUserMessage(err, { fallback: '补录查询失败' })
   } finally {
-    loading.value = false
+    if (request === loadSequence) loading.value = false
+  }
+}
+
+async function exportQuery() {
+  const filters = appliedFilters.value
+  if (!filters || filtersChanged.value || loading.value || exporting.value || total.value === 0) return
+  exporting.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const count = await exportSettlementSupplementWorkbook({
+      businessMonth: filters.business_month ?? '',
+      fetchPage: (page) => assetWorkbenchApi.listSettlementSupplements({ ...filters, page, page_size: 100 }),
+    })
+    notice.value = `已导出 ${formatInt(count)} 条补录记录`
+  } catch (err) {
+    error.value = resolveApiUserMessage(err, { fallback: '导出补录记录失败' })
+  } finally {
+    exporting.value = false
   }
 }
 
 async function resetQuery() {
   businessMonth.value = currentBusinessMonth()
   payeeUserId.value = 0
+  difficultyClass.value = ''
   orderNo.value = ''
   status.value = ''
   dateFrom.value = ''
@@ -158,8 +189,7 @@ async function deleteSelected() {
 async function changePage(delta: number) {
   const next = page.value + delta
   if (next < 1) return
-  page.value = next
-  await load()
+  await load(false, next)
 }
 
 async function openPreview(row: SettlementSupplementRow, file: SubmissionFileRow) {
@@ -183,7 +213,14 @@ async function openPreview(row: SettlementSupplementRow, file: SubmissionFileRow
   }
 }
 
-onMounted(() => void load())
+onMounted(() => {
+  void load()
+  void assetWorkbenchApi.listDifficultyClasses().then((classes) => {
+    difficultyOptions.value = [...new Set([...difficultyOptions.value, ...difficultyCodes(classes)])]
+  }).catch(() => {
+    // Standard A/B/C codes remain usable if the configured catalog is unavailable.
+  })
+})
 </script>
 
 <template>
@@ -194,6 +231,16 @@ onMounted(() => void load())
       </div>
       <div class="aw-supplement-console__header-actions">
         <span>{{ formatInt(total) }} 条记录</span>
+        <button
+          class="aw-secondary-button"
+          type="button"
+          :disabled="loading || exporting || filtersChanged || total === 0"
+          :title="filtersChanged ? '请先查询以应用筛选条件' : '导出当前查询的全部记录'"
+          @click="exportQuery"
+        >
+          <Download :size="15" aria-hidden="true" />
+          {{ exporting ? '导出中' : '导出 Excel' }}
+        </button>
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="load()">
           <RefreshCw :size="15" aria-hidden="true" />
           {{ loading ? '刷新中' : '刷新' }}
@@ -227,6 +274,13 @@ onMounted(() => void load())
           @selected="load(true)"
           @cleared="load(true)"
         />
+        <label>
+          <span>分类</span>
+          <select v-model="difficultyClass" aria-label="分类" @change="load(true)">
+            <option value="">全部分类</option>
+            <option v-for="code in difficultyOptions" :key="code" :value="code">{{ code }} 类</option>
+          </select>
+        </label>
         <label class="aw-supplement-filter-bar__name">
           <span>文件/作品名称</span>
           <input v-model="orderNo" placeholder="输入文件名" />

@@ -329,6 +329,9 @@ func (r *supplementRepo) ListSettlementSupplements(_ context.Context, filter rep
 		if filter.BusinessMonth != "" && item.BusinessMonth != filter.BusinessMonth {
 			continue
 		}
+		if filter.DifficultyClass != "" && item.DifficultyClass != filter.DifficultyClass {
+			continue
+		}
 		if filter.OrderNo != "" && item.OrderNo != filter.OrderNo {
 			continue
 		}
@@ -3184,9 +3187,10 @@ func TestCreateSettlementSupplementRejectsPayeeSpoofing(t *testing.T) {
 func TestListSettlementSupplementsNormalizesDateFilterAndSort(t *testing.T) {
 	workbenchRepo := &supplementRepo{
 		supplements: []*domain.AssetWorkbenchSettlementSupplement{
-			{ID: 601, PayeeUserID: 1001, BusinessMonth: "2026-06", OrderNo: "海报.jpg", SupplementDate: "2026-06-15", Status: domain.AssetWorkbenchSupplementStatusApproved},
-			{ID: 602, PayeeUserID: 1001, BusinessMonth: "2026-06", OrderNo: "挂布.jpg", SupplementDate: "2026-06-16", Status: domain.AssetWorkbenchSupplementStatusApproved},
+			{ID: 601, PayeeUserID: 1001, BusinessMonth: "2026-06", DifficultyClass: "A", OrderNo: "海报.jpg", SupplementDate: "2026-06-15", Status: domain.AssetWorkbenchSupplementStatusApproved},
+			{ID: 602, PayeeUserID: 1001, BusinessMonth: "2026-06", DifficultyClass: "A", OrderNo: "挂布.jpg", SupplementDate: "2026-06-16", Status: domain.AssetWorkbenchSupplementStatusApproved},
 			{ID: 603, PayeeUserID: 1002, BusinessMonth: "2026-06", OrderNo: "海报.jpg", SupplementDate: "2026-06-15", Status: domain.AssetWorkbenchSupplementStatusVoided},
+			{ID: 604, PayeeUserID: 1001, BusinessMonth: "2026-06", DifficultyClass: "C", OrderNo: "海报.jpg", SupplementDate: "2026-06-15", Status: domain.AssetWorkbenchSupplementStatusApproved},
 		},
 	}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
@@ -3194,6 +3198,7 @@ func TestListSettlementSupplementsNormalizesDateFilterAndSort(t *testing.T) {
 
 	items, total, appErr := svc.ListSettlementSupplements(context.Background(), actor, repo.AssetWorkbenchSettlementSupplementFilter{
 		BusinessMonth:      "2026-06",
+		DifficultyClass:    " A ",
 		SupplementDateFrom: "2026/06/15",
 		SupplementDateTo:   "2026.06.15",
 		Status:             domain.AssetWorkbenchSupplementStatusApproved,
@@ -3206,10 +3211,11 @@ func TestListSettlementSupplementsNormalizesDateFilterAndSort(t *testing.T) {
 		t.Fatalf("ListSettlementSupplements() error = %+v", appErr)
 	}
 	if total != 1 || len(items) != 1 || items[0].ID != 601 {
-		t.Fatalf("items=%+v total=%d, want only approved 2026-06-15 row", items, total)
+		t.Fatalf("items=%+v total=%d, want only approved class A on 2026-06-15", items, total)
 	}
 	if workbenchRepo.lastListFilter.SupplementDateFrom != "2026-06-15" ||
 		workbenchRepo.lastListFilter.SupplementDateTo != "2026-06-15" ||
+		workbenchRepo.lastListFilter.DifficultyClass != "A" ||
 		workbenchRepo.lastListFilter.SortBy != "supplement_date" ||
 		workbenchRepo.lastListFilter.SortDir != "asc" {
 		t.Fatalf("repo filter = %+v, want normalized date range and sort", workbenchRepo.lastListFilter)

@@ -3760,6 +3760,10 @@ func (r *assetWorkbenchRepo) ListSettlementSupplements(ctx context.Context, filt
 		where = append(where, "business_month = ?")
 		args = append(args, v)
 	}
+	if filter.DifficultyClass != "" {
+		where = append(where, "difficulty_class = ?")
+		args = append(args, filter.DifficultyClass)
+	}
 	if v := strings.TrimSpace(filter.OrderNo); v != "" {
 		where = append(where, "order_no = ?")
 		args = append(args, v)

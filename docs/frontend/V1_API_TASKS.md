@@ -13350,7 +13350,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/report \
 ### 简介
 支持方法: GET, POST。
 
-- `GET`: Lists manual settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, file/work name, status, and supplement date.
+- `GET`: Lists settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, difficulty class, file/work name, status, and supplement date.
 - `POST`: Creates one supplement in an unlocked current or historical payroll month. Future months and months with generated or confirmed batches are rejected. Settlement roles may create a manual row. Asset submitters may create only their own row, must supply uploaded `upload_session_ids`, and must still have an enabled permission for the selected month when the transaction locks the permission row. Submission serializes with batch generation and rechecks the month inside the transaction. Uploaded supplements reuse normal upload directories, pricing, file query, and preview, but their linked submission item has `entry_kind=supplement` and is excluded from normal piecework settlement. The target supplement date does not change its payroll month.
 
 ### 鉴权与 RBAC
@@ -13368,6 +13368,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/report \
 |---|---|---|---|---|
 | `business_month` | query | string | 否 | - |
 | `payee_user_id` | query | integer | 否 | - |
+| `difficulty_class` | query | string | 否 | Exact recorded difficulty class code, such as A, B, or C. Omit to include all classes. |
 | `order_no` | query | string | 否 | - |
 | `status` | query | enum(draft/approved/in_batch/settled/voided) | 否 | - |
 | `supplement_date` | query | string | 否 | Exact supplement date filter. |

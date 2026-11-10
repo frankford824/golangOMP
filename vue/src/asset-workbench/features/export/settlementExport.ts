@@ -7,7 +7,9 @@ import type {
   SettlementReport,
   SettlementReportDifficultyMetric,
   SettlementReportRow,
+  SettlementSupplementRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { supplementStatusMeta } from '@aw/shared/format/status'
 
 interface SettlementWorkbookInput {
   businessMonth: string
@@ -191,6 +193,61 @@ export async function exportQCImportTemplateWorkbook(): Promise<void> {
     new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
     'asset-workbench-status-update-template.xlsx',
   )
+}
+
+export async function exportSettlementSupplementWorkbook(input: {
+  businessMonth: string
+  fetchPage: (page: number) => Promise<{ items: SettlementSupplementRow[]; total: number }>
+}): Promise<number> {
+  const limit = 5000
+  const rows = new Map<number, SettlementSupplementRow>()
+  let expectedTotal: number | undefined
+  for (let page = 1; ; page += 1) {
+    const result = await input.fetchPage(page)
+    if (result.total > limit) throw new Error(`一次最多导出 ${limit} 条，请缩小筛选范围。`)
+    expectedTotal ??= result.total
+    if (result.total !== expectedTotal) throw new Error('补录记录已变化，请刷新后重新导出。')
+    for (const row of result.items) {
+      if (rows.has(row.id)) throw new Error('补录记录已变化，请刷新后重新导出。')
+      rows.set(row.id, row)
+    }
+    if (rows.size === expectedTotal) break
+    if (!result.items.length || rows.size > expectedTotal) throw new Error('读取补录记录不完整，请刷新后重试。')
+  }
+  if (!rows.size) throw new Error('没有匹配的补录记录可导出。')
+
+  const { Workbook } = await import('exceljs')
+  const workbook = new Workbook()
+  workbook.creator = 'asset-workbench'
+  const sheet = workbook.addWorksheet('补录记录')
+  sheet.columns = [
+    { header: '结算月', width: 12 },
+    { header: '补录人员编号', width: 16 },
+    { header: '文件/作品名称', width: 42 },
+    { header: '关联文件', width: 42 },
+    { header: '补录日期', width: 14 },
+    { header: '分类', width: 16 },
+    { header: '张数', width: 10 },
+    { header: '状态', width: 12 },
+    { header: '金额（元）', width: 12 },
+  ]
+  for (const row of rows.values()) {
+    sheet.addRow([
+      row.business_month, row.payee_user_id, row.order_no,
+      (row.files ?? []).map((file) => file.display_name || file.original_filename).join('、'),
+      row.supplement_date || '', row.difficulty_class, row.page_count,
+      supplementStatusMeta(row.status).label, row.gross_amount,
+    ])
+  }
+  sheet.getColumn(9).numFmt = '0.00'
+  sheet.autoFilter = 'A1:I1'
+  formatSheet(sheet)
+  const buffer = await workbook.xlsx.writeBuffer()
+  downloadBlob(
+    new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    `补录记录-${sanitizeFilename(input.businessMonth || 'all')}.xlsx`,
+  )
+  return rows.size
 }
 
 export async function exportSettlementReportWorkbook(input: SettlementReportWorkbookInput): Promise<void> {

@@ -11278,6 +11278,12 @@ func normalizeSettlementSupplement(actorID int64, params CreateSettlementSupplem
 
 func normalizeSettlementSupplementFilter(filter repo.AssetWorkbenchSettlementSupplementFilter) (repo.AssetWorkbenchSettlementSupplementFilter, *domain.AppError) {
 	filter.BusinessMonth = strings.TrimSpace(filter.BusinessMonth)
+	filter.DifficultyClass = strings.TrimSpace(filter.DifficultyClass)
+	if filter.DifficultyClass != "" {
+		if _, appErr := normalizeWorkbenchDifficultyCode(filter.DifficultyClass, false); appErr != nil {
+			return filter, appErr
+		}
+	}
 	filter.OrderNo = strings.TrimSpace(filter.OrderNo)
 	filter.Status = strings.TrimSpace(filter.Status)
 	filter.SupplementDate = strings.TrimSpace(filter.SupplementDate)

@@ -1883,6 +1883,7 @@ func (h *AssetWorkbenchHandler) ListSettlementSupplements(c *gin.Context) {
 	items, total, appErr := h.svc.ListSettlementSupplements(c.Request.Context(), actor, repo.AssetWorkbenchSettlementSupplementFilter{
 		PayeeUserID:        payeeID,
 		BusinessMonth:      c.Query("business_month"),
+		DifficultyClass:    c.Query("difficulty_class"),
 		OrderNo:            c.Query("order_no"),
 		Status:             c.Query("status"),
 		SupplementDate:     c.Query("supplement_date"),

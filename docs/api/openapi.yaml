@@ -18258,7 +18258,7 @@ paths:
   /v1/asset-workbench/settlement/supplements:
     get:
       summary: List asset workbench settlement supplements
-      description: Lists manual settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, file/work name, status, and supplement date.
+      description: Lists settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, difficulty class, file/work name, status, and supplement date.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -18273,6 +18273,10 @@ paths:
         - in: query
           name: payee_user_id
           schema: { type: integer }
+        - in: query
+          name: difficulty_class
+          description: Exact recorded difficulty class code, such as A, B, or C. Omit to include all classes.
+          schema: { type: string, minLength: 1, maxLength: 64 }
         - in: query
           name: order_no
           schema: { type: string }
