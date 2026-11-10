@@ -2,6 +2,7 @@ import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import type { ModuleSummary } from '@/services/apiTypes'
 import type { TaskPriorityApi } from '@/domain/task-priority'
+import type { CostInput } from '@/domain/cost-model'
 
 /** Cutover 后唯一可用于活动任务查询、渲染与动作判定的状态合同。 */
 export type ActiveTaskStatus =
@@ -317,6 +318,7 @@ export interface Task {
   width?: number
   height?: number
   area?: number
+  costInput?: CostInput
 
   // ── 其他标志位 ─────────────────────────────────────────────────────────────
   requiresAssetVersions?: boolean

@@ -63,6 +63,27 @@ async function mountNewDesignBatch(names: string[]) {
 }
 
 describe('UnifiedTaskCreateView', () => {
+  it.each([1, 2])('submits explicitly chosen pricing specifications for %i new SKUs', async (count) => {
+    const wrapper = await mountNewDesignBatch(Array.from({ length: count }, (_, index) => `测试款 ${index + 1}`))
+    const fields = wrapper.get('.compose-cost-fields')
+    const select = (label: string) => fields.findAll('label').find((field) => field.text().startsWith(label))!.get('select')
+    await select('计价形状').setValue('normal')
+    await select('打孔').setValue('false')
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.addTask).toHaveBeenCalledTimes(1)
+    const payload = mocks.addTask.mock.calls[0][0]
+    const input = expect.objectContaining({ area_mode: 'total', area_m2: 0.168, shape: 'normal', processes: { punch: false } })
+    if (count === 1) {
+      expect(payload.costInput).toEqual(input)
+    } else {
+      expect(payload.batchItems[0].variantJson.cost_input).toEqual(input)
+      expect(payload.batchItems[1].variantJson.cost_input).toBeUndefined()
+    }
+    wrapper.unmount()
+  })
+
   it('blocks an unsynced IID before creating any task and retains the entered rows', async () => {
     mocks.getIids.mockResolvedValue({ data: { data: [] } })
     const wrapper = await mountNewDesignBatch(['定制喷绘布新设计'])

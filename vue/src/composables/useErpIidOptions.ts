@@ -45,7 +45,7 @@ export function useErpIidOptions() {
   const selectOptions = computed(() => items.value.map((item) => ({
     value: item.i_id,
     label: item.category_name && item.category_name !== item.i_id
-      ? `${item.i_id}（${item.category_name}）` : item.i_id,
+      ? `${item.i_id}（ERP 分类：${item.category_name}）` : item.i_id,
   })))
 
   return { loading, items, error, hasLoaded, selectOptions, loadIids, reset }

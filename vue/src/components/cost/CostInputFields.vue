@@ -1,16 +1,18 @@
 <template>
   <fieldset class="cost-inputs" :disabled="disabled">
     <legend>一个 SKU 的计价规格</legend>
-    <label>面积方式<select v-model="draft.area_mode" @change="emitValue"><option value="total">已知整套总面积</option><option value="flat">平面 · 单片长宽</option><option value="faces">多面 / 多片汇总</option><option value="layout">展开用料总长宽</option></select></label>
-    <label>每 SKU 片数<input v-model.number="draft.pieces" type="number" min="1" step="1" @input="emitValue" /></label>
-    <template v-if="draft.area_mode === 'flat' || draft.area_mode === 'layout'">
-      <label>{{ draft.area_mode === 'layout' ? '展开总长' : '单片长' }}（米）<input v-model.number="draft.width_m" type="number" min="0" step="any" @input="emitValue" /></label>
-      <label>{{ draft.area_mode === 'layout' ? '展开总宽' : '单片宽' }}（米）<input v-model.number="draft.height_m" type="number" min="0" step="any" @input="emitValue" /></label>
+    <template v-if="!fromGrid">
+      <label>面积方式<select v-model="draft.area_mode" @change="emitValue"><option value="total">已知整套总面积</option><option value="flat">平面 · 单片长宽</option><option value="faces">多面 / 多片汇总</option><option value="layout">展开用料总长宽</option></select></label>
+      <label>每 SKU 片数<input v-model.number="draft.pieces" type="number" min="1" step="1" @input="emitValue" /></label>
+      <template v-if="draft.area_mode === 'flat' || draft.area_mode === 'layout'">
+        <label>{{ draft.area_mode === 'layout' ? '展开总长' : '单片长' }}（米）<input v-model.number="draft.width_m" type="number" min="0" step="any" @input="emitValue" /></label>
+        <label>{{ draft.area_mode === 'layout' ? '展开总宽' : '单片宽' }}（米）<input v-model.number="draft.height_m" type="number" min="0" step="any" @input="emitValue" /></label>
+      </template>
+      <label v-if="draft.area_mode === 'total'">整套总面积（㎡）<input v-model.number="draft.area_m2" type="number" min="0" step="any" @input="emitValue" /></label>
     </template>
-    <label v-if="draft.area_mode === 'total'">整套总面积（㎡）<input v-model.number="draft.area_m2" type="number" min="0" step="any" @input="emitValue" /></label>
     <label>厚度（mm，可选）<input v-model.number="draft.thickness_mm" type="number" min="0" step="any" @input="emitValue" /></label>
-    <label>形状<select :value="draft.shape || ''" @change="setShape"><option value="">未确认</option><option value="normal">普通</option><option value="irregular">异形</option></select></label>
-    <section v-if="draft.area_mode === 'faces'" class="full">
+    <label>{{ fromGrid ? '计价形状' : '形状' }}<select :value="draft.shape || ''" @change="setShape"><option value="">未确认</option><option value="normal">{{ fromGrid ? '普通（矩形）' : '普通' }}</option><option value="irregular">异形</option></select></label>
+    <section v-if="!fromGrid && draft.area_mode === 'faces'" class="full">
       <p>按实际用料填写每种面的尺寸。立体表面积不一定等于展开用料面积。</p>
       <div v-for="(face,i) in draft.faces" :key="i" class="face-row">
         <label>面{{ i+1 }}长（m）<input v-model.number="face.width_m" type="number" min="0" step="any" @input="emitValue" /></label>
@@ -20,17 +22,19 @@
       </div>
       <button type="button" @click="draft.faces.push({width_m:0,height_m:0,count:1});emitValue()">添加一组面</button>
     </section>
-    <template v-if="!dimensionsOnly"><label v-for="(name,code) in processNames" :key="code">{{name}}<select :value="draft.processes[code] == null ? '' : String(draft.processes[code])" @change="setProcess(code,$event)"><option value="">未确认</option><option value="false">否</option><option value="true">是</option></select></label>
+    <template v-if="!dimensionsOnly"><label v-for="[code,name] in visibleProcesses" :key="code">{{name}}<select :value="draft.processes[code] == null ? '' : String(draft.processes[code])" @change="setProcess(code,$event)"><option value="">未确认</option><option value="false">否</option><option value="true">是</option></select></label>
     <label v-if="draft.processes.punch">整套孔数<input v-model.number="draft.hole_count" type="number" min="0" step="1" @input="emitValue" /></label>
     <label v-if="Object.values(draft.processes).some(Boolean)">整套加工长度（米，按米计费时填）<input v-model.number="draft.process_length_m" type="number" min="0" step="any" @input="emitValue" /></label>
     </template>
-    <small class="full">总面积、展开面积、分面面积已包含整套用料，不再乘片数。订单数量不参与单 SKU 成本。</small>
+    <small v-if="fromGrid" class="full">表格面积按整套用料填写。具体收费以款式绑定的计价方案为准。</small>
+    <small v-else class="full">总面积、展开面积、分面面积已包含整套用料，不再乘片数。订单数量不参与单 SKU 成本。</small>
   </fieldset>
 </template>
 <script setup lang="ts">
-import {ref,watch} from 'vue'
+import {computed,ref,watch} from 'vue'
 import {emptyCostInput,processNames,type CostInput} from '@/domain/cost-model'
-const props=defineProps<{modelValue:CostInput;disabled?:boolean;dimensionsOnly?:boolean}>()
+const props=defineProps<{modelValue:CostInput;disabled?:boolean;dimensionsOnly?:boolean;fromGrid?:boolean}>()
+const visibleProcesses = computed(() => Object.entries(processNames).filter(([code]) => !props.fromGrid || code !== 'slot'))
 const emit=defineEmits<{ 'update:modelValue':[CostInput] }>()
 const draft=ref<CostInput>(emptyCostInput())
 watch(()=>props.modelValue,v=>{draft.value=JSON.parse(JSON.stringify({...emptyCostInput(),...v,faces:v?.faces||[],processes:v?.processes||{}}))},{immediate:true,deep:true})

@@ -23181,6 +23181,8 @@ export interface components {
              * @description Optional area captured by operations for the single-SKU task.
              */
             area?: number | null;
+            /** @description Optional structured pricing specifications for a single new-product SKU. Batch requests supply specifications in each item's variant_json.cost_input. Omit unconfirmed shape and process selections to retain manual-review behavior. */
+            cost_input?: components["schemas"]["CostInput"];
             /** @description Human-readable structure and craft summary captured at creation, for example `平面 开槽`. */
             craft_text?: string;
             /** @description Canonical cost-rule process keyword captured at creation, for example `开槽` or `不开槽`. */

@@ -1285,6 +1285,7 @@ export const useTasksStore = defineStore('tasks', () => {
       width: t.width ?? task.width ?? undefined,
       height: t.height ?? task.height ?? undefined,
       area: t.area ?? task.area ?? undefined,
+      cost_input: taskType === 'new_product_development' && !isBatchMode ? task.costInput : undefined,
       craft_text: t.craftText ?? undefined,
       process: t.process ?? undefined,
       set_mode_hint: Boolean(t.setModeHint ?? task.setModeHint),

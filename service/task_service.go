@@ -87,6 +87,7 @@ type CreateTaskParams struct {
 	Width             *float64
 	Height            *float64
 	Area              *float64
+	CostInput         *domain.CostInput `json:",omitempty"`
 	CraftText         string
 	Process           string
 	ReferenceLink     string
@@ -775,6 +776,14 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 	applyTaskProductSelection(detail, selection, task)
 
 	items := buildSingleTaskSKUItems(task, detail)
+	if p.CostInput != nil && len(items) == 1 {
+		item := items[0].Item
+		variant, appErr := setTaskSKUItemSpecInVariantJSON(item.VariantJSON, UpdateTaskSKUItemInfoParams{CostInput: p.CostInput})
+		if appErr != nil {
+			return nil, appErr
+		}
+		item.VariantJSON = variant
+	}
 	if appErr := s.applyBatchSKUItemCostPrefill(ctx, detail, items); appErr != nil {
 		return nil, appErr
 	}
@@ -1222,6 +1231,10 @@ func validateProductSelectionByTaskType(p CreateTaskParams) *domain.AppError {
 }
 
 func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.AppError {
+	if p.CostInput != nil && (p.TaskType != domain.TaskTypeNewProductDevelopment || isMultipleBatchTaskRequest(p)) {
+		return taskCreateValidationError("cost_input is only allowed for a single new-product SKU", p,
+			taskCreateViolation("cost_input", "field_not_allowed_for_task_type", "Use variant_json.cost_input for each batch SKU"))
+	}
 	if !p.TaskType.Valid() || p.TaskType == domain.TaskTypePurchaseTask {
 		return taskCreateValidationError(
 			"task_type is not supported by the active workflow",

@@ -182,21 +182,28 @@
           </section>
           <section v-if="intent === 'modify_existing' || intent === 'new_design'" class="drawer-section spec-section">
             <h4>生产规格</h4>
-            <label>形态
+            <label>结构
               <select :value="selectedRow.structure_type || ''" @change="updateSelected('structure_type', ($event.target as HTMLSelectElement).value || undefined)">
                 <option value="">待确认</option><option value="flat">平面</option><option value="three_dimensional">立体</option>
               </select>
             </label>
-            <label>工艺
+            <label>开槽
               <select :value="selectedRow.slotting || ''" @change="updateSelected('slotting', ($event.target as HTMLSelectElement).value || undefined)">
                 <option value="">待确认</option><option value="not_slotted">不开槽</option><option value="slotted">开槽</option>
               </select>
             </label>
-            <p>宽、高、面积与这里的形态/工艺会随 SKU 保存，并参与成本规则匹配和 ERP 同步。</p>
+            <CostInputFields
+              v-if="intent === 'new_design'"
+              class="compose-cost-fields"
+              :model-value="selectedCostInput"
+              from-grid
+              @update:model-value="updateSelectedCostInput"
+            />
+            <p v-else>宽、高、面积、结构和开槽选择随任务保存。</p>
           </section>
           <section class="drawer-section"><h4>{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</h4><div class="asset-list"><article v-for="asset in selectedRow.reference_assets" :key="asset.id"><img v-if="asset.preview_url" :src="asset.preview_url" alt="" /><FileImage v-else :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ assetStatusText(asset.status) }}</span></div><button type="button" aria-label="移除文件" @click="removeAsset(selectedRow.id, 'reference_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'reference_assets')"><ImagePlus :size="16" />添加{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}</button></section>
           <section v-if="intent === 'retouch'" class="drawer-section"><h4>待修素材</h4><p>支持图片、PSD / AI、ZIP / RAR 等源文件；每项可一次多选，最多 50 个文件，单文件不超过 300 MB。</p><div class="asset-list"><article v-for="asset in selectedRow.source_assets" :key="asset.id"><FileArchive :size="24" /><div><strong>{{ asset.name }}</strong><span>{{ asset.error || assetStatusText(asset.status) }}</span></div><button type="button" @click="removeAsset(selectedRow.id, 'source_assets', asset.id)"><X :size="14" /></button></article></div><button class="asset-button" type="button" @click="openFilePicker(selectedRow.id, 'source_assets')"><Paperclip :size="16" />批量添加待修素材</button></section>
-          <section class="drawer-section"><h4>本行提示</h4><ul v-if="selectedRowViolations.length" class="drawer-errors"><li v-for="issue in selectedRowViolations" :key="`${issue.field}-${issue.message}`">{{ issue.message }}</li></ul><p v-else class="drawer-ok"><CheckCircle2 :size="15" />本行信息已完整</p></section>
+          <section class="drawer-section"><h4>本行提示</h4><ul v-if="selectedRowViolations.length" class="drawer-errors"><li v-for="issue in selectedRowViolations" :key="`${issue.field}-${issue.message}`">{{ issue.message }}</li></ul><p v-else class="drawer-ok"><CheckCircle2 :size="15" />本行建单必填项已填写</p></section>
         </aside>
       </div>
 
@@ -233,12 +240,15 @@ import { AlertTriangle, Barcode, CheckCircle2, FileArchive, FileImage, ImagePlus
 
 import UnifiedTaskGrid from '@/components/task-create/UnifiedTaskGrid.vue'
 import IIdSelector from '@/components/task-create/IIdSelector.vue'
+import CostInputFields from '@/components/cost/CostInputFields.vue'
+import { emptyCostInput, type CostInput } from '@/domain/cost-model'
 import {
   applyBackendViolations,
   buildPlanningInputs,
   buildTaskSubmissionUnits,
   COMPOSE_INTENT_META,
   composeColumns,
+  composeCostInput,
   composeIdempotencyKey,
   createComposeRow,
   defaultErpSyncMode,
@@ -338,6 +348,9 @@ const erpSyncHint = computed(() => {
 })
 const violations = computed(() => [...validateCompose(intent.value, common, rows.value), ...remoteViolations.value])
 const selectedRow = computed(() => rows.value.find((row) => row.id === selectedRowId.value))
+const selectedCostInput = computed(() =>
+  (selectedRow.value && composeCostInput(selectedRow.value)) || emptyCostInput(),
+)
 const selectedRowIndex = computed(() => Math.max(0, rows.value.findIndex((row) => row.id === selectedRowId.value)))
 const selectedRowViolations = computed(() => violations.value.filter((issue) => issue.row_id === selectedRowId.value))
 const failedRows = computed(() => rows.value.filter((row) => row.status === 'failed'))
@@ -522,6 +535,9 @@ function updateSelected(key: ComposeColumnKey, value: unknown) {
   // The drawer edits the row model outside Univer. Rebuild only for this
   // explicit parent-side change so the selected i_id is visible in the grid.
   gridRevision.value += 1
+}
+function updateSelectedCostInput(input: CostInput) {
+  if (selectedRow.value) selectedRow.value.cost_input = input
 }
 function mobileRowTitle(row: ComposeRow) { return row.product_name || row.description_spec || row.design_requirement || row.erp_sku || '待完善' }
 
@@ -1106,5 +1122,5 @@ function startAnother() { resetComposeState() }
 .compose-confirm .primary-button.danger{border-color:rgb(var(--yb-danger));background:rgb(var(--yb-danger))}
 @media(max-width:1180px){.intent-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.note-field{flex-basis:100%}.workspace-layout.has-drawer{grid-template-columns:minmax(0,1fr) 19rem}.validation-dock{grid-template-columns:1fr auto}.validation-items{grid-column:1/-1;grid-row:2}.dock-actions{grid-column:2;grid-row:1}}
 @media(max-width:760px){.compose-page{padding:.75rem}.compose-hero,.workspace-toolbar,.result-heading{align-items:flex-start;flex-direction:column}.hero-actions,.toolbar-actions,.result-actions{width:100%;justify-content:flex-start}.intent-grid{grid-template-columns:1fr}.intent-card{min-height:6.5rem}.common-ribbon{flex-direction:column;align-items:stretch}.common-ribbon input[type=datetime-local],.common-ribbon select{width:100%}.sku-rule-notice{grid-template-columns:auto 1fr}.sku-rule-notice>code{grid-column:1/-1;width:max-content}.generated-sku-banner{align-items:flex-start;flex-direction:column}.generated-sku-preview{justify-content:flex-start}.workspace-layout.has-drawer{grid-template-columns:1fr}.grid-column{padding:.65rem}.row-drawer{border-left:0;border-top:1px solid rgb(var(--yb-border-context))}.mobile-row-list{display:grid;gap:.65rem}.mobile-row-card{display:grid;gap:.65rem;padding:.8rem;border:1px solid rgb(var(--yb-border-context));border-radius:.8rem;background:rgb(var(--yb-surface))}.mobile-row-card.selected{border-color:rgb(var(--yb-brand))}.mobile-row-card header{display:grid;grid-template-columns:auto 1fr auto;gap:.55rem;align-items:center}.mobile-row-card header span{font-size:.7rem;color:rgb(var(--yb-text-secondary))}.mobile-fields{display:grid;gap:.55rem}.mobile-fields label{display:grid;gap:.3rem;font-size:.72rem;font-weight:700;color:rgb(var(--yb-text-secondary))}.mobile-fields input,.mobile-fields textarea{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid rgb(var(--yb-border-context));border-radius:.6rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.mobile-fields .mobile-switch{grid-template-columns:1fr auto}.mobile-switch input{width:2.4rem}.validation-dock{position:static;grid-template-columns:1fr}.validation-items,.dock-actions{grid-column:auto;grid-row:auto}.dock-actions{display:grid}.dock-actions .primary-button{width:100%}.task-result-grid,.sku-result-grid{grid-template-columns:1fr}}
-.spec-section{grid-template-columns:1fr 1fr}.spec-section h4,.spec-section p{grid-column:1/-1}.spec-section label{display:grid;gap:.35rem;font-size:.74rem;font-weight:760;color:rgb(var(--yb-text-secondary))}.spec-section select{min-height:2.45rem;padding:0 .65rem;border:1px solid rgb(var(--yb-border-context));border-radius:.65rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.mobile-fields select{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid rgb(var(--yb-border-context));border-radius:.6rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}
+.compose-cost-fields{grid-column:1/-1}.spec-section{grid-template-columns:1fr 1fr}.spec-section h4,.spec-section p{grid-column:1/-1}.spec-section label{display:grid;gap:.35rem;font-size:.74rem;font-weight:760;color:rgb(var(--yb-text-secondary))}.spec-section select{min-height:2.45rem;padding:0 .65rem;border:1px solid rgb(var(--yb-border-context));border-radius:.65rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.mobile-fields select{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid rgb(var(--yb-border-context));border-radius:.6rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}
 </style>

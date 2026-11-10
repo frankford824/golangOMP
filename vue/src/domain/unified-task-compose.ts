@@ -1,3 +1,4 @@
+import { emptyCostInput, type CostInput } from '@/domain/cost-model'
 import type { PlanningSKUInput } from '@/services/api/planningSkuApi'
 import type { Task, TaskBatchItem } from '@/domain/types'
 import { erpProductNameError, isErpProductNameTooLong } from '@/domain/erp-product-name'
@@ -56,6 +57,7 @@ export interface ComposeRow {
   area?: number
   structure_type?: 'flat' | 'three_dimensional'
   slotting?: 'slotted' | 'not_slotted'
+  cost_input?: CostInput
   special_note?: string
   reference_assets: ComposeAssetDraft[]
   source_assets: ComposeAssetDraft[]
@@ -116,7 +118,7 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'height', label: '高（cm）', width: 92, kind: 'number' },
     { key: 'area', label: '面积（㎡）', width: 104, kind: 'number' },
     { key: 'structure_type', label: '形态', width: 100, help: '平面或立体' },
-    { key: 'slotting', label: '工艺', width: 100, help: '开槽或不开槽' },
+    { key: 'slotting', label: '开槽', width: 100, help: '开槽或不开槽' },
     { key: 'special_note', label: '特殊说明', width: 180 },
     { key: 'reference_assets', label: '参考图', width: 120, kind: 'asset' },
     { key: 'set_mode_hint', label: '建议套装', width: 102, kind: 'boolean', help: '仅供设计师参考，最终由设计阶段判定' },
@@ -129,7 +131,7 @@ const columns: Record<ComposeIntent, ComposeColumn[]> = {
     { key: 'height', label: '高（cm）', width: 92, kind: 'number' },
     { key: 'area', label: '面积（㎡）', width: 104, kind: 'number' },
     { key: 'structure_type', label: '形态', width: 100, help: '平面或立体' },
-    { key: 'slotting', label: '工艺', width: 100, help: '开槽或不开槽' },
+    { key: 'slotting', label: '开槽', width: 100, help: '开槽或不开槽' },
     { key: 'special_note', label: '特殊说明', width: 180 },
     { key: 'reference_assets', label: '参考图', width: 120, kind: 'asset' },
     { key: 'set_mode_hint', label: '建议套装', width: 102, kind: 'boolean', help: '仅供设计师参考，最终由设计阶段判定' },
@@ -249,7 +251,7 @@ export function validateCompose(
       add('structure_type', '形态只能选择平面或立体')
     }
     if ((intent === 'modify_existing' || intent === 'new_design') && row.slotting && !['slotted', 'not_slotted'].includes(row.slotting)) {
-      add('slotting', '工艺只能选择开槽或不开槽')
+      add('slotting', '请选择开槽或不开槽')
     }
     for (const [field, assets] of [['reference_assets', row.reference_assets], ['source_assets', row.source_assets]] as const) {
       for (const asset of assets) {
@@ -269,6 +271,38 @@ function uploadedRefs(assets: ComposeAssetDraft[]): Array<string | Record<string
   return assets.map((asset) => asset.upload_ref).filter((value): value is string | Record<string, unknown> => Boolean(value))
 }
 
+// Width and height in the grid are centimetres. An explicit area covers the entire SKU.
+export function composeCostInput(row: ComposeRow): CostInput | undefined {
+  const input = row.cost_input
+  const processes = { ...input?.processes }
+  if (row.slotting === 'slotted' || row.slotting === 'not_slotted') {
+    processes.slot = row.slotting === 'slotted'
+  } else {
+    delete processes.slot
+  }
+  const thickness = Number(input?.thickness_mm) || 0
+  const holes = Number(input?.hole_count) || 0
+  const length = Number(input?.process_length_m) || 0
+  if (!input?.shape && !thickness && !Object.keys(processes).length && !holes && !length) return undefined
+
+  const area = Number(row.area) || 0
+  const width = Number(row.width) || 0
+  const height = Number(row.height) || 0
+  const useFlat = area === 0 && width > 0 && height > 0 && row.structure_type !== 'three_dimensional'
+  return {
+    ...emptyCostInput(),
+    area_mode: useFlat ? 'flat' : 'total',
+    area_m2: area,
+    width_m: width / 100,
+    height_m: height / 100,
+    shape: input?.shape,
+    thickness_mm: thickness,
+    processes,
+    hole_count: holes,
+    process_length_m: length,
+  }
+}
+
 function dimensionVariant(row: ComposeRow): Record<string, unknown> | undefined {
   const value: Record<string, unknown> = {}
   if (Number.isFinite(row.width) && Number(row.width) >= 0) value.width = row.width
@@ -286,6 +320,8 @@ function dimensionVariant(row: ComposeRow): Record<string, unknown> | undefined 
       value.process,
     ].filter(Boolean).join(' ')
   }
+  const costInput = composeCostInput(row)
+  if (costInput) value.cost_input = costInput
   if (row.special_note?.trim()) value.special_note = row.special_note.trim()
   if (row.set_mode_hint) value.set_mode_hint = true
   return Object.keys(value).length ? value : undefined
@@ -393,6 +429,7 @@ export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'plannin
       task: {
         ...shared,
         taskType: 'NEW_PRODUCT_DEV',
+        costInput: composeCostInput(row),
         productName: row.product_name ?? '',
         category: row.product_i_id,
         designRequirement: row.design_requirement ?? '',

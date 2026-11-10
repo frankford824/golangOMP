@@ -98,6 +98,7 @@ type createTaskReq struct {
 	Width             *float64                      `json:"width"`
 	Height            *float64                      `json:"height"`
 	Area              *float64                      `json:"area"`
+	CostInput         *domain.CostInput             `json:"cost_input"`
 	CraftText         string                        `json:"craft_text"`
 	Process           string                        `json:"process"`
 	ReferenceLink     string                        `json:"reference_link"`
@@ -845,6 +846,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		Width:              req.Width,
 		Height:             req.Height,
 		Area:               req.Area,
+		CostInput:          req.CostInput,
 		CraftText:          req.CraftText,
 		Process:            req.Process,
 		ReferenceLink:      req.ReferenceLink,

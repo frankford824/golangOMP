@@ -3216,6 +3216,9 @@ components:
           minimum: 0
           nullable: true
           description: Optional area captured by operations for the single-SKU task.
+        cost_input:
+          allOf: [{ $ref: '#/components/schemas/CostInput' }]
+          description: Optional structured pricing specifications for a single new-product SKU. Batch requests supply specifications in each item's variant_json.cost_input. Omit unconfirmed shape and process selections to retain manual-review behavior.
         craft_text:
           type: string
           description: Human-readable structure and craft summary captured at creation, for example `平面 开槽`.
