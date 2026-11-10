@@ -1,11 +1,31 @@
 import { describe, expect, it } from 'vitest'
 
-import { canAttemptSystemAssetPreview, isPdfMimeOrFilename, materialAssetKey, resolvedSystemAssetThumbnailUrl } from './systemAssetPreview'
+import { canAttemptSystemAssetPreview, isPdfMimeOrFilename, materialAssetKey, resolvedSystemAssetPreviewUrl, resolvedSystemAssetThumbnailUrl } from './systemAssetPreview'
 
 describe('systemAssetPreview helpers', () => {
   it('requests derived previews for design files before metadata is ready', () => {
     expect(canAttemptSystemAssetPreview({ id: 7, file_name: 'poster.psd', mime_type: 'image/vnd.adobe.photoshop' })).toBe(true)
     expect(canAttemptSystemAssetPreview({ id: 8, file_name: 'poster.ai', mime_type: 'application/octet-stream' })).toBe(true)
+  })
+
+  it('uses a derived preview for PSB even when the original has an image MIME type', () => {
+    const asset = {
+      asset_id: 7,
+      filename: 'poster.PSB',
+      mime_type: 'image/x-psb',
+      download_url: 'https://example.com/poster.PSB',
+      status: 'not_applicable' as const,
+      preparing: false,
+      preview_available: false,
+    }
+    expect(canAttemptSystemAssetPreview(asset)).toBe(true)
+    expect(resolvedSystemAssetPreviewUrl(asset)).toBe('')
+    expect(resolvedSystemAssetPreviewUrl({
+      ...asset,
+      status: 'ready',
+      preview_available: true,
+      preview_url: 'https://example.com/preview.webp',
+    })).toBe('https://example.com/preview.webp')
   })
 
   it('requests a published client material preview even when its old snapshot is empty', () => {

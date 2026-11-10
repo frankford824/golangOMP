@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { FileText, ImageOff } from 'lucide-vue-next'
 
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
+import { isPsbFilename } from '@aw/shared/materials/systemAssetPreview'
 
 const props = defineProps<{
   fileId: number
@@ -23,7 +24,8 @@ let retryCount = 0
 let requested = false
 const MAX_PREVIEW_RETRIES = 6
 
-const isImage = () => {
+const canLoadPreview = () => {
+  if (isPsbFilename(props.filename)) return ['pending', 'processing', 'ready'].includes(props.previewStatus || '')
   const mime = String(props.mimeType || '').toLowerCase()
   if (mime === 'application/pdf') return true
   if (mime.startsWith('image/')) return !mime.includes('photoshop') && !mime.includes('vnd.adobe')
@@ -33,7 +35,7 @@ const isImage = () => {
 async function loadPreview() {
   if (requested) return
   requested = true
-  if (!isImage()) {
+  if (!canLoadPreview()) {
     failed.value = true
     return
   }

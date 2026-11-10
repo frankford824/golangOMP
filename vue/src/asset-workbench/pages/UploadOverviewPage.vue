@@ -21,6 +21,7 @@ import { batchMutationFailureMessage, hasSupplementRecordFailure } from '@aw/sha
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.vue'
+import { isPsbFilename } from '@aw/shared/materials/systemAssetPreview'
 import { collectFilteredFiles, resolveWholeWorks, type PendingWorkDeletion, type WorkSelectionFile } from '@aw/shared/drive/workSelection'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 
@@ -220,6 +221,7 @@ function fileExtLabel(file: DriveFileRow): string {
 
 function fileFormatKind(file: DriveFileRow): string {
   const ext = fileExtLabel(file).toLowerCase()
+  if (ext === 'psb') return '设计源文件'
   const rawType = String(file.file_type || '').toLowerCase()
   const mime = String(file.mime_type || '').toLowerCase()
   if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext) || rawType === 'archive' || mime.includes('zip') || mime.includes('rar') || mime.includes('7z')) return '压缩包'
@@ -643,7 +645,7 @@ async function openFilePreview(file: DriveFileRow) {
   try {
     const meta = await assetWorkbenchApi.getFilePreview(file.id)
     previewUrl.value = meta.preview_url || ''
-    previewEmptyLabel.value = meta.preview_url ? '' : '暂无可展示预览，可下载原文件查看'
+    previewEmptyLabel.value = meta.preview_url ? '' : meta.preparing ? '预览生成中，可先下载原件' : '暂无可展示预览，可下载原文件查看'
   } catch (err) {
     previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
   }
@@ -691,7 +693,7 @@ function openArchiveFolder(path: string) {
 }
 
 function canPreviewArchiveVirtualFile(file: ArchiveVirtualFile) {
-  if (!file.preview_url) return false
+  if (!file.preview_url || isPsbFilename(file.name)) return false
   const mime = (file.mime_type || '').toLowerCase()
   if (mime.startsWith('image/') || mime.startsWith('video/') || mime === 'application/pdf') return true
   const ext = filenameExt(file.name).toLowerCase()

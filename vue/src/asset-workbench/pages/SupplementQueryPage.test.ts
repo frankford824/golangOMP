@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   listSettlementSupplements: vi.fn(),
+  listDifficultyClasses: vi.fn(),
   batchDeleteSettlementSupplements: vi.fn(),
 }))
 
@@ -46,6 +47,7 @@ const rows = [
 describe('SupplementQueryPage deletion placement', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.listDifficultyClasses.mockResolvedValue([])
     mocks.listSettlementSupplements.mockResolvedValue({ items: rows, total: rows.length })
     mocks.batchDeleteSettlementSupplements.mockResolvedValue({ deleted_ids: [701, 702], supplements: [] })
   })

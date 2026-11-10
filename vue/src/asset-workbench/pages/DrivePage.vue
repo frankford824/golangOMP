@@ -68,9 +68,11 @@ import type {
 } from '@aw/shared/spreadsheet/types'
 import {
   canAttemptSystemAssetPreview,
+  isPsbFilename,
   materialAssetKey,
   resolvedSystemAssetPreviewUrl,
   resolvedSystemAssetThumbnailUrl,
+  systemAssetFilename,
 } from '@aw/shared/materials/systemAssetPreview'
 
 type DriveMode = 'uploads' | 'directories' | 'operational'
@@ -1129,7 +1131,7 @@ function fileFormatLabel(file: DriveFileRow): string {
   const rawType = file.file_type?.trim().replace(/^\./, '')
   const name = file.display_name || file.original_filename
   const suffix = name.includes('.') ? name.split('.').pop()?.trim() : ''
-  const ext = (rawType || suffix || '').replace(/^\./, '')
+  const ext = isPsbFilename(file.original_filename) ? 'psb' : (rawType || suffix || '').replace(/^\./, '')
   const extLabel = ext ? ext.toUpperCase() : ''
   if (file.mime_type) return extLabel ? `${extLabel} · ${file.mime_type}` : file.mime_type
   return extLabel || '—'
@@ -1151,7 +1153,6 @@ function normalizeExtensionLabel(value?: string): string {
     tiff: 'TIF',
     tif: 'TIF',
     svgz: 'SVG',
-    psb: 'PSD',
     ai: 'AI',
     eps: 'EPS',
     cdr: 'CDR',
@@ -1193,6 +1194,7 @@ function searchHitFilename(row: OverviewSearchRow): string {
 function searchHitFormatLabel(row: OverviewSearchRow): string {
   const metaFileType = stringFromMeta(row, 'file_type')
   const filename = searchHitFilename(row) || row.title || row.primary_code
+  if (isPsbFilename(stringFromMeta(row, 'original_filename')) || isPsbFilename(filename)) return 'PSB'
   return (
     normalizeExtensionLabel(metaFileType) ||
     formatLabelFromMimeType(stringFromMeta(row, 'mime_type')) ||
@@ -2017,7 +2019,7 @@ async function openFilePreview(file: DriveFileRow) {
   try {
     const meta = await assetWorkbenchApi.getFilePreview(file.id)
     previewUrl.value = meta.preview_url || ''
-    previewEmptyLabel.value = meta.preview_url ? '' : '暂无可展示预览'
+    previewEmptyLabel.value = meta.preview_url ? '' : meta.preparing ? '预览生成中，可先下载原件' : '暂无可展示预览'
   } catch (err) {
     previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
   }
@@ -2410,7 +2412,7 @@ async function downloadArchiveVirtualFile(file: ArchiveVirtualFile) {
 }
 
 function canPreviewArchiveVirtualFile(file: ArchiveVirtualFile) {
-  if (!file.preview_url) return false
+  if (!file.preview_url || isPsbFilename(file.name)) return false
   const mime = (file.mime_type || '').toLowerCase()
   if (mime.startsWith('image/') || mime.startsWith('video/') || mime === 'application/pdf') return true
   const ext = (file.name.split('.').pop() || '').toLowerCase()
@@ -2867,6 +2869,7 @@ function materialCodeOf(asset: SystemAssetRow): string {
 }
 
 function materialTypeLabel(asset: SystemAssetRow): string {
+  if (isPsbFilename(systemAssetFilename(asset)) || isPsbFilename(asset.origin_path)) return 'PSB'
   const mime = (asset.mime_type || '').toLowerCase()
   if (mime.includes('photoshop') || mime.includes('vnd.adobe')) return 'PSD'
   if (mime.includes('pdf')) return 'PDF'

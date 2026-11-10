@@ -10,6 +10,10 @@ function extensionOf(filename?: string | null) {
   return match?.[1] || ''
 }
 
+export function isPsbFilename(filename?: string | null) {
+  return extensionOf(filename) === 'psb'
+}
+
 export function systemAssetFilename(asset: SystemAssetRow | SystemAssetPreviewMeta) {
   if ('filename' in asset && asset.filename) return asset.filename
   if ('original_filename' in asset && asset.original_filename) return asset.original_filename
@@ -27,6 +31,7 @@ export function materialAssetKey(asset: SystemAssetRow | SystemAssetPreviewMeta)
 }
 
 export function isSystemAssetImagePreviewable(asset: SystemAssetRow | SystemAssetPreviewMeta) {
+  if (isPsbFilename(systemAssetFilename(asset))) return false
   const mime = normalizedMime(asset.mime_type)
   if (mime.startsWith('image/')) {
     return !mime.includes('photoshop') && !mime.includes('vnd.adobe')
