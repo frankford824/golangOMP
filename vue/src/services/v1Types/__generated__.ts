@@ -16898,7 +16898,7 @@ export interface paths {
         };
         /**
          * Get uploaded work file preview metadata
-         * @description Returns preview metadata for one uploaded work file. Submitters can access only their own files; managers and settlement roles can access visible workbench files.
+         * @description Returns preview metadata for one uploaded work file. Submitters can access only their own files; managers and settlement roles can access visible workbench files. Opening a legacy PSB without a preview can queue generation of a bounded preview. Use the download endpoint for the original PSB.
          */
         get: {
             parameters: {
@@ -19247,7 +19247,7 @@ export interface paths {
         put?: never;
         /**
          * Create asset workbench upload session
-         * @description Creates a direct-upload session. Files no larger than the configured OSS part size use a single PUT; larger files use multipart upload. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot. `file_hash` is optional metadata and is not required before upload starts.
+         * @description Creates a direct-upload session. Files no larger than the configured OSS part size use a single PUT; larger files use multipart upload. PSB design source files use the same upload path. A directory restricted by extension must include `psb` to allow PSB by extension. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot. `file_hash` is optional metadata and is not required before upload starts.
          */
         post: {
             parameters: {

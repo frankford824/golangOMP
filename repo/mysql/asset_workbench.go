@@ -3064,7 +3064,9 @@ func (r *assetWorkbenchRepo) RenewPreviewLease(ctx context.Context, fileID int64
 // enqueue a duplicate task in asset_media_jobs for workbench-owned uploads.
 func (r *assetWorkbenchRepo) RequeueOriginalPreview(ctx context.Context, fileID int64, original string) error {
 	_, err := r.db.db.ExecContext(ctx, `UPDATE asset_workbench_submission_files SET preview_status='pending',preview_attempts=0,preview_next_retry_at=UTC_TIMESTAMP(),preview_error=''
- WHERE id=? AND object_key=? AND preview_status='ready' AND (preview_key='' OR preview_key=object_key)`, fileID, original)
+ WHERE id=? AND object_key=? AND deleted_at IS NULL
+   AND ((preview_status='ready' AND (preview_key='' OR preview_key=object_key))
+        OR (preview_status='not_applicable' AND file_ext='psb'))`, fileID, original)
 	return err
 }
 

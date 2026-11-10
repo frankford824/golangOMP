@@ -217,7 +217,7 @@ onMounted(loadDirectories)
         </label>
         <label class="aw-field">
           <span>允许格式</span>
-          <input v-model.trim="form.allowed_file_types" aria-label="允许格式" placeholder="jpg, png, psd；不填则不限" />
+          <input v-model.trim="form.allowed_file_types" aria-label="允许格式" placeholder="jpg, png, psd, psb；不填则不限" />
         </label>
         <label class="aw-field">
           <span>排序</span>

@@ -691,6 +691,9 @@ func archiveEntryMimeType(filename string) string {
 }
 
 func archiveEntryPreviewable(filename, mimeType string) bool {
+	if isPSBFilename(filename) {
+		return false
+	}
 	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
 	if strings.HasPrefix(mimeType, "image/") || strings.HasPrefix(mimeType, "video/") || mimeType == "application/pdf" {
 		return true

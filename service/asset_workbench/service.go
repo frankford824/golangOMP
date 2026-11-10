@@ -4366,17 +4366,19 @@ func (s *Service) GetFilePreview(ctx context.Context, actor domain.RequestActor,
 			file.PreviewStatus == domain.AssetWorkbenchPreviewStatusProcessing,
 		Error: file.PreviewError,
 	}
-	if file.PreviewStatus != domain.AssetWorkbenchPreviewStatusReady {
+	isPSB := isPSBFilename(file.OriginalFilename)
+	legacyPSB := isPSB && file.PreviewStatus == domain.AssetWorkbenchPreviewStatusNotApplicable
+	if file.PreviewStatus != domain.AssetWorkbenchPreviewStatusReady && !legacyPSB {
 		return meta, nil
 	}
 	if s.oss == nil || !s.oss.Enabled() {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "OSS direct preview is not enabled.", nil)
 	}
 	previewKey := strings.TrimSpace(file.PreviewKey)
-	if previewKey == "" || previewKey == file.ObjectKey {
+	if legacyPSB || previewKey == "" || previewKey == file.ObjectKey {
 		meta.Status = domain.AssetWorkbenchPreviewStatusNotApplicable
 		meta.Preparing = false
-		if file.FileType == "image" || file.FileType == "design" || file.FileType == "pdf" {
+		if isPSB || file.FileType == "image" || file.FileType == "design" || file.FileType == "pdf" {
 			if queue, ok := s.repo.(interface {
 				RequeueOriginalPreview(context.Context, int64, string) error
 			}); ok {
@@ -7553,7 +7555,7 @@ func (s *Service) processPreviewFile(ctx context.Context, file *domain.AssetWork
 	if file == nil {
 		return nil
 	}
-	if file.FileType != "design" && file.FileType != "image" && file.FileType != "pdf" {
+	if file.FileType != "design" && file.FileType != "image" && file.FileType != "pdf" && !isPSBFilename(file.OriginalFilename) {
 		return s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 			return s.repo.MarkPreviewReady(ctx, tx, file.ID, file.ObjectKey)
 		})
@@ -7563,6 +7565,9 @@ func (s *Service) processPreviewFile(ctx context.Context, file *domain.AssetWork
 	}
 	if s.renderer == nil {
 		return fmt.Errorf("asset preview renderer is not configured")
+	}
+	if file.FileSize > baseservice.AssetPreviewSourceMaxBytes {
+		return fmt.Errorf("preview_source_exceeds_limit")
 	}
 	reader, err := s.oss.OpenObject(ctx, file.ObjectKey)
 	if err != nil {
@@ -11472,6 +11477,9 @@ func initialPreviewStatus(filename, mimeType string) string {
 
 func inferFileType(filename, mimeType string) string {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
+	if ext == "psb" {
+		return "design"
+	}
 	if strings.HasPrefix(strings.ToLower(mimeType), "image/") {
 		return "image"
 	}
@@ -11495,7 +11503,14 @@ func inferFileType(filename, mimeType string) string {
 	}
 }
 
+func isPSBFilename(filename string) bool {
+	return strings.EqualFold(filepath.Ext(strings.TrimSpace(filename)), ".psb")
+}
+
 func isWorkbenchSystemAssetDirectPreviewable(mimeType string, filename string) bool {
+	if isPSBFilename(filename) {
+		return false
+	}
 	mime := strings.ToLower(strings.TrimSpace(mimeType))
 	if strings.HasPrefix(mime, "image/") {
 		return !strings.Contains(mime, "photoshop") && !strings.Contains(mime, "vnd.adobe")

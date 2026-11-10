@@ -17471,7 +17471,7 @@ paths:
   /v1/asset-workbench/files/{file_id}/preview:
     get:
       summary: Get uploaded work file preview metadata
-      description: Returns preview metadata for one uploaded work file. Submitters can access only their own files; managers and settlement roles can access visible workbench files.
+      description: Returns preview metadata for one uploaded work file. Submitters can access only their own files; managers and settlement roles can access visible workbench files. Opening a legacy PSB without a preview can queue generation of a bounded preview. Use the download endpoint for the original PSB.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -18652,7 +18652,7 @@ paths:
   /v1/asset-workbench/upload-sessions:
     post:
       summary: Create asset workbench upload session
-      description: Creates a direct-upload session. Files no larger than the configured OSS part size use a single PUT; larger files use multipart upload. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot. `file_hash` is optional metadata and is not required before upload starts.
+      description: Creates a direct-upload session. Files no larger than the configured OSS part size use a single PUT; larger files use multipart upload. PSB design source files use the same upload path. A directory restricted by extension must include `psb` to allow PSB by extension. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot. `file_hash` is optional metadata and is not required before upload starts.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
