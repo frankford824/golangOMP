@@ -84,6 +84,22 @@ function dialog() {
 }
 
 describe('TaskDetailV8View business context', () => {
+  it('opens the default-style upload directly from the task header', async () => {
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, reference_file_refs: [] } } })
+    mocks.taskBundle.mockResolvedValue({
+      ...bundle, can_manage_default_style: true,
+      groups: [{ id: 501, task_id: 41, scope_kind: 'sku', lock_version: 1, sku_code: 'SKU-041', migration_incomplete: false }],
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('.default-style-entry').text()).toBe('上传默认款')
+    await wrapper.get('.default-style-entry').trigger('click')
+    expect(dialog().getAttribute('aria-label')).toBe('默认款')
+    expect(dialog().textContent).toContain('SKU-041')
+    expect(dialog().textContent).toContain('还没有默认款')
+    wrapper.unmount()
+  })
+
   it('refreshes per-SKU reference URLs without replacing business or cost values', async () => {
     const item = { id: 51, sku_code: 'SKU-041', cost_price: 23.5, reference_file_refs: [{ asset_id: 'uuid', thumbnail_url: '/old-thumb.webp' }] }
     mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, reference_file_refs: [], sku_items: [item], events: [] } } })

@@ -10,6 +10,10 @@
             <button class="back-button" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>{{ backButtonLabel }}</span></button>
             <div class="hero-actions">
               <TaskStatusTag :status="task.task_status" />
+              <button v-if="bundle?.groups.length" type="button" class="default-style-entry"
+                @click="openWorkspace('defaultStyle')">
+                <Image :size="16" aria-hidden="true" />{{ defaultStyleActionLabel }}
+              </button>
               <button class="refresh-button" :disabled="loading" aria-label="刷新任务" @click="load"><RefreshCw :size="16" :stroke-width="1.9" aria-hidden="true" /><span>刷新</span></button>
             </div>
           </nav>
@@ -201,10 +205,10 @@
 
       <Teleport to="body">
       <div v-if="workspaceMode" class="workspace-backdrop" @mousedown.self="closeWorkspace">
-        <section ref="workspaceDialog" class="workspace-dialog" role="dialog" aria-modal="true" :aria-label="workspaceTitle" tabindex="-1" @keydown="handleWorkspaceKeydown">
+        <section ref="workspaceDialog" class="workspace-dialog" :class="{ 'default-style-dialog': workspaceMode === 'defaultStyle' }" role="dialog" aria-modal="true" :aria-label="workspaceTitle" tabindex="-1" @keydown="handleWorkspaceKeydown">
           <header class="workspace-head">
             <div><p class="eyebrow">{{ task.task_no }}</p><h2>{{ workspaceTitle }}</h2><p>{{ workspaceSubtitle }}</p></div>
-            <button class="close-button" aria-label="关闭" @click="closeWorkspace">×</button>
+            <button class="close-button" aria-label="关闭" :disabled="defaultStyleBusy" @click="closeWorkspace">×</button>
           </header>
 
           <div v-if="workspaceMode === 'workflow' && bundle" class="workspace-body workflow-body">
@@ -224,7 +228,16 @@
             />
           </div>
 
-          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles" :enable-revision-history="can('asset.view')" show-default-style @refresh-references="refreshReferencePreviews" /></div>
+          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body">
+            <SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles"
+              :enable-revision-history="can('asset.view')" show-default-style @refresh-references="refreshReferencePreviews"
+              @default-style-busy="defaultStyleBusy = $event" @default-style-dirty="defaultStyleDirty = $event" />
+          </div>
+          <div v-else-if="workspaceMode === 'defaultStyle' && bundle" class="workspace-body">
+            <DefaultStyleWorkspace :groups="bundle.groups" :editable="bundle.can_manage_default_style"
+              :history-enabled="can('asset.view')"
+              @updated="updateDefaultStyleGroup" @busy="defaultStyleBusy = $event" @dirty-change="defaultStyleDirty = $event" />
+          </div>
 
           <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
             <TaskAttachmentWorkspace
@@ -388,6 +401,7 @@ import {
   Download,
   FileText,
   History,
+  Image,
   Layers3,
   PanelTopOpen,
   PencilLine,
@@ -396,7 +410,7 @@ import {
   Upload,
 } from 'lucide-vue-next'
 import { tasksApi } from '@/services/api/tasksApi'
-import { resourceGroupsApi, type ProductCostReconciliation, type ResourceBundle } from '@/services/api/resourceGroupsApi'
+import { resourceGroupsApi, type ProductCostReconciliation, type ResourceBundle, type ResourceGroup } from '@/services/api/resourceGroupsApi'
 import { mergeDetailEnvelopeIntoTaskRaw } from '@/domain/mappers/task-detail-envelope'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { usePermission } from '@/composables/usePermission'
@@ -405,6 +419,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
 import TaskStatusTag from '@/components/task/TaskStatusTag.vue'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
+import DefaultStyleWorkspace from '@/components/task/DefaultStyleWorkspace.vue'
 import ResourceWorkflowPanel from '@/components/task/ResourceWorkflowPanel.vue'
 import TaskAttachmentWorkspace from '@/components/task/TaskAttachmentWorkspace.vue'
 import TaskResourceRail from '@/components/task/TaskResourceRail.vue'
@@ -442,7 +457,7 @@ interface V8Task extends Record<string, unknown> {
 interface ReferenceFile extends Record<string, unknown> { id?: number; asset_id?: string; ref_id?: string; file_name?: string; filename?: string; mime_type?: string; download_url?: string; preview_url?: string; url?: string }
 interface TaskEvent extends Record<string, unknown> { id?: number; event_type?: string; title?: string; operator_name?: string; actor_name?: string; created_at?: string; reason?: string; remark?: string }
 interface AuditHandover { id: number; handover_no?: string; status?: string; allowed_actions?: string[] }
-type WorkspaceMode = 'workflow' | 'resources' | 'attachments' | 'details' | 'history' | 'collaboration'
+type WorkspaceMode = 'workflow' | 'defaultStyle' | 'resources' | 'attachments' | 'details' | 'history' | 'collaboration'
 
 const route = useRoute()
 const router = useRouter()
@@ -515,6 +530,18 @@ const {
   loadDesigners: loadAuditorCandidates,
 } = useDesignerOptions({ includeEmpty: false, autoLoad: false, workflowLane: 'audit', requiredActions: ['task.audit.decision'] })
 const workflowDirty = ref(false)
+const defaultStyleBusy = ref(false)
+const defaultStyleDirty = ref(false)
+const defaultStyleActionLabel = computed(() => {
+  if (!bundle.value?.can_manage_default_style) return '查看默认款'
+  const hasDefaultStyle = bundle.value.groups.some(group => group.default_style || group.pending_default_style)
+  return hasDefaultStyle ? '管理默认款' : '上传默认款'
+})
+
+function updateDefaultStyleGroup(updated: ResourceGroup) {
+  const group = bundle.value?.groups.find(item => item.id === updated.id)
+  if (group) Object.assign(group, updated)
+}
 const workspaceMode = ref<WorkspaceMode | null>(null)
 const workspaceDialog = ref<HTMLElement | null>(null)
 const workspaceReturnFocus = ref<HTMLElement | null>(null)
@@ -766,9 +793,10 @@ const workflowButtonLabel = computed(() => {
   if (task.value?.task_status === 'Completed') return '查看结单资源'
   return '进入设计提交'
 })
-const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', attachments: isRetouch.value ? '运营参考图' : '任务级参考附件', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
+const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', defaultStyle: '默认款', attachments: isRetouch.value ? '运营参考图' : '任务级参考附件', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
 const workspaceSubtitle = computed(() => {
   if (workspaceMode.value === 'workflow') return currentStageDescription.value
+  if (workspaceMode.value === 'defaultStyle') return task.value?.task_status === 'Completed' ? '保存后立即生效。' : '保存后将在任务结单时生效。'
   if (workspaceMode.value === 'attachments') return isRetouch.value
     ? '集中预览和下载任务级附件与逐项修图需求所绑定的参考图。'
     : '集中预览和下载运营提供的任务级参考图片与文件。'
@@ -1128,7 +1156,9 @@ async function submitAssign(payload: { mode: 'reassign' | 'clear'; assigneeId: s
   }
 }
 function closeWorkspace() {
-  if (workspaceMode.value === 'workflow' && workflowDirty.value && !window.confirm('当前上传区还有未提交修改，确定关闭吗？')) return
+  if (defaultStyleBusy.value) return
+  if ((workflowDirty.value || defaultStyleDirty.value) && !window.confirm('当前上传区还有未提交修改，确定关闭吗？')) return
+  defaultStyleDirty.value = false
   workspaceMode.value = null
   void nextTick(() => workspaceReturnFocus.value?.focus())
 }
@@ -1159,8 +1189,15 @@ function handleWorkspaceKeydown(event: KeyboardEvent) {
 async function onWorkflowUpdated(next: ResourceBundle) { workflowDirty.value = false; bundle.value = next; closeWorkspace(); await load() }
 async function submitHandover() { if (!handoverUserId.value || !handoverReason.value || handoverBusy.value) return; handoverBusy.value = true; error.value = ''; try { await tasksApi.auditHandover(String(taskId.value),{ to_auditor_id:handoverUserId.value,reason:handoverReason.value }); handoverReason.value=''; await load() } catch(cause) { error.value=cause instanceof Error?cause.message:'审核交班失败。' } finally { handoverBusy.value=false } }
 async function takeover(handoverId:number) { if(handoverBusy.value)return; handoverBusy.value=true; error.value=''; try{await tasksApi.auditTakeover(String(taskId.value),{handover_id:handoverId});await load()}catch(cause){error.value=cause instanceof Error?cause.message:'接手任务失败。'}finally{handoverBusy.value=false} }
-function confirmWorkflowLeave(){if(!workflowDirty.value)return true;return window.confirm('当前资源区还有未提交修改，确定离开吗？')}
-function warnBeforeUnload(event:BeforeUnloadEvent){if(!workflowDirty.value)return;event.preventDefault();event.returnValue=''}
+function confirmWorkflowLeave() {
+  if (defaultStyleBusy.value) return false
+  return (!workflowDirty.value && !defaultStyleDirty.value) || window.confirm('当前资源区还有未提交修改，确定离开吗？')
+}
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  if (!workflowDirty.value && !defaultStyleDirty.value && !defaultStyleBusy.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
 watch(workspaceMode, (mode) => {
   if (mode) {
     previousBodyOverflow = document.body.style.overflow
@@ -1330,4 +1367,14 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 @media(max-width:1160px){.hero-facts{flex-basis:auto}.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-card{grid-column:1/-1}}
 @media(max-width:760px){.task-page{padding:0 0 22px;gap:10px}.task-hero{min-height:0;border-radius:14px}.hero-content{min-height:0;padding:12px}.hero-nav{align-items:center}.back-button span,.refresh-button span{display:none}.back-button,.refresh-button{width:36px;padding:0}.hero-main{gap:12px}.hero-identity h1{font-size:26px;line-height:1.12}.identity-badges{margin-top:10px}.identity-badge{min-height:26px;padding-inline:8px}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-progress{padding-bottom:2px;overflow:visible}.sku-visibility-strip,.legacy-resource-bridge{grid-template-columns:1fr}.command-strip{padding:12px}.overview-grid{grid-template-columns:1fr;gap:10px}.mission-card{grid-column:auto}.card-actions{flex-wrap:wrap;justify-content:flex-end}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border-radius:0}}
 @media(prefers-reduced-motion:no-preference){@keyframes task-refresh-spin{to{transform:rotate(360deg)}}}
+
+.hero-actions .default-style-entry {
+  white-space: nowrap;
+  color: rgb(var(--yb-text-inverse));
+  border-color: rgb(var(--yb-text-inverse)/.45);
+  background: rgb(var(--yb-text-inverse)/.16);
+}
+.hero-actions .default-style-entry:hover { background: rgb(var(--yb-text-inverse)/.23); }
+.workspace-dialog.default-style-dialog { width: min(690px, 100%); height: auto; max-height: calc(100dvh - 40px); }
+.default-style-dialog .workspace-body { min-height: 0; }
 </style>

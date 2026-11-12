@@ -29,15 +29,11 @@
       </div>
     </header>
 
-    <div v-if="isAuditStage && bundle.can_manage_default_style && selectedDefaultStyleRow" class="audit-default-style">
-      <label v-if="rows.length > 1">默认款所属 SKU
-        <select v-model.number="defaultStyleGroupID" :disabled="defaultStyleBusy">
-          <option v-for="row in rows" :key="row.group.id" :value="row.group.id">{{ row.group.sku_code || scopeLabel(row.group) }}</option>
-        </select>
-      </label>
-      <DefaultStyleSlot :key="selectedDefaultStyleRow.group.id" :group="selectedDefaultStyleRow.group" editable
-        @updated="updateDefaultStyleGroup" @busy="defaultStyleBusy = $event" />
-    </div>
+    <details v-if="isAuditStage && bundle.can_manage_default_style && bundle.groups.length" class="audit-default-style">
+      <summary>默认款 <small>{{ defaultStyleDirty ? '有未保存的变更' : '上传或查看默认款' }}</small></summary>
+      <DefaultStyleWorkspace :groups="bundle.groups" editable
+        @updated="updateDefaultStyleGroup" @busy="defaultStyleBusy = $event" @dirty-change="defaultStyleDirty = $event" />
+    </details>
 
     <div class="stage-map" aria-label="任务资源的三个阶段">
       <article class="stage-node complete">
@@ -281,7 +277,7 @@ import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { referenceThumbnailURL } from '@/domain/reference-thumbnail'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
 import type { ImagePreviewLightboxItem } from '@/components/media/imagePreviewLightbox'
-import DefaultStyleSlot from '@/components/task/DefaultStyleSlot.vue'
+import DefaultStyleWorkspace from '@/components/task/DefaultStyleWorkspace.vue'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode, type ResourceReference } from '@/services/api/resourceGroupsApi'
 import { assetsApi, type ReferenceFileRef } from '@/services/api/assetsApi'
@@ -314,9 +310,9 @@ const rows = ref<EditorRow[]>([])
 const changedGroups = ref(new Set<number>())
 const replaceSourceGroups = ref(new Set<number>())
 const busy = ref(false)
-const defaultStyleGroupID = ref(0)
 const defaultStyleBusy = ref(false)
-const selectedDefaultStyleRow = computed(() => rows.value.find((row) => row.group.id === defaultStyleGroupID.value) ?? rows.value[0])
+const defaultStyleDirty = ref(false)
+const defaultStyleEditing = computed(() => defaultStyleBusy.value || defaultStyleDirty.value)
 function updateDefaultStyleGroup(group: ResourceGroup) {
   const row = rows.value.find((item) => item.group.id === group.id)
   if (!row) return
@@ -398,7 +394,7 @@ const editorVisibleStart = computed(() => Math.max(0, Math.floor(editorScrollTop
 const editorVisibleCount = computed(() => Math.ceil(editorViewportHeight.value / editorRowHeight.value) + editorOverscan * 2)
 const visibleEditorRows = computed(() => rows.value.slice(editorVisibleStart.value, editorVisibleStart.value + editorVisibleCount.value).map((row, offset) => ({ row, groupIndex: editorVisibleStart.value + offset })))
 const editorWindowOffset = computed(() => editorVisibleStart.value * editorRowHeight.value)
-const isDirty = computed(() => folderUploading.value || defaultStyleBusy.value || changedGroups.value.size > 0 || rows.value.some((row) => Boolean(row.uploading)))
+const isDirty = computed(() => folderUploading.value || defaultStyleEditing.value || changedGroups.value.size > 0 || rows.value.some((row) => Boolean(row.uploading)))
 const dirtyLabel = computed(() => {
   if (isDirty.value) return '当前修改尚未提交'
   if (isDesignStage.value) {
@@ -446,7 +442,6 @@ function buildRows() {
       uploading: '',
     }
   })
-  defaultStyleGroupID.value = rows.value[0]?.group.id ?? 0
   changedGroups.value = new Set()
   replaceSourceGroups.value = new Set()
   editorScrollTop.value = 0
@@ -690,7 +685,7 @@ function validFinals(row: EditorRow) {
   return row.mode === 'single' ? row.finals.length === 1 : row.finals.length >= 2
 }
 const validDesign = computed(() => rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && ['single','set'].includes(row.mode)) && !rows.value.some((row) => row.uploading))
-const validAudit = computed(() => !defaultStyleBusy.value && rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && validFinals(row)) && !rows.value.some((row) => row.uploading))
+const validAudit = computed(() => !defaultStyleEditing.value && rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && validFinals(row)) && !rows.value.some((row) => row.uploading))
 const validRetouch = computed(() => rows.value.length > 0 && rows.value.every((row) => validFinals(row)) && !folderUploading.value && !rows.value.some((row) => row.uploading))
 function submission(row: EditorRow): ResourceGroupSubmission {
   const includeFinals = isAuditStage.value || isRetouchStage.value
@@ -726,13 +721,25 @@ function openConfirmation(action: 'approve' | 'return_to_design' | 'reopen') { i
 function closeConfirmation() { pendingAction.value = null; void nextTick(() => confirmationTrigger?.focus()) }
 function cancelConfirmation() { if (!busy.value) closeConfirmation() }
 function trapConfirmationFocus(event: KeyboardEvent) { const controls = [...(confirmDialog.value?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]; if (!controls.length) return; const first = controls[0]; const last = controls[controls.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() } }
-async function confirmAction() { if (!pendingAction.value || busy.value || defaultStyleBusy.value) return; const action = pendingAction.value; if (action === 'approve') await approve(); else if (action === 'return_to_design') await returnToDesign(); else await reopen(); if (!error.value) closeConfirmation() }
+async function confirmAction() { if (!pendingAction.value || busy.value || defaultStyleEditing.value) return; const action = pendingAction.value; if (action === 'approve') await approve(); else if (action === 'return_to_design') await returnToDesign(); else await reopen(); if (!error.value) closeConfirmation() }
 onMounted(() => { refreshEditorMetrics(); window.addEventListener('resize', refreshEditorMetrics) })
 onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetrics); emit('dirty-change', false) })
 </script>
 
 <style scoped>
-.audit-default-style{display:grid;gap:6px;padding:8px 12px}.audit-default-style select{margin-inline-start:6px;max-width:100%}
+.audit-default-style {
+  flex: 0 0 auto;
+  max-height: 38dvh;
+  margin: 5px 12px;
+  padding: 7px 10px;
+  overflow: auto;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 8px;
+  background: rgb(var(--yb-surface));
+}
+.audit-default-style summary { color: rgb(var(--yb-brand-strong)); font-weight: 750; font-size: 13px; cursor: pointer; }
+.audit-default-style summary small { margin-left: 6px; color: rgb(var(--yb-text-muted)); font-weight: 500; }
+.audit-default-style[open] summary { margin-bottom: 8px; }
 .resource-workspace{display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto;min-height:0;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));overflow:hidden;box-shadow:0 18px 44px rgb(var(--yb-shadow)/.05)}
 .workspace-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:18px 20px 14px}.workspace-head h2{margin:2px 0 4px;font-size:22px}.workspace-head p{margin:0;color:rgb(var(--yb-text-muted));font-size:13px}.section-label{font-size:11px;font-weight:800;letter-spacing:.08em;color:rgb(var(--yb-brand))}
 .stage-map{display:grid;grid-template-columns:repeat(3,1fr);border-block:1px solid rgb(var(--yb-border));background:linear-gradient(90deg,rgb(var(--yb-brand-soft)/.45),rgb(var(--yb-surface)) 48%)}.stage-node{position:relative;display:flex;align-items:center;gap:10px;min-height:66px;padding:10px 18px;color:rgb(var(--yb-text-muted))}.stage-node:not(:last-child)::after{content:"";position:absolute;right:-8px;width:16px;height:1px;background:rgb(var(--yb-border-strong))}.stage-node.active{color:rgb(var(--yb-text));background:rgb(var(--yb-brand-soft)/.45)}.stage-node.complete{color:rgb(var(--yb-text))}.stage-index{display:grid;place-items:center;width:28px;height:28px;border:1px solid rgb(var(--yb-border-strong));border-radius:50%;font-weight:800}.active .stage-index{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.complete .stage-index{border-color:rgb(var(--yb-brand));color:rgb(var(--yb-brand))}.stage-node div{display:grid;gap:3px}.stage-node small{font-size:11px;color:rgb(var(--yb-text-muted))}

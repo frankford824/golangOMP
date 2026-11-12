@@ -121,7 +121,9 @@
       <DefaultStyleSlot v-if="showDefaultStyle || group.default_style || group.pending_default_style"
         :group="group" :editable="bundle.can_manage_default_style && !group.migration_incomplete"
         :history-enabled="enableRevisionHistory"
-        @updated="(updated) => Object.assign(group, updated)" />
+        @updated="(updated) => Object.assign(group, updated)"
+        @busy="setDefaultStyleActivity(busyDefaultStyles, group.id, $event, 'defaultStyleBusy')"
+        @dirty-change="setDefaultStyleActivity(dirtyDefaultStyles, group.id, $event, 'defaultStyleDirty')" />
 
       <footer class="group-footer">
         <span>来源任务 · {{ group.task_no || group.task_id }}</span>
@@ -177,7 +179,15 @@ const props = defineProps<{
 }>()
 
 const preview = reactive({ url: '', name: '', open: false })
-defineEmits<{ refreshReferences: [] }>()
+const emit = defineEmits<{ refreshReferences: []; defaultStyleBusy: [active: boolean]; defaultStyleDirty: [dirty: boolean] }>()
+const busyDefaultStyles = new Set<number>()
+const dirtyDefaultStyles = new Set<number>()
+function setDefaultStyleActivity(groups: Set<number>, id: number, active: boolean, event: 'defaultStyleBusy' | 'defaultStyleDirty') {
+  if (active) groups.add(id)
+  else groups.delete(id)
+  if (event === 'defaultStyleBusy') emit('defaultStyleBusy', groups.size > 0)
+  else emit('defaultStyleDirty', groups.size > 0)
+}
 const previewItems = computed(() => preview.url ? [{
   src: preview.url,
   title: preview.name,
