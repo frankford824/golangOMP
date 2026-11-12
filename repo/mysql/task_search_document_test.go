@@ -75,7 +75,7 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 				"INSERT INTO task_search_documents",
 				"ORDER BY id SEPARATOR ' '",
 				"scope_sku_code",
-				"asset_type NOT IN ('preview', 'design_thumb')",
+				"asset_type NOT IN ('preview', 'design_thumb', 'default_style')",
 				"tsi.product_name_snapshot",
 				"COALESCE(sku_items.sku_item_text, '')",
 				"ORDER BY tsi.id, revision.id SEPARATOR ' '",

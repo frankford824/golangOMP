@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `202` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `204` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## POST /v1/integration/asset-media/workers/claim
 
@@ -2070,7 +2070,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 | `sku_code` | query | string | 否 | - |
 | `task_no` | query | string | 否 | - |
 | `creator_id` | query | integer | 否 | - |
-| `resource_role` | query | enum(reference/source/final) | 否 | - |
+| `resource_role` | query | enum(reference/source/final/default_style) | 否 | - |
 | `format_category` | query | enum(image/design/pdf/video/archive) | 否 | Optional coarse resource format category. |
 | `business_lane` | query | enum(normal/customization) | 否 | Optional task business category. `customization` means 定制; `normal` means 常规. |
 | `q` | query | string | 否 | Searches task number |
@@ -2176,6 +2176,136 @@ curl -X GET https://api.example.com/v1/resource-groups \
 ### curl 示例
 ```bash
 curl -X GET https://api.example.com/v1/resource-groups/<id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## PUT /v1/resource-groups/{id}/default-style
+
+### 简介
+支持方法: PUT。
+
+- `PUT`: Requires scoped task.audit.decision. Binds one staged file from the actor and group, or records a removal. Completed tasks publish immediately. Active tasks publish on completion.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `PUT` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `task_asset_id` | integer | 否 | - |
+| `remove` | boolean | 否 | - |
+| `expected_group_lock_version` | integer | 是 | - |
+| `idempotency_key` | string | 是 | - |
+| `reason` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "group_lock_version": 123,
+    "revision_id": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | DefaultStyleUpdateResult | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 403 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 404 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 409 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+
+### curl 示例
+```bash
+curl -X PUT https://api.example.com/v1/resource-groups/<id>/default-style \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/resource-groups/{id}/default-style/history
+
+### 简介
+支持方法: GET。
+
+- `GET`: Requires both asset.view and scoped task.audit.decision. Pass the last returned revision ID as before_id to read older changes.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: 已登录 / scope-aware。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+| `before_id` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | DefaultStyleHistory | 是 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 404 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/resource-groups/<id>/default-style/history \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -6789,7 +6919,7 @@ curl -X GET https://api.example.com/v1/task-board/design-department \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns a deterministic snapshot of current finalized resource-group revisions using the same eligibility and image filtering as production Excel packaging. It never exposes draft-only or superseded revisions. `manifest_id` and the response `ETag` hash canonical snapshot content and exclude `generated_at`; clients should send `If-None-Match` on later polls. Objects that are missing in OSS remain in the manifest as current database facts and are reported by the download-ticket endpoint.
+- `GET`: Returns a deterministic snapshot of current finalized resource-group revisions using the same eligibility and image filtering as production Excel packaging. It never exposes draft-only or superseded revisions. `manifest_id` and the response `ETag` hash canonical snapshot content and exclude `generated_at`; clients should send `If-None-Match` on later polls. Objects that are missing in OSS remain in the manifest as current database facts and are reported by the download-ticket endpoint. Request `schema_version=2` to also receive explicitly waived finalized groups with empty items and independent `default_styles`, including completed planning SKU slots and supported non-image files.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -6801,6 +6931,7 @@ curl -X GET https://api.example.com/v1/task-board/design-department \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
+| `schema_version` | query | enum(1/2) | 否 | - |
 | `If-None-Match` | header | string | 否 | - |
 
 请求体: 无请求体。
@@ -6828,6 +6959,7 @@ curl -X GET https://api.example.com/v1/task-board/design-department \
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 | 401 | 见 `error.code` | 见 `deny_code` | Missing or invalid dedicated machine token |
 | 500 | 见 `error.code` | 见 `deny_code` | Manifest query or construction failed |
 
@@ -6851,7 +6983,7 @@ curl -X GET https://api.example.com/v1/integration/asset-sync/finalized/manifest
 ### 简介
 支持方法: POST。
 
-- `POST`: Revalidates that every requested task asset still belongs to a current eligible finalized revision, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
+- `POST`: Revalidates that every requested task asset still belongs to a current eligible finalized revision or is a currently effective default style, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

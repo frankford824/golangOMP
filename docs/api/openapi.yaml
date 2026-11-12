@@ -1981,7 +1981,7 @@ components:
           nullable: true
         asset_type:
           type: string
-          enum: [reference, source, delivery, preview, design_thumb]
+          enum: [reference, source, delivery, preview, design_thumb, default_style]
         version_no: { type: integer }
         asset_version_no:
           type: integer
@@ -2154,7 +2154,7 @@ components:
           description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy asset scope.
         asset_type:
           type: string
-          enum: [reference, source, delivery, preview, design_thumb]
+          enum: [reference, source, delivery, preview, design_thumb, default_style]
         version_no: { type: integer }
         timeline_version_no: { type: integer }
         upload_mode:
@@ -2287,7 +2287,7 @@ components:
           description: Optional P图需求明细 scope for `retouch_task`. NULL means task-level or legacy asset scope.
         asset_type:
           type: string
-          enum: [reference, source, delivery, preview, design_thumb]
+          enum: [reference, source, delivery, preview, design_thumb, default_style]
         current_version_id:
           type: integer
           nullable: true
@@ -2331,7 +2331,7 @@ components:
         asset_type:
           type: string
           nullable: true
-          enum: [reference, source, delivery, preview, design_thumb]
+          enum: [reference, source, delivery, preview, design_thumb, default_style]
         target_sku_code:
           type: string
           nullable: true
@@ -2570,8 +2570,10 @@ components:
         Asset-center upload sessions prefer `oss_direct` instructions and return `remote` only as a fallback.
         Frontend uploads bytes using the returned plan, then calls `complete`.
         Source and final uploads are staged and become business resources only through submit-design
-        or audit decision. Tasks in `Completed` reject create, complete, and cancel mutations with
-        `completed_resource_requires_reopen`; the task must be reopened before any resource change.
+        or audit decision. Use `asset_kind=default_style` to stage one new default-style file
+        in the resource group's task, SKU, or retouch requirement scope. The session is restricted to its
+        creator with scoped `task.audit.decision`, including for completed tasks. Bind the resulting task
+        asset through the default-style resource-group operation. Other completed-task resource changes require reopen.
         Authorization uses explicit capabilities plus stable department/team ID scope. Legacy roles
         and organization display names never authorize this operation.
       anyOf:
@@ -2596,11 +2598,11 @@ components:
           description: Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents.
         asset_type:
           type: string
-          enum: [reference, source, delivery, preview, design_thumb]
+          enum: [reference, source, delivery, preview, design_thumb, default_style]
           description: Compatibility alias of `asset_kind` retained for migration safety.
         asset_kind:
           type: string
-          enum: [reference, source, delivery, preview, design_thumb]
+          enum: [reference, source, delivery, preview, design_thumb, default_style]
           description: Canonical upload intent field for new frontend integrations.
         upload_mode:
           $ref: '#/components/schemas/DesignAssetUploadMode'
@@ -2673,7 +2675,7 @@ components:
               minimum: 1
             asset_kind:
               type: string
-              enum: [reference, source, delivery, preview, design_thumb]
+              enum: [reference, source, delivery, preview, design_thumb, default_style]
             file_name:
               type: string
               minLength: 1
@@ -5090,6 +5092,7 @@ components:
       type: object
       required: [group_id, revision_id, revision_mode, finalized_at, task_id, task_no, scope_kind, sku_code, product_name, items]
       properties:
+        final_output_waived: { type: boolean, description: Included in schema v2 for approved customization groups with no final items. }
         group_id: { type: integer, format: int64 }
         revision_id: { type: integer, format: int64 }
         revision_mode: { type: string, enum: [single, set] }
@@ -5102,11 +5105,35 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/FinalizedSyncManifestItem' }
+    FinalizedSyncDefaultStyle:
+      type: object
+      required: [group_id, default_style_revision_id, task_id, task_no, scope_kind, sku_code, product_name, task_asset_id, file_name, original_filename, format, mime_type, file_size, storage_key, whole_hash, created_at]
+      properties:
+        group_id: { type: integer, format: int64 }
+        default_style_revision_id: { type: integer, format: int64 }
+        task_id: { type: integer, format: int64 }
+        task_no: { type: string }
+        scope_kind: { type: string, enum: [task, sku, retouch_requirement] }
+        sku_code: { type: string }
+        product_name: { type: string }
+        task_asset_id: { type: integer, format: int64 }
+        file_name: { type: string }
+        original_filename: { type: string }
+        format: { type: string }
+        mime_type: { type: string }
+        file_size: { type: integer, format: int64, minimum: 0 }
+        storage_key: { type: string }
+        whole_hash: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
     FinalizedSyncManifest:
       type: object
       required: [schema_version, manifest_id, generated_at, group_count, item_count, object_count, total_object_bytes, groups]
       properties:
-        schema_version: { type: integer, enum: [1] }
+        schema_version: { type: integer, enum: [1, 2] }
+        default_styles:
+          type: array
+          description: Present in schema v2, with one current file per occupied slot. Includes default-style objects in object_count and total_object_bytes.
+          items: { $ref: '#/components/schemas/FinalizedSyncDefaultStyle' }
         manifest_id: { type: string, pattern: '^[0-9a-f]{64}$' }
         generated_at: { type: string, format: date-time }
         group_count: { type: integer, minimum: 0 }
@@ -6431,10 +6458,53 @@ components:
           type: string
           pattern: '^[0-9a-f]{64}$'
           description: Lower-case SHA-256 of an oversized business reason that could not fit beside the marker.
+    DefaultStyleRevision:
+      type: object
+      required: [id, group_id, removed, created_by, reason, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        group_id: { type: integer, format: int64 }
+        file: { $ref: '#/components/schemas/TaskResourceFile' }
+        removed: { type: boolean }
+        created_by: { type: integer, format: int64 }
+        reason: { type: string }
+        created_at: { type: string, format: date-time }
+    DefaultStyleUpdateRequest:
+      type: object
+      required: [expected_group_lock_version, idempotency_key, reason]
+      oneOf:
+        - required: [task_asset_id]
+          properties:
+            remove: { type: boolean, enum: [false] }
+        - required: [remove]
+          properties:
+            remove: { type: boolean, enum: [true] }
+          not: { required: [task_asset_id] }
+      properties:
+        task_asset_id: { type: integer, format: int64, minimum: 1 }
+        remove: { type: boolean }
+        expected_group_lock_version: { type: integer, format: int64, minimum: 0 }
+        idempotency_key: { type: string, minLength: 1, maxLength: 128 }
+        reason: { type: string, minLength: 1, maxLength: 512 }
+    DefaultStyleUpdateResult:
+      type: object
+      required: [group_lock_version, revision_id]
+      properties:
+        group_lock_version: { type: integer, format: int64 }
+        revision_id: { type: integer, format: int64 }
+    DefaultStyleHistory:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/DefaultStyleRevision' }
     TaskAssetGroupRevision:
       type: object
       required: [id, group_id, revision_no, status, mode, source_stage, created_by, legacy_migration, items, references, created_at]
       properties:
+        final_output_waived: { type: boolean, description: True when customization audit explicitly approved this SKU without final output. }
         id: { type: integer, format: int64 }
         group_id: { type: integer, format: int64 }
         revision_no: { type: integer }
@@ -6475,6 +6545,10 @@ components:
       type: object
       required: [id, task_id, scope_kind, lock_version, migration_incomplete, created_at, updated_at]
       properties:
+        default_style: { $ref: '#/components/schemas/DefaultStyleRevision' }
+        pending_default_style:
+          description: Task-bundle only, visible within scoped audit access. A removal is represented by a revision with removed=true.
+          allOf: [{ $ref: '#/components/schemas/DefaultStyleRevision' }]
         id: { type: integer, format: int64 }
         task_id: { type: integer, format: int64 }
         scope_kind: { type: string, enum: [task, sku, retouch_requirement] }
@@ -6545,6 +6619,7 @@ components:
       type: object
       required: [task_id, workflow_revision, groups]
       properties:
+        can_manage_default_style: { type: boolean, description: The actor may maintain default styles in the current task state. }
         task_id: { type: integer, format: int64 }
         workflow_revision: { type: integer, format: int64 }
         groups:
@@ -6557,10 +6632,11 @@ components:
         One complete resource-group input. For ordinary and customization tasks, the designer selects
         `mode` and submits exactly one editable source while `final_task_asset_ids` MUST be empty.
         During audit, the auditor may retain or revise `mode`; each group supplies a newly staged complete
-        final set (`single` exactly one, `set` at least two in array order). Omitting
+        final set (`single` exactly one, `set` at least two in array order), or explicitly waives it during customization audit. Omitting
         `source_task_asset_id` during audit inherits the designer source; supplying it replaces that source.
         Retouch submissions provide final files directly and may omit the source.
       properties:
+        final_output_waived: { type: boolean, description: Customization audit approval only. Requires an empty final_task_asset_ids list and an effective source. }
         group_id: { type: integer, format: int64 }
         expected_group_lock_version: { type: integer, format: int64 }
         mode:
@@ -6819,7 +6895,7 @@ components:
           type: string
           enum: [original_product_development, new_product_development, sku_planning, retouch_task, customer_customization, regular_customization]
         sku_code: { type: string }
-        resource_role: { type: string, enum: [reference, source, final] }
+        resource_role: { type: string, enum: [reference, source, final, default_style] }
         file_name: { type: string }
         mime_type: { type: string }
         resource_owner_id: { type: integer, format: int64 }
@@ -8292,7 +8368,7 @@ paths:
         - { name: sku_code, in: query, schema: { type: string } }
         - { name: task_no, in: query, schema: { type: string } }
         - { name: creator_id, in: query, schema: { type: integer, format: int64 } }
-        - { name: resource_role, in: query, schema: { type: string, enum: [reference, source, final] } }
+        - { name: resource_role, in: query, schema: { type: string, enum: [reference, source, final, default_style] } }
         - { name: format_category, in: query, description: Optional coarse resource format category., schema: { type: string, enum: [image, design, pdf, video, archive] } }
         - { name: business_lane, in: query, description: Optional task business category. `customization` means 定制; `normal` means 常规., schema: { type: string, enum: [normal, customization] } }
         - { name: q, in: query, description: Searches task number, SKU, indexed resource text, and finalized filenames., schema: { type: string } }
@@ -8336,6 +8412,56 @@ paths:
         '403': { $ref: '#/components/responses/V8Forbidden' }
         '404': { $ref: '#/components/responses/V8NotFound' }
         '409': { $ref: '#/components/responses/V8Conflict' }
+  /v1/resource-groups/{id}/default-style:
+    put:
+      operationId: updateTaskResourceGroupDefaultStyle
+      tags: [TaskResourceWorkflow]
+      summary: Upload, replace, or remove a resource group's default style
+      description: Requires scoped task.audit.decision. Binds one staged file from the actor and group, or records a removal. Completed tasks publish immediately. Active tasks publish on completion.
+      x-api-readiness: ready_for_frontend
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DefaultStyleUpdateRequest' }
+      responses:
+        '200':
+          description: Saved default-style revision and new group lock version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/DefaultStyleUpdateResult' }
+        '400': { $ref: '#/components/responses/V8BadRequest' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
+        '409': { $ref: '#/components/responses/V8Conflict' }
+  /v1/resource-groups/{id}/default-style/history:
+    get:
+      operationId: listTaskResourceGroupDefaultStyleHistory
+      tags: [TaskResourceWorkflow]
+      summary: Read default-style changes newest first
+      description: Requires both asset.view and scoped task.audit.decision. Pass the last returned revision ID as before_id to read older changes.
+      x-api-readiness: ready_for_frontend
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { name: before_id, in: query, schema: { type: integer, format: int64, minimum: 0 } }
+      responses:
+        '200':
+          description: Up to 50 revisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/DefaultStyleHistory' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
   /v1/resource-groups/{id}/cost-reconciliation:
     get:
       operationId: reconcileTaskResourceGroupCost
@@ -13024,6 +13150,7 @@ paths:
       summary: Get the complete current finalized production manifest
       description: |
         Returns a deterministic snapshot of current finalized resource-group revisions using the same eligibility and image filtering as production Excel packaging. It never exposes draft-only or superseded revisions. `manifest_id` and the response `ETag` hash canonical snapshot content and exclude `generated_at`; clients should send `If-None-Match` on later polls. Objects that are missing in OSS remain in the manifest as current database facts and are reported by the download-ticket endpoint.
+        Request `schema_version=2` to also receive explicitly waived finalized groups with empty items and independent `default_styles`, including completed planning SKU slots and supported non-image files.
       tags: [IntegrationCenter]
       x-api-readiness: ready_for_frontend
       x-machine-auth:
@@ -13032,6 +13159,7 @@ paths:
       security:
         - AssetSyncToken: []
       parameters:
+        - { name: schema_version, in: query, schema: { type: integer, enum: [1, 2], default: 1 } }
         - in: header
           name: If-None-Match
           required: false
@@ -13046,6 +13174,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FinalizedSyncManifestResponse' }
+        '400': { $ref: '#/components/responses/V8BadRequest' }
         '304':
           description: Manifest content has not changed
         '401':
@@ -13057,7 +13186,7 @@ paths:
       operationId: createFinalizedAssetDownloadTickets
       summary: Stat finalized OSS objects and issue short-lived download tickets
       description: |
-        Revalidates that every requested task asset still belongs to a current eligible finalized revision, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
+        Revalidates that every requested task asset still belongs to a current eligible finalized revision or is a currently effective default style, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
       tags: [IntegrationCenter]
       x-api-readiness: ready_for_frontend
       x-machine-auth:

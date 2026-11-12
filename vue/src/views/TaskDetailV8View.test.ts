@@ -391,7 +391,7 @@ describe('TaskDetailV8View business context', () => {
     expect(exportButton).toBeDefined()
     await exportButton?.trigger('click')
     expect(mocks.downloadPlanning).toHaveBeenCalledWith(41)
-    expect(mocks.taskBundle).not.toHaveBeenCalled()
+    expect(mocks.taskBundle).toHaveBeenCalledWith(41)
     expect(mocks.listAuditHandovers).not.toHaveBeenCalled()
     expect(wrapper.find('.workflow-stub').exists()).toBe(false)
     expect(wrapper.find('.collaboration-fab').exists()).toBe(false)

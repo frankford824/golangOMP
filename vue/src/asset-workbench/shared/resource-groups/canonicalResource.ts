@@ -28,7 +28,7 @@ export const canonicalResourceRoleOptions: Array<{ value: CanonicalResourceRole;
 ]
 
 export function canonicalResourceRoleLabel(role: FlatResourceItem['resource_role']): string {
-  return ({ reference: '参考图', source: '设计源文件', final: '最终成品' } as const)[role]
+  return ({ reference: '参考图', source: '设计源文件', final: '最终成品', default_style: '默认款' } as const)[role]
 }
 
 export function canonicalPreviewUnavailableMessage(role?: FlatResourceItem['resource_role']): string {
@@ -46,7 +46,7 @@ export function canonicalPreviewErrorMessage(
   if (
     parsed.status === 409 &&
     parsed.code === 'INVALID_STATE_TRANSITION' &&
-    (backendMessage === 'task asset preview is not available' || backendMessage === 'asset preview is not available')
+    (backendMessage === 'task asset preview is not available' || backendMessage === 'asset preview is not available' || backendMessage === 'default style preview is not available')
   ) {
     return canonicalPreviewUnavailableMessage(role)
   }
@@ -67,6 +67,11 @@ export function canonicalGroupCover(group: ResourceGroup): CanonicalResourceFile
 }
 
 export function canonicalFileFromGroup(group: ResourceGroup, item: FlatResourceItem): CanonicalResourceFile {
+  if (item.resource_role === 'default_style') {
+    const style = group.default_style
+    if (style?.id !== item.revision_id || !style.file) throw new Error('默认款已变化，请刷新列表后重试')
+    return fromResourceFile(style.file)
+  }
   const revision = currentCanonicalRevision(group)
   if (!revision || revision.id !== item.revision_id) {
     throw new Error('资源版本已更新，请刷新列表后重试')

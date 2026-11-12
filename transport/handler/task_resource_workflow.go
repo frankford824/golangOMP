@@ -28,7 +28,7 @@ func (h *TaskResourceWorkflowHandler) ListResourceGroups(c *gin.Context) {
 		Page:           page, PageSize: pageSize,
 	}
 	if !params.ResourceRole.Valid() {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "resource_role must be reference, source, or final", nil))
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "resource_role must be reference, source, final, or default_style", nil))
 		return
 	}
 	if raw := c.Query("creator_id"); raw != "" {
@@ -229,4 +229,38 @@ func (h *TaskResourceWorkflowHandler) Reopen(c *gin.Context) {
 		return
 	}
 	respondOK(c, result)
+}
+
+func (h *TaskResourceWorkflowHandler) UpdateDefaultStyle(c *gin.Context) {
+	groupID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid resource group id", nil))
+		return
+	}
+	var request domain.DefaultStyleUpdate
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.UpdateDefaultStyle(c.Request.Context(), requestActor(c), groupID, request)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *TaskResourceWorkflowHandler) DefaultStyleHistory(c *gin.Context) {
+	groupID, err := parseID(c)
+	beforeID, cursorErr := strconv.ParseInt(c.DefaultQuery("before_id", "0"), 10, 64)
+	if err != nil || cursorErr != nil || beforeID < 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid resource group id or history cursor", nil))
+		return
+	}
+	items, appErr := h.svc.DefaultStyleHistory(c.Request.Context(), requestActor(c), groupID, beforeID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, domain.DefaultStyleHistory{Items: items})
 }

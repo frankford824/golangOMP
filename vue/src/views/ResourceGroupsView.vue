@@ -43,7 +43,7 @@
       <section v-else class="grid flat-grid" aria-label="匹配资源列表">
         <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
           <span class="cover">
-            <AssetPreviewMedia v-if="item.task_asset_id" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" rendition="thumbnail" :open-full-on-click="false" />
+            <AssetPreviewMedia v-if="item.task_asset_id && (item.resource_role !== 'default_style' || item.preview_url)" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" rendition="thumbnail" :open-full-on-click="false" />
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
             <span class="mode-badge">{{ roleLabel(item.resource_role) }}</span>
           </span>
@@ -73,7 +73,7 @@
             />
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(coverName(group)) }}</span><small>暂无成品预览</small></span>
             <span class="mode-badge">{{ revision(group)?.mode === 'set' ? '套装' : '单图' }}</span>
-            <span class="item-count">{{ finals(group).length }} 张成品</span>
+            <span class="item-count">{{ revision(group)?.final_output_waived ? '无需成品图' : `${finals(group).length} 张成品` }}</span>
           </span>
           <span class="card-body sku-card-body">
             <span class="sku-heading">
@@ -87,6 +87,7 @@
               <span>{{ laneLabel(group.business_lane) || '常规任务' }}</span>
               <span>任务 {{ group.task_no || group.task_id }}</span>
               <span>{{ group.creator_name || '创建人待补充' }}</span>
+              <span v-if="group.default_style?.file">有默认款</span>
             </span>
             <span class="sku-facts" :class="{ 'has-erp-cost': liveCost(group.id) }">
               <span><small>规格 / 尺寸</small><b>{{ specificationText(group) }}</b></span>
@@ -140,7 +141,7 @@
           <form @submit.prevent="searchFromDrawer">
             <section class="filter-section">
               <h3>资源属性</h3>
-              <label>资源类型<select v-model="filters.resource_role"><option value="">全部资源</option><option value="reference">参考图</option><option value="source">设计源文件</option><option value="final">最终成品</option></select></label>
+              <label>资源类型<select v-model="filters.resource_role"><option value="">全部资源</option><option value="reference">参考图</option><option value="source">设计源文件</option><option value="final">最终成品</option><option value="default_style">默认款</option></select></label>
               <label>资源文件格式<select v-model="filters.file_format"><option value="">全部格式</option><option value="jpg">JPG</option><option value="jpeg">JPEG</option><option value="png">PNG</option><option value="tif">TIF</option><option value="tiff">TIFF</option><option value="psd">PSD</option><option value="ai">AI</option><option value="pdf">PDF</option><option value="zip">ZIP</option></select></label>
               <label>资源创建开始时间<input v-model="filters.created_from" type="date" /></label>
               <label>资源创建结束时间<input v-model="filters.created_to" type="date" /></label>
@@ -174,7 +175,7 @@ const brokenFlat = ref(new Set<number>())
 const liveCosts = ref(new Map<number, ProductCostReconciliation>())
 const externalItems = ref<BackendAsset[]>([])
 let liveCostRequestVersion = 0
-const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final', file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
+const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final' | 'default_style', file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
 const initialPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? Math.max(80, Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE || 100)) : 24
 const result = reactive({ items: [] as ResourceGroup[], flat_items: [] as FlatResourceItem[], view_mode: 'group' as 'group' | 'flat', page: 1, page_size: initialPageSize, total: 0 })
 const { creatorOptions: rawCreatorOptions } = useTaskFilterOptions(true, '全部')
@@ -184,7 +185,7 @@ const isFlatMode = computed(() => result.view_mode === 'flat' || !!filters.resou
 const revision = (group: ResourceGroup): ResourceRevision | null | undefined => group.finalized_revision || group.working_revision
 const finals = (group: ResourceGroup) => [...(revision(group)?.items || [])].sort((a, b) => a.sort_order - b.sort_order)
 const laneLabel = (lane?: string) => ({ normal: '常规', customization: '定制' }[lane || ''] || '')
-const roleLabel = (role: string) => ({ reference: '参考图', source: '源文件', final: '最终成品' }[role] || role)
+const roleLabel = (role: string) => ({ reference: '参考图', source: '源文件', final: '最终成品', default_style: '默认款' }[role] || role)
 const displaySKU = (group: ResourceGroup) => group.sku_code || group.sku_profile?.sku_code || 'SKU 待关联'
 const productTitle = (group: ResourceGroup) => group.sku_profile?.product_name || group.product_name || (group.scope_kind === 'retouch_requirement' ? '修图成品' : '未命名产品')
 const coverName = (group: ResourceGroup) => finals(group)[0]?.file?.file_name || finals(group)[0]?.item_name || group.product_name || '资源'

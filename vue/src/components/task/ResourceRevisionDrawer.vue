@@ -81,7 +81,7 @@
                   <button v-if="item.file?.download_url" type="button" @click="downloadAsset(item.file.task_asset_id, item.file.file_name)">下载</button>
                 </article>
               </div>
-              <p v-else class="empty-file">本版本没有最终成品。</p>
+              <p v-else class="empty-file">{{ revision.final_output_waived ? '审核确认无需成品图' : '本版本没有最终成品。' }}</p>
             </section>
 
             <section v-if="revision.references.length" class="revision-files">

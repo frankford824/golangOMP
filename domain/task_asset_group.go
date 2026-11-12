@@ -86,7 +86,36 @@ type TaskAssetGroupSKUAreaSummary struct {
 	Warning     string   `json:"warning,omitempty"`
 }
 
+type DefaultStyleRevision struct {
+	ID        int64             `json:"id"`
+	GroupID   int64             `json:"group_id"`
+	File      *TaskResourceFile `json:"file,omitempty"`
+	Removed   bool              `json:"removed"`
+	CreatedBy int64             `json:"created_by"`
+	Reason    string            `json:"reason"`
+	CreatedAt time.Time         `json:"created_at"`
+}
+
+type DefaultStyleHistory struct {
+	Items []DefaultStyleRevision `json:"items"`
+}
+
+type DefaultStyleUpdate struct {
+	TaskAssetID              *int64 `json:"task_asset_id,omitempty"`
+	Remove                   bool   `json:"remove,omitempty"`
+	ExpectedGroupLockVersion *int64 `json:"expected_group_lock_version"`
+	IdempotencyKey           string `json:"idempotency_key"`
+	Reason                   string `json:"reason"`
+}
+
+type DefaultStyleUpdateResult struct {
+	GroupLockVersion int64 `json:"group_lock_version"`
+	RevisionID       int64 `json:"revision_id"`
+}
+
 type TaskAssetGroup struct {
+	DefaultStyle         *DefaultStyleRevision     `json:"default_style,omitempty"`
+	PendingDefaultStyle  *DefaultStyleRevision     `json:"pending_default_style,omitempty"`
 	ID                   int64                     `json:"id"`
 	TaskID               int64                     `json:"task_id"`
 	ScopeKind            TaskAssetGroupScopeKind   `json:"scope_kind"`
@@ -111,6 +140,7 @@ type TaskAssetGroup struct {
 }
 
 type TaskAssetGroupRevision struct {
+	FinalOutputWaived bool                              `json:"final_output_waived,omitempty"`
 	ID                int64                             `json:"id"`
 	GroupID           int64                             `json:"group_id"`
 	RevisionNo        int                               `json:"revision_no"`
@@ -183,14 +213,15 @@ type TaskResourceFile struct {
 type ResourceRoleFilter string
 
 const (
-	ResourceRoleFilterReference ResourceRoleFilter = "reference"
-	ResourceRoleFilterSource    ResourceRoleFilter = "source"
-	ResourceRoleFilterFinal     ResourceRoleFilter = "final"
+	ResourceRoleFilterReference    ResourceRoleFilter = "reference"
+	ResourceRoleFilterSource       ResourceRoleFilter = "source"
+	ResourceRoleFilterFinal        ResourceRoleFilter = "final"
+	ResourceRoleFilterDefaultStyle ResourceRoleFilter = "default_style"
 )
 
 func (r ResourceRoleFilter) Valid() bool {
 	switch r {
-	case "", ResourceRoleFilterReference, ResourceRoleFilterSource, ResourceRoleFilterFinal:
+	case "", ResourceRoleFilterReference, ResourceRoleFilterSource, ResourceRoleFilterFinal, ResourceRoleFilterDefaultStyle:
 		return true
 	default:
 		return false
@@ -217,9 +248,10 @@ type TaskAssetGroupRevisionReference struct {
 }
 
 type ResourceBundle struct {
-	TaskID           int64            `json:"task_id"`
-	WorkflowRevision int64            `json:"workflow_revision"`
-	Groups           []TaskAssetGroup `json:"groups"`
+	CanManageDefaultStyle bool             `json:"can_manage_default_style,omitempty"`
+	TaskID                int64            `json:"task_id"`
+	WorkflowRevision      int64            `json:"workflow_revision"`
+	Groups                []TaskAssetGroup `json:"groups"`
 }
 
 type ResourceGroupListParams struct {
@@ -330,17 +362,29 @@ type ResourceGroupPublicationSnapshot struct {
 }
 
 type TaskWorkflowLock struct {
-	TaskID            int64      `json:"task_id"`
-	TaskType          TaskType   `json:"task_type"`
-	Status            TaskStatus `json:"status"`
-	WorkflowRevision  int64      `json:"workflow_revision"`
-	CurrentHandlerID  *int64     `json:"current_handler_id,omitempty"`
-	DesignerID        *int64     `json:"designer_id,omitempty"`
-	Customization     bool       `json:"customization"`
-	CreatorID         int64      `json:"creator_id"`
-	RequesterID       *int64     `json:"requester_id,omitempty"`
-	OwnerDepartmentID *int64     `json:"owner_department_id,omitempty"`
-	OwnerTeamID       *int64     `json:"owner_team_id,omitempty"`
+	BusinessLane      TaskBusinessLane `json:"business_lane,omitempty"`
+	TaskID            int64            `json:"task_id"`
+	TaskType          TaskType         `json:"task_type"`
+	Status            TaskStatus       `json:"status"`
+	WorkflowRevision  int64            `json:"workflow_revision"`
+	CurrentHandlerID  *int64           `json:"current_handler_id,omitempty"`
+	DesignerID        *int64           `json:"designer_id,omitempty"`
+	Customization     bool             `json:"customization"`
+	CreatorID         int64            `json:"creator_id"`
+	RequesterID       *int64           `json:"requester_id,omitempty"`
+	OwnerDepartmentID *int64           `json:"owner_department_id,omitempty"`
+	OwnerTeamID       *int64           `json:"owner_team_id,omitempty"`
+}
+
+func (t TaskWorkflowLock) AllowsFinalOutputWaiver() bool {
+	switch t.TaskType {
+	case TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
+		return true
+	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment:
+		return t.BusinessLane == TaskBusinessLaneCustomization || t.Customization
+	default:
+		return false
+	}
 }
 
 func (t TaskWorkflowLock) AccessSubject() TaskAccessSubject {
@@ -371,12 +415,13 @@ type StagedTaskAssetBinding struct {
 // projection for previewing an unbound upload. It intentionally contains no
 // organization display names or legacy roles.
 type StagedTaskAssetPreviewAccess struct {
-	TaskAssetID int64
+	TaskAssetID int64 `json:"task_asset_id,omitempty"`
 	TaskID      int64
 	StagedBy    int64
 }
 
 type SubmitResourceGroupInput struct {
+	FinalOutputWaived        bool               `json:"final_output_waived,omitempty"`
 	GroupID                  int64              `json:"group_id"`
 	ExpectedGroupLockVersion int64              `json:"expected_group_lock_version"`
 	Mode                     TaskAssetGroupMode `json:"mode"`

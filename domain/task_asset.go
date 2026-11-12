@@ -6,12 +6,13 @@ import "time"
 type TaskAssetType string
 
 const (
-	TaskAssetTypeReference   TaskAssetType = "reference"
-	TaskAssetTypeSource      TaskAssetType = "source"
-	TaskAssetTypeDelivery    TaskAssetType = "delivery"
-	TaskAssetTypePreview     TaskAssetType = "preview"
-	TaskAssetTypeDesignThumb TaskAssetType = "design_thumb"
-	TaskAssetTypeERPProduct  TaskAssetType = "erp_product_image"
+	TaskAssetTypeReference    TaskAssetType = "reference"
+	TaskAssetTypeSource       TaskAssetType = "source"
+	TaskAssetTypeDelivery     TaskAssetType = "delivery"
+	TaskAssetTypeDefaultStyle TaskAssetType = "default_style"
+	TaskAssetTypePreview      TaskAssetType = "preview"
+	TaskAssetTypeDesignThumb  TaskAssetType = "design_thumb"
+	TaskAssetTypeERPProduct   TaskAssetType = "erp_product_image"
 
 	// Legacy aliases kept for backward-compatible input normalization.
 	TaskAssetTypeOriginal        TaskAssetType = "original"
@@ -29,6 +30,8 @@ func (t TaskAssetType) Canonical() TaskAssetType {
 		return TaskAssetTypeSource
 	case TaskAssetTypeDelivery, TaskAssetTypeDraft, TaskAssetTypeRevised, TaskAssetTypeFinal, TaskAssetTypeOutsourceReturn:
 		return TaskAssetTypeDelivery
+	case TaskAssetTypeDefaultStyle:
+		return TaskAssetTypeDefaultStyle
 	case TaskAssetTypePreview:
 		return TaskAssetTypePreview
 	case TaskAssetTypeDesignThumb:

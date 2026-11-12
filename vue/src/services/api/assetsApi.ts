@@ -17,7 +17,7 @@ export interface CreateAssetUploadSessionPayload {
   task_id?: string | number
   /** Existing design asset id. When present, the upload replaces that asset's current version. */
   asset_id?: string | number
-  asset_kind: AssetKind
+  asset_kind: AssetKind | 'default_style'
   /** 规范字段名 */
   file_name: string
   expected_size?: number

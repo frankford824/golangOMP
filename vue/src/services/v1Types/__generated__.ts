@@ -1995,6 +1995,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/resource-groups/{id}/default-style": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upload, replace, or remove a resource group's default style
+         * @description Requires scoped task.audit.decision. Binds one staged file from the actor and group, or records a removal. Completed tasks publish immediately. Active tasks publish on completion.
+         */
+        put: operations["updateTaskResourceGroupDefaultStyle"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/resource-groups/{id}/default-style/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read default-style changes newest first
+         * @description Requires both asset.view and scoped task.audit.decision. Pass the last returned revision ID as before_id to read older changes.
+         */
+        get: operations["listTaskResourceGroupDefaultStyleHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/resource-groups/{id}/cost-reconciliation": {
         parameters: {
             query?: never;
@@ -9143,6 +9183,7 @@ export interface paths {
         /**
          * Get the complete current finalized production manifest
          * @description Returns a deterministic snapshot of current finalized resource-group revisions using the same eligibility and image filtering as production Excel packaging. It never exposes draft-only or superseded revisions. `manifest_id` and the response `ETag` hash canonical snapshot content and exclude `generated_at`; clients should send `If-None-Match` on later polls. Objects that are missing in OSS remain in the manifest as current database facts and are reported by the download-ticket endpoint.
+         *     Request `schema_version=2` to also receive explicitly waived finalized groups with empty items and independent `default_styles`, including completed planning SKU slots and supported non-image files.
          */
         get: operations["getFinalizedAssetSyncManifest"];
         put?: never;
@@ -9164,7 +9205,7 @@ export interface paths {
         put?: never;
         /**
          * Stat finalized OSS objects and issue short-lived download tickets
-         * @description Revalidates that every requested task asset still belongs to a current eligible finalized revision, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
+         * @description Revalidates that every requested task asset still belongs to a current eligible finalized revision or is a currently effective default style, performs OSS HEAD/Stat, and returns one ordered result per distinct requested ID. Valid batch requests return HTTP 200 even when individual objects are missing, mismatched, stale, or temporarily unavailable. Only `ready` results contain download URLs; file bytes are served directly by OSS rather than proxied by this API.
          */
         post: operations["createFinalizedAssetDownloadTickets"];
         delete?: never;
@@ -22341,7 +22382,7 @@ export interface components {
             task_id?: number;
             asset_id?: number | null;
             /** @enum {string} */
-            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
+            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | "default_style";
             version_no?: number;
             asset_version_no?: number | null;
             /**
@@ -22437,7 +22478,7 @@ export interface components {
              */
             retouch_requirement_id?: number | null;
             /** @enum {string} */
-            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
+            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | "default_style";
             version_no?: number;
             timeline_version_no?: number;
             /** @description Compatibility input alias. New frontend integrations should prefer `asset_kind` and let backend strategy selection drive `upload_strategy`. */
@@ -22516,7 +22557,7 @@ export interface components {
              */
             retouch_requirement_id?: number | null;
             /** @enum {string} */
-            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
+            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | "default_style";
             current_version_id?: number | null;
             approved_version_id?: number | null;
             upload_status?: components["schemas"]["DesignAssetUploadStatus"];
@@ -22539,7 +22580,7 @@ export interface components {
             task_id?: number;
             asset_id?: number | null;
             /** @enum {string|null} */
-            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | null;
+            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | "default_style" | null;
             /** @description Optional target SKU captured on the upload-session business view for batch-task uploads. The completed asset root and asset version later expose the persisted SKU scope on `scope_sku_code`. */
             target_sku_code?: string | null;
             /**
@@ -22693,8 +22734,10 @@ export interface components {
          *     Asset-center upload sessions prefer `oss_direct` instructions and return `remote` only as a fallback.
          *     Frontend uploads bytes using the returned plan, then calls `complete`.
          *     Source and final uploads are staged and become business resources only through submit-design
-         *     or audit decision. Tasks in `Completed` reject create, complete, and cancel mutations with
-         *     `completed_resource_requires_reopen`; the task must be reopened before any resource change.
+         *     or audit decision. Use `asset_kind=default_style` to stage one new default-style file
+         *     in the resource group's task, SKU, or retouch requirement scope. The session is restricted to its
+         *     creator with scoped `task.audit.decision`, including for completed tasks. Bind the resulting task
+         *     asset through the default-style resource-group operation. Other completed-task resource changes require reopen.
          *     Authorization uses explicit capabilities plus stable department/team ID scope. Legacy roles
          *     and organization display names never authorize this operation.
          */
@@ -22714,12 +22757,12 @@ export interface components {
              * @description Compatibility alias of `asset_kind` retained for migration safety.
              * @enum {string}
              */
-            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
+            asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | "default_style";
             /**
              * @description Canonical upload intent field for new frontend integrations.
              * @enum {string}
              */
-            asset_kind?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
+            asset_kind?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | "default_style";
             /** @description Compatibility-only input. New frontend integrations must not send this field. */
             upload_mode?: components["schemas"]["DesignAssetUploadMode"];
             /** @description Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. */
@@ -22766,7 +22809,7 @@ export interface components {
         CreateAssetUploadSessionRequestCanonical: components["schemas"]["CreateTaskAssetUploadSessionRequest"] & ({
             task_id: number;
             /** @enum {string} */
-            asset_kind: "reference" | "source" | "delivery" | "preview" | "design_thumb";
+            asset_kind: "reference" | "source" | "delivery" | "preview" | "design_thumb" | "default_style";
             file_name?: string;
             filename?: string;
         } | unknown | unknown);
@@ -24702,6 +24745,8 @@ export interface components {
             asset_updated_at: string;
         };
         FinalizedSyncManifestGroup: {
+            /** @description Included in schema v2 for approved customization groups with no final items. */
+            final_output_waived?: boolean;
             /** Format: int64 */
             group_id: number;
             /** Format: int64 */
@@ -24719,9 +24764,36 @@ export interface components {
             product_name: string;
             items: components["schemas"]["FinalizedSyncManifestItem"][];
         };
+        FinalizedSyncDefaultStyle: {
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int64 */
+            default_style_revision_id: number;
+            /** Format: int64 */
+            task_id: number;
+            task_no: string;
+            /** @enum {string} */
+            scope_kind: "task" | "sku" | "retouch_requirement";
+            sku_code: string;
+            product_name: string;
+            /** Format: int64 */
+            task_asset_id: number;
+            file_name: string;
+            original_filename: string;
+            format: string;
+            mime_type: string;
+            /** Format: int64 */
+            file_size: number;
+            storage_key: string;
+            whole_hash: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
         FinalizedSyncManifest: {
             /** @enum {integer} */
-            schema_version: 1;
+            schema_version: 1 | 2;
+            /** @description Present in schema v2, with one current file per occupied slot. Includes default-style objects in object_count and total_object_bytes. */
+            default_styles?: components["schemas"]["FinalizedSyncDefaultStyle"][];
             manifest_id: string;
             /** Format: date-time */
             generated_at: string;
@@ -25680,7 +25752,46 @@ export interface components {
             /** @description Lower-case SHA-256 of an oversized business reason that could not fit beside the marker. */
             business_reason_sha256?: string;
         };
+        DefaultStyleRevision: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            group_id: number;
+            file?: components["schemas"]["TaskResourceFile"];
+            removed: boolean;
+            /** Format: int64 */
+            created_by: number;
+            reason: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        DefaultStyleUpdateRequest: {
+            /** Format: int64 */
+            task_asset_id?: number;
+            remove?: boolean;
+            /** Format: int64 */
+            expected_group_lock_version: number;
+            idempotency_key: string;
+            reason: string;
+        } & ({
+            /** @enum {boolean} */
+            remove?: false;
+        } | {
+            /** @enum {boolean} */
+            remove: true;
+        });
+        DefaultStyleUpdateResult: {
+            /** Format: int64 */
+            group_lock_version: number;
+            /** Format: int64 */
+            revision_id: number;
+        };
+        DefaultStyleHistory: {
+            items: components["schemas"]["DefaultStyleRevision"][];
+        };
         TaskAssetGroupRevision: {
+            /** @description True when customization audit explicitly approved this SKU without final output. */
+            final_output_waived?: boolean;
             /** Format: int64 */
             id: number;
             /** Format: int64 */
@@ -25722,6 +25833,9 @@ export interface components {
             total: number;
         };
         TaskAssetGroup: {
+            default_style?: components["schemas"]["DefaultStyleRevision"];
+            /** @description Task-bundle only, visible within scoped audit access. A removal is represented by a revision with removed=true. */
+            pending_default_style?: components["schemas"]["DefaultStyleRevision"];
             /** Format: int64 */
             id: number;
             /** Format: int64 */
@@ -25800,6 +25914,8 @@ export interface components {
             last_erp_checked_at?: string | null;
         };
         ResourceBundle: {
+            /** @description The actor may maintain default styles in the current task state. */
+            can_manage_default_style?: boolean;
             /** Format: int64 */
             task_id: number;
             /** Format: int64 */
@@ -25810,11 +25926,13 @@ export interface components {
          * @description One complete resource-group input. For ordinary and customization tasks, the designer selects
          *     `mode` and submits exactly one editable source while `final_task_asset_ids` MUST be empty.
          *     During audit, the auditor may retain or revise `mode`; each group supplies a newly staged complete
-         *     final set (`single` exactly one, `set` at least two in array order). Omitting
+         *     final set (`single` exactly one, `set` at least two in array order), or explicitly waives it during customization audit. Omitting
          *     `source_task_asset_id` during audit inherits the designer source; supplying it replaces that source.
          *     Retouch submissions provide final files directly and may omit the source.
          */
         SubmitResourceGroupInput: {
+            /** @description Customization audit approval only. Requires an empty final_task_asset_ids list and an effective source. */
+            final_output_waived?: boolean;
             /** Format: int64 */
             group_id: number;
             /** Format: int64 */
@@ -26076,7 +26194,7 @@ export interface components {
             task_type: "original_product_development" | "new_product_development" | "sku_planning" | "retouch_task" | "customer_customization" | "regular_customization";
             sku_code?: string;
             /** @enum {string} */
-            resource_role: "reference" | "source" | "final";
+            resource_role: "reference" | "source" | "final" | "default_style";
             file_name: string;
             mime_type?: string;
             /** Format: int64 */
@@ -27119,7 +27237,7 @@ export interface operations {
                 sku_code?: string;
                 task_no?: string;
                 creator_id?: number;
-                resource_role?: "reference" | "source" | "final";
+                resource_role?: "reference" | "source" | "final" | "default_style";
                 /** @description Optional coarse resource format category. */
                 format_category?: "image" | "design" | "pdf" | "video" | "archive";
                 /** @description Optional task business category. `customization` means 定制; `normal` means 常规. */
@@ -27183,6 +27301,66 @@ export interface operations {
             403: components["responses"]["V8Forbidden"];
             404: components["responses"]["V8NotFound"];
             409: components["responses"]["V8Conflict"];
+        };
+    };
+    updateTaskResourceGroupDefaultStyle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DefaultStyleUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved default-style revision and new group lock version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["DefaultStyleUpdateResult"];
+                    };
+                };
+            };
+            400: components["responses"]["V8BadRequest"];
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
+        };
+    };
+    listTaskResourceGroupDefaultStyleHistory: {
+        parameters: {
+            query?: {
+                before_id?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Up to 50 revisions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["DefaultStyleHistory"];
+                    };
+                };
+            };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
         };
     };
     reconcileTaskResourceGroupCost: {
@@ -27782,7 +27960,9 @@ export interface operations {
     };
     getFinalizedAssetSyncManifest: {
         parameters: {
-            query?: never;
+            query?: {
+                schema_version?: 1 | 2;
+            };
             header?: {
                 "If-None-Match"?: string;
             };
@@ -27809,6 +27989,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["V8BadRequest"];
             /** @description Missing or invalid dedicated machine token */
             401: {
                 headers: {

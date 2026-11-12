@@ -252,7 +252,7 @@ func upsertTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumen
 			  SELECT task_id, GROUP_CONCAT(CONCAT_WS(' ', scope_sku_code, file_name, original_filename, asset_type, source_module_key) ORDER BY id SEPARATOR ' ') AS asset_text
 			  FROM task_assets
 			  WHERE task_id = ? AND {{active_asset_where}}
-			    AND asset_type NOT IN ('preview', 'design_thumb')
+			    AND asset_type NOT IN ('preview', 'design_thumb', 'default_style')
 			  GROUP BY task_id
 			) assets ON assets.task_id = t.id
 		LEFT JOIN (

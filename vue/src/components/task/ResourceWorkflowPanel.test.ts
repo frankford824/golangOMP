@@ -480,6 +480,31 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
+  it('requires an explicit waiver per customization SKU before approving without finals', async () => {
+    const resources = bundleWithGroups(2)
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: { taskId: 41, taskType: 'new_product_development', businessLane: 'customization', bundle: resources, allowedActions: ['task.audit.approve'] },
+      attachTo: document.body,
+    })
+    const waivers = wrapper.findAll('label').filter((label) => label.text().includes('本次无需成品图'))
+    expect(waivers).toHaveLength(2)
+    const approve = button(wrapper, '确认定稿并结单')
+    expect(approve.attributes('disabled')).toBeDefined()
+    await waivers[0].get('input').setValue(true)
+    expect(approve.attributes('disabled')).toBeDefined()
+    await waivers[1].get('input').setValue(true)
+    expect(approve.attributes('disabled')).toBeUndefined()
+    await approve.trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('2 个 SKU 已确认无需成品图')
+    await button(wrapper, '确认通过并结单').trigger('click')
+    await flushPromises()
+    expect(mocks.auditDecision).toHaveBeenCalledWith(41, resources, 'approve', '', [
+      { group_id: 1, expected_group_lock_version: 3, mode: 'single', final_task_asset_ids: [], final_output_waived: true },
+      { group_id: 2, expected_group_lock_version: 3, mode: 'single', final_task_asset_ids: [], final_output_waived: true },
+    ])
+    wrapper.unmount()
+  })
+
   it('uses the designer mode and sends a newly staged final when approving', async () => {
     const wrapper = mountPanel(['task.audit.approve'])
     expect(wrapper.get('.mode-control button.selected').text()).toBe('单图')

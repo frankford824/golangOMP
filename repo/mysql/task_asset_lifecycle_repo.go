@@ -71,6 +71,13 @@ func (r *taskAssetLifecycleRepo) ListSupersededEligibleForCleanup(ctx context.Co
 		            )
 		   )
 		   AND NOT EXISTS (
+		        SELECT 1 FROM task_default_style_revisions ds
+		         WHERE ds.task_asset_id = ta.id
+		            OR ds.task_asset_id IN (
+		                 SELECT derived_ref.id FROM task_assets derived_ref WHERE derived_ref.source_asset_version_id = ta.id
+		            )
+		   )
+		   AND NOT EXISTS (
 		        SELECT 1
 		          FROM task_asset_group_revision_references frozen_ref
 		         WHERE frozen_ref.formal_task_asset_id = ta.id
@@ -228,6 +235,7 @@ func (r *taskAssetLifecycleRepo) LockGenericDeleteGuard(ctx context.Context, tx 
 		`SELECT id FROM task_asset_group_revisions WHERE source_task_asset_id IN (` + inClause + `) ORDER BY id FOR UPDATE`,
 		`SELECT revision_id FROM task_asset_group_revision_items WHERE task_asset_id IN (` + inClause + `) ORDER BY revision_id FOR UPDATE`,
 		`SELECT revision_id FROM task_asset_group_revision_references WHERE formal_task_asset_id IN (` + inClause + `) ORDER BY revision_id FOR UPDATE`,
+		`SELECT id FROM task_default_style_revisions WHERE task_asset_id IN (` + inClause + `) ORDER BY id FOR UPDATE`,
 	}
 	revisionIDs := map[int64]struct{}{}
 	for _, query := range revisionQueries {
@@ -333,7 +341,8 @@ func cleanupObjectSetHasRevisionReferences(ctx context.Context, sqlTx *sql.Tx, t
 	if marks == "" {
 		return false, nil
 	}
-	queryArgs := make([]interface{}, 0, len(args)*3)
+	queryArgs := make([]interface{}, 0, len(args)*4)
+	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
@@ -351,7 +360,8 @@ func cleanupObjectSetHasRevisionReferences(ctx context.Context, sqlTx *sql.Tx, t
 		  OR EXISTS (
 		    SELECT 1 FROM task_asset_group_revision_references
 		     WHERE formal_task_asset_id IN (`+marks+`)
-		  )`, queryArgs...).Scan(&referenced)
+		  )
+    OR EXISTS (SELECT 1 FROM task_default_style_revisions WHERE task_asset_id IN (`+marks+`))`, queryArgs...).Scan(&referenced)
 	if err != nil {
 		return false, fmt.Errorf("check cleanup revision references: %w", err)
 	}

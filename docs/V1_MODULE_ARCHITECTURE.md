@@ -54,7 +54,7 @@ allowed_actions = 有效能力 ∩ 稳定 ID 数据范围 ∩ 当前状态规则
 - 每组包含 `expected_group_lock_version`。
 - 设计类任务每组恰有一份源文件。
 - `single` 恰有一张最终成品。
-- `set` 至少两张最终成品，顺序连续且完整。
+- `set` 至少两张最终成品，顺序连续且完整。定制审核可逐 SKU 明确免传，仍须提交有效源文件。
 - 一个任务内不同 SKU 可以混用两种模式。
 - 所有文件必须是同任务、同范围、同角色且由有权用户暂存的文件。
 - 请求使用 `expected_workflow_revision + idempotency_key`。

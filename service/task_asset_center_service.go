@@ -425,6 +425,9 @@ func (s *taskAssetCenterService) getAssetPreviewInfoByID(ctx context.Context, as
 	if appErr != nil {
 		return nil, appErr
 	}
+	if asset.AssetType == domain.TaskAssetTypeDefaultStyle {
+		return nil, domain.ErrNotFound
+	}
 	task, appErr := s.requireTask(ctx, asset.TaskID)
 	if appErr != nil {
 		return nil, appErr
@@ -557,6 +560,16 @@ func (s *taskAssetCenterService) getTaskAssetPreviewInfoByID(ctx context.Context
 	if appErr := validateAssetVersionObjectAvailable(version); appErr != nil {
 		return nil, appErr
 	}
+	if record.AssetType == domain.TaskAssetTypeDefaultStyle {
+		if !isOSSIMGDirectPreviewSupported(version.FileName, version.MimeType) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "default style preview is not available", nil)
+		}
+		version.PreviewAvailable = true
+		if thumbnail {
+			return buildAssetThumbnailInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
+		}
+		return buildAssetPreviewInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
+	}
 	if s.strictMediaPreviews && !version.IsPreviewFile && !version.IsDesignThumb {
 		info, resolveErr := s.resolveTaskAssetDerivedRenditionInfo(ctx, record, task, thumbnail)
 		if resolveErr != nil {
@@ -603,6 +616,24 @@ func (s *taskAssetCenterService) requireBoundRevisionTaskAsset(ctx context.Conte
 	task, appErr := s.requireTask(ctx, record.TaskID)
 	if appErr != nil {
 		return nil, nil, appErr
+	}
+	if record.AssetType == domain.TaskAssetTypeDefaultStyle {
+		actor, _ := domain.RequestActorFromContext(ctx)
+		if !domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, task.AccessSubject()) {
+			currentRepo, ok := s.taskAssetRepo.(interface {
+				IsCurrentDefaultStyle(context.Context, int64) (bool, error)
+			})
+			if !ok {
+				return nil, nil, domain.ErrNotFound
+			}
+			current, err := currentRepo.IsCurrentDefaultStyle(ctx, taskAssetID)
+			if err != nil {
+				return nil, nil, infraError("check current default style", err)
+			}
+			if !current {
+				return nil, nil, domain.ErrNotFound
+			}
+		}
 	}
 	return record, task, nil
 }
@@ -857,9 +888,7 @@ func (s *taskAssetCenterService) GetUploadSession(ctx context.Context, taskID in
 	if appErr != nil {
 		return nil, appErr
 	}
-	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
-		return nil, appErr
-	}
+
 	if appErr := authorizeV8TaskAssetSessionRead(ctx, task); appErr != nil {
 		return nil, appErr
 	}
@@ -872,6 +901,13 @@ func (s *taskAssetCenterService) GetUploadSession(ctx context.Context, taskID in
 	}
 	if request.TaskID != taskID && !(request.OwnerType == domain.AssetOwnerTypeTask && request.OwnerID == taskID) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current task", nil)
+	}
+	if request.TaskAssetType != nil && *request.TaskAssetType == domain.TaskAssetTypeDefaultStyle {
+		if appErr := authorizeDefaultStyleUpload(ctx, task, request.CreatedBy); appErr != nil {
+			return nil, appErr
+		}
+	} else if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+		return nil, appErr
 	}
 	if request.RemoteUploadID != "" && request.SessionStatus == domain.DesignAssetSessionStatusCreated {
 		if request, err = s.syncUploadRequestFromRemote(ctx, request); err != nil {
@@ -901,7 +937,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	if appErr != nil {
 		return nil, appErr
 	}
-	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+	if appErr := authorizeUploadSessionMutation(ctx, task, request); appErr != nil {
 		return nil, appErr
 	}
 	if request.TaskAssetType == nil {
@@ -1040,7 +1076,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			return domain.ErrNotFound
 		}
 		task = lockedTask
-		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+		if appErr := authorizeUploadSessionMutation(ctx, task, request); appErr != nil {
 			return appErr
 		}
 		if request.TaskAssetType == nil {
@@ -1134,9 +1170,12 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			flowReviewStatus = domain.TaskAssetFlowReviewStatusPendingReview
 		}
 		sourceModuleKey := designAssetSourceModuleKeyForTask(task, requestAssetType)
-		sourceTaskModuleID, err := s.resolveTaskAssetSourceModuleID(ctx, tx, task, sourceModuleKey)
-		if err != nil {
-			return fmt.Errorf("resolve task asset source module: %w", err)
+		var sourceTaskModuleID *int64
+		if requestAssetType != domain.TaskAssetTypeDefaultStyle {
+			sourceTaskModuleID, err = s.resolveTaskAssetSourceModuleID(ctx, tx, task, sourceModuleKey)
+			if err != nil {
+				return fmt.Errorf("resolve task asset source module: %w", err)
+			}
 		}
 		taskAsset := &domain.TaskAsset{
 			TaskID:               params.TaskID,
@@ -1197,15 +1236,18 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 				return err
 			}
 		}
-		bindableResource := requestAssetType.IsSource() || requestAssetType.IsDelivery()
+		bindableResource := requestAssetType.IsSource() || requestAssetType.IsDelivery() || requestAssetType == domain.TaskAssetTypeDefaultStyle
 		if bindableResource {
 			stagingRepo, ok := s.taskAssetRepo.(taskAssetBindingStagingRepo)
 			if !ok {
 				return fmt.Errorf("task asset repository does not support staged resource binding")
 			}
 			bindingRole := "final"
-			if requestAssetType.IsSource() {
+			switch requestAssetType {
+			case domain.TaskAssetTypeSource:
 				bindingRole = "source"
+			case domain.TaskAssetTypeDefaultStyle:
+				bindingRole = string(domain.TaskAssetTypeDefaultStyle)
 			}
 			if err := stagingRepo.MarkBindingStaged(ctx, tx, versionID, params.TaskID, params.CompletedBy, scopeSKUCode, retouchRequirementID, bindingRole, request.RequestID, now.Add(taskAssetStagingRetention)); err != nil {
 				return err
@@ -1476,7 +1518,7 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 	if appErr != nil {
 		return nil, appErr
 	}
-	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+	if appErr := authorizeUploadSessionMutation(ctx, task, request); appErr != nil {
 		return nil, appErr
 	}
 	assetType := domain.TaskAssetType("")
@@ -1511,7 +1553,7 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 			return domain.ErrNotFound
 		}
 		task = lockedTask
-		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+		if appErr := authorizeUploadSessionMutation(ctx, task, request); appErr != nil {
 			return appErr
 		}
 		if appErr := authorizeV8TaskAssetMutation(ctx, task, assetType); appErr != nil {
@@ -1680,7 +1722,11 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		return nil, appErr
 	}
 	params.AssetType = normalizedAssetType
-	if err := validateTaskAssetType(params.AssetType); err != nil {
+	if params.AssetType == domain.TaskAssetTypeDefaultStyle {
+		if params.AssetID != nil || params.SourceAssetID != nil || !defaultStyleFileAllowed(params.Filename) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "default style requires a new file in a supported final-output format", nil)
+		}
+	} else if err := validateTaskAssetType(params.AssetType); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(params.Filename) == "" {
@@ -1725,7 +1771,7 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		return nil, appErr
 	}
 	params.TargetSKUCode = targetSKUCode
-	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+	if appErr := rejectCompletedTaskAssetUpload(task, params.AssetType); appErr != nil {
 		return nil, appErr
 	}
 	if appErr := authorizeV8TaskAssetMutation(ctx, task, params.AssetType); appErr != nil {
@@ -1862,7 +1908,7 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 			return domain.ErrNotFound
 		}
 		task = lockedTask
-		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+		if appErr := rejectCompletedTaskAssetUpload(task, params.AssetType); appErr != nil {
 			return appErr
 		}
 		if appErr := authorizeV8TaskAssetMutation(ctx, task, params.AssetType); appErr != nil {
@@ -1938,7 +1984,7 @@ func (s *taskAssetCenterService) syncUploadRequestFromRemote(ctx context.Context
 		if lockedTask == nil {
 			return domain.ErrNotFound
 		}
-		if appErr := rejectCompletedTaskAssetMutation(lockedTask); appErr != nil {
+		if appErr := authorizeUploadSessionMutation(ctx, lockedTask, request); appErr != nil {
 			return appErr
 		}
 		if request.Status == domain.UploadRequestStatusBound || request.Status == domain.UploadRequestStatusCancelled || request.Status == domain.UploadRequestStatusExpired ||
@@ -2351,6 +2397,12 @@ func validateTaskStageUploadAssetType(task *domain.Task, assetType domain.TaskAs
 		return nil
 	}
 	normalized := domain.NormalizeTaskAssetType(assetType)
+	if normalized == domain.TaskAssetTypeDefaultStyle {
+		if defaultStyleEditable(task.TaskStatus) && task.TaskType != domain.TaskTypePurchaseTask {
+			return nil
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "default style cannot be changed in the current task state", nil)
+	}
 	if task.TaskType == domain.TaskTypeSKUPlanning || task.TaskType == domain.TaskTypePurchaseTask {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "planning SKU images do not use task resource upload sessions", map[string]interface{}{
 			"deny_code": "planning_sku_resource_upload_not_allowed",
@@ -2444,6 +2496,9 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetT
 		})
 	}
 
+	if assetType == domain.TaskAssetTypeDefaultStyle {
+		return authorizeDefaultStyleUpload(ctx, task, actor.ID)
+	}
 	permissions := []domain.PermissionCode{domain.PermissionAssetManage}
 	if assetType.IsReference() {
 		// Operational reference attachments are a task-maintenance action. They are
@@ -2611,7 +2666,7 @@ func matchesAssetResourceFilters(asset *domain.DesignAsset, params ListAssetReso
 }
 
 func (s *taskAssetCenterService) loadAssetResource(ctx context.Context, asset *domain.DesignAsset) (*domain.DesignAsset, *domain.AppError) {
-	if asset == nil {
+	if asset == nil || asset.AssetType == domain.TaskAssetTypeDefaultStyle {
 		return nil, domain.ErrNotFound
 	}
 	task, appErr := s.requireTask(ctx, asset.TaskID)
@@ -2854,7 +2909,7 @@ func (s *taskAssetCenterService) freezeUploadAssetIdentity(
 		if task == nil {
 			return domain.ErrNotFound
 		}
-		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
+		if appErr := rejectCompletedTaskAssetUpload(task, assetType); appErr != nil {
 			return appErr
 		}
 		assetNo, err := s.designAssetRepo.NextAssetNo(ctx, tx, taskID)

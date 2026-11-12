@@ -19,7 +19,7 @@
       <div><span>来源任务</span><strong>{{ group.task_no || group.task_id }}</strong></div>
       <div><span>创建人</span><strong>{{ group.creator_name || '—' }}</strong></div>
       <div><span>交付方式</span><strong>{{ modeLabel }}</strong></div>
-      <div><span>最终成品</span><strong>{{ finalCount }} 张</strong></div>
+      <div><span>最终成品</span><strong>{{ activeRevision?.final_output_waived ? '审核确认无需成品图' : `${finalCount} 张` }}</strong></div>
     </section>
 
     <section v-if="group" class="sku-business-panel" aria-label="SKU 业务信息">
@@ -53,7 +53,7 @@
 
     <div v-if="error" class="state-card error" role="alert">{{ error }}</div>
     <div v-if="loading && !group" class="state-card">正在加载当前有效资源…</div>
-    <SkuResourceMatrix v-else-if="group" :bundle="{ task_id: group.task_id, workflow_revision: 0, groups: [group] }" />
+    <SkuResourceMatrix v-else-if="group" :bundle="{ task_id: group.task_id, workflow_revision: 0, groups: [group] }" show-default-style />
   </main>
 </template>
 

@@ -97,7 +97,7 @@ func TestLockCleanupObjectIDsLocksRootAndDerivedVersions(t *testing.T) {
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(101)).AddRow(int64(102)),
 	)
 	mock.ExpectQuery(`SELECT EXISTS[\s\S]+task_asset_group_revisions`).
-		WithArgs(int64(101), int64(102), int64(101), int64(102), int64(101), int64(102)).
+		WithArgs(int64(101), int64(102), int64(101), int64(102), int64(101), int64(102), int64(101), int64(102)).
 		WillReturnRows(sqlmock.NewRows([]string{"referenced"}).AddRow(false))
 	mock.ExpectCommit()
 	var ids []int64
@@ -129,7 +129,7 @@ func TestLockCleanupObjectIDsRejectsRevisionReferencedAssets(t *testing.T) {
 		sqlmock.NewRows([]string{"id"}).AddRow(int64(201)).AddRow(int64(202)),
 	)
 	mock.ExpectQuery(`SELECT EXISTS[\s\S]+task_asset_group_revisions`).
-		WithArgs(int64(201), int64(202), int64(201), int64(202), int64(201), int64(202)).
+		WithArgs(int64(201), int64(202), int64(201), int64(202), int64(201), int64(202), int64(201), int64(202)).
 		WillReturnRows(sqlmock.NewRows([]string{"referenced"}).AddRow(true))
 	mock.ExpectRollback()
 
@@ -218,6 +218,9 @@ func TestLockGenericDeleteGuardLocksHistoricalRevisionAndPublicationReferences(t
 	mock.ExpectQuery(`SELECT revision_id FROM task_asset_group_revision_references WHERE formal_task_asset_id IN`).
 		WithArgs(int64(901), int64(902)).
 		WillReturnRows(sqlmock.NewRows([]string{"revision_id"}))
+	mock.ExpectQuery(`SELECT id FROM task_default_style_revisions WHERE task_asset_id IN`).
+		WithArgs(int64(901), int64(902)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`SELECT id[\s\S]+FROM asset_workbench_client_materials`).
 		WithArgs(int64(12402), int64(12403)).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(801)))

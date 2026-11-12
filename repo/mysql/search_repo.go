@@ -562,7 +562,7 @@ func (r *searchRepo) searchAssetsLegacy(ctx context.Context, q string, limit int
 			  LEFT JOIN tasks t ON t.id = ta.task_id
 			  LEFT JOIN users creator ON creator.id = t.creator_id
 			  LEFT JOIN users designer ON designer.id = t.designer_id
-			 WHERE {{active_asset_where}}
+			 WHERE {{active_asset_where}} AND ta.asset_type <> 'default_style'
 			   AND (
 			       ta.asset_id IS NULL
 			       OR ta.id = COALESCE(da.current_version_id, (

@@ -1224,3 +1224,41 @@ func scopedCapabilityActor(id int64, permission domain.PermissionCode, scope dom
 	}
 	return domain.RequestActor{ID: id, DepartmentID: departmentID, TeamID: teamID, Permissions: view.Permissions, EffectiveAccess: view}
 }
+
+func TestFinalizerValidatesExplicitCustomizationWaivers(t *testing.T) {
+	sourceID := int64(70)
+	for _, tt := range []struct {
+		name          string
+		lane          domain.TaskBusinessLane
+		mode          domain.TaskAssetGroupMode
+		waiver        bool
+		finals        int
+		source        bool
+		finalizerMode FinalizeMode
+		wantSuccess   bool
+	}{
+		{"custom single", domain.TaskBusinessLaneCustomization, domain.TaskAssetGroupModeSingle, true, 0, true, FinalizeModeDesignAudit, true},
+		{"custom set", domain.TaskBusinessLaneCustomization, domain.TaskAssetGroupModeSet, true, 0, true, FinalizeModeDesignAudit, true},
+		{"normal forged", domain.TaskBusinessLaneNormal, domain.TaskAssetGroupModeSingle, true, 0, true, FinalizeModeDesignAudit, false},
+		{"no waiver", domain.TaskBusinessLaneCustomization, domain.TaskAssetGroupModeSingle, false, 0, true, FinalizeModeDesignAudit, false},
+		{"conflicting final", domain.TaskBusinessLaneCustomization, domain.TaskAssetGroupModeSingle, true, 1, true, FinalizeModeDesignAudit, false},
+		{"missing source", domain.TaskBusinessLaneCustomization, domain.TaskAssetGroupModeSet, true, 0, false, FinalizeModeDesignAudit, false},
+		{"retouch path", domain.TaskBusinessLaneCustomization, domain.TaskAssetGroupModeSingle, true, 0, true, FinalizeModeRetouch, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			revision := domain.TaskAssetGroupRevision{ID: 80, Status: domain.TaskAssetGroupRevisionSubmitted, Mode: tt.mode,
+				FinalOutputWaived: tt.waiver, Items: make([]domain.TaskAssetGroupRevisionItem, tt.finals)}
+			if tt.source {
+				revision.SourceTaskAssetID = &sourceID
+			}
+			repository := &finalizerRepoStub{revision: revision}
+			finalizer := NewTaskFinalizer(repository, &finalizerEventRepo{})
+			_, err := finalizer.FinalizeInTx(context.Background(), resourceWorkflowTestTx{}, &domain.TaskWorkflowLock{
+				TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusPendingAudit, BusinessLane: tt.lane,
+			}, []domain.TaskAssetGroup{{ID: 20, WorkingRevisionID: &revision.ID}}, tt.finalizerMode, 7)
+			if (err == nil) != tt.wantSuccess || (repository.finalizeCalls == 1) != tt.wantSuccess {
+				t.Fatalf("FinalizeInTx error=%v, finalized=%d, want success=%t", err, repository.finalizeCalls, tt.wantSuccess)
+			}
+		})
+	}
+}

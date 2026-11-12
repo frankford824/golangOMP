@@ -47,6 +47,8 @@ type TaskResourceGroupRepository interface {
 }
 
 type TaskResourceWorkflowService interface {
+	UpdateDefaultStyle(context.Context, domain.RequestActor, int64, domain.DefaultStyleUpdate) (*domain.DefaultStyleUpdateResult, *domain.AppError)
+	DefaultStyleHistory(context.Context, domain.RequestActor, int64, int64) ([]domain.DefaultStyleRevision, *domain.AppError)
 	ResourceBundle(ctx context.Context, taskID int64, actor domain.RequestActor) (*domain.ResourceBundle, *domain.AppError)
 	ListResourceGroups(ctx context.Context, actor domain.RequestActor, params domain.ResourceGroupListParams) (*domain.ResourceGroupListResult, *domain.AppError)
 	ResourceGroup(ctx context.Context, actor domain.RequestActor, groupID int64) (*domain.TaskAssetGroup, *domain.AppError)
@@ -164,15 +166,19 @@ func (s *taskResourceWorkflowService) ResourceBundle(ctx context.Context, taskID
 			})
 		}
 	}
+	subject := task.AccessSubject()
+	canAudit := domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, subject)
+	if err := s.loadDefaultStyles(ctx, groups, canAudit); err != nil {
+		return nil, mapTaskResourceReadError("load task default styles", err)
+	}
 	s.hydrateSKUProfiles(ctx, groups)
 	hydrateCurrentResourceGroupEvidence(groups)
-	subject := task.AccessSubject()
 	s.hydrateResourceGroupURLsForAccess(
 		groups,
 		domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetView, subject),
 		domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetDownload, subject),
 	)
-	return &domain.ResourceBundle{TaskID: taskID, WorkflowRevision: task.WorkflowRevision, Groups: groups}, nil
+	return &domain.ResourceBundle{TaskID: taskID, WorkflowRevision: task.WorkflowRevision, Groups: groups, CanManageDefaultStyle: canAudit && defaultStyleEditable(task.Status) && task.TaskType != domain.TaskTypePurchaseTask}, nil
 }
 
 func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, actor domain.RequestActor, params domain.ResourceGroupListParams) (*domain.ResourceGroupListResult, *domain.AppError) {
@@ -203,6 +209,9 @@ func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, ac
 	items, total, err := s.repo.ListResourceGroups(ctx, params)
 	if err != nil {
 		return nil, mapTaskResourceReadError("list resource groups", err)
+	}
+	if err := s.loadDefaultStyles(ctx, items, false); err != nil {
+		return nil, mapTaskResourceReadError("load resource group default styles", err)
 	}
 	s.hydrateSKUProfiles(ctx, items)
 	hydrateCurrentResourceGroupEvidence(items)
@@ -263,6 +272,9 @@ func (s *taskResourceWorkflowService) ResourceGroup(ctx context.Context, actor d
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "resource group is outside the effective data scope", nil)
 	}
 	items := []domain.TaskAssetGroup{*group}
+	if err := s.loadDefaultStyles(ctx, items, false); err != nil {
+		return nil, mapTaskResourceReadError("load resource group default styles", err)
+	}
 	s.hydrateSKUProfiles(ctx, items)
 	hydrateCurrentResourceGroupEvidence(items)
 	s.hydrateResourceGroupURLsForAccess(
@@ -454,6 +466,8 @@ func (s *taskResourceWorkflowService) hydrateResourceGroupURLs(groups []domain.T
 
 func (s *taskResourceWorkflowService) hydrateResourceGroupURLsForAccess(groups []domain.TaskAssetGroup, canPreview, canDownload bool) {
 	for groupIndex := range groups {
+		s.hydrateDefaultStyleURLs(groups[groupIndex].DefaultStyle, canPreview, canDownload)
+		s.hydrateDefaultStyleURLs(groups[groupIndex].PendingDefaultStyle, canPreview, canDownload)
 		for _, revision := range []*domain.TaskAssetGroupRevision{groups[groupIndex].WorkingRevision, groups[groupIndex].FinalizedRevision} {
 			if revision == nil {
 				continue
@@ -781,7 +795,11 @@ func (s *taskResourceWorkflowService) hydrateFlatResourceItemURLs(items []domain
 			MimeType:    items[index].MimeType,
 			StorageKey:  items[index].StorageKey,
 		}
-		s.hydrateCurrentResourceFileURL(file, true, canDownload)
+		canPreview := true
+		if items[index].ResourceRole == domain.ResourceRoleFilterDefaultStyle {
+			_, canPreview = OSSIMGPreviewProcessForSize(file.FileName, file.MimeType, 0)
+		}
+		s.hydrateCurrentResourceFileURL(file, canPreview, canDownload)
 		items[index].PreviewURL = file.PreviewURL
 		items[index].DownloadURL = file.DownloadURL
 	}
@@ -967,6 +985,9 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 	if request.Decision != domain.TaskAuditDecisionApprove && request.Decision != domain.TaskAuditDecisionReturnToDesign {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "decision must be approve or return_to_design", nil)
 	}
+	if request.Decision == domain.TaskAuditDecisionReturnToDesign && len(request.Groups) != 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "return_to_design does not accept resource changes", nil)
+	}
 	if request.Decision == domain.TaskAuditDecisionReturnToDesign && strings.TrimSpace(request.Reason) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeReasonRequired, "reason is required when returning to design", nil)
 	}
@@ -1064,7 +1085,7 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 			if input.SourceTaskAssetID == nil {
 				input.SourceTaskAssetID = current.SourceTaskAssetID
 			}
-			if appErr := validateGroupInput(input, true); appErr != nil {
+			if appErr := validateFinalGroupInput(input, true, task.AllowsFinalOutputWaiver()); appErr != nil {
 				return appErr
 			}
 			if err := s.validateBindingAssetsForStage(ctx, tx, actor.ID, groups[i], input, true); err != nil {
@@ -1213,13 +1234,14 @@ func (f *TaskFinalizer) FinalizeInTx(ctx context.Context, tx repo.Tx, task *doma
 		if err != nil {
 			return 0, err
 		}
-		if revision.Status != domain.TaskAssetGroupRevisionSubmitted || len(revision.Items) == 0 {
+		if revision.Status != domain.TaskAssetGroupRevisionSubmitted {
 			return 0, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "resource group is not complete for finalization", map[string]interface{}{"group_id": groups[i].ID})
 		}
 		if mode == FinalizeModeDesignAudit && revision.SourceTaskAssetID == nil {
 			return 0, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "design resource group requires a source file", map[string]interface{}{"group_id": groups[i].ID})
 		}
-		if revision.Mode == domain.TaskAssetGroupModeSingle && len(revision.Items) != 1 || revision.Mode == domain.TaskAssetGroupModeSet && len(revision.Items) < 2 {
+		waiverAllowed := mode == FinalizeModeDesignAudit && task.AllowsFinalOutputWaiver()
+		if !validFinalOutputCount(revision.Mode, len(revision.Items), revision.FinalOutputWaived, waiverAllowed) {
 			return 0, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "resource group item count does not match mode", map[string]interface{}{"group_id": groups[i].ID})
 		}
 		if err := f.repo.FinalizeGroup(ctx, tx, groups[i].ID, revision.ID, groups[i].LockVersion, actorID); err != nil {
@@ -1365,6 +1387,9 @@ func (s *taskResourceWorkflowService) validateBindingAssetsForStage(ctx context.
 }
 
 func validateDesignGroupInput(input domain.SubmitResourceGroupInput) *domain.AppError {
+	if input.FinalOutputWaived {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "only customization audit may waive final output", nil)
+	}
 	if input.GroupID <= 0 || input.ExpectedGroupLockVersion < 0 {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "group_id and expected_group_lock_version are required", nil)
 	}
@@ -1404,6 +1429,21 @@ func validateCompleteGroupCoverage(groups []domain.TaskAssetGroup, inputs []doma
 }
 
 func validateGroupInput(input domain.SubmitResourceGroupInput, sourceRequired bool) *domain.AppError {
+	return validateFinalGroupInput(input, sourceRequired, false)
+}
+
+func validFinalOutputCount(mode domain.TaskAssetGroupMode, count int, waived, waiverAllowed bool) bool {
+	if mode != domain.TaskAssetGroupModeSingle && mode != domain.TaskAssetGroupModeSet {
+		return false
+	}
+	if waived {
+		return waiverAllowed && count == 0
+	}
+	return (mode == domain.TaskAssetGroupModeSingle && count == 1) ||
+		(mode == domain.TaskAssetGroupModeSet && count >= 2)
+}
+
+func validateFinalGroupInput(input domain.SubmitResourceGroupInput, sourceRequired, waiverAllowed bool) *domain.AppError {
 	if input.GroupID <= 0 || input.ExpectedGroupLockVersion < 0 {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "group_id and expected_group_lock_version are required", nil)
 	}
@@ -1419,6 +1459,12 @@ func validateGroupInput(input domain.SubmitResourceGroupInput, sourceRequired bo
 				return domain.NewAppError(domain.ErrCodeInvalidRequest, "source_task_asset_id cannot also be a final_task_asset_id", map[string]interface{}{"group_id": input.GroupID, "task_asset_id": finalID})
 			}
 		}
+	}
+	if input.FinalOutputWaived {
+		if !validFinalOutputCount(input.Mode, len(input.FinalTaskAssetIDs), true, waiverAllowed) {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "waiving final output requires customization audit, a valid mode and no final files", nil)
+		}
+		return nil
 	}
 	switch input.Mode {
 	case domain.TaskAssetGroupModeSingle:

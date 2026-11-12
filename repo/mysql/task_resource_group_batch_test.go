@@ -23,8 +23,8 @@ func TestHydrateResourceGroupRevisionsUsesOneBatchPerRelation(t *testing.T) {
 	mock.ExpectQuery(`FROM task_asset_group_revisions r[\s\S]+JOIN task_asset_groups g ON g\.id = r\.group_id[\s\S]+WHERE r\.id IN \(\?,\?\)`).
 		WithArgs(int64(101), int64(102)).
 		WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-			AddRow(101, 1, 1, "finalized", "single", 201, "design", 9, "审核员", "", now, now, now, 1001, "task", nil, nil).
-			AddRow(102, 2, 1, "finalized", "set", 202, "audit", 9, "审核员", "", now, now, now, 1002, "task", nil, nil))
+			AddRow(101, 1, 1, "finalized", "single", 201, "design", 9, "审核员", "", now, now, now, 1001, "task", nil, nil, false).
+			AddRow(102, 2, 1, "finalized", "set", 202, "audit", 9, "审核员", "", now, now, now, 1002, "task", nil, nil, false))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM task_asset_group_revision_items\n\t\tWHERE revision_id IN (?,?)")).
 		WithArgs(int64(101), int64(102)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}).

@@ -114,9 +114,14 @@
               </div>
             </template>
           </div>
-          <p v-else class="stage-empty">尚无最终成品</p>
+          <p v-else class="stage-empty">{{ revision(group)?.final_output_waived ? '审核确认无需成品图' : '尚无最终成品' }}</p>
         </section>
       </div>
+
+      <DefaultStyleSlot v-if="showDefaultStyle || group.default_style || group.pending_default_style"
+        :group="group" :editable="bundle.can_manage_default_style && !group.migration_incomplete"
+        :history-enabled="enableRevisionHistory"
+        @updated="(updated) => Object.assign(group, updated)" />
 
       <footer class="group-footer">
         <span>来源任务 · {{ group.task_no || group.task_id }}</span>
@@ -139,6 +144,7 @@
 import { computed, reactive, ref } from 'vue'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
+import DefaultStyleSlot from '@/components/task/DefaultStyleSlot.vue'
 import ResourceRevisionDrawer from '@/components/task/ResourceRevisionDrawer.vue'
 import { fetchTaskAssetPreviewMeta } from '@/domain/asset-access'
 import { referenceThumbnailURL, withTaskReferencePreview } from '@/domain/reference-thumbnail'
@@ -165,6 +171,7 @@ interface DisplayReference {
 const props = defineProps<{
   bundle: ResourceBundle
   enableRevisionHistory?: boolean
+  showDefaultStyle?: boolean
   skuItems?: SkuResourceMatrixItem[]
   taskReferences?: unknown[]
 }>()

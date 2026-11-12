@@ -150,3 +150,77 @@ func TestFinalizedDownloadTicketsValidatesIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestFinalizedManifestV2IncludesWaiversAndNonImageDefaultStyles(t *testing.T) {
+	final := finalizedSyncRow(1, 11, 101, 0, "final.jpg", 10)
+	waived := finalizedSyncRow(2, 0, 0, 0, "", 0)
+	planningDefault := finalizedSyncRow(3, 0, 301, 0, "style.psb", 20)
+	planningDefault.MimeType = "application/octet-stream"
+	now := time.Unix(3000, 0)
+	v1, err := buildFinalizedSyncManifest([]repo.ProductionPackageAsset{final}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, err := buildFinalizedSyncManifestV2([]repo.ProductionPackageAsset{final}, []repo.ProductionPackageAsset{waived}, []repo.ProductionPackageAsset{planningDefault}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1.SchemaVersion != 1 || v1.DefaultStyles != nil || v2.SchemaVersion != 2 || v2.GroupCount != 2 || v2.ItemCount != 1 || v2.ObjectCount != 2 || v2.TotalObjectBytes != 30 {
+		t.Fatalf("unexpected v1=%+v / v2=%+v", v1, v2)
+	}
+	if !v2.Groups[0].FinalOutputWaived || v2.Groups[0].Items == nil || len(v2.Groups[0].Items) != 0 {
+		t.Fatalf("waived group: %+v", v2.Groups[0])
+	}
+	if styles := *v2.DefaultStyles; len(styles) != 1 || styles[0].TaskAssetID != 301 || styles[0].Format != "psb" {
+		t.Fatalf("default styles: %+v", styles)
+	}
+	removed, err := buildFinalizedSyncManifestV2([]repo.ProductionPackageAsset{final}, []repo.ProductionPackageAsset{waived}, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.ManifestID == v2.ManifestID || len(*removed.DefaultStyles) != 0 {
+		t.Fatalf("removing a default style did not change snapshot")
+	}
+}
+
+type defaultStyleSyncRepoStub struct {
+	finalizedSyncRepoStub
+	row               repo.ProductionPackageAsset
+	calls             int
+	replaceDuringStat bool
+}
+
+func (r *defaultStyleSyncRepoStub) ListCurrentDefaultStyleAssetsByIDs(_ context.Context, ids []int64) ([]repo.ProductionPackageAsset, error) {
+	r.calls++
+	if r.replaceDuringStat && r.calls > 1 {
+		return nil, nil
+	}
+	for _, id := range ids {
+		if id == r.row.TaskAssetID {
+			return []repo.ProductionPackageAsset{r.row}, nil
+		}
+	}
+	return nil, nil
+}
+
+func TestDefaultStyleTicketsForNonImageAndConcurrentReplacement(t *testing.T) {
+	style := finalizedSyncRow(5, 0, 501, 0, "style.pdf", 42)
+	style.MimeType = "application/pdf"
+	for _, replace := range []bool{false, true} {
+		repository := &defaultStyleSyncRepoStub{row: style, replaceDuringStat: replace}
+		store := &finalizedSyncStoreStub{infos: map[string]*baseservice.OSSObjectInfo{style.StorageKey: {ContentLength: 42}}}
+		svc := NewService(nil, nil, nil, WithFinalizedAssetSync(repository, store))
+		result, appErr := svc.FinalizedDownloadTickets(context.Background(), []int64{style.TaskAssetID, 999})
+		if appErr != nil {
+			t.Fatal(appErr)
+		}
+		status := FinalizedDownloadReady
+		if replace {
+			status = FinalizedDownloadNotCurrent
+		}
+		if result.Results[0].Status != status || (result.Results[0].DownloadURL != "") == replace ||
+			result.Results[1].Status != FinalizedDownloadNotCurrent {
+			t.Fatalf("replace=%t results=%+v", replace, result.Results)
+		}
+	}
+}

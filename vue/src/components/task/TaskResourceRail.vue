@@ -42,7 +42,7 @@
       <ArrowRight class="rail-arrow" :size="20" aria-hidden="true" />
 
       <article class="rail-column finals" :class="{ locked: finalLocked }">
-        <div class="column-head"><span>03</span><div><strong>最终成品图</strong><small>{{ finalCount }} 张 · {{ setCount ? `${setCount} 个套装` : '单图成品' }}</small></div><LockKeyhole v-if="finalLocked" :size="16" aria-label="设计阶段暂不可上传" /></div>
+        <div class="column-head"><span>03</span><div><strong>最终成品图</strong><small>{{ finalCount }} 张{{ waivedCount ? ` · ${waivedCount} 个 SKU 无需成品图` : setCount ? ` · ${setCount} 个套装` : ' · 单图成品' }}</small></div><LockKeyhole v-if="finalLocked" :size="16" aria-label="设计阶段暂不可上传" /></div>
         <div v-if="finals.length" class="media-strip">
           <button v-for="item in finals.slice(0,4)" :key="item.id" type="button" @click="$emit('openResources')">
             <AssetPreviewMedia
@@ -59,7 +59,7 @@
           </button>
         </div>
         <div v-else-if="finalLocked" class="locked-copy"><LockKeyhole :size="22" aria-hidden="true" /><span><strong>设计阶段不上传成品</strong><small>审核人员会按设计判定的单图或套装模式完成定稿。</small></span></div>
-        <p v-else class="empty-copy">等待审核人员上传最终成品</p>
+        <p v-else class="empty-copy">{{ waivedCount ? '审核确认无需成品图' : '等待审核人员上传最终成品' }}</p>
       </article>
     </div>
     <footer v-if="canOperate"><span>{{ actionHint }}</span><button type="button" @click="$emit('openWorkflow')">{{ actionLabel }} <ArrowRight :size="15" aria-hidden="true" /></button></footer>
@@ -134,7 +134,8 @@ const sourceEmptyCopy = computed(() => isRetouch.value
 const finals = computed<ResourceRevisionItem[]>(() => groups.value.flatMap((group) => group.finalized_revision?.items || []))
 const finalCount = computed(() => finals.value.length)
 const setCount = computed(() => groups.value.filter((group) => (group.finalized_revision || group.working_revision)?.mode === 'set').length)
-const finalLocked = computed(() => props.taskStatus === 'InProgress' && !finalCount.value)
+const waivedCount = computed(() => groups.value.filter((group) => group.finalized_revision?.final_output_waived).length)
+const finalLocked = computed(() => props.taskStatus === 'InProgress' && !finalCount.value && !waivedCount.value)
 const actionHint = computed(() => {
   if (props.taskStatus === 'Completed') return isRetouch.value
     ? '按修图范围提交最终成品；独立源文件可选。需要更换结单文件时，重开到修图阶段后重新提交。'

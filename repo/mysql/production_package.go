@@ -2,6 +2,7 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -77,7 +78,15 @@ func (r *productionPackageRepo) ListFinalizedAssetsByIDs(ctx context.Context, ta
 }
 
 func (r *productionPackageRepo) listFinalizedAssets(ctx context.Context, matchClause string, args ...interface{}) ([]repo.ProductionPackageAsset, error) {
-	rows, err := r.db.db.QueryContext(ctx, `
+	return queryProductionPackageAssets(ctx, r.db.db, matchClause, args...)
+}
+
+type productionPackageQuerier interface {
+	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
+}
+
+func queryProductionPackageAssets(ctx context.Context, q productionPackageQuerier, matchClause string, args ...interface{}) ([]repo.ProductionPackageAsset, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT g.id,
 		       r.id,
 		       r.mode,
@@ -121,6 +130,10 @@ func (r *productionPackageRepo) listFinalizedAssets(ctx context.Context, matchCl
 	if err != nil {
 		return nil, fmt.Errorf("list finalized production package assets: %w", err)
 	}
+	return scanProductionPackageAssets(rows)
+}
+
+func scanProductionPackageAssets(rows *sql.Rows) ([]repo.ProductionPackageAsset, error) {
 	defer rows.Close()
 
 	out := make([]repo.ProductionPackageAsset, 0)

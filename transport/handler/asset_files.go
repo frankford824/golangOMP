@@ -131,6 +131,34 @@ func (h *AssetFilesHandler) authorizeTaskAssetAccess(ctx context.Context, asset 
 			"deny_code": "asset_file_task_not_found",
 		})
 	}
+	if asset.AssetType == domain.TaskAssetTypeDefaultStyle {
+		actor, _ := domain.RequestActorFromContext(ctx)
+		subject := task.AccessSubject()
+		accessRepo, ok := h.accessTaskAssetRepo.(interface {
+			GetBoundRevisionTaskAssetByID(context.Context, int64) (*domain.TaskAsset, error)
+			IsCurrentDefaultStyle(context.Context, int64) (bool, error)
+		})
+		if !ok || !domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetDownload, subject) {
+			return domain.ErrNotFound
+		}
+		bound, err := accessRepo.GetBoundRevisionTaskAssetByID(ctx, asset.ID)
+		if err != nil {
+			return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify default style access.", nil)
+		}
+		if bound == nil {
+			return domain.ErrNotFound
+		}
+		if !domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, subject) {
+			current, err := accessRepo.IsCurrentDefaultStyle(ctx, asset.ID)
+			if err != nil {
+				return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify default style access.", nil)
+			}
+			if !current {
+				return domain.ErrNotFound
+			}
+		}
+		return nil
+	}
 	return service.AuthorizeTaskReadDetail(ctx, task, h.accessUserRepo)
 }
 

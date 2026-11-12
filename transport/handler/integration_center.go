@@ -55,7 +55,24 @@ func (h *IntegrationCenterHandler) FinalizedSyncManifest(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "finalized asset sync service is not configured", nil))
 		return
 	}
-	manifest, appErr := h.assetSync.FinalizedSyncManifest(c.Request.Context())
+	var manifest *assetcenter.FinalizedSyncManifest
+	var appErr *domain.AppError
+	switch c.Query("schema_version") {
+	case "", "1":
+		manifest, appErr = h.assetSync.FinalizedSyncManifest(c.Request.Context())
+	case "2":
+		v2, ok := h.assetSync.(interface {
+			FinalizedSyncManifestV2(context.Context) (*assetcenter.FinalizedSyncManifest, *domain.AppError)
+		})
+		if !ok {
+			respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "finalized sync v2 service is not configured", nil))
+			return
+		}
+		manifest, appErr = v2.FinalizedSyncManifestV2(c.Request.Context())
+	default:
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "schema_version must be 1 or 2", nil))
+		return
+	}
 	if appErr != nil {
 		respondError(c, appErr)
 		return

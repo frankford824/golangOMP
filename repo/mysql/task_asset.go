@@ -83,8 +83,10 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 	// of rebuilding it inside the asset transaction: an oversized or otherwise
 	// unhealthy search document must never roll back verified upload bytes and
 	// the authoritative task_assets row.
-	if err := enqueueTaskSearchReindexForAssetMutation(ctx, sqlTx, asset.TaskID, id); err != nil {
-		return 0, err
+	if asset.AssetType != domain.TaskAssetTypeDefaultStyle {
+		if err := enqueueTaskSearchReindexForAssetMutation(ctx, sqlTx, asset.TaskID, id); err != nil {
+			return 0, err
+		}
 	}
 	return id, nil
 }
@@ -173,6 +175,13 @@ func (r *taskAssetRepo) GetBoundRevisionTaskAssetByID(ctx context.Context, id in
 		      FROM task_asset_group_revision_references reference
 		      WHERE reference.formal_task_asset_id = ta.id
 		    )
+		    OR EXISTS (
+		      SELECT 1 FROM task_default_style_revisions ds
+		      WHERE ds.task_asset_id = ta.id AND ds.group_id = ta.bound_group_id AND ta.bound_role = 'default_style'
+        AND ta.asset_type = 'default_style' AND COALESCE(ta.is_archived, 0) = 0
+        AND ta.upload_status = 'uploaded' AND asr.is_placeholder = 0
+        AND asr.status NOT IN ('archived', 'historical_unavailable')
+		    )
 		  )`, id)
 	return scanTaskAsset(row)
 }
@@ -210,7 +219,7 @@ func (r *taskAssetRepo) ListByTaskID(ctx context.Context, taskID int64) ([]*doma
 		SELECT `+taskAssetSelectCols+`
 		FROM task_assets ta
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
-		WHERE ta.task_id = ?
+		WHERE ta.task_id = ? AND ta.asset_type <> 'default_style'
 		ORDER BY ta.version_no ASC, ta.created_at ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list task_assets: %w", err)
@@ -529,4 +538,14 @@ func buildAssetStorageRef(
 	}
 	domain.HydrateAssetStorageRefDerived(ref)
 	return ref
+}
+
+func (r *taskAssetRepo) IsCurrentDefaultStyle(ctx context.Context, assetID int64) (bool, error) {
+	var current bool
+	err := r.db.db.QueryRowContext(ctx, `SELECT EXISTS (
+  SELECT 1 FROM task_default_style_revisions ds JOIN task_asset_groups g
+   ON g.id = ds.group_id AND g.current_default_style_id = ds.id
+  WHERE ds.task_asset_id = ?
+ )`, assetID).Scan(&current)
+	return current, err
 }

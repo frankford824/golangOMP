@@ -19,7 +19,7 @@ func revisionHydrationColumns() []string {
 		"source_task_asset_id", "source_stage", "created_by",
 		"created_by_name", "reason", "submitted_at", "finalized_at",
 		"created_at", "task_id", "scope_kind", "task_sku_item_id",
-		"retouch_requirement_id",
+		"retouch_requirement_id", "final_output_waived",
 	}
 }
 
@@ -62,8 +62,8 @@ func TestListResourceGroupRevisionsPagesNewestFirstAndHydratesOnlyPage(t *testin
 	mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).
 		WithArgs(int64(11), int64(12)).
 		WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-			AddRow(11, 8, 1, "superseded", "single", 111, "design", 7, "设计师", "first", now, nil, now, 80, "task", nil, nil).
-			AddRow(12, 8, 2, "finalized", "set", 112, "audit", 9, "审核员", "approved", now, now, now, 80, "task", nil, nil))
+			AddRow(11, 8, 1, "superseded", "single", 111, "design", 7, "设计师", "first", now, nil, now, 80, "task", nil, nil, false).
+			AddRow(12, 8, 2, "finalized", "set", 112, "audit", 9, "审核员", "approved", now, now, now, 80, "task", nil, nil, false))
 	mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(int64(11), int64(12)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}))
 	mock.ExpectQuery(`FROM task_asset_group_revision_references`).WithArgs(int64(11), int64(12)).
@@ -112,7 +112,7 @@ func TestCurrentRevisionHydrationRejectsMissingOrInactiveFiles(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(revisionID).
 		WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-			AddRow(revisionID, 8, 1, "submitted", "single", 111, "design", 7, "设计师", "submitted", now, nil, now, 80, "task", nil, nil))
+			AddRow(revisionID, 8, 1, "submitted", "single", 111, "design", 7, "设计师", "submitted", now, nil, now, 80, "task", nil, nil, false))
 	mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(revisionID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}))
 	mock.ExpectQuery(`FROM task_asset_group_revision_references`).WithArgs(revisionID).
@@ -145,7 +145,7 @@ func TestHistoricalRevisionHydrationRetainsUnavailableFileMetadata(t *testing.T)
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11))
 	mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(int64(11)).
 		WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-			AddRow(11, 8, 1, "superseded", "single", nil, "migration", 7, "管理员", "historical", now, now, now, 80, "task", nil, nil))
+			AddRow(11, 8, 1, "superseded", "single", nil, "migration", 7, "管理员", "historical", now, now, now, 80, "task", nil, nil, false))
 	mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(int64(11)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}).
 			AddRow(21, 11, 12323, 0, "lost.psd", now))
@@ -194,7 +194,7 @@ func TestRevisionReferenceHydrationHonorsFormalTaskAssetTombstone(t *testing.T) 
 
 			mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-					AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "historical", now, now, now, 80, "task", nil, nil))
+					AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "historical", now, now, now, 80, "task", nil, nil, false))
 			mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}))
 			mock.ExpectQuery(`FROM task_asset_group_revision_references`).WithArgs(revisionID).
@@ -266,7 +266,7 @@ func TestRevisionHydrationRejectsCrossGroupAssetOwnership(t *testing.T) {
 
 			mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-					AddRow(revisionID, 8, 1, "finalized", "single", 111, "design", 7, "审核员", "", now, now, now, 80, "task", nil, nil))
+					AddRow(revisionID, 8, 1, "finalized", "single", 111, "design", 7, "审核员", "", now, now, now, 80, "task", nil, nil, false))
 			mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}).
 					AddRow(71, revisionID, 112, 0, "final.png", now))
@@ -314,7 +314,7 @@ func TestRevisionHydrationRejectsReferenceScopeOrSnapshotMismatch(t *testing.T) 
 
 			mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-					AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "", now, now, now, 80, "sku", 801, nil))
+					AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "", now, now, now, 80, "sku", 801, nil, false))
 			mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}))
 			mock.ExpectQuery(`FROM task_asset_group_revision_references`).WithArgs(revisionID).
@@ -345,7 +345,7 @@ func TestRevisionHydrationRejectsMissingReferenceFileRow(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(revisionID).
 		WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-			AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "", now, now, now, 80, "task", nil, nil))
+			AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "", now, now, now, 80, "task", nil, nil, false))
 	mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(revisionID).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}))
 	mock.ExpectQuery(`FROM task_asset_group_revision_references rr[\s\S]+LEFT JOIN reference_file_refs f`).
@@ -393,7 +393,7 @@ func TestHistoricalRevisionHydrationRetainsRevokedOrArchivedFileMetadata(t *test
 
 			mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-					AddRow(revisionID, 8, 1, "superseded", "single", 111, "audit", 7, "审核员", "", now, now, now, 80, "task", nil, nil))
+					AddRow(revisionID, 8, 1, "superseded", "single", 111, "audit", 7, "审核员", "", now, now, now, 80, "task", nil, nil, false))
 			mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}))
 			mock.ExpectQuery(`FROM task_asset_group_revision_references`).WithArgs(revisionID).
@@ -458,7 +458,7 @@ func TestRevisionHydrationRejectsInvalidFormalReferenceOwnership(t *testing.T) {
 
 			mock.ExpectQuery(`SELECT r.id, r.group_id, r.revision_no, r.status, r.mode`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
-					AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "", now, now, now, 80, "task", nil, nil))
+					AddRow(revisionID, 8, 1, "finalized", "single", nil, "migration", 7, "管理员", "", now, now, now, 80, "task", nil, nil, false))
 			mock.ExpectQuery(`FROM task_asset_group_revision_items`).WithArgs(revisionID).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}))
 			mock.ExpectQuery(`FROM task_asset_group_revision_references`).WithArgs(revisionID).

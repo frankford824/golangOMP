@@ -43,6 +43,7 @@ export interface ResourceReference {
 }
 
 export interface ResourceRevision {
+  final_output_waived?: boolean
   id: number
   group_id: number
   revision_no: number
@@ -134,7 +135,19 @@ export interface ProductCostReconciliation {
   erp_product_name?: string
 }
 
+export interface DefaultStyleRevision {
+  id: number
+  group_id: number
+  file?: ResourceFile
+  removed: boolean
+  created_by: number
+  reason: string
+  created_at: string
+}
+
 export interface ResourceGroup {
+  default_style?: DefaultStyleRevision
+  pending_default_style?: DefaultStyleRevision
   id: number
   task_id: number
   scope_kind: 'task' | 'sku' | 'retouch_requirement'
@@ -157,6 +170,7 @@ export interface ResourceGroup {
 }
 
 export interface ResourceBundle {
+  can_manage_default_style?: boolean
   task_id: number
   workflow_revision: number
   groups: ResourceGroup[]
@@ -172,7 +186,7 @@ export interface FlatResourceItem {
   task_no?: string
   task_type: string
   sku_code?: string
-  resource_role: 'reference' | 'source' | 'final'
+  resource_role: 'reference' | 'source' | 'final' | 'default_style'
   file_name: string
   mime_type?: string
   resource_owner_id?: number
@@ -226,6 +240,7 @@ export interface ResourceDownloadInfo {
 }
 
 export interface ResourceGroupSubmission {
+  final_output_waived?: boolean
   group_id: number
   expected_group_lock_version: number
   mode: ResourceMode
@@ -240,6 +255,17 @@ const unwrap = <T>(response: { data?: { data?: T } | T }): T => {
 }
 
 export const resourceGroupsApi = {
+  async updateDefaultStyle(group: ResourceGroup, change: { task_asset_id: number } | { remove: true }, reason: string, key: string): Promise<{ group_lock_version: number; revision_id: number }> {
+    return unwrap(await http.put(`/v1/resource-groups/${group.id}/default-style`, {
+      ...change,
+      expected_group_lock_version: group.lock_version,
+      reason,
+      idempotency_key: key,
+    }))
+  },
+  async defaultStyleHistory(groupId: number, beforeId?: number): Promise<{ items: DefaultStyleRevision[] }> {
+    return unwrap(await http.get(`/v1/resource-groups/${groupId}/default-style/history`, { params: { before_id: beforeId } }))
+  },
   async taskBundle(taskId: number): Promise<ResourceBundle> {
     return unwrap(await http.get(`/v1/tasks/${taskId}/resource-bundle`))
   },
@@ -248,7 +274,7 @@ export const resourceGroupsApi = {
     sku_code?: string
     task_no?: string
     creator_id?: number | string
-    resource_role?: 'reference' | 'source' | 'final' | ''
+    resource_role?: 'reference' | 'source' | 'final' | 'default_style' | ''
     format_category?: 'image' | 'design' | 'pdf' | 'video' | 'archive'
     business_lane?: 'normal' | 'customization'
     q?: string

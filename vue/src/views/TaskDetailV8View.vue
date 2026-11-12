@@ -41,7 +41,7 @@
       <div v-if="referenceStatus" class="message success" role="status">{{ referenceStatus }}</div>
 
       <TaskResourceRail
-        v-if="bundle"
+        v-if="bundle && !isPlanning"
         :bundle="bundle"
         :task-status="task.task_status"
         :task-type="task.task_type"
@@ -129,6 +129,7 @@
           </dl>
         </div>
         <div class="command-actions">
+          <button v-if="isPlanning && bundle" class="secondary-button" @click="openWorkspace('resources')">查看 SKU 资源</button>
           <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
           <button v-if="canEditTaskBusinessInfo" class="primary-button" @click="openTaskEditor"><PencilLine :size="16" aria-hidden="true" />编辑任务信息</button>
           <button v-if="canTerminateTask" class="secondary-button danger-button" :disabled="cancelLoading" @click="openTerminateDialog"><Ban :size="16" aria-hidden="true" />{{ cancelLoading ? '正在终止…' : '终止任务' }}</button>
@@ -223,7 +224,7 @@
             />
           </div>
 
-          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles" :enable-revision-history="can('asset.view')" @refresh-references="refreshReferencePreviews" /></div>
+          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :sku-items="skuItems" :task-references="displayReferenceFiles" :enable-revision-history="can('asset.view')" show-default-style @refresh-references="refreshReferencePreviews" /></div>
 
           <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
             <TaskAttachmentWorkspace
@@ -874,11 +875,9 @@ async function load() {
     const aggregateEvents = Array.isArray(envelope.events) ? envelope.events as TaskEvent[] : []
     // 资源组接口对历史任务会 fail-closed，单独兜住它，避免连带丢掉事件与协作数据。
     const [nextBundle,eventResponse,handoverResponse,nextPlanningResult] = await Promise.all([
-      task.value.task_type === 'sku_planning'
-        ? Promise.resolve(null)
-        : resourceGroupsApi.taskBundle(taskId.value).catch((cause) => {
+      resourceGroupsApi.taskBundle(taskId.value).catch((cause) => {
           bundleError.value = resolveApiUserMessage(cause, { fallback: '任务资源区暂时打不开，请稍后刷新重试。' })
-          void loadLegacyAssets()
+          if (!isPlanning.value) void loadLegacyAssets()
           return null
         }),
       tasksApi.listTaskEvents(String(taskId.value)).catch(() => null),

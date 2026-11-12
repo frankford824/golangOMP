@@ -27,7 +27,7 @@
 - Completion is performed only by `TaskFinalizer.FinalizeInTx` inside the caller transaction.
 - ERP and search projection failures never reopen a completed task.
 - Current business files are resolved only through `task_asset_groups` working/finalized pointers.
-- Public resource views expose reference images, one current effective source and ordered final products.
+- Public resource views expose reference images, one current effective source, ordered final products, and an independent optional default style. Customization audit may explicitly waive final output per SKU while retaining an effective source.
 - Authorization is capability plus stable organization-ID scope. Organization names are display-only.
 - `workflow_contract_version=2` and an empty `allowed_actions` array means explicitly no actions.
 - Removed route families return 404 after cutover; no compatibility aliases are introduced.

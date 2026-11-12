@@ -143,7 +143,7 @@ func (r *taskAssetSearchRepo) ListCurrentByAssetIDs(ctx context.Context, assetID
 func (r *taskAssetSearchRepo) ListVersionsByAssetID(ctx context.Context, assetID int64) ([]*repo.TaskAssetSearchRow, error) {
 	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
 	rows, err := r.db.db.QueryContext(queryCtx, taskAssetSearchSelect+taskAssetSearchFrom+`
-		WHERE da.id = ?
+		WHERE da.id = ? AND ta.asset_type <> 'default_style'
 		ORDER BY ta.asset_version_no ASC, ta.id ASC`, assetID)
 	if err != nil {
 		cancelQuery()
@@ -157,7 +157,7 @@ func (r *taskAssetSearchRepo) ListVersionsByAssetID(ctx context.Context, assetID
 func (r *taskAssetSearchRepo) GetVersion(ctx context.Context, assetID, versionID int64) (*repo.TaskAssetSearchRow, error) {
 	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
 	row := r.db.db.QueryRowContext(queryCtx, taskAssetSearchSelect+taskAssetSearchFrom+`
-		WHERE da.id = ? AND ta.id = ?`, assetID, versionID)
+		WHERE da.id = ? AND ta.id = ? AND ta.asset_type <> 'default_style'`, assetID, versionID)
 	item, err := scanTaskAssetSearchRow(row)
 	cancelQuery()
 	return item, err
@@ -500,7 +500,7 @@ func buildListCurrentByAssetIDsQuery(assetIDs []int64) (string, []interface{}) {
 
 func taskAssetCurrentVersionPredicate() string {
 	if taskAssetLegacyCurrentVersionEnabled() {
-		return `ta.id = COALESCE(da.current_version_id, (
+		return `ta.asset_type <> 'default_style' AND ta.id = COALESCE(da.current_version_id, (
 		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
 		  ))`
 	}

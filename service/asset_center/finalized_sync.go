@@ -28,27 +28,48 @@ type FinalizedAssetSyncObjectStore interface {
 }
 
 type FinalizedSyncManifest struct {
-	SchemaVersion    int                  `json:"schema_version"`
-	ManifestID       string               `json:"manifest_id"`
-	GeneratedAt      time.Time            `json:"generated_at"`
-	GroupCount       int                  `json:"group_count"`
-	ItemCount        int                  `json:"item_count"`
-	ObjectCount      int                  `json:"object_count"`
-	TotalObjectBytes int64                `json:"total_object_bytes"`
-	Groups           []FinalizedSyncGroup `json:"groups"`
+	DefaultStyles    *[]FinalizedSyncDefaultStyle `json:"default_styles,omitempty"`
+	SchemaVersion    int                          `json:"schema_version"`
+	ManifestID       string                       `json:"manifest_id"`
+	GeneratedAt      time.Time                    `json:"generated_at"`
+	GroupCount       int                          `json:"group_count"`
+	ItemCount        int                          `json:"item_count"`
+	ObjectCount      int                          `json:"object_count"`
+	TotalObjectBytes int64                        `json:"total_object_bytes"`
+	Groups           []FinalizedSyncGroup         `json:"groups"`
 }
 
 type FinalizedSyncGroup struct {
-	GroupID      int64                          `json:"group_id"`
-	RevisionID   int64                          `json:"revision_id"`
-	RevisionMode domain.TaskAssetGroupMode      `json:"revision_mode"`
-	FinalizedAt  time.Time                      `json:"finalized_at"`
-	TaskID       int64                          `json:"task_id"`
-	TaskNo       string                         `json:"task_no"`
-	ScopeKind    domain.TaskAssetGroupScopeKind `json:"scope_kind"`
-	SKUCode      string                         `json:"sku_code"`
-	ProductName  string                         `json:"product_name"`
-	Items        []FinalizedSyncItem            `json:"items"`
+	FinalOutputWaived bool                           `json:"final_output_waived,omitempty"`
+	GroupID           int64                          `json:"group_id"`
+	RevisionID        int64                          `json:"revision_id"`
+	RevisionMode      domain.TaskAssetGroupMode      `json:"revision_mode"`
+	FinalizedAt       time.Time                      `json:"finalized_at"`
+	TaskID            int64                          `json:"task_id"`
+	TaskNo            string                         `json:"task_no"`
+	ScopeKind         domain.TaskAssetGroupScopeKind `json:"scope_kind"`
+	SKUCode           string                         `json:"sku_code"`
+	ProductName       string                         `json:"product_name"`
+	Items             []FinalizedSyncItem            `json:"items"`
+}
+
+type FinalizedSyncDefaultStyle struct {
+	GroupID          int64                          `json:"group_id"`
+	RevisionID       int64                          `json:"default_style_revision_id"`
+	TaskID           int64                          `json:"task_id"`
+	TaskNo           string                         `json:"task_no"`
+	ScopeKind        domain.TaskAssetGroupScopeKind `json:"scope_kind"`
+	SKUCode          string                         `json:"sku_code"`
+	ProductName      string                         `json:"product_name"`
+	TaskAssetID      int64                          `json:"task_asset_id"`
+	FileName         string                         `json:"file_name"`
+	OriginalFilename string                         `json:"original_filename"`
+	Format           string                         `json:"format"`
+	MimeType         string                         `json:"mime_type"`
+	FileSize         int64                          `json:"file_size"`
+	StorageKey       string                         `json:"storage_key"`
+	WholeHash        *string                        `json:"whole_hash"`
+	CreatedAt        time.Time                      `json:"created_at"`
 }
 
 type FinalizedSyncItem struct {
@@ -213,6 +234,27 @@ func (s *Service) FinalizedDownloadTickets(ctx context.Context, taskAssetIDs []i
 			}
 		}
 	}
+	defaultIDs := make(map[int64]struct{})
+	var defaultRepo currentDefaultStyleSyncRepository
+	if repository, ok := s.finalizedSyncRepo.(currentDefaultStyleSyncRepository); ok {
+		missing := make([]int64, 0, len(ids))
+		for _, id := range ids {
+			if _, exists := current[id]; !exists {
+				missing = append(missing, id)
+			}
+		}
+		if len(missing) > 0 {
+			defaults, err := repository.ListCurrentDefaultStyleAssetsByIDs(ctx, missing)
+			if err != nil {
+				return nil, domain.NewAppError(domain.ErrCodeInternalError, fmt.Sprintf("list default style download tickets: %v", err), nil)
+			}
+			defaultRepo = repository
+			for _, row := range defaults {
+				current[row.TaskAssetID] = row
+				defaultIDs[row.TaskAssetID] = struct{}{}
+			}
+		}
+	}
 	results := make([]FinalizedDownloadTicketResult, len(ids))
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
@@ -237,6 +279,33 @@ func (s *Service) FinalizedDownloadTickets(ctx context.Context, taskAssetIDs []i
 		}(row)
 	}
 	wg.Wait()
+	if len(defaultIDs) > 0 {
+		// Recheck after OSS metadata requests, which can outlive a concurrent replacement.
+		ready := make([]int64, 0, len(defaultIDs))
+		for _, result := range results {
+			if _, isDefault := defaultIDs[result.TaskAssetID]; isDefault && result.Status == FinalizedDownloadReady {
+				ready = append(ready, result.TaskAssetID)
+			}
+		}
+		if len(ready) > 0 {
+			rows, err := defaultRepo.ListCurrentDefaultStyleAssetsByIDs(ctx, ready)
+			stillCurrent := make(map[int64]struct{}, len(rows))
+			for _, row := range rows {
+				stillCurrent[row.TaskAssetID] = struct{}{}
+			}
+			for i, result := range results {
+				id := result.TaskAssetID
+				if _, isDefault := defaultIDs[id]; !isDefault || result.Status != FinalizedDownloadReady {
+					continue
+				}
+				if err != nil {
+					results[i] = finalizedTicketError(current[id], err, true)
+				} else if _, exists := stillCurrent[id]; !exists {
+					results[i] = FinalizedDownloadTicketResult{TaskAssetID: id, Status: FinalizedDownloadNotCurrent}
+				}
+			}
+		}
+	}
 	return &FinalizedDownloadTicketResponse{Results: results}, nil
 }
 

@@ -326,6 +326,9 @@ func NewRouter(
 		resourceGroups.GET("/:id", capabilityAccess(resourceGroups, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ResourceGroup)
 		resourceGroups.GET("/:id/cost-reconciliation", capabilityAccess(resourceGroups, http.MethodGet, "/:id/cost-reconciliation", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ResourceGroupCostReconciliation)
 		resourceGroups.GET("/:id/revisions", capabilityAccess(resourceGroups, http.MethodGet, "/:id/revisions", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ResourceGroupRevisions)
+		resourceGroups.PUT("/:id/default-style", capabilityAccess(resourceGroups, http.MethodPut, "/:id/default-style", domain.APIReadinessReadyForFrontend, domain.PermissionTaskAuditDecision), taskResourceWorkflowH.UpdateDefaultStyle)
+		resourceGroups.GET("/:id/default-style/history", capabilityAccess(resourceGroups, http.MethodGet, "/:id/default-style/history", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.DefaultStyleHistory)
+
 		resourceGroups.POST("/batch-download", capabilityAccess(resourceGroups, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskResourceWorkflowH.BatchDownloadResourceGroups)
 	}
 

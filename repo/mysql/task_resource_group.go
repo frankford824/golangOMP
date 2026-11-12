@@ -26,10 +26,10 @@ func (r *TaskResourceGroupRepo) GetWorkflow(ctx context.Context, taskID int64) (
 	var handlerID, designerID, requesterID, departmentID, teamID sql.NullInt64
 	err := r.db.db.QueryRowContext(ctx, `
 		SELECT id, task_type, task_status, workflow_revision, current_handler_id, designer_id, customization_required,
-		       creator_id, requester_id, owner_department_id, owner_team_id
+		       creator_id, requester_id, owner_department_id, owner_team_id, business_lane
 		FROM tasks WHERE id = ?`, taskID).
 		Scan(&item.TaskID, &item.TaskType, &item.Status, &item.WorkflowRevision, &handlerID, &designerID, &item.Customization,
-			&item.CreatorID, &requesterID, &departmentID, &teamID)
+			&item.CreatorID, &requesterID, &departmentID, &teamID, &item.BusinessLane)
 	if err == sql.ErrNoRows {
 		return nil, repo.ErrNotFound
 	}
@@ -49,10 +49,10 @@ func (r *TaskResourceGroupRepo) GetWorkflowForUpdate(ctx context.Context, tx rep
 	var handlerID, designerID, requesterID, departmentID, teamID sql.NullInt64
 	err := Unwrap(tx).QueryRowContext(ctx, `
 		SELECT id, task_type, task_status, workflow_revision, current_handler_id, designer_id, customization_required,
-		       creator_id, requester_id, owner_department_id, owner_team_id
+		       creator_id, requester_id, owner_department_id, owner_team_id, business_lane
 		FROM tasks WHERE id = ? FOR UPDATE`, taskID).
 		Scan(&item.TaskID, &item.TaskType, &item.Status, &item.WorkflowRevision, &handlerID, &designerID, &item.Customization,
-			&item.CreatorID, &requesterID, &departmentID, &teamID)
+			&item.CreatorID, &requesterID, &departmentID, &teamID, &item.BusinessLane)
 	if err == sql.ErrNoRows {
 		return nil, repo.ErrNotFound
 	}
@@ -181,7 +181,7 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 	// A SKU identity becomes searchable as soon as it is generated. Finalized
 	// assets enrich the card later; they are not a prerequisite for the card.
 	// Task- and retouch-scoped empty shells remain hidden.
-	where := []string{"(g.finalized_revision_id IS NOT NULL OR " + resourceGroupSKUIdentitySQL + " <> '')"}
+	where := []string{"(g.finalized_revision_id IS NOT NULL OR g.current_default_style_id IS NOT NULL OR " + resourceGroupSKUIdentitySQL + " <> '')"}
 	args := make([]interface{}, 0, 12)
 	if params.TaskID > 0 {
 		where = append(where, "g.task_id = ?")
@@ -200,6 +200,9 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		args = append(args, *params.CreatorID)
 	}
 	switch params.ResourceRole {
+	case domain.ResourceRoleFilterDefaultStyle:
+		where = append(where, `EXISTS (SELECT 1 FROM task_default_style_revisions ds`+defaultStyleFileJoin+`
+   WHERE ds.id = g.current_default_style_id AND ds.group_id = g.id)`)
 	case domain.ResourceRoleFilterReference:
 		where = append(where, `EXISTS (
 			SELECT 1 FROM task_asset_group_revision_references rr
@@ -312,7 +315,7 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 }
 
 func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error) {
-	baseWhere := []string{"g.finalized_revision_id IS NOT NULL"}
+	baseWhere := []string{"1 = 1"}
 	baseArgs := make([]interface{}, 0, 12)
 	if params.TaskID > 0 {
 		baseWhere = append(baseWhere, "g.task_id = ?")
@@ -442,12 +445,27 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		  AND ta.deleted_at IS NULL AND ta.cleaned_at IS NULL
 		  AND ta.access_revoked_at IS NULL AND ta.object_deleted_at IS NULL
 		  AND ta.storage_ref_id IS NOT NULL AND asr.ref_id IS NOT NULL
-		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
-	)`
-	unionArgs := make([]interface{}, 0, len(baseArgs)*3)
+		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable') `
+	unionArgs := make([]interface{}, 0, len(baseArgs)*4)
 	for range 3 {
 		unionArgs = append(unionArgs, baseArgs...)
 	}
+	if params.ResourceRole == "" || params.ResourceRole == domain.ResourceRoleFilterDefaultStyle {
+		flatCTE += ` UNION ALL
+  SELECT g.id, g.task_id, ds.id, t.task_no, t.task_type, ` + resourceGroupSKUIdentitySQL + `,
+   'default_style', ta.file_name, COALESCE(ta.mime_type, ''), ta.storage_key,
+   ta.id, ta.uploaded_by, COALESCE(NULLIF(owner_user.display_name, ''), NULLIF(owner_user.username, ''), ''),
+   ds.created_at, g.updated_at, 4, 0, ds.id
+  FROM task_asset_groups g
+  JOIN tasks t ON t.id = g.task_id
+  LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+  JOIN task_default_style_revisions ds ON ds.id = g.current_default_style_id AND ds.group_id = g.id
+  ` + defaultStyleFileJoin + `
+  LEFT JOIN users owner_user ON owner_user.id = ta.uploaded_by
+  WHERE ` + baseClause + ` AND g.migration_incomplete = 0`
+		unionArgs = append(unionArgs, baseArgs...)
+	}
+	flatCTE += ")"
 	flatWhere := []string{"1 = 1"}
 	flatArgs := make([]interface{}, 0, 12)
 	if params.ResourceRole != "" {
@@ -859,7 +877,7 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 		SELECT r.id, r.group_id, r.revision_no, r.status, r.mode, r.source_task_asset_id, r.source_stage,
 		       r.created_by, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''),
 		       r.reason, r.submitted_at, r.finalized_at, r.created_at,
-		       g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id
+		       g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id, r.final_output_waived
 		FROM task_asset_group_revisions r
 		JOIN task_asset_groups g ON g.id = r.group_id
 		LEFT JOIN users u ON u.id = r.created_by
@@ -878,7 +896,7 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 		var owner revisionOwner
 		if err := rows.Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,
 			&item.CreatedBy, &item.CreatedByName, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt,
-			&owner.taskID, &owner.scopeKind, &taskSKUItemID, &retouchRequirementID); err != nil {
+			&owner.taskID, &owner.scopeKind, &taskSKUItemID, &retouchRequirementID, &item.FinalOutputWaived); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1276,10 +1294,10 @@ func (r *TaskResourceGroupRepo) GetRevisionForUpdate(ctx context.Context, tx rep
 	var submittedAt, finalizedAt sql.NullTime
 	err := Unwrap(tx).QueryRowContext(ctx, `
 		SELECT id, group_id, revision_no, status, mode, source_task_asset_id, source_stage,
-		       created_by, reason, submitted_at, finalized_at, created_at
+		       created_by, reason, submitted_at, finalized_at, created_at, final_output_waived
 		FROM task_asset_group_revisions WHERE id = ? FOR UPDATE`, revisionID).
 		Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,
-			&item.CreatedBy, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt)
+			&item.CreatedBy, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt, &item.FinalOutputWaived)
 	if err == sql.ErrNoRows {
 		return nil, repo.ErrNotFound
 	}
@@ -1368,9 +1386,9 @@ func (r *TaskResourceGroupRepo) CreateRevision(ctx context.Context, tx repo.Tx, 
 	}
 	result, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO task_asset_group_revisions
-		  (group_id, revision_no, status, mode, source_task_asset_id, source_stage, created_by, reason, submitted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, group.ID, revisionNo, string(status), string(input.Mode),
-		toNullInt64(input.SourceTaskAssetID), string(stage), actorID, strings.TrimSpace(reason), submittedAt)
+		  (group_id, revision_no, status, mode, source_task_asset_id, source_stage, created_by, reason, submitted_at, final_output_waived)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, group.ID, revisionNo, string(status), string(input.Mode),
+		toNullInt64(input.SourceTaskAssetID), string(stage), actorID, strings.TrimSpace(reason), submittedAt, input.FinalOutputWaived)
 	if err != nil {
 		return 0, err
 	}
@@ -1529,7 +1547,9 @@ func (r *TaskResourceGroupRepo) FinalizeGroup(ctx context.Context, tx repo.Tx, g
 	}
 	result, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_asset_groups
-		SET finalized_revision_id = ?, working_revision_id = ?, lock_version = lock_version + 1
+		SET finalized_revision_id = ?, working_revision_id = ?, lock_version = lock_version + 1,
+      current_default_style_id = COALESCE(pending_default_style_id, current_default_style_id),
+      pending_default_style_id = NULL
 		WHERE id = ? AND lock_version = ?`, revisionID, revisionID, groupID, expectedLockVersion)
 	if err != nil {
 		return err
