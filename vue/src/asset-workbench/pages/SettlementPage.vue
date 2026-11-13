@@ -17,7 +17,7 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook, payrollRowLabel } from '@aw/features/export/settlementExport'
+import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook, payrollRowLabel as payrollTypeLabel } from '@aw/features/export/settlementExport'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
@@ -238,7 +238,7 @@ const errorImportRecordGridRows = computed(() => (selectedErrorImport.value?.rec
   ...row,
   payee_name_label: row.payee_name || (row.payee_user_id ? `用户 ${row.payee_user_id}` : '未匹配'),
   match_status_label: errorImportMatchStatusLabel(row.match_status),
-  payroll_row_type_label: row.match_status === 'matched' ? payrollRowLabel(row.payroll_row_type ?? 'normal_piecework') : '—',
+  payroll_row_type_label: row.match_status === 'matched' ? payrollTypeLabel(row.payroll_row_type ?? 'normal_piecework') : '—',
   occurred_date_label: row.occurred_date?.slice(0, 10) || '—',
   issue_label: errorImportIssueLabel(row),
 })) as unknown as Record<string, unknown>[])
