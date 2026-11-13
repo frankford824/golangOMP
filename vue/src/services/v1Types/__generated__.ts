@@ -18216,7 +18216,7 @@ export interface paths {
                     "application/json": {
                         /** @description Human-reviewed reason stored in the immutable audit event and batch cancellation metadata. */
                         reason: string;
-                        /** @description Exact visible batch number typed by the operator to prevent reversing the wrong batch. */
+                        /** @description Exact batch number shown in the confirmation dialog, submitted by the client for comparison with the locked batch. */
                         expected_batch_no: string;
                         /**
                          * @description Required operator attestation that payroll for this batch has not been paid. Paid batches must use adjustments instead.

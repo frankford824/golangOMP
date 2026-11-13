@@ -18330,7 +18330,7 @@ paths:
                 expected_batch_no:
                   type: string
                   minLength: 1
-                  description: Exact visible batch number typed by the operator to prevent reversing the wrong batch.
+                  description: Exact batch number shown in the confirmation dialog, submitted by the client for comparison with the locked batch.
                 confirm_unpaid:
                   type: boolean
                   enum: [true]

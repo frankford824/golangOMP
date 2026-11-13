@@ -13426,7 +13426,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `reason` | string | 是 | Human-reviewed reason stored in the immutable audit event and batch cancellation metadata. |
-| `expected_batch_no` | string | 是 | Exact visible batch number typed by the operator to prevent reversing the wrong batch. |
+| `expected_batch_no` | string | 是 | Exact batch number shown in the confirmation dialog, submitted by the client for comparison with the locked batch. |
 | `confirm_unpaid` | enum(True) | 是 | Required operator attestation that payroll for this batch has not been paid. Paid batches must use adjustments instead. |
 
 ### 响应体 schema
