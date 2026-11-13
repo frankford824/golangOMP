@@ -538,6 +538,10 @@ func (r *settlementBatchRepo) ListReservedSettlementSources(context.Context, rep
 	return nil, nil
 }
 
+func (r *settlementBatchRepo) ListQualityActualDeductions(context.Context, repo.Tx, string) ([]*domain.AssetWorkbenchSettlementAdjustment, error) {
+	return nil, nil
+}
+
 func (r *settlementBatchRepo) ListErrorRecordsByMonth(context.Context, string) ([]*domain.AssetWorkbenchErrorRecord, error) {
 	return nil, nil
 }

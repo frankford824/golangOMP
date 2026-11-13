@@ -18133,6 +18133,174 @@ paths:
                       size: { type: integer }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/settlement/quality-actual-deductions:
+    get:
+      summary: List manual quality deductions for a payroll month
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: business_month
+          required: true
+          schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+      responses:
+        '200':
+          description: Positive manual overrides and month lock state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [business_month, locked, deductions]
+                    properties:
+                      business_month: { type: string }
+                      locked: { type: boolean }
+                      deductions:
+                        type: array
+                        items:
+                          type: object
+                          required: [payee_user_id, quality_actual_deduction_amount]
+                          properties:
+                            payee_user_id: { type: integer }
+                            quality_actual_deduction_amount: { type: number }
+        '400': { description: Invalid or future payroll month }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+    put:
+      summary: Save one person's manual quality deduction for a payroll month
+      description: A positive amount replaces the rule-based deduction when calculating actual net pay. Zero restores the rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [business_month, payee_user_id, quality_actual_deduction_amount]
+              properties:
+                business_month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+                payee_user_id: { type: integer, minimum: 1 }
+                quality_actual_deduction_amount: { type: number, minimum: 0, maximum: 9999999999.99, multipleOf: 0.01 }
+      responses:
+        '200':
+          description: Saved person and month
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      payee_user_id: { type: integer }
+                      business_month: { type: string }
+        '400': { description: Invalid amount, person or month }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Personnel profile not found }
+        '409': { description: Payroll month is locked }
+  /v1/asset-workbench/settlement/preview:
+    get:
+      summary: Preview settlement and actual net pay
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: business_month
+          required: true
+          schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+      responses:
+        '200':
+          description: Settlement preview and payroll lines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      business_month: { type: string }
+                      rows:
+                        type: array
+                        items: &AssetWorkbenchSettlementPreviewRow
+                          type: object
+                          properties:
+                            payee_user_id: { type: integer }
+                            payee_name: { type: string }
+                            worker_type: { type: string }
+                            item_count: { type: integer }
+                            page_count: { type: integer }
+                            error_count: { type: integer }
+                            gross_amount: { type: number }
+                            deduction_amount: { type: number }
+                            welfare_amount: { type: number }
+                            supplement_amount: { type: number }
+                            net_amount: { type: number, description: Net amount due using the rule-based deduction. }
+                            actual_net_amount: { type: number, description: Actual net amount after replacing the applicable rule-based deduction with the manual amount. }
+                      totals: *AssetWorkbenchSettlementPreviewRow
+                      payroll_rows:
+                        type: array
+                        items: &AssetWorkbenchSettlementPayrollRow
+                          allOf:
+                            - *AssetWorkbenchSettlementPreviewRow
+                            - type: object
+                              properties:
+                                business_month: { type: string }
+                                row_type: { type: string, enum: [normal_piecework, supplement_piecework] }
+                                adjustment_amount: { type: number }
+                                quality_actual_deduction_amount: { type: number, description: Manual deduction applied to the normal payroll row. Omitted when the rule-based deduction applies. }
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/settlement/batches/{batch_id}:
+    get:
+      summary: Get settlement batch details and frozen payroll lines
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: batch_id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Settlement batch and payable amounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      batch: { type: object, additionalProperties: true }
+                      items:
+                        type: array
+                        items: { type: object, additionalProperties: true }
+                      payroll_rows:
+                        type: array
+                        items: *AssetWorkbenchSettlementPayrollRow
+                      actual_net_amount: { type: number }
+        '400': { description: Invalid batch ID }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Batch not found }
   /v1/asset-workbench/settlement/batches/{batch_id}/reverse-confirmation:
     post:
       summary: Reverse one confirmed but unpaid settlement batch
@@ -18635,6 +18803,8 @@ paths:
                             supplement_amount: { type: number }
                             adjustment_amount: { type: number }
                             net_amount: { type: number }
+                            quality_actual_deduction_amount: { type: number }
+                            actual_net_amount: { type: number }
                             confirmed: { type: boolean }
                             settlement_state: { type: string, enum: [accumulating, pending_confirmation, partially_confirmed, confirmed] }
                             confirmed_net_amount: { type: number }

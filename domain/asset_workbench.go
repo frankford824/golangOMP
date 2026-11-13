@@ -6,12 +6,13 @@ import (
 )
 
 const (
-	AssetWorkbenchItemTypeGrossPiecework = "gross_piecework"
-	AssetWorkbenchItemTypeErrorDeduction = "error_deduction"
-	AssetWorkbenchItemTypeWelfare        = "welfare"
-	AssetWorkbenchItemTypeSupplement     = "supplement"
-	AssetWorkbenchItemTypeAdjustment     = "adjustment"
-	AssetWorkbenchItemTypeReversal       = "reversal"
+	AssetWorkbenchItemTypeGrossPiecework             = "gross_piecework"
+	AssetWorkbenchItemTypeErrorDeduction             = "error_deduction"
+	AssetWorkbenchItemTypeQualityDeductionAdjustment = "quality_deduction_adjustment"
+	AssetWorkbenchItemTypeWelfare                    = "welfare"
+	AssetWorkbenchItemTypeSupplement                 = "supplement"
+	AssetWorkbenchItemTypeAdjustment                 = "adjustment"
+	AssetWorkbenchItemTypeReversal                   = "reversal"
 
 	AssetWorkbenchPayrollRowTypeNormalPiecework     = "normal_piecework"
 	AssetWorkbenchPayrollRowTypeSupplementPiecework = "supplement_piecework"
@@ -24,6 +25,7 @@ func DefaultAssetWorkbenchSettlementItemTypes() []string {
 	return []string{
 		AssetWorkbenchItemTypeGrossPiecework,
 		AssetWorkbenchItemTypeErrorDeduction,
+		AssetWorkbenchItemTypeQualityDeductionAdjustment,
 		AssetWorkbenchItemTypeWelfare,
 		AssetWorkbenchItemTypeSupplement,
 		AssetWorkbenchItemTypeAdjustment,
@@ -124,9 +126,10 @@ const (
 	AssetWorkbenchErrorMatchStatusUnmatched = "unmatched"
 	AssetWorkbenchErrorMatchStatusAmbiguous = "ambiguous"
 
-	AssetWorkbenchAdjustmentTypeAdjustment = "adjustment"
-	AssetWorkbenchAdjustmentTypeReversal   = "reversal"
-	AssetWorkbenchAdjustmentStatusApplied  = "applied"
+	AssetWorkbenchAdjustmentTypeAdjustment             = "adjustment"
+	AssetWorkbenchAdjustmentTypeReversal               = "reversal"
+	AssetWorkbenchAdjustmentTypeQualityActualDeduction = "quality_actual_deduction"
+	AssetWorkbenchAdjustmentStatusApplied              = "applied"
 
 	AssetWorkbenchEventProfileUpserted             = "profile.upserted"
 	AssetWorkbenchEventProfilePIIViewed            = "profile.pii_viewed"
@@ -154,6 +157,7 @@ const (
 	AssetWorkbenchEventSettlementConfirmed         = "settlement.confirmed"
 	AssetWorkbenchEventSettlementCancelled         = "settlement.cancelled"
 	AssetWorkbenchEventSettlementAdjusted          = "settlement.adjusted"
+	AssetWorkbenchEventQualityActualDeductionSaved = "settlement.quality_actual_deduction_saved"
 	AssetWorkbenchEventSupplementCreated           = "supplement.created"
 	AssetWorkbenchEventSupplementVoided            = "supplement.voided"
 	AssetWorkbenchEventSupplementPermissionChanged = "supplement_permission.changed"

@@ -882,6 +882,7 @@ type SettlementPreview struct {
 }
 
 type SettlementPreviewRow struct {
+	ActualNetAmount  float64 `json:"actual_net_amount"`
 	PayeeUserID      int64   `json:"payee_user_id"`
 	PayeeName        string  `json:"payee_name,omitempty"`
 	WorkerType       string  `json:"worker_type,omitempty"`
@@ -896,20 +897,22 @@ type SettlementPreviewRow struct {
 }
 
 type SettlementPayrollRow struct {
-	PayeeUserID      int64   `json:"payee_user_id"`
-	PayeeName        string  `json:"payee_name,omitempty"`
-	WorkerType       string  `json:"worker_type,omitempty"`
-	BusinessMonth    string  `json:"business_month"`
-	RowType          string  `json:"row_type"`
-	ItemCount        int     `json:"item_count"`
-	PageCount        int     `json:"page_count"`
-	GrossAmount      float64 `json:"gross_amount"`
-	ErrorCount       int     `json:"error_count"`
-	DeductionAmount  float64 `json:"deduction_amount"`
-	WelfareAmount    float64 `json:"welfare_amount"`
-	SupplementAmount float64 `json:"supplement_amount"`
-	AdjustmentAmount float64 `json:"adjustment_amount"`
-	NetAmount        float64 `json:"net_amount"`
+	QualityActualDeductionAmount *float64 `json:"quality_actual_deduction_amount,omitempty"`
+	ActualNetAmount              float64  `json:"actual_net_amount"`
+	PayeeUserID                  int64    `json:"payee_user_id"`
+	PayeeName                    string   `json:"payee_name,omitempty"`
+	WorkerType                   string   `json:"worker_type,omitempty"`
+	BusinessMonth                string   `json:"business_month"`
+	RowType                      string   `json:"row_type"`
+	ItemCount                    int      `json:"item_count"`
+	PageCount                    int      `json:"page_count"`
+	GrossAmount                  float64  `json:"gross_amount"`
+	ErrorCount                   int      `json:"error_count"`
+	DeductionAmount              float64  `json:"deduction_amount"`
+	WelfareAmount                float64  `json:"welfare_amount"`
+	SupplementAmount             float64  `json:"supplement_amount"`
+	AdjustmentAmount             float64  `json:"adjustment_amount"`
+	NetAmount                    float64  `json:"net_amount"`
 }
 
 type SettlementReport struct {
@@ -972,23 +975,25 @@ type MySettlementResponse struct {
 }
 
 type MySettlementMonthRow struct {
-	SettlementState           string  `json:"settlement_state"`
-	ConfirmedNetAmount        float64 `json:"confirmed_net_amount"`
-	PendingConfirmationAmount float64 `json:"pending_confirmation_amount"`
-	EstimatedAmount           float64 `json:"estimated_amount"`
-	PendingPricingCount       int     `json:"pending_pricing_count"`
-	SupplementItemCount       int     `json:"supplement_item_count"`
-	SupplementPageCount       int     `json:"supplement_page_count"`
-	BusinessMonth             string  `json:"business_month"`
-	ItemCount                 int     `json:"item_count"`
-	PageCount                 int     `json:"page_count"`
-	GrossAmount               float64 `json:"gross_amount"`
-	DeductionAmount           float64 `json:"deduction_amount"`
-	WelfareAmount             float64 `json:"welfare_amount"`
-	SupplementAmount          float64 `json:"supplement_amount"`
-	AdjustmentAmount          float64 `json:"adjustment_amount"`
-	NetAmount                 float64 `json:"net_amount"`
-	Confirmed                 bool    `json:"confirmed"`
+	QualityActualDeductionAmount *float64 `json:"quality_actual_deduction_amount,omitempty"`
+	ActualNetAmount              float64  `json:"actual_net_amount"`
+	SettlementState              string   `json:"settlement_state"`
+	ConfirmedNetAmount           float64  `json:"confirmed_net_amount"`
+	PendingConfirmationAmount    float64  `json:"pending_confirmation_amount"`
+	EstimatedAmount              float64  `json:"estimated_amount"`
+	PendingPricingCount          int      `json:"pending_pricing_count"`
+	SupplementItemCount          int      `json:"supplement_item_count"`
+	SupplementPageCount          int      `json:"supplement_page_count"`
+	BusinessMonth                string   `json:"business_month"`
+	ItemCount                    int      `json:"item_count"`
+	PageCount                    int      `json:"page_count"`
+	GrossAmount                  float64  `json:"gross_amount"`
+	DeductionAmount              float64  `json:"deduction_amount"`
+	WelfareAmount                float64  `json:"welfare_amount"`
+	SupplementAmount             float64  `json:"supplement_amount"`
+	AdjustmentAmount             float64  `json:"adjustment_amount"`
+	NetAmount                    float64  `json:"net_amount"`
+	Confirmed                    bool     `json:"confirmed"`
 }
 
 type welfareSettlementLine struct {
@@ -1065,9 +1070,10 @@ type ReverseSettlementBatchConfirmationParams struct {
 }
 
 type SettlementBatchDetail struct {
-	Batch       *domain.AssetWorkbenchSettlementBatch  `json:"batch"`
-	Items       []*domain.AssetWorkbenchSettlementItem `json:"items"`
-	PayrollRows []SettlementPayrollRow                 `json:"payroll_rows"`
+	ActualNetAmount float64                                `json:"actual_net_amount"`
+	Batch           *domain.AssetWorkbenchSettlementBatch  `json:"batch"`
+	Items           []*domain.AssetWorkbenchSettlementItem `json:"items"`
+	PayrollRows     []SettlementPayrollRow                 `json:"payroll_rows"`
 }
 
 type UpsertSavedViewParams struct {
@@ -4819,6 +4825,11 @@ func (s *Service) PreviewSettlement(ctx context.Context, actor domain.RequestAct
 	if appErr != nil {
 		return nil, appErr
 	}
+	actualDeductions, err := s.repo.ListQualityActualDeductions(ctx, nil, businessMonth)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality actual deductions.", nil)
+	}
+	applyQualityActualDeductions(preview, actualDeductions, reserved)
 	return preview, nil
 }
 
@@ -4867,12 +4878,12 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 	if businessMonth == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month is required.", nil)
 	}
-	errorRecords, err := s.repo.ListErrorRecordsByMonth(ctx, businessMonth)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", err.Error())
-	}
 	var batch *domain.AssetWorkbenchSettlementBatch
 	if err := s.repo.RunSettlementMonthTx(ctx, businessMonth, func(tx repo.Tx) error {
+		errorRecords, err := s.repo.ListErrorRecordsByMonth(ctx, businessMonth)
+		if err != nil {
+			return err
+		}
 		items, err := s.repo.LockSettleableItems(ctx, tx, businessMonth)
 		if err != nil {
 			return err
@@ -4894,6 +4905,11 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 		if appErr != nil {
 			return appErr
 		}
+		actualDeductions, err := s.repo.ListQualityActualDeductions(ctx, tx, businessMonth)
+		if err != nil {
+			return err
+		}
+		qualityLines := applyQualityActualDeductions(preview, actualDeductions, reserved)
 		batch, err = s.repo.CreateSettlementBatch(ctx, tx, &domain.AssetWorkbenchSettlementBatch{
 			BatchNo:          "AWB" + s.nowFn().UTC().Format("20060102150405") + strings.ToUpper(uuid.NewString()[:8]),
 			BusinessMonth:    businessMonth,
@@ -4908,6 +4924,12 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 		})
 		if err != nil {
 			return err
+		}
+		for _, line := range qualityLines {
+			line.BatchID = batch.ID
+			if _, err := s.repo.CreateSettlementItem(ctx, tx, line); err != nil {
+				return err
+			}
 		}
 		welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, items)
 		if appErr != nil {
@@ -5415,7 +5437,11 @@ func (s *Service) GetSettlementBatchDetail(ctx context.Context, actor domain.Req
 	if appErr != nil {
 		return nil, appErr
 	}
-	return &SettlementBatchDetail{Batch: batch, Items: items, PayrollRows: payrollRows}, nil
+	actualNet := 0.0
+	for _, row := range payrollRows {
+		actualNet += row.ActualNetAmount
+	}
+	return &SettlementBatchDetail{Batch: batch, Items: items, PayrollRows: payrollRows, ActualNetAmount: incomeMoney(actualNet)}, nil
 }
 
 func (s *Service) ListSupplementPermissions(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, *domain.AppError) {
@@ -8460,6 +8486,8 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 		}
 		applySettlementPayrollProfile(normalPayrollRow, profile)
 		applySettlementPayrollProfile(supplementPayrollRow, profile)
+		normalPayrollRow.ActualNetAmount = normalPayrollRow.NetAmount
+		supplementPayrollRow.ActualNetAmount = supplementPayrollRow.NetAmount
 		payrollRows = append(payrollRows, *normalPayrollRow, *supplementPayrollRow)
 	}
 	return &SettlementPreview{BusinessMonth: businessMonth, Rows: rows, Totals: total, PayrollRows: payrollRows}, nil
@@ -8743,6 +8771,7 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 	normalRowsByPayee := map[int64]*SettlementPayrollRow{}
 	supplementRowsByPayee := map[int64]*SettlementPayrollRow{}
 	payees := map[int64]struct{}{}
+	qualityDifferences := map[int64]float64{}
 	ensureNormal := func(payeeID int64) *SettlementPayrollRow {
 		payees[payeeID] = struct{}{}
 		row := normalRowsByPayee[payeeID]
@@ -8785,6 +8814,16 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 			row.ErrorCount += int(item.Quantity)
 			row.DeductionAmount += item.Amount
 			row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.AdjustmentAmount
+		case domain.AssetWorkbenchItemTypeQualityDeductionAdjustment:
+			row := ensureNormal(item.PayeeUserID)
+			if item.UnitPrice != nil {
+				actual := *item.UnitPrice
+				if row.QualityActualDeductionAmount != nil {
+					actual += *row.QualityActualDeductionAmount
+				}
+				row.QualityActualDeductionAmount = &actual
+			}
+			qualityDifferences[item.PayeeUserID] += signedSettlementAmount(item)
 		case domain.AssetWorkbenchItemTypeWelfare:
 			row := ensureNormal(item.PayeeUserID)
 			row.WelfareAmount += item.Amount
@@ -8832,6 +8871,8 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 				RowType:       domain.AssetWorkbenchPayrollRowTypeSupplementPiecework,
 			}
 		}
+		normal.ActualNetAmount = incomeMoney(normal.NetAmount + qualityDifferences[payeeID])
+		supplement.ActualNetAmount = supplement.NetAmount
 		rows = append(rows, *normal, *supplement)
 	}
 	return rows

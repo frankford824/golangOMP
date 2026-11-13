@@ -17833,6 +17833,362 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/asset-workbench/settlement/quality-actual-deductions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List manual quality deductions for a payroll month */
+        get: {
+            parameters: {
+                query: {
+                    business_month: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Positive manual overrides and month lock state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                business_month: string;
+                                locked: boolean;
+                                deductions: {
+                                    payee_user_id: number;
+                                    quality_actual_deduction_amount: number;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid or future payroll month */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Save one person's manual quality deduction for a payroll month
+         * @description A positive amount replaces the rule-based deduction when calculating actual net pay. Zero restores the rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        business_month: string;
+                        payee_user_id: number;
+                        quality_actual_deduction_amount: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved person and month */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                payee_user_id?: number;
+                                business_month?: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid amount */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Personnel profile not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Payroll month is locked */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/settlement/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview settlement and actual net pay */
+        get: {
+            parameters: {
+                query: {
+                    business_month: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Settlement preview and payroll lines */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                business_month?: string;
+                                rows?: {
+                                    payee_user_id?: number;
+                                    payee_name?: string;
+                                    worker_type?: string;
+                                    item_count?: number;
+                                    page_count?: number;
+                                    error_count?: number;
+                                    gross_amount?: number;
+                                    deduction_amount?: number;
+                                    welfare_amount?: number;
+                                    supplement_amount?: number;
+                                    /** @description Net amount due using the rule-based deduction. */
+                                    net_amount?: number;
+                                    /** @description Actual net amount after replacing the applicable rule-based deduction with the manual amount. */
+                                    actual_net_amount?: number;
+                                }[];
+                                totals?: {
+                                    payee_user_id?: number;
+                                    payee_name?: string;
+                                    worker_type?: string;
+                                    item_count?: number;
+                                    page_count?: number;
+                                    error_count?: number;
+                                    gross_amount?: number;
+                                    deduction_amount?: number;
+                                    welfare_amount?: number;
+                                    supplement_amount?: number;
+                                    /** @description Net amount due using the rule-based deduction. */
+                                    net_amount?: number;
+                                    /** @description Actual net amount after replacing the applicable rule-based deduction with the manual amount. */
+                                    actual_net_amount?: number;
+                                };
+                                payroll_rows?: ({
+                                    payee_user_id?: number;
+                                    payee_name?: string;
+                                    worker_type?: string;
+                                    item_count?: number;
+                                    page_count?: number;
+                                    error_count?: number;
+                                    gross_amount?: number;
+                                    deduction_amount?: number;
+                                    welfare_amount?: number;
+                                    supplement_amount?: number;
+                                    /** @description Net amount due using the rule-based deduction. */
+                                    net_amount?: number;
+                                    /** @description Actual net amount after replacing the applicable rule-based deduction with the manual amount. */
+                                    actual_net_amount?: number;
+                                } & {
+                                    business_month?: string;
+                                    /** @enum {string} */
+                                    row_type?: "normal_piecework" | "supplement_piecework";
+                                    adjustment_amount?: number;
+                                    /** @description Manual deduction applied to the normal payroll row. Omitted when the rule-based deduction applies. */
+                                    quality_actual_deduction_amount?: number;
+                                })[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/settlement/batches/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get settlement batch details and frozen payroll lines */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    batch_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Settlement batch and payable amounts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                batch?: {
+                                    [key: string]: unknown;
+                                };
+                                items?: {
+                                    [key: string]: unknown;
+                                }[];
+                                payroll_rows?: ({
+                                    payee_user_id?: number;
+                                    payee_name?: string;
+                                    worker_type?: string;
+                                    item_count?: number;
+                                    page_count?: number;
+                                    error_count?: number;
+                                    gross_amount?: number;
+                                    deduction_amount?: number;
+                                    welfare_amount?: number;
+                                    supplement_amount?: number;
+                                    /** @description Net amount due using the rule-based deduction. */
+                                    net_amount?: number;
+                                    /** @description Actual net amount after replacing the applicable rule-based deduction with the manual amount. */
+                                    actual_net_amount?: number;
+                                } & {
+                                    business_month?: string;
+                                    /** @enum {string} */
+                                    row_type?: "normal_piecework" | "supplement_piecework";
+                                    adjustment_amount?: number;
+                                    /** @description Manual deduction applied to the normal payroll row. Omitted when the rule-based deduction applies. */
+                                    quality_actual_deduction_amount?: number;
+                                })[];
+                                actual_net_amount?: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid batch ID */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Batch not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/asset-workbench/settlement/batches/{batch_id}/reverse-confirmation": {
         parameters: {
             query?: never;
@@ -18731,6 +19087,8 @@ export interface paths {
                                     supplement_amount?: number;
                                     adjustment_amount?: number;
                                     net_amount?: number;
+                                    quality_actual_deduction_amount?: number;
+                                    actual_net_amount?: number;
                                     confirmed?: boolean;
                                     /** @enum {string} */
                                     settlement_state?: "accumulating" | "pending_confirmation" | "partially_confirmed" | "confirmed";

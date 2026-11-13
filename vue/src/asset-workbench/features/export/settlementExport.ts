@@ -33,10 +33,12 @@ export interface SettlementPayrollExportRow {
   grossAmount: number
   errorCount: number
   deductionAmount: number
+  qualityActualDeductionAmount?: number
   welfareAmount: number
   supplementAmount: number
   adjustmentAmount: number
   netAmount: number
+  actualNetAmount: number
 }
 
 export const errorImportTemplateHeaders = [
@@ -67,10 +69,12 @@ export function buildSettlementPayrollExportRows(rows: SettlementPayrollRow[]): 
     grossAmount: row.gross_amount,
     errorCount: row.error_count,
     deductionAmount: row.deduction_amount,
+    qualityActualDeductionAmount: row.quality_actual_deduction_amount,
     welfareAmount: row.welfare_amount,
     supplementAmount: row.supplement_amount,
     adjustmentAmount: row.adjustment_amount,
     netAmount: row.net_amount,
+    actualNetAmount: row.actual_net_amount ?? row.net_amount,
   }))
 }
 
@@ -287,11 +291,13 @@ function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: Settleme
     { header: '单数', key: 'itemCount', width: 10 },
     { header: '毛额', key: 'grossAmount', width: 12 },
     { header: '出错数', key: 'errorCount', width: 10 },
-    { header: '质检扣款', key: 'deductionAmount', width: 12 },
+    { header: '质检应扣', key: 'deductionAmount', width: 12 },
+    { header: '质检实际扣款', key: 'qualityActualDeductionAmount', width: 16 },
     { header: '福利', key: 'welfareAmount', width: 12 },
     { header: '补录', key: 'supplementAmount', width: 12 },
     { header: '调整', key: 'adjustmentAmount', width: 12 },
-    { header: '净额', key: 'netAmount', width: 12 },
+    { header: '应发净额', key: 'netAmount', width: 12 },
+    { header: '实发净额', key: 'actualNetAmount', width: 12 },
   ]
   sheet.addRows(rows)
   formatSheet(sheet)
@@ -309,7 +315,8 @@ function appendSummarySheet(workbook: import('exceljs').Workbook, rows: Settleme
     { header: '质检扣款', key: 'deduction_amount', width: 12 },
     { header: '福利', key: 'welfare_amount', width: 12 },
     { header: '补录', key: 'supplement_amount', width: 12 },
-    { header: '净额', key: 'net_amount', width: 12 },
+    { header: '应发净额', key: 'net_amount', width: 12 },
+    { header: '实发净额', key: 'actual_net_amount', width: 12 },
   ]
   sheet.addRows(rows.map(summaryExportRow))
   sheet.addRow({ ...summaryExportRow(totals), payee_user_id: '合计', payee_name: '合计', worker_type_label: '全部' })
@@ -418,6 +425,7 @@ function workerTypeLabel(value?: string | null): string {
 function summaryExportRow(row: SettlementPreviewRow) {
   const output: Record<string, string | number | undefined> = {
     ...row,
+    actual_net_amount: row.actual_net_amount ?? row.net_amount,
     payee_name: row.payee_name || (row.payee_user_id ? `用户 ${row.payee_user_id}` : ''),
     worker_type_label: workerTypeLabel(row.worker_type),
   }

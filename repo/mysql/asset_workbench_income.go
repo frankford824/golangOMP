@@ -67,6 +67,10 @@ func (r *assetWorkbenchRepo) ReadPersonalIncome(ctx context.Context, userID int6
 	if err != nil {
 		return nil, err
 	}
+	result.QualityActualDeductions, err = readQualityActualDeductions(ctx, tx, "payee_user_id = ?", userID)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -95,7 +99,7 @@ func (r *assetWorkbenchRepo) ListReservedSettlementSources(ctx context.Context, 
 	if tx != nil {
 		executor = Unwrap(tx)
 	}
-	rows, err := executor.QueryContext(ctx, assetWorkbenchSettlementItemSelect()+` WHERE business_month = ? AND item_type IN (?, ?) AND batch_id IN (SELECT id FROM asset_workbench_settlement_batches WHERE status IN (?, ?)) ORDER BY id`, month, domain.AssetWorkbenchItemTypeErrorDeduction, domain.AssetWorkbenchItemTypeWelfare, domain.AssetWorkbenchBatchStatusGenerated, domain.AssetWorkbenchBatchStatusConfirmed)
+	rows, err := executor.QueryContext(ctx, assetWorkbenchSettlementItemSelect()+` WHERE business_month = ? AND item_type IN (?, ?, ?) AND batch_id IN (SELECT id FROM asset_workbench_settlement_batches WHERE status IN (?, ?)) ORDER BY id`, month, domain.AssetWorkbenchItemTypeErrorDeduction, domain.AssetWorkbenchItemTypeWelfare, domain.AssetWorkbenchItemTypeQualityDeductionAdjustment, domain.AssetWorkbenchBatchStatusGenerated, domain.AssetWorkbenchBatchStatusConfirmed)
 	if err != nil {
 		return nil, err
 	}

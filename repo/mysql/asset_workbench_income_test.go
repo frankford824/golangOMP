@@ -23,6 +23,7 @@ func TestPersonalIncomeSnapshotIsOwnerScopedUnpaginatedAndIncludesGenerated(t *t
 	mock.ExpectQuery(`FROM asset_workbench_settlement_supplements WHERE payee_user_id = \? ORDER BY business_month DESC, id DESC$`).WithArgs(77).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`FROM asset_workbench_error_records WHERE payee_user_id = \? ORDER BY id$`).WithArgs(77).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(`WHERE si.payee_user_id = \? AND sb.status IN \(\?, \?\) ORDER BY si.id$`).WithArgs(77, "generated", "confirmed").WillReturnRows(sqlmock.NewRows([]string{"id", "batch_id", "item_type", "submission_item_id", "payee_user_id", "paid_to_user_id", "business_month", "amount", "quantity", "unit_price", "direction", "source_ref_type", "source_ref_id", "snapshot_json", "payout_snapshot_json", "created_at", "status"}).AddRow(1, 2, "gross_piecework", 3, 77, nil, "2026-09", 10, 1, 10, "credit", "submission_item", 3, nil, nil, time.Now(), "generated"))
+	mock.ExpectQuery(`WHERE payee_user_id = \? AND batch_id IS NULL AND adjustment_type = \? ORDER BY id DESC$`).WithArgs(77, domain.AssetWorkbenchAdjustmentTypeQualityActualDeduction).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectCommit()
 	got, err := NewAssetWorkbenchRepo(New(db)).ReadPersonalIncome(context.Background(), 77)
 	if err != nil {
@@ -77,7 +78,7 @@ func TestReservedSourcesExcludeCancelledBatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(`WHERE business_month = \? AND item_type IN \(\?, \?\) AND batch_id IN \(SELECT id FROM asset_workbench_settlement_batches WHERE status IN \(\?, \?\)\) ORDER BY id$`).WithArgs("2026-10", domain.AssetWorkbenchItemTypeErrorDeduction, domain.AssetWorkbenchItemTypeWelfare, "generated", "confirmed").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`WHERE business_month = \? AND item_type IN \(\?, \?, \?\) AND batch_id IN \(SELECT id FROM asset_workbench_settlement_batches WHERE status IN \(\?, \?\)\) ORDER BY id$`).WithArgs("2026-10", domain.AssetWorkbenchItemTypeErrorDeduction, domain.AssetWorkbenchItemTypeWelfare, domain.AssetWorkbenchItemTypeQualityDeductionAdjustment, "generated", "confirmed").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	_, err = NewAssetWorkbenchRepo(New(db)).ListReservedSettlementSources(context.Background(), nil, "2026-10")
 	if err != nil {
 		t.Fatal(err)

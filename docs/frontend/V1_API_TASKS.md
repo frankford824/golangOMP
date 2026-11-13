@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `204` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `207` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## POST /v1/integration/asset-media/workers/claim
 
@@ -13140,6 +13140,256 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/group-files \
 ### curl 示例
 ```bash
 curl -X GET https://api.example.com/v1/asset-workbench/materials/browse \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/settlement/quality-actual-deductions
+
+### 简介
+支持方法: GET, PUT。
+
+- `GET`: List manual quality deductions for a payroll month
+- `PUT`: A positive amount replaces the rule-based deduction when calculating actual net pay. Zero restores the rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSettlement, SuperAdmin。
+- `PUT` 允许角色: AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### GET 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `business_month` | query | string | 是 | - |
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "business_month": "string",
+    "locked": true,
+    "deductions": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid or future payroll month |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+##### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/settlement/quality-actual-deductions \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### PUT 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `business_month` | string | 是 | - |
+| `payee_user_id` | integer | 是 | - |
+| `quality_actual_deduction_amount` | number | 是 | - |
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "payee_user_id": 123,
+    "business_month": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid amount |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | Personnel profile not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Payroll month is locked |
+
+##### curl 示例
+```bash
+curl -X PUT https://api.example.com/v1/asset-workbench/settlement/quality-actual-deductions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/settlement/preview
+
+### 简介
+支持方法: GET。
+
+- `GET`: Preview settlement and actual net pay
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `business_month` | query | string | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "business_month": "string",
+    "rows": [
+      "..."
+    ],
+    "totals": {
+      "payee_user_id": "...",
+      "payee_name": "...",
+      "worker_type": "...",
+      "item_count": "..."
+    },
+    "payroll_rows": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/settlement/preview \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/settlement/batches/{batch_id}
+
+### 简介
+支持方法: GET。
+
+- `GET`: Get settlement batch details and frozen payroll lines
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `batch_id` | path | integer | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "batch": {},
+    "items": [
+      "..."
+    ],
+    "payroll_rows": [
+      "..."
+    ],
+    "actual_net_amount": 12.3
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid batch ID |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | Batch not found |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/settlement/batches/<batch_id> \
   -H "Authorization: Bearer $TOKEN"
 ```
 

@@ -305,6 +305,7 @@ export interface SubmissionDetail {
 }
 
 export interface SettlementPreviewRow {
+  actual_net_amount?: number
   payee_user_id: number
   payee_name?: string
   worker_type?: string
@@ -319,6 +320,8 @@ export interface SettlementPreviewRow {
 }
 
 export interface SettlementPayrollRow {
+  quality_actual_deduction_amount?: number
+  actual_net_amount?: number
   payee_user_id: number
   payee_name?: string
   worker_type?: string
@@ -423,12 +426,15 @@ export interface SettlementItemRow {
 }
 
 export interface SettlementBatchDetail {
+  actual_net_amount?: number
   batch: SettlementBatchRow
   items: SettlementItemRow[]
   payroll_rows: SettlementPayrollRow[]
 }
 
 export interface MySettlementMonthRow {
+  quality_actual_deduction_amount?: number
+  actual_net_amount?: number
   settlement_state?: 'accumulating' | 'pending_confirmation' | 'partially_confirmed' | 'confirmed'
   confirmed_net_amount?: number
   pending_confirmation_amount?: number
@@ -1596,6 +1602,23 @@ export const assetWorkbenchApi = {
       signal,
     })
     return unwrap(res.data)
+  },
+
+  async qualityActualDeductions(businessMonth: string, signal?: AbortSignal) {
+    const res = await http.get<ApiEnvelope<{
+      business_month: string
+      locked: boolean
+      deductions: Array<{ payee_user_id: number; quality_actual_deduction_amount: number }>
+    }>>('/v1/asset-workbench/settlement/quality-actual-deductions', { params: { business_month: businessMonth }, signal })
+    return unwrap(res.data)
+  },
+
+  async saveQualityActualDeduction(businessMonth: string, payeeUserID: number, amount: number) {
+    await http.put('/v1/asset-workbench/settlement/quality-actual-deductions', {
+      business_month: businessMonth,
+      payee_user_id: payeeUserID,
+      quality_actual_deduction_amount: amount,
+    })
   },
 
   async settlementReport(businessMonth: string, signal?: AbortSignal): Promise<SettlementReport> {

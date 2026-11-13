@@ -653,6 +653,7 @@ type AssetWorkbenchRepo interface {
 	HasConfirmedSettlementForPayeeMonth(ctx context.Context, payeeUserID int64, businessMonth string) (bool, error)
 	ListConfirmedSettlementMonthsByPayee(ctx context.Context, payeeUserID int64) ([]string, error)
 	CreateSettlementAdjustment(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementAdjustment) (*domain.AssetWorkbenchSettlementAdjustment, error)
+	ListQualityActualDeductions(ctx context.Context, tx Tx, businessMonth string) ([]*domain.AssetWorkbenchSettlementAdjustment, error)
 	ApplySettlementBatchAdjustment(ctx context.Context, tx Tx, batchID int64, signedAmount float64) error
 	ListSettlementSupplements(ctx context.Context, filter AssetWorkbenchSettlementSupplementFilter) ([]*domain.AssetWorkbenchSettlementSupplement, int64, error)
 	CreateSettlementSupplement(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSettlementSupplement) (*domain.AssetWorkbenchSettlementSupplement, error)

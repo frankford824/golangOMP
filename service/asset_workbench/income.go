@@ -89,6 +89,11 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 	errorsByMonth := map[string][]*domain.AssetWorkbenchErrorRecord{}
 	supplements := map[string][]*domain.AssetWorkbenchSettlementSupplement{}
 	ledgerByMonth := map[string][]*domain.AssetWorkbenchSettlementItem{}
+	qualityDifference := map[string]float64{}
+	manualDeductions := map[string][]*domain.AssetWorkbenchSettlementAdjustment{}
+	for _, entry := range sources.QualityActualDeductions {
+		manualDeductions[entry.BusinessMonth] = append(manualDeductions[entry.BusinessMonth], entry)
+	}
 	confirmed, pending, estimated := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, entry := range sources.Ledger {
 		item := entry.Item
@@ -116,6 +121,15 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 			row.GrossAmount += signed
 		case domain.AssetWorkbenchItemTypeErrorDeduction:
 			row.DeductionAmount -= signed
+		case domain.AssetWorkbenchItemTypeQualityDeductionAdjustment:
+			qualityDifference[item.BusinessMonth] += signedSettlementAmount(item)
+			if item.UnitPrice != nil {
+				actual := *item.UnitPrice
+				if row.QualityActualDeductionAmount != nil {
+					actual += *row.QualityActualDeductionAmount
+				}
+				row.QualityActualDeductionAmount = &actual
+			}
 		case domain.AssetWorkbenchItemTypeWelfare:
 			row.WelfareAmount += signed
 		case domain.AssetWorkbenchItemTypeSupplement:
@@ -177,6 +191,7 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 		if appErr != nil {
 			return nil, appErr
 		}
+		applyQualityActualDeductions(preview, manualDeductions[month], ledgerByMonth[month])
 		for _, part := range preview.PayrollRows {
 			if part.PayeeUserID != actor.ID {
 				continue
@@ -192,7 +207,15 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 				row.SupplementPageCount += part.PageCount
 				row.SupplementAmount += part.SupplementAmount
 			}
-			row.EstimatedAmount += part.NetAmount
+			if part.QualityActualDeductionAmount != nil {
+				actual := *part.QualityActualDeductionAmount
+				if row.QualityActualDeductionAmount != nil {
+					actual += *row.QualityActualDeductionAmount
+				}
+				row.QualityActualDeductionAmount = &actual
+				qualityDifference[month] += part.ActualNetAmount - part.NetAmount
+			}
+			row.EstimatedAmount += part.ActualNetAmount
 		}
 		row.GrossAmount = incomeMoney(row.GrossAmount)
 		row.DeductionAmount = incomeMoney(row.DeductionAmount)
@@ -203,6 +226,7 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 		row.PendingConfirmationAmount = incomeMoney(row.PendingConfirmationAmount)
 		row.EstimatedAmount = incomeMoney(row.EstimatedAmount)
 		row.NetAmount = incomeMoney(row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount + row.AdjustmentAmount)
+		row.ActualNetAmount = incomeMoney(row.NetAmount + qualityDifference[month])
 		switch {
 		case confirmed[month] && !pending[month] && !estimated[month]:
 			row.SettlementState = "confirmed"
@@ -233,7 +257,7 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 	}
 	result := &MySettlementResponse{CurrentMonth: currentMonth, Months: months, Supplements: currentSupplements, SupplementPermission: permission, SupplementPermissions: permissions, GeneratedAt: now, RefreshAfterSeconds: 30}
 	if row := rows[currentMonth]; row != nil {
-		result.EstimatedNetAmount = row.NetAmount
+		result.EstimatedNetAmount = row.ActualNetAmount
 	}
 	return result, nil
 }

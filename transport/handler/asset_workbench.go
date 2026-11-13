@@ -1621,6 +1621,51 @@ func (h *AssetWorkbenchHandler) PreviewSettlement(c *gin.Context) {
 	respondOK(c, result)
 }
 
+type qualityActualDeductionResponse struct {
+	BusinessMonth string                                  `json:"business_month"`
+	Locked        bool                                    `json:"locked"`
+	Deductions    []assetworkbench.QualityActualDeduction `json:"deductions"`
+}
+
+type qualityActualDeductionSavedResponse struct {
+	BusinessMonth string `json:"business_month"`
+	PayeeUserID   int64  `json:"payee_user_id"`
+}
+
+func (h *AssetWorkbenchHandler) QualityActualDeductions(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.QualityActualDeductions(c.Request.Context(), actor, c.Query("business_month"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, qualityActualDeductionResponse{BusinessMonth: result.BusinessMonth, Locked: result.Locked, Deductions: result.Deductions})
+}
+
+func (h *AssetWorkbenchHandler) SaveQualityActualDeduction(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		BusinessMonth string   `json:"business_month" binding:"required"`
+		PayeeUserID   int64    `json:"payee_user_id" binding:"required"`
+		Amount        *float64 `json:"quality_actual_deduction_amount" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择月份和人员，并填写质检实际扣款。", nil))
+		return
+	}
+	if appErr := h.svc.SaveQualityActualDeduction(c.Request.Context(), actor, req.BusinessMonth, req.PayeeUserID, *req.Amount); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, qualityActualDeductionSavedResponse{PayeeUserID: req.PayeeUserID, BusinessMonth: req.BusinessMonth})
+}
+
 func (h *AssetWorkbenchHandler) SettlementReport(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

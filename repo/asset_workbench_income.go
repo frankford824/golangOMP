@@ -10,8 +10,9 @@ type AssetWorkbenchIncomeLedgerRow struct {
 }
 
 type AssetWorkbenchIncomeSources struct {
-	Items       []*domain.AssetWorkbenchSubmissionItem
-	Supplements []*domain.AssetWorkbenchSettlementSupplement
-	Errors      []*domain.AssetWorkbenchErrorRecord
-	Ledger      []AssetWorkbenchIncomeLedgerRow
+	QualityActualDeductions []*domain.AssetWorkbenchSettlementAdjustment
+	Items                   []*domain.AssetWorkbenchSubmissionItem
+	Supplements             []*domain.AssetWorkbenchSettlementSupplement
+	Errors                  []*domain.AssetWorkbenchErrorRecord
+	Ledger                  []AssetWorkbenchIncomeLedgerRow
 }
