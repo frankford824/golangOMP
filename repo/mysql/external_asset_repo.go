@@ -850,7 +850,27 @@ func upsertExternalAssetDirectory(ctx context.Context, exec sqlExecContext, prov
 		INSERT INTO external_asset_directory_index (
 		  provider, kind, driver, mount_path, path_hash, parent_path_hash, path, parent_path, name,
 		  status, descendant_file_count, direct_file_count, last_seen_at, last_scanned_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'indexed', ?, ?, ?, ?)
+		)
+		SELECT incoming.* FROM (
+		  SELECT ? AS provider, ? AS kind, ? AS driver, ? AS mount_path,
+		         ? AS path_hash, ? AS parent_path_hash, ? AS path, ? AS parent_path, ? AS name,
+		         'indexed' AS status, ? AS descendant_file_count, ? AS direct_file_count,
+		         CAST(? AS DATETIME) AS last_seen_at, CAST(? AS DATETIME) AS last_scanned_at
+		) incoming
+		WHERE incoming.descendant_file_count <> 0 OR incoming.direct_file_count <> 0
+		   OR NOT EXISTS (
+		     SELECT 1 FROM external_asset_directory_index current_dir
+		      WHERE current_dir.path_hash = incoming.path_hash
+		        AND CAST(current_dir.kind AS BINARY) <=> CAST(incoming.kind AS BINARY)
+		        AND CAST(current_dir.driver AS BINARY) <=> CAST(incoming.driver AS BINARY)
+		        AND CAST(current_dir.mount_path AS BINARY) <=> CAST(incoming.mount_path AS BINARY)
+		        AND current_dir.parent_path_hash <=> incoming.parent_path_hash
+		        AND CAST(current_dir.parent_path AS BINARY) <=> CAST(incoming.parent_path AS BINARY)
+		        AND CAST(current_dir.name AS BINARY) <=> CAST(incoming.name AS BINARY)
+		        AND current_dir.status = 'indexed'
+		        AND current_dir.last_seen_at >= incoming.last_seen_at
+		        AND current_dir.last_scanned_at >= incoming.last_scanned_at
+		   )
 		ON DUPLICATE KEY UPDATE
 		  kind = VALUES(kind),
 		  driver = VALUES(driver),
@@ -859,10 +879,10 @@ func upsertExternalAssetDirectory(ctx context.Context, exec sqlExecContext, prov
 		  parent_path = VALUES(parent_path),
 		  name = VALUES(name),
 		  status = 'indexed',
-		  descendant_file_count = GREATEST(descendant_file_count + VALUES(descendant_file_count), 0),
-		  direct_file_count = GREATEST(direct_file_count + VALUES(direct_file_count), 0),
-		  last_seen_at = VALUES(last_seen_at),
-		  last_scanned_at = VALUES(last_scanned_at)`,
+		  descendant_file_count = GREATEST(external_asset_directory_index.descendant_file_count + VALUES(descendant_file_count), 0),
+		  direct_file_count = GREATEST(external_asset_directory_index.direct_file_count + VALUES(direct_file_count), 0),
+		  last_seen_at = GREATEST(COALESCE(external_asset_directory_index.last_seen_at, VALUES(last_seen_at)), VALUES(last_seen_at)),
+		  last_scanned_at = GREATEST(COALESCE(external_asset_directory_index.last_scanned_at, VALUES(last_scanned_at)), VALUES(last_scanned_at))`,
 		provider, string(kind), driver, mountPath, externalAssetDirectoryPathHash(provider, mountPath, dirPath),
 		externalAssetParentPathHash(parentPath), dirPath, parentPath, name, descendantDelta, directDelta, scannedAt, scannedAt)
 	if err != nil {
@@ -958,7 +978,23 @@ func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain
 	}
 	// Full scans stamp every item with their start time. A slower, older scan
 	// must not move the watermark behind a newer scan's missing-file cutoff.
-	_, err = tx.ExecContext(ctx, `
+	if existing != nil {
+		// The row is already locked above. Repeated scans update its watermark
+		// without entering the AUTO_INCREMENT duplicate-insert path.
+		_, err = tx.ExecContext(ctx, `UPDATE external_asset_records
+		   SET kind=?, driver=?, mount_path=?, origin_path=?, parent_path=?,
+		       file_name=?, file_ext=?, mime_type=?, file_size=?, is_dir=?, status='indexed',
+		       raw_url=CASE WHEN ? <> '' THEN ? ELSE raw_url END,
+		       last_seen_at=GREATEST(COALESCE(last_seen_at, ?), ?),
+		       last_scanned_at=GREATEST(COALESCE(last_scanned_at, ?), ?),
+		       searchable_text=?
+		 WHERE origin_path_hash=?`,
+			string(item.Kind), item.Driver, item.MountPath, item.OriginPath, item.ParentPath,
+			item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir,
+			item.RawURL, item.RawURL, item.ScannedAt, item.ScannedAt, item.ScannedAt, item.ScannedAt,
+			item.SearchableText, hash)
+	} else {
+		_, err = tx.ExecContext(ctx, `
 		INSERT INTO external_asset_records (
 		  provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
 		  file_name, file_ext, mime_type, file_size, is_dir, status, raw_url,
@@ -980,9 +1016,10 @@ func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain
 		  last_seen_at = GREATEST(COALESCE(last_seen_at, VALUES(last_seen_at)), VALUES(last_seen_at)),
 		  last_scanned_at = GREATEST(COALESCE(last_scanned_at, VALUES(last_scanned_at)), VALUES(last_scanned_at)),
 		  searchable_text = VALUES(searchable_text)`,
-		item.Provider, string(item.Kind), item.Driver, item.MountPath, hash, item.OriginPath, item.ParentPath,
-		item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir, item.RawURL,
-		item.ScannedAt, item.ScannedAt, item.SearchableText)
+			item.Provider, string(item.Kind), item.Driver, item.MountPath, hash, item.OriginPath, item.ParentPath,
+			item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir, item.RawURL,
+			item.ScannedAt, item.ScannedAt, item.SearchableText)
+	}
 	if err != nil {
 		return fmt.Errorf("upsert external asset: %w", err)
 	}

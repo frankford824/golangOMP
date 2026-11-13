@@ -74,10 +74,13 @@ func TestExternalAssetUpsertKeepsConcurrentScanWatermarksMonotonic(t *testing.T)
 		}
 		normalized := strings.Join(strings.Fields(actual), " ")
 		for _, field := range []string{"last_seen_at", "last_scanned_at"} {
-			fragment := fmt.Sprintf("%s = GREATEST(COALESCE(%s, VALUES(%s)), VALUES(%s))", field, field, field, field)
+			fragment := fmt.Sprintf("%s=GREATEST(COALESCE(%s, ?), ?)", field, field)
 			if !strings.Contains(normalized, fragment) {
 				return fmt.Errorf("older concurrent scan could regress %s: %s", field, normalized)
 			}
+		}
+		if !strings.Contains(normalized, "UPDATE external_asset_records") || strings.Contains(normalized, "INSERT INTO external_asset_records") {
+			return fmt.Errorf("existing file must not attempt another insert")
 		}
 		return nil
 	})))
@@ -98,9 +101,9 @@ func TestExternalAssetUpsertKeepsConcurrentScanWatermarksMonotonic(t *testing.T)
 			AddRow("alist", "nas_local", "", "/p3", "/p3/warehouse", 10, false, "indexed", "ready", "none", "original.jpg", "", ""))
 	mock.ExpectQuery("SELECT file_size, source_modified_at").WithArgs(hash).
 		WillReturnRows(sqlmock.NewRows([]string{"file_size", "source_modified_at"}).AddRow(10, modified))
-	mock.ExpectExec("monotonic scan upsert").WithArgs(item.Provider, string(item.Kind), item.Driver, item.MountPath, hash,
+	mock.ExpectExec("monotonic scan upsert").WithArgs(string(item.Kind), item.Driver, item.MountPath,
 		item.OriginPath, item.ParentPath, item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir,
-		item.RawURL, olderScan, olderScan, item.SearchableText).WillReturnResult(sqlmock.NewResult(0, 1))
+		item.RawURL, item.RawURL, olderScan, olderScan, olderScan, olderScan, item.SearchableText, hash).WillReturnResult(sqlmock.NewResult(0, 1))
 	for range 2 { // /p3 and /p3/warehouse directory-presence updates.
 		mock.ExpectExec("INSERT INTO external_asset_directory_index").WillReturnResult(sqlmock.NewResult(0, 1))
 	}
