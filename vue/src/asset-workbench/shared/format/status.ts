@@ -150,6 +150,7 @@ export const itemTypeMeta = (value?: string | null) =>
     {
       gross_piecework: { label: '日常计件', tone: 'success' },
       error_deduction: { label: '质检扣款', tone: 'danger' },
+      quality_deduction_adjustment: { label: '质检实扣差额', tone: 'neutral' },
       welfare: { label: '福利补贴', tone: 'money' },
       supplement: { label: '补录计件', tone: 'info' },
       adjustment: { label: '补发', tone: 'money' },

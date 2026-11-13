@@ -130,7 +130,7 @@ function formatMonthLabel(month: string) {
 }
 
 function normalPieceworkAmount(month: MySettlementMonthRow) {
-  return month.gross_amount - month.deduction_amount + month.welfare_amount + month.adjustment_amount
+  return (month.actual_net_amount ?? month.net_amount) - month.supplement_amount
 }
 
 function supplementAmount(month: MySettlementMonthRow) {
@@ -429,7 +429,9 @@ onBeforeUnmount(() => {
                 <div class="aw-pay-slip__copy">
                   <strong>正常作品工资</strong>
                   <span>{{ formatInt(month.item_count) }} 个作品 · {{ formatInt(month.page_count) }} 个计价单位</span>
-                  <small v-if="month.deduction_amount > 0">已扣 {{ formatMoney(month.deduction_amount) }}</small>
+                  <small v-if="month.deduction_amount > 0 || month.quality_actual_deduction_amount != null">
+                    质检应扣 {{ formatMoney(month.deduction_amount) }} · 实际扣款 {{ formatMoney(month.quality_actual_deduction_amount ?? month.deduction_amount) }}
+                  </small>
                   <small>计件毛额 {{ formatMoney(month.gross_amount) }} · 福利 {{ formatMoney(month.welfare_amount) }} · 调整 {{ formatMoney(month.adjustment_amount) }}</small>
                 </div>
                 <b class="aw-cell-money">{{ formatMoney(normalPieceworkAmount(month)) }}</b>
@@ -451,8 +453,8 @@ onBeforeUnmount(() => {
             <p v-if="month.pending_pricing_count" class="aw-inline-alert">另有 {{ formatInt(month.pending_pricing_count) }} 个作品待定级或未计价，尚未计入金额，请联系管理员核对。</p>
             <p class="aw-copy">累计中 {{ formatMoney(month.estimated_amount ?? 0) }} · 待确认 {{ formatMoney(month.pending_confirmation_amount ?? 0) }} · 已确认 {{ formatMoney(month.confirmed_net_amount ?? 0) }}</p>
             <footer class="aw-simple-income__total">
-              <span>这个月合计</span>
-              <strong>{{ formatMoney(month.net_amount) }}</strong>
+              <span>应发净额 {{ formatMoney(month.net_amount) }}</span>
+              <strong>实发净额 {{ formatMoney(month.actual_net_amount ?? month.net_amount) }}</strong>
             </footer>
           </article>
         </div>

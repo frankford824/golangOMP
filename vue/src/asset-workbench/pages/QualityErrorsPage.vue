@@ -13,6 +13,7 @@ import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import PersonnelPicker from '@aw/shared/ui/PersonnelPicker.vue'
 import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
 import { buildImportReviewSource, workbookReviewRowsToFiles } from '@aw/shared/spreadsheet/excelReview'
 import type { WorkbenchSpreadsheetActionPayload, WorkbenchSpreadsheetSource } from '@aw/shared/spreadsheet/types'
@@ -39,6 +40,11 @@ const error = ref('')
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const reviewSource = ref<WorkbenchSpreadsheetSource | null>(null)
 const reviewRevision = ref(0)
+const actualDeductions = ref<Awaited<ReturnType<typeof assetWorkbenchApi.qualityActualDeductions>> | null>(null)
+const deductionPayeeID = ref(0)
+const deductionInput = ref('')
+const savingDeduction = ref(false)
+let loadSequence = 0
 
 const ruleColumns = [
   { key: 'worker_type_label', label: '人员类型', width: 120 },
@@ -65,6 +71,37 @@ const ruleGridRows = computed<DeductionGridRow[]>(() =>
 const totalErrors = computed(() => preview.value?.totals.error_count ?? 0)
 const totalDeduction = computed(() => preview.value?.totals.deduction_amount ?? 0)
 const importHasWarnings = computed(() => lastImportWarningCount.value > 0)
+const canEditActualDeduction = computed(() =>
+  actualDeductions.value?.business_month === month.value && !actualDeductions.value.locked && !loading.value && !savingDeduction.value,
+)
+const selectedPayroll = computed(() => preview.value?.payroll_rows.find(
+  row => row.payee_user_id === deductionPayeeID.value && row.row_type === 'normal_piecework',
+))
+
+function fillSavedDeduction() {
+  const saved = actualDeductions.value?.deductions.find(row => row.payee_user_id === deductionPayeeID.value)
+  deductionInput.value = saved ? String(saved.quality_actual_deduction_amount) : ''
+}
+
+async function saveActualDeduction() {
+  if (!canEditActualDeduction.value || !deductionPayeeID.value || deductionInput.value === '') return
+  const amount = Number(deductionInput.value)
+  const targetMonth = month.value
+  const targetPayee = deductionPayeeID.value
+  savingDeduction.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    await assetWorkbenchApi.saveQualityActualDeduction(targetMonth, targetPayee, amount)
+    if (month.value !== targetMonth) return
+    notice.value = amount === 0 ? '已恢复按质检应扣计算。' : '已保存质检实际扣款。'
+    await loadQualityOverview({ keepFeedback: true })
+  } catch (err) {
+    error.value = resolveApiUserMessage(err, { fallback: '保存质检实际扣款失败' })
+  } finally {
+    savingDeduction.value = false
+  }
+}
 
 function ruleAppliesToMonth(rule: DeductionRuleRow, businessMonth: string) {
   if (!rule.enabled) return false
@@ -74,22 +111,29 @@ function ruleAppliesToMonth(rule: DeductionRuleRow, businessMonth: string) {
 }
 
 async function loadQualityOverview(options: { keepFeedback?: boolean } = {}) {
+  const request = ++loadSequence
+  const targetMonth = month.value
   loading.value = true
+  actualDeductions.value = null
   if (!options.keepFeedback) {
     notice.value = ''
     error.value = ''
   }
   try {
-    const [previewResult, rulesResult] = await Promise.all([
-      canPreviewSettlement.value ? assetWorkbenchApi.previewSettlement(month.value) : Promise.resolve(null),
+    const [previewResult, rulesResult, actualResult] = await Promise.all([
+      canPreviewSettlement.value ? assetWorkbenchApi.previewSettlement(targetMonth) : Promise.resolve(null),
       canViewRules.value ? assetWorkbenchApi.listDeductionRules({ page: 1, page_size: 100 }) : Promise.resolve(null),
+      canPreviewSettlement.value ? assetWorkbenchApi.qualityActualDeductions(targetMonth) : Promise.resolve(null),
     ])
+    if (request !== loadSequence) return
     preview.value = previewResult
     deductionRules.value = rulesResult?.items ?? []
+    actualDeductions.value = actualResult
+    fillSavedDeduction()
   } catch (err) {
-    error.value = resolveApiUserMessage(err, { fallback: '出错记录数据加载失败，请稍后重试' })
+    if (request === loadSequence) error.value = resolveApiUserMessage(err, { fallback: '出错记录数据加载失败，请稍后重试' })
   } finally {
-    loading.value = false
+    if (request === loadSequence) loading.value = false
   }
 }
 
@@ -193,7 +237,7 @@ onMounted(() => void loadQualityOverview())
       <div class="aw-page-bar__actions">
         <label class="aw-month-control">
           <span>扣款月份</span>
-          <input v-model="month" type="month" lang="zh-CN" aria-label="出错记录月份" />
+          <input v-model="month" type="month" lang="zh-CN" aria-label="出错记录月份" :disabled="savingDeduction" />
         </label>
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadQualityOverview()">
           <RefreshCw :size="16" aria-hidden="true" />
@@ -296,6 +340,31 @@ onMounted(() => void loadQualityOverview())
             <span><CheckCircle2 :size="15" aria-hidden="true" />出错分类</span>
             <span><CheckCircle2 :size="15" aria-hidden="true" />出错张数</span>
           </div>
+        </section>
+
+        <section v-if="canPreviewSettlement" class="aw-quality-errors__rules aw-data-surface">
+          <div class="aw-settlement-section__head">
+            <div>
+              <h3>质检实际扣款</h3>
+              <p>{{ month }} · 按人员录入。填 0 恢复按系统质检应扣计算。</p>
+            </div>
+          </div>
+          <p v-if="actualDeductions?.locked" class="aw-inline-alert">该月已有生成或确认的批次，实扣金额已锁定。</p>
+          <form class="aw-form-grid" @submit.prevent="saveActualDeduction">
+            <PersonnelPicker v-model="deductionPayeeID" label="扣款人员" clearable @selected="fillSavedDeduction" @cleared="fillSavedDeduction" />
+            <label>
+              质检实际扣款（元）
+              <input v-model="deductionInput" type="number" min="0" max="9999999999.99" step="0.01" required :disabled="!canEditActualDeduction || !deductionPayeeID" />
+            </label>
+            <div class="aw-inline-actions aw-form-grid__full">
+              <span v-if="selectedPayroll">质检应扣 {{ formatMoney(selectedPayroll.deduction_amount) }}</span>
+              <span v-if="selectedPayroll">应发 {{ formatMoney(selectedPayroll.net_amount) }}</span>
+              <span v-if="selectedPayroll">实发 {{ formatMoney(selectedPayroll.actual_net_amount ?? selectedPayroll.net_amount) }}</span>
+              <button class="aw-primary-button" type="submit" :disabled="!canEditActualDeduction || !deductionPayeeID || deductionInput === ''">
+                {{ savingDeduction ? '保存中…' : '保存实际扣款' }}
+              </button>
+            </div>
+          </form>
         </section>
 
         <section class="aw-quality-errors__rules">

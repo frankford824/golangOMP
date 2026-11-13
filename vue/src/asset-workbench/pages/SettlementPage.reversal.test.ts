@@ -69,7 +69,7 @@ describe('SettlementPage confirmed batch reversal', () => {
     reverseSettlementBatchConfirmation.mockResolvedValue({ batch_id: 8801, status: 'cancelled' })
   })
 
-  it('requires reason, exact batch number, and unpaid attestation before reversing', async () => {
+  it('uses the selected batch number and requires a reason and unpaid attestation', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     useAssetWorkbenchSessionStore().setBootstrap({
@@ -101,10 +101,16 @@ describe('SettlementPage confirmed batch reversal', () => {
 
     const dialog = wrapper.get('[role="dialog"][aria-label="撤销已确认批次"]')
     expect(dialog.text()).toContain('若工资已经实际发放，请勿撤销')
+    expect(dialog.text()).toContain(confirmedBatch.batch_no)
+    expect(dialog.find('input[aria-label="确认撤销批次号"]').exists()).toBe(false)
+    const confirm = textButton(wrapper, '确认撤销')
+    expect(confirm.attributes('disabled')).toBeDefined()
     await dialog.get('input[aria-label="撤销确认原因"]').setValue('误确认，尚未发放')
-    await dialog.get('input[aria-label="确认撤销批次号"]').setValue(confirmedBatch.batch_no)
+    expect(confirm.attributes('disabled')).toBeDefined()
+    expect(reverseSettlementBatchConfirmation).not.toHaveBeenCalled()
     await dialog.get('input[type="checkbox"]').setValue(true)
-    await textButton(wrapper, '确认撤销').trigger('click')
+    expect(confirm.attributes('disabled')).toBeUndefined()
+    await confirm.trigger('click')
     await flushPromises()
 
     expect(reverseSettlementBatchConfirmation).toHaveBeenCalledWith(8801, {

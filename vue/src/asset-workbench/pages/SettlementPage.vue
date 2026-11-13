@@ -96,7 +96,6 @@ const selectedErrorImport = ref<ErrorImportBatchRow | null>(null)
 const pendingDeleteErrorImport = ref<ErrorImportBatchRow | null>(null)
 const cancelReason = ref('')
 const reverseReason = ref('')
-const reverseExpectedBatchNo = ref('')
 const reverseConfirmedUnpaid = ref(false)
 const supplementDeleteReason = ref('')
 const errorImportDeleteReason = ref('')
@@ -186,7 +185,7 @@ const adjustmentMode = computed({
     adjustmentForm.value.adjustment_type = value === 'debit' ? 'reversal' : 'adjustment'
   },
 })
-const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'amount'])
+const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'quality_actual_deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'actual_net_amount', 'amount'])
 const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity', 'total_rows', 'matched_rows', 'unmatched_rows', 'ambiguous_rows'])
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const selectedSupplementUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === supplementUploadDirectoryId.value) ?? null)
@@ -200,14 +199,16 @@ const ledgerSegments = computed(() => {
       { key: 'gross', label: '日常计件', value: formatMoney(0), hint: '待生成预览', expandable: true },
       { key: 'deduction', label: '质检扣款', value: formatMoney(0), hint: '结算时读取质检错误表', expandable: true },
       { key: 'supplement', label: '补录计件', value: formatMoney(0), hint: '工资条第二行', expandable: true },
-      { key: 'net', label: '应结净额', value: formatMoney(0), hint: '计件 + 补录 - 质检扣款', money: true, expandable: true },
+      { key: 'net', label: '应发净额', value: formatMoney(0), hint: '待生成预览', money: true, expandable: true },
+      { key: 'actual-net', label: '实发净额', value: formatMoney(0), hint: '待生成预览', money: true },
     ]
   }
   return [
     { key: 'gross', label: '日常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单`, expandable: true },
     { key: 'deduction', label: '质检扣款', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错`, expandable: true },
     { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行', expandable: true },
-    { key: 'net', label: '应结净额', value: formatMoney(value.net_amount), hint: '正常工资行 + 补录工资行', money: true, expandable: true },
+    { key: 'net', label: '应发净额', value: formatMoney(value.net_amount), hint: '按系统质检应扣计算', money: true, expandable: true },
+    { key: 'actual-net', label: '实发净额', value: formatMoney(value.actual_net_amount ?? value.net_amount), hint: '按适用的质检扣款计算', money: true },
   ]
 })
 const payrollGridRows = computed(() => payrollRows.value.map(toPayrollGridRow) as unknown as Record<string, unknown>[])
@@ -302,17 +303,19 @@ const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'row_label', label: '工资条', width: 140 },
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
   { key: 'gross_amount', label: '毛额', width: 100, align: 'right' },
-  { key: 'deduction_amount', label: '质检扣款', width: 112, align: 'right' },
+  { key: 'deduction_amount', label: '质检应扣', width: 112, align: 'right' },
+  { key: 'quality_actual_deduction_amount', label: '质检实际扣款', width: 126, align: 'right' },
   { key: 'welfare_amount', label: '福利', width: 100, align: 'right' },
   { key: 'supplement_amount', label: '补录', width: 100, align: 'right' },
   { key: 'adjustment_amount', label: '调整', width: 100, align: 'right' },
-  { key: 'net_amount', label: '净额', width: 112, align: 'right' },
+  { key: 'net_amount', label: '应发净额', width: 112, align: 'right' },
+  { key: 'actual_net_amount', label: '实发净额', width: 112, align: 'right' },
 ])
 const batchGridColumns = computed<GridColumn[]>(() => [
   { key: 'batch_no', label: '批次号', width: 190 },
   { key: 'business_month', label: '结算月', width: 108 },
   { key: 'status_label', label: '状态', width: 96 },
-  { key: 'net_amount', label: '净额', width: 112, align: 'right' },
+  { key: 'net_amount', label: '应发净额', width: 112, align: 'right' },
   { key: 'actions', label: '动作', width: 180, align: 'center' },
 ])
 const batchItemGridColumns = computed<GridColumn[]>(() => [
@@ -361,7 +364,7 @@ const errorImportRecordGridColumns = computed<GridColumn[]>(() => [
 ])
 const settlementSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
   id: 'asset-settlement-spreadsheet',
-  revision: `${month.value}:${payrollRows.value.length}:${batches.value.length}:${supplements.value.length}:${supplementPermissions.value.length}:${errorImports.value.length}`,
+  revision: `${month.value}:${payrollRows.value.map(row => `${row.payee_user_id},${row.net_amount},${row.quality_actual_deduction_amount ?? ''},${row.actual_net_amount ?? ''}`).join('|')}:${batches.value.length}:${supplements.value.length}:${supplementPermissions.value.length}:${errorImports.value.length}`,
   mode: 'settlement',
   title: `${month.value} 结算表格工作台`,
   description: '用于集中核对工资条、每次质检导入、批次和补录记录。这里不替代批次确认、删除、调整等原页面动作。',
@@ -430,6 +433,7 @@ function payrollRowLabel(row: SettlementPayrollRow) {
 function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
   return {
     ...row,
+    actual_net_amount: row.actual_net_amount ?? row.net_amount,
     grid_id: `${row.payee_user_id}-${row.row_type}`,
     row_label: payrollRowLabel(row),
     payee_name_label: row.payee_name || `用户 ${row.payee_user_id}`,
@@ -501,6 +505,7 @@ function isMoneyColumn(key: string) {
 }
 
 function gridValue(key: string, value: unknown) {
+  if (key === 'quality_actual_deduction_amount' && value == null) return '—'
   if (moneyColumns.has(key)) return formatMoney(value)
   if (intColumns.has(key)) return formatInt(value)
   return value || '—'
@@ -679,14 +684,13 @@ function startReverseBatchConfirmation(batch: SettlementBatchRow) {
   pendingReverseBatch.value = batch
   pendingCancelBatch.value = null
   reverseReason.value = ''
-  reverseExpectedBatchNo.value = ''
   reverseConfirmedUnpaid.value = false
+  error.value = ''
 }
 
 function closeReverseBatchConfirmation() {
   pendingReverseBatch.value = null
   reverseReason.value = ''
-  reverseExpectedBatchNo.value = ''
   reverseConfirmedUnpaid.value = false
 }
 
@@ -696,10 +700,6 @@ async function reverseBatchConfirmation() {
   const reason = reverseReason.value.trim()
   if (!reason) {
     error.value = '请填写撤销确认原因'
-    return
-  }
-  if (reverseExpectedBatchNo.value.trim() !== batch.batch_no) {
-    error.value = `请输入完整批次号 ${batch.batch_no} 以确认操作`
     return
   }
   if (!reverseConfirmedUnpaid.value) {
@@ -712,7 +712,7 @@ async function reverseBatchConfirmation() {
   try {
     await assetWorkbenchApi.reverseSettlementBatchConfirmation(batch.id, {
       reason,
-      expected_batch_no: reverseExpectedBatchNo.value.trim(),
+      expected_batch_no: batch.batch_no,
       confirm_unpaid: true,
     })
     notice.value = `已撤销确认：${batch.batch_no}；原结算快照已保留，作品已恢复为未结算状态`
@@ -1525,7 +1525,7 @@ onMounted(() => {
               <div class="aw-panel__head">
                 <div>
                   <h3>撤销已确认批次</h3>
-                  <p class="aw-copy">{{ pendingReverseBatch.batch_no }}</p>
+                  <p class="aw-copy">撤销批次 {{ pendingReverseBatch.batch_no }}</p>
                 </div>
                 <span class="aw-chip aw-chip--danger">高风险操作</span>
               </div>
@@ -1534,21 +1534,17 @@ onMounted(() => {
               </p>
               <label class="aw-field">
                 <span>撤销原因</span>
-                <input v-model="reverseReason" aria-label="撤销确认原因" required />
-              </label>
-              <label class="aw-field">
-                <span>输入完整批次号确认</span>
-                <input v-model="reverseExpectedBatchNo" :placeholder="pendingReverseBatch.batch_no" aria-label="确认撤销批次号" autocomplete="off" required />
+                <input v-model="reverseReason" aria-label="撤销确认原因" :disabled="reversingBatchId !== null" required />
               </label>
               <label class="aw-check-row">
-                <input v-model="reverseConfirmedUnpaid" type="checkbox" />
+                <input v-model="reverseConfirmedUnpaid" type="checkbox" :disabled="reversingBatchId !== null" />
                 <span>我确认该批次尚未实际发放，且理解原结算快照会永久保留</span>
               </label>
               <div class="aw-inline-actions">
                 <button
                   class="aw-secondary-button aw-secondary-button--danger"
                   type="button"
-                  :disabled="reversingBatchId === pendingReverseBatch.id"
+                  :disabled="reversingBatchId !== null || !reverseReason.trim() || !reverseConfirmedUnpaid"
                   @click="reverseBatchConfirmation"
                 >
                   {{ reversingBatchId === pendingReverseBatch.id ? '撤销中…' : '确认撤销' }}
@@ -1570,7 +1566,8 @@ onMounted(() => {
               </div>
               <div class="aw-inline-actions">
                 <span :class="chipClass(batchStatusMeta(selectedBatch.batch.status).tone)">{{ batchStatusMeta(selectedBatch.batch.status).label }}</span>
-                <strong class="aw-cell-money">{{ formatMoney(selectedBatch.batch.net_amount) }}</strong>
+                <span>应发净额 {{ formatMoney(selectedBatch.batch.net_amount) }}</span>
+                <strong class="aw-cell-money">实发净额 {{ formatMoney(selectedBatch.actual_net_amount ?? selectedBatch.batch.net_amount) }}</strong>
                 <button
                   v-if="selectedBatch.batch.status === 'generated'"
                   class="aw-primary-button"
