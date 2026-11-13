@@ -153,16 +153,30 @@ func (r *settlementReportRepo) ListDifficultyClasses(context.Context, repo.Asset
 
 type errorImportRepo struct {
 	repo.AssetWorkbenchRepo
-	items             []*domain.AssetWorkbenchSubmissionItem
-	profiles          []*domain.AssetWorkbenchProfile
-	difficulties      []*domain.AssetWorkbenchDifficultyClass
-	batch             *domain.AssetWorkbenchErrorImportBatch
-	batches           []*domain.AssetWorkbenchErrorImportBatch
-	records           []*domain.AssetWorkbenchErrorRecord
-	rule              *domain.AssetWorkbenchDeductionRule
-	settlementBatches []*domain.AssetWorkbenchSettlementBatch
-	deletedBatchID    int64
-	events            []*domain.AssetWorkbenchEvent
+	qualityRefs        map[string]map[int64][]repo.AssetWorkbenchQualityWorkReference
+	qualityMonthStates map[string]bool
+	items              []*domain.AssetWorkbenchSubmissionItem
+	profiles           []*domain.AssetWorkbenchProfile
+	difficulties       []*domain.AssetWorkbenchDifficultyClass
+	batch              *domain.AssetWorkbenchErrorImportBatch
+	batches            []*domain.AssetWorkbenchErrorImportBatch
+	records            []*domain.AssetWorkbenchErrorRecord
+	rule               *domain.AssetWorkbenchDeductionRule
+	settlementBatches  []*domain.AssetWorkbenchSettlementBatch
+	deletedBatchID     int64
+	events             []*domain.AssetWorkbenchEvent
+}
+
+func (r *errorImportRepo) ListQualityImportWorkReferences(_ context.Context, month string, payeeID int64) ([]repo.AssetWorkbenchQualityWorkReference, error) {
+	return r.qualityRefs[month][payeeID], nil
+}
+
+func (r *errorImportRepo) ListSettlementMonthStates(context.Context) (map[string]bool, error) {
+	return r.qualityMonthStates, nil
+}
+
+func (r *errorImportRepo) RunSettlementMonthTx(_ context.Context, _ string, fn func(repo.Tx) error) error {
+	return fn(nil)
 }
 
 func (r *errorImportRepo) ListSubmissionItemsByMonth(context.Context, string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
@@ -2949,6 +2963,9 @@ func TestImportErrorRecordsExcelMatchesQualityTemplateByPayeeAndDifficulty(t *te
 	workbenchRepo := &errorImportRepo{
 		profiles: []*domain.AssetWorkbenchProfile{
 			{UserID: 100, RealName: "张三", WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "J1"},
+		},
+		qualityRefs: map[string]map[int64][]repo.AssetWorkbenchQualityWorkReference{
+			"2026-07": {100: {{WorkID: 501, OrderNo: "3310254339917022991"}}},
 		},
 	}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))

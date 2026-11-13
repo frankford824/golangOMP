@@ -51,6 +51,8 @@ export const errorImportTemplateHeaders = [
   '处理方法',
   '登记人',
   '备注',
+  '工资条类型',
+  '文件名',
   '线上订单号',
 ] as const
 
@@ -119,18 +121,21 @@ export async function exportErrorImportTemplateWorkbook(): Promise<void> {
     { key: 'handling_method', width: 18 },
     { key: 'reporter_name', width: 14 },
     { key: 'remark', width: 18 },
+    { key: 'payroll_row_type', width: 20 },
+    { key: 'file_name', width: 28 },
     { key: 'order_no', width: 24 },
   ]
-  sheet.addRow(['说明：前四列必填。系统按日期、出错人、出错分类和出错张数匹配扣款规则；其余列用于说明和追溯，可不填。'])
+  sheet.addRow(['说明：前四列必填。填写线上订单号或完整文件名可匹配日常、补录作品，也可手填工资条类型。无作品线索且类型留空时按日常计件。'])
   sheet.mergeCells(1, 1, 1, errorImportTemplateHeaders.length)
   sheet.addRow([...errorImportTemplateHeaders])
-  sheet.addRow([new Date(2026, 6, 1), '张三', 'C类', 1, '年龄做错了', '抽查', '重修', '李四', '', ''])
+  sheet.addRow([new Date(2026, 6, 1), '张三', 'C类', 1, '年龄做错了', '抽查', '重修', '李四', '', '', '', ''])
   sheet.getRow(1).font = { color: { argb: 'FF6B6258' } }
   sheet.getRow(1).alignment = { vertical: 'middle', wrapText: true }
   sheet.getRow(1).height = 34
   sheet.getRow(2).font = { bold: true }
   sheet.getRow(2).alignment = { vertical: 'middle', horizontal: 'center' }
   sheet.getColumn(1).numFmt = 'yyyy-mm-dd'
+  sheet.getColumn(12).numFmt = '@'
   sheet.views = [{ state: 'frozen', ySplit: 2 }]
 
   const buffer = await workbook.xlsx.writeBuffer()

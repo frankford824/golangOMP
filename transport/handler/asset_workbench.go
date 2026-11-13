@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -1506,6 +1507,14 @@ func (h *AssetWorkbenchHandler) ImportErrorRecords(c *gin.Context) {
 }
 
 func (h *AssetWorkbenchHandler) ImportErrorRecordsExcel(c *gin.Context) {
+	h.handleQualityErrorExcel(c, false)
+}
+
+func (h *AssetWorkbenchHandler) PreviewQualityImportExcel(c *gin.Context) {
+	h.handleQualityErrorExcel(c, true)
+}
+
+func (h *AssetWorkbenchHandler) handleQualityErrorExcel(c *gin.Context, preview bool) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
 		return
@@ -1521,7 +1530,23 @@ func (h *AssetWorkbenchHandler) ImportErrorRecordsExcel(c *gin.Context) {
 		return
 	}
 	defer src.Close()
-	result, appErr := h.svc.ImportErrorRecordsExcel(c.Request.Context(), actor, c.PostForm("business_month"), fileHeader.Filename, src)
+	if preview {
+		result, appErr := h.svc.PreviewQualityImportExcel(c.Request.Context(), actor, c.PostForm("business_month"), src)
+		if appErr != nil {
+			respondError(c, appErr)
+			return
+		}
+		respondOK(c, result)
+		return
+	}
+	var overrides []assetworkbench.QualityImportRowOverride
+	if raw := c.PostForm("payroll_overrides"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &overrides); err != nil || len(overrides) > 50000 {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "无法读取工资条类型选择。", nil))
+			return
+		}
+	}
+	result, appErr := h.svc.ImportErrorRecordsExcel(c.Request.Context(), actor, c.PostForm("business_month"), fileHeader.Filename, src, overrides...)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1651,15 +1676,16 @@ func (h *AssetWorkbenchHandler) SaveQualityActualDeduction(c *gin.Context) {
 		return
 	}
 	var req struct {
-		BusinessMonth string   `json:"business_month" binding:"required"`
-		PayeeUserID   int64    `json:"payee_user_id" binding:"required"`
-		Amount        *float64 `json:"quality_actual_deduction_amount" binding:"required"`
+		BusinessMonth  string   `json:"business_month" binding:"required"`
+		PayeeUserID    int64    `json:"payee_user_id" binding:"required"`
+		Amount         *float64 `json:"quality_actual_deduction_amount" binding:"required"`
+		PayrollRowType string   `json:"payroll_row_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择月份和人员，并填写质检实际扣款。", nil))
 		return
 	}
-	if appErr := h.svc.SaveQualityActualDeduction(c.Request.Context(), actor, req.BusinessMonth, req.PayeeUserID, *req.Amount); appErr != nil {
+	if appErr := h.svc.SaveQualityActualDeductionForPayroll(c.Request.Context(), actor, req.BusinessMonth, req.PayeeUserID, *req.Amount, req.PayrollRowType); appErr != nil {
 		respondError(c, appErr)
 		return
 	}

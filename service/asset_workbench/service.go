@@ -849,6 +849,10 @@ type ImportErrorRecordsParams struct {
 }
 
 type ImportErrorRecordInput struct {
+	FileName         string `json:"file_name,omitempty"`
+	excelSheet       int
+	excelRow         int
+	PayrollRowType   string          `json:"payroll_row_type,omitempty"`
 	PayeeUserID      *int64          `json:"payee_user_id"`
 	PayeeName        string          `json:"payee_name"`
 	OrderNo          string          `json:"order_no"`
@@ -975,25 +979,27 @@ type MySettlementResponse struct {
 }
 
 type MySettlementMonthRow struct {
-	QualityActualDeductionAmount *float64 `json:"quality_actual_deduction_amount,omitempty"`
-	ActualNetAmount              float64  `json:"actual_net_amount"`
-	SettlementState              string   `json:"settlement_state"`
-	ConfirmedNetAmount           float64  `json:"confirmed_net_amount"`
-	PendingConfirmationAmount    float64  `json:"pending_confirmation_amount"`
-	EstimatedAmount              float64  `json:"estimated_amount"`
-	PendingPricingCount          int      `json:"pending_pricing_count"`
-	SupplementItemCount          int      `json:"supplement_item_count"`
-	SupplementPageCount          int      `json:"supplement_page_count"`
-	BusinessMonth                string   `json:"business_month"`
-	ItemCount                    int      `json:"item_count"`
-	PageCount                    int      `json:"page_count"`
-	GrossAmount                  float64  `json:"gross_amount"`
-	DeductionAmount              float64  `json:"deduction_amount"`
-	WelfareAmount                float64  `json:"welfare_amount"`
-	SupplementAmount             float64  `json:"supplement_amount"`
-	AdjustmentAmount             float64  `json:"adjustment_amount"`
-	NetAmount                    float64  `json:"net_amount"`
-	Confirmed                    bool     `json:"confirmed"`
+	SupplementDeductionAmount       float64  `json:"supplement_deduction_amount"`
+	SupplementActualDeductionAmount float64  `json:"supplement_actual_deduction_amount"`
+	QualityActualDeductionAmount    *float64 `json:"quality_actual_deduction_amount,omitempty"`
+	ActualNetAmount                 float64  `json:"actual_net_amount"`
+	SettlementState                 string   `json:"settlement_state"`
+	ConfirmedNetAmount              float64  `json:"confirmed_net_amount"`
+	PendingConfirmationAmount       float64  `json:"pending_confirmation_amount"`
+	EstimatedAmount                 float64  `json:"estimated_amount"`
+	PendingPricingCount             int      `json:"pending_pricing_count"`
+	SupplementItemCount             int      `json:"supplement_item_count"`
+	SupplementPageCount             int      `json:"supplement_page_count"`
+	BusinessMonth                   string   `json:"business_month"`
+	ItemCount                       int      `json:"item_count"`
+	PageCount                       int      `json:"page_count"`
+	GrossAmount                     float64  `json:"gross_amount"`
+	DeductionAmount                 float64  `json:"deduction_amount"`
+	WelfareAmount                   float64  `json:"welfare_amount"`
+	SupplementAmount                float64  `json:"supplement_amount"`
+	AdjustmentAmount                float64  `json:"adjustment_amount"`
+	NetAmount                       float64  `json:"net_amount"`
+	Confirmed                       bool     `json:"confirmed"`
 }
 
 type welfareSettlementLine struct {
@@ -4496,61 +4502,35 @@ func (s *Service) BuildFileBatchDownloadManifest(ctx context.Context, actor doma
 }
 
 func (s *Service) ImportErrorRecords(ctx context.Context, actor domain.RequestActor, params ImportErrorRecordsParams) (*domain.AssetWorkbenchErrorImportBatch, *domain.AppError) {
-	if err := s.requireRepo(); err != nil {
-		return nil, err
+	businessMonth, appErr := s.validateQualityImport(actor, params)
+	if appErr != nil {
+		return nil, appErr
 	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers or settlement roles can import error records.", nil)
-	}
-	businessMonth := strings.TrimSpace(params.BusinessMonth)
-	if businessMonth == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month is required.", nil)
-	}
-	if len(params.Records) == 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "records are required.", nil)
-	}
-	var submissionItems []*domain.AssetWorkbenchSubmissionItem
-	var difficultyIndex map[string]string
-	matches := make([]errorRecordImportMatch, len(params.Records))
-	matchedRows := 0
-	unmatchedRows := 0
-	ambiguousRows := 0
-	for idx, input := range params.Records {
-		var match errorRecordImportMatch
-		var appErr *domain.AppError
-		if isQualityErrorImportInput(input) {
-			if difficultyIndex == nil {
-				difficultyIndex, appErr = s.errorImportDifficultyIndex(ctx)
-				if appErr != nil {
-					return nil, appErr
-				}
-			}
-			match, appErr = s.matchQualityErrorRecord(ctx, input, difficultyIndex)
-			if appErr != nil {
-				return nil, appErr
-			}
-		} else {
-			if submissionItems == nil {
-				var err error
-				submissionItems, err = s.repo.ListSubmissionItemsByMonth(ctx, businessMonth)
-				if err != nil {
-					return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load submission items for error import matching.", err.Error())
-				}
-			}
-			match = matchImportedErrorRecord(submissionItems, input)
-		}
-		matches[idx] = match
-		switch match.Status {
-		case domain.AssetWorkbenchErrorMatchStatusMatched:
-			matchedRows++
-		case domain.AssetWorkbenchErrorMatchStatusAmbiguous:
-			ambiguousRows++
-		default:
-			unmatchedRows++
-		}
-	}
+	params.Records = append([]ImportErrorRecordInput(nil), params.Records...)
 	var batch *domain.AssetWorkbenchErrorImportBatch
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+	if err := s.repo.RunSettlementMonthTx(ctx, businessMonth, func(tx repo.Tx) error {
+		if appErr := s.checkQualityImportMonth(ctx, businessMonth); appErr != nil {
+			return appErr
+		}
+		matches, review, appErr := s.reviewQualityImport(ctx, businessMonth, params.Records)
+		if appErr != nil {
+			return appErr
+		}
+		var matchedRows, unmatchedRows, ambiguousRows int
+		for idx, row := range review {
+			if row.Blocking {
+				return qualityImportRowError(row)
+			}
+			params.Records[idx].PayrollRowType = row.PayrollRowType
+			switch matches[idx].Status {
+			case domain.AssetWorkbenchErrorMatchStatusMatched:
+				matchedRows++
+			case domain.AssetWorkbenchErrorMatchStatusAmbiguous:
+				ambiguousRows++
+			default:
+				unmatchedRows++
+			}
+		}
 		var err error
 		batch, err = s.repo.CreateErrorImportBatch(ctx, tx, &domain.AssetWorkbenchErrorImportBatch{
 			ImportNo:         "AWE" + s.nowFn().UTC().Format("20060102150405") + strings.ToUpper(uuid.NewString()[:8]),
@@ -4568,8 +4548,8 @@ func (s *Service) ImportErrorRecords(ctx context.Context, actor domain.RequestAc
 		}
 		for idx, input := range params.Records {
 			orderNo := strings.TrimSpace(input.OrderNo)
-			if input.ErrorCount < 0 {
-				return domain.NewAppError(domain.ErrCodeInvalidRequest, "error_count must be non-negative.", nil)
+			if orderNo == "" {
+				orderNo = strings.TrimSpace(input.FileName)
 			}
 			match := matches[idx]
 			raw := errorRecordRawPayload(input, match)
@@ -4606,7 +4586,7 @@ func (s *Service) ImportErrorRecords(ctx context.Context, actor domain.RequestAc
 	return batch, nil
 }
 
-func (s *Service) ImportErrorRecordsExcel(ctx context.Context, actor domain.RequestActor, businessMonth string, originalFilename string, reader io.Reader) (*domain.AssetWorkbenchErrorImportBatch, *domain.AppError) {
+func (s *Service) ImportErrorRecordsExcel(ctx context.Context, actor domain.RequestActor, businessMonth string, originalFilename string, reader io.Reader, overrides ...QualityImportRowOverride) (*domain.AssetWorkbenchErrorImportBatch, *domain.AppError) {
 	if reader == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", nil)
 	}
@@ -4614,11 +4594,25 @@ func (s *Service) ImportErrorRecordsExcel(ctx context.Context, actor domain.Requ
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr := applyQualityImportOverrides(records, overrides); appErr != nil {
+		return nil, appErr
+	}
 	return s.ImportErrorRecords(ctx, actor, ImportErrorRecordsParams{
 		BusinessMonth:    businessMonth,
 		OriginalFilename: originalFilename,
 		Records:          records,
 	})
+}
+
+func (s *Service) PreviewQualityImportExcel(ctx context.Context, actor domain.RequestActor, businessMonth string, reader io.Reader) (*QualityImportReview, *domain.AppError) {
+	if reader == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", nil)
+	}
+	records, appErr := parseErrorRecordsExcel(reader)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return s.PreviewQualityImport(ctx, actor, ImportErrorRecordsParams{BusinessMonth: businessMonth, Records: records})
 }
 
 func (s *Service) ListErrorImportBatches(ctx context.Context, actor domain.RequestActor, businessMonth string, page, pageSize int) ([]*domain.AssetWorkbenchErrorImportBatch, int64, *domain.AppError) {
@@ -4714,6 +4708,9 @@ func (s *Service) enrichErrorImportBatches(ctx context.Context, batches []*domai
 			record.PayeeName = errorImportRecordPayeeName(record, nil)
 		}
 		if includeRecords {
+			if record.MatchStatus == domain.AssetWorkbenchErrorMatchStatusMatched {
+				record.PayrollRowType = domain.WorkbenchPayrollRowType(record.RawPayload)
+			}
 			batch.Records = append(batch.Records, record)
 		}
 	}
@@ -5000,7 +4997,7 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 			if appErr != nil {
 				return appErr
 			}
-			if deduction <= 0 {
+			if deduction <= 0 && domain.WorkbenchPayrollRowType(record.RawPayload) != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
 				continue
 			}
 			sourceID := record.ID
@@ -8399,7 +8396,10 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 			row = &SettlementPreviewRow{PayeeUserID: payeeID}
 			rowsByPayee[payeeID] = row
 		}
-		normalPayrollRow := ensureNormalPayrollRow(payeeID)
+		payrollRow := ensureNormalPayrollRow(payeeID)
+		if domain.WorkbenchPayrollRowType(record.RawPayload) == domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
+			payrollRow = ensureSupplementPayrollRow(payeeID)
+		}
 		deduction, _, appErr := s.calculateQualityErrorDeductionCached(ctx, businessMonth, record, profile, deductionCache)
 		if appErr != nil {
 			return nil, appErr
@@ -8407,9 +8407,9 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 		row.ErrorCount += record.ErrorCount
 		row.DeductionAmount += deduction
 		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount
-		normalPayrollRow.ErrorCount += record.ErrorCount
-		normalPayrollRow.DeductionAmount += deduction
-		normalPayrollRow.NetAmount = normalPayrollRow.GrossAmount - normalPayrollRow.DeductionAmount + normalPayrollRow.WelfareAmount + normalPayrollRow.AdjustmentAmount
+		payrollRow.ErrorCount += record.ErrorCount
+		payrollRow.DeductionAmount += deduction
+		payrollRow.NetAmount = payrollRow.GrossAmount - payrollRow.DeductionAmount + payrollRow.WelfareAmount + payrollRow.AdjustmentAmount
 	}
 	welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, items)
 	if appErr != nil {
@@ -8443,7 +8443,7 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 		supplementPayrollRow.ItemCount++
 		supplementPayrollRow.PageCount += supplement.PageCount
 		supplementPayrollRow.SupplementAmount += supplement.GrossAmount
-		supplementPayrollRow.NetAmount = supplementPayrollRow.SupplementAmount
+		supplementPayrollRow.NetAmount = supplementPayrollRow.SupplementAmount - supplementPayrollRow.DeductionAmount
 	}
 	rows := make([]SettlementPreviewRow, 0, len(rowsByPayee))
 	for _, row := range rowsByPayee {
@@ -8625,7 +8625,7 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 			continue
 		}
 		payeeID := *record.PayeeUserID
-		rowType := domain.AssetWorkbenchPayrollRowTypeNormalPiecework
+		rowType := domain.WorkbenchPayrollRowType(record.RawPayload)
 		key := settlementReportRowKey(payeeID, rowType)
 		row := ensureRow(payeeID, rowType)
 		difficultyClass := settlementReportDifficultyClass(record.DifficultyClass)
@@ -8771,7 +8771,7 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 	normalRowsByPayee := map[int64]*SettlementPayrollRow{}
 	supplementRowsByPayee := map[int64]*SettlementPayrollRow{}
 	payees := map[int64]struct{}{}
-	qualityDifferences := map[int64]float64{}
+	qualityDifferences := map[qualityPayrollKey]float64{}
 	ensureNormal := func(payeeID int64) *SettlementPayrollRow {
 		payees[payeeID] = struct{}{}
 		row := normalRowsByPayee[payeeID]
@@ -8811,11 +8811,17 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 			row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.AdjustmentAmount
 		case domain.AssetWorkbenchItemTypeErrorDeduction:
 			row := ensureNormal(item.PayeeUserID)
+			if domain.WorkbenchPayrollRowType(item.Snapshot) == domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
+				row = ensureSupplement(item.PayeeUserID)
+			}
 			row.ErrorCount += int(item.Quantity)
 			row.DeductionAmount += item.Amount
-			row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.AdjustmentAmount
+			row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.AdjustmentAmount + row.SupplementAmount
 		case domain.AssetWorkbenchItemTypeQualityDeductionAdjustment:
 			row := ensureNormal(item.PayeeUserID)
+			if domain.WorkbenchPayrollRowType(item.Snapshot) == domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
+				row = ensureSupplement(item.PayeeUserID)
+			}
 			if item.UnitPrice != nil {
 				actual := *item.UnitPrice
 				if row.QualityActualDeductionAmount != nil {
@@ -8823,7 +8829,7 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 				}
 				row.QualityActualDeductionAmount = &actual
 			}
-			qualityDifferences[item.PayeeUserID] += signedSettlementAmount(item)
+			qualityDifferences[qualityPayrollKey{item.PayeeUserID, row.RowType}] += signedSettlementAmount(item)
 		case domain.AssetWorkbenchItemTypeWelfare:
 			row := ensureNormal(item.PayeeUserID)
 			row.WelfareAmount += item.Amount
@@ -8833,7 +8839,7 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 			row.ItemCount++
 			row.PageCount += int(item.Quantity)
 			row.SupplementAmount += item.Amount
-			row.NetAmount = row.SupplementAmount
+			row.NetAmount = row.SupplementAmount - row.DeductionAmount
 		case domain.AssetWorkbenchItemTypeAdjustment, domain.AssetWorkbenchItemTypeReversal:
 			row := ensureNormal(item.PayeeUserID)
 			signedAmount := item.Amount
@@ -8871,8 +8877,8 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 				RowType:       domain.AssetWorkbenchPayrollRowTypeSupplementPiecework,
 			}
 		}
-		normal.ActualNetAmount = incomeMoney(normal.NetAmount + qualityDifferences[payeeID])
-		supplement.ActualNetAmount = supplement.NetAmount
+		normal.ActualNetAmount = incomeMoney(normal.NetAmount + qualityDifferences[qualityPayrollKey{payeeID, normal.RowType}])
+		supplement.ActualNetAmount = incomeMoney(supplement.NetAmount + qualityDifferences[qualityPayrollKey{payeeID, supplement.RowType}])
 		rows = append(rows, *normal, *supplement)
 	}
 	return rows
@@ -9324,6 +9330,7 @@ func enrichQualityErrorDeductionSnapshot(snapshot json.RawMessage, record *domai
 		_ = json.Unmarshal(snapshot, &payload)
 	}
 	payload["source"] = "quality_error_import"
+	payload["payroll_row_type"] = domain.WorkbenchPayrollRowType(record.RawPayload)
 	payload["error_record_id"] = record.ID
 	payload["order_no"] = record.OrderNo
 	payload["difficulty_class"] = record.DifficultyClass
@@ -9403,7 +9410,8 @@ func matchImportedErrorRecord(items []*domain.AssetWorkbenchSubmissionItem, inpu
 }
 
 func isQualityErrorImportInput(input ImportErrorRecordInput) bool {
-	return strings.TrimSpace(input.DifficultyClass) != "" ||
+	return strings.TrimSpace(input.FileName) != "" ||
+		strings.TrimSpace(input.DifficultyClass) != "" ||
 		strings.TrimSpace(input.PayeeName) != "" ||
 		strings.TrimSpace(input.IssueDescription) != "" ||
 		strings.TrimSpace(input.SourceType) != "" ||
@@ -9433,7 +9441,7 @@ func (s *Service) errorImportDifficultyIndex(ctx context.Context) (map[string]st
 	return index, nil
 }
 
-func (s *Service) matchQualityErrorRecord(ctx context.Context, input ImportErrorRecordInput, difficultyIndex map[string]string) (errorRecordImportMatch, *domain.AppError) {
+func (s *Service) matchQualityErrorRecord(input ImportErrorRecordInput, difficultyIndex map[string]string, resolvePayee func() (qualityImportPayee, *domain.AppError)) (errorRecordImportMatch, *domain.AppError) {
 	match := errorRecordImportMatch{Status: domain.AssetWorkbenchErrorMatchStatusMatched}
 	difficulty := normalizeErrorImportDifficulty(input.DifficultyClass, difficultyIndex)
 	if difficulty == "" {
@@ -9447,21 +9455,21 @@ func (s *Service) matchQualityErrorRecord(ctx context.Context, input ImportError
 		return match, appErr
 	}
 	match.OccurredDate = occurredDate
-	payeeUserID, candidates, reason, appErr := s.matchErrorImportPayee(ctx, input)
+	payee, appErr := resolvePayee()
 	if appErr != nil {
 		return match, appErr
 	}
-	match.CandidateUserIDs = candidates
-	if payeeUserID == nil {
-		if len(candidates) > 1 {
+	match.CandidateUserIDs = payee.candidates
+	if payee.id == nil {
+		if len(payee.candidates) > 1 {
 			match.Status = domain.AssetWorkbenchErrorMatchStatusAmbiguous
 		} else {
 			match.Status = domain.AssetWorkbenchErrorMatchStatusUnmatched
 		}
-		match.Reason = reason
+		match.Reason = payee.reason
 		return match, nil
 	}
-	match.PayeeUserID = payeeUserID
+	match.PayeeUserID = payee.id
 	return match, nil
 }
 
@@ -11783,10 +11791,32 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 	if len(sheets) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file has no readable sheet.", nil)
 	}
-	rows, err := f.GetRows(sheets[0])
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to read error Excel rows.", err.Error())
+	var records []ImportErrorRecordInput
+	for sheetIndex, sheet := range sheets {
+		rows, err := f.GetRows(sheet)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to read error Excel rows.", err.Error())
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		items, appErr := parseErrorRecordsSheet(rows, sheetIndex+1)
+		if appErr != nil {
+			appErr.Message = fmt.Sprintf("工作表「%s」：%s", sheet, appErr.Message)
+			return nil, appErr
+		}
+		if len(records)+len(items) > 50000 {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel rows exceed error import limit.", map[string]int{"limit": 50000})
+		}
+		records = append(records, items...)
 	}
+	if len(records) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file has no valid error rows.", nil)
+	}
+	return records, nil
+}
+
+func parseErrorRecordsSheet(rows [][]string, sheetIndex int) ([]ImportErrorRecordInput, *domain.AppError) {
 	if len(rows) < 2 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file must include a header row and at least one data row.", nil)
 	}
@@ -11794,7 +11824,8 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 	if !ok {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing quality error import headers.", nil)
 	}
-	orderIndex, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号", "文件名")
+	orderIndex, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号")
+	fileIndex, hasFile := firstExcelColumn(headers, "file_name", "文件名", "作品文件名")
 	errorIndex, hasErrorCount := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数", "出错张数")
 	payeeIndex, hasPayee := firstExcelColumn(headers, "payee_user_id", "payeeuserid", "user_id", "userid", "人员id", "用户id")
 	payeeNameIndex, hasPayeeName := firstExcelColumn(headers, "payee_name", "payeename", "出错人", "人员", "姓名", "计件人")
@@ -11805,6 +11836,7 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 	methodIndex, hasMethod := firstExcelColumn(headers, "handling_method", "handlingmethod", "处理方法", "处理方式")
 	reporterIndex, hasReporter := firstExcelColumn(headers, "reporter_name", "reportername", "登记人", "记录人")
 	remarkIndex, hasRemark := firstExcelColumn(headers, "remark", "remarks", "备注", "说明")
+	payrollIndex, hasPayroll := firstExcelColumn(headers, "payroll_row_type", "payrollrowtype", "工资条类型", "工资类型")
 	records := make([]ImportErrorRecordInput, 0, len(rows)-headerRow-1)
 	for rowIndex := headerRow + 1; rowIndex < len(rows); rowIndex++ {
 		row := rows[rowIndex]
@@ -11813,15 +11845,16 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel rows exceed error import limit.", map[string]int{"limit": 50000})
 		}
 		orderNo := excelOptionalCell(row, orderIndex, hasOrder)
+		fileName := excelOptionalCell(row, fileIndex, hasFile)
 		difficulty := excelOptionalCell(row, difficultyIndex, hasDifficulty)
 		payeeName := excelOptionalCell(row, payeeNameIndex, hasPayeeName)
 		errorRaw := excelOptionalCell(row, errorIndex, hasErrorCount)
 		issue := excelOptionalCell(row, issueIndex, hasIssue)
 		isQualityRow := difficulty != "" || payeeName != "" || issue != ""
-		if orderNo == "" && difficulty == "" && payeeName == "" && errorRaw == "" && issue == "" {
+		if orderNo == "" && fileName == "" && difficulty == "" && payeeName == "" && errorRaw == "" && issue == "" {
 			continue
 		}
-		if orderNo == "" && !isQualityRow {
+		if orderNo == "" && fileName == "" && !isQualityRow {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "order_no or quality import columns are required.", map[string]int{"row": currentRow})
 		}
 		errorCount := 1
@@ -11847,6 +11880,7 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 			"row":   currentRow,
 			"日期":    excelOptionalCell(row, dateIndex, hasDate),
 			"线上订单号": orderNo,
+			"文件名":   fileName,
 			"分类":    difficulty,
 			"出错人":   payeeName,
 			"问题描述":  issue,
@@ -11857,6 +11891,10 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 			"出错数":   errorCount,
 		}
 		records = append(records, ImportErrorRecordInput{
+			FileName:         fileName,
+			excelSheet:       sheetIndex,
+			excelRow:         currentRow,
+			PayrollRowType:   excelOptionalCell(row, payrollIndex, hasPayroll),
 			PayeeUserID:      payeeUserID,
 			PayeeName:        payeeName,
 			OrderNo:          orderNo,

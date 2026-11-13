@@ -121,8 +121,15 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 			row.GrossAmount += signed
 		case domain.AssetWorkbenchItemTypeErrorDeduction:
 			row.DeductionAmount -= signed
+			if domain.WorkbenchPayrollRowType(item.Snapshot) == domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
+				row.SupplementDeductionAmount -= signed
+				row.SupplementActualDeductionAmount -= signed
+			}
 		case domain.AssetWorkbenchItemTypeQualityDeductionAdjustment:
 			qualityDifference[item.BusinessMonth] += signedSettlementAmount(item)
+			if domain.WorkbenchPayrollRowType(item.Snapshot) == domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
+				row.SupplementActualDeductionAmount -= signedSettlementAmount(item)
+			}
 			if item.UnitPrice != nil {
 				actual := *item.UnitPrice
 				if row.QualityActualDeductionAmount != nil {
@@ -206,6 +213,12 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 				row.SupplementItemCount += part.ItemCount
 				row.SupplementPageCount += part.PageCount
 				row.SupplementAmount += part.SupplementAmount
+				row.DeductionAmount += part.DeductionAmount
+				row.SupplementDeductionAmount += part.DeductionAmount
+				row.SupplementActualDeductionAmount += part.DeductionAmount
+				if part.QualityActualDeductionAmount != nil {
+					row.SupplementActualDeductionAmount += *part.QualityActualDeductionAmount - part.DeductionAmount
+				}
 			}
 			if part.QualityActualDeductionAmount != nil {
 				actual := *part.QualityActualDeductionAmount
@@ -221,6 +234,8 @@ func (s *Service) personalIncome(ctx context.Context, actor domain.RequestActor)
 		row.DeductionAmount = incomeMoney(row.DeductionAmount)
 		row.WelfareAmount = incomeMoney(row.WelfareAmount)
 		row.SupplementAmount = incomeMoney(row.SupplementAmount)
+		row.SupplementDeductionAmount = incomeMoney(row.SupplementDeductionAmount)
+		row.SupplementActualDeductionAmount = incomeMoney(row.SupplementActualDeductionAmount)
 		row.AdjustmentAmount = incomeMoney(row.AdjustmentAmount)
 		row.ConfirmedNetAmount = incomeMoney(row.ConfirmedNetAmount)
 		row.PendingConfirmationAmount = incomeMoney(row.PendingConfirmationAmount)

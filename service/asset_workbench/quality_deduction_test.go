@@ -1,9 +1,12 @@
 package assetworkbench
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
+
+	"github.com/xuri/excelize/v2"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -20,10 +23,78 @@ func (r *qualityDeductionRepo) ListSettlementMonthStates(context.Context) (map[s
 }
 
 func (r *qualityDeductionRepo) ListQualityActualDeductions(context.Context, repo.Tx, string) ([]*domain.AssetWorkbenchSettlementAdjustment, error) {
-	if len(r.saved) == 0 {
-		return nil, nil
+	var result []*domain.AssetWorkbenchSettlementAdjustment
+	seen := map[qualityPayrollKey]bool{}
+	for i := len(r.saved) - 1; i >= 0; i-- {
+		row := r.saved[i]
+		key := qualityPayrollKey{row.PayeeUserID, domain.WorkbenchPayrollRowType(row.Payload)}
+		if !seen[key] {
+			result = append(result, row)
+			seen[key] = true
+		}
 	}
-	return r.saved[len(r.saved)-1:], nil
+	return result, nil
+}
+
+func TestSupplementQualityDeductionStaysOnSupplementPayroll(t *testing.T) {
+	ctx := context.Background()
+	r := &qualityDeductionRepo{}
+	s := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
+	s.nowFn = func() time.Time { return time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC) }
+	admin := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetSettlement}}
+	normal := domain.AssetWorkbenchPayrollRowTypeNormalPiecework
+	supplement := domain.AssetWorkbenchPayrollRowTypeSupplementPiecework
+	if err := s.SaveQualityActualDeductionForPayroll(ctx, admin, "2026-10", 350, 25, normal); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveQualityActualDeductionForPayroll(ctx, admin, "2026-10", 350, 5, supplement); err != nil {
+		t.Fatal(err)
+	}
+	lines := []*domain.AssetWorkbenchSettlementItem{
+		{PayeeUserID: 350, ItemType: domain.AssetWorkbenchItemTypeGrossPiecework, Amount: 283.06},
+		{PayeeUserID: 350, ItemType: domain.AssetWorkbenchItemTypeErrorDeduction, Amount: 45, Quantity: 6},
+		{PayeeUserID: 350, ItemType: domain.AssetWorkbenchItemTypeSupplement, Amount: 30},
+		{PayeeUserID: 350, ItemType: domain.AssetWorkbenchItemTypeErrorDeduction, Amount: 10, Quantity: 1, Snapshot: mustJSON(map[string]string{"payroll_row_type": supplement})},
+	}
+	check := func(want float64) {
+		t.Helper()
+		entries, _ := r.ListQualityActualDeductions(ctx, nil, "2026-10")
+		preview := &SettlementPreview{BusinessMonth: "2026-10", PayrollRows: buildSettlementPayrollRowsFromItems("2026-10", lines)}
+		frozen := applyQualityActualDeductions(preview, entries, nil)
+		rows := buildSettlementPayrollRowsFromItems("2026-10", append(lines, frozen...))
+		if rows[0].ActualNetAmount != 258.06 || rows[0].DeductionAmount != 45 || rows[1].NetAmount != 20 ||
+			rows[1].ActualNetAmount != want || rows[1].DeductionAmount != 10 || rows[1].ErrorCount != 1 {
+			t.Fatalf("payroll rows = %+v", rows)
+		}
+	}
+	check(25)
+	if err := s.SaveQualityActualDeductionForPayroll(ctx, admin, "2026-10", 350, 0, supplement); err != nil {
+		t.Fatal(err)
+	}
+	check(20)
+}
+
+func TestQualityExcelKeepsSupplementPayrollType(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	sheet := f.GetSheetName(0)
+	if err := f.SetSheetRow(sheet, "A1", &[]any{"日期", "出错人", "出错分类", "出错张数", "工资条类型"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow(sheet, "A2", &[]any{"2026-10-12", "测试人员", "A类", 1, "补录计件工资"}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := parseErrorRecordsExcel(&buf)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows=%+v err=%v", rows, err)
+	}
+	if rowType, ok := normalizeQualityPayrollRowType(rows[0].PayrollRowType); !ok || rowType != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
+		t.Fatalf("imported payroll type = %q", rows[0].PayrollRowType)
+	}
 }
 
 func (r *qualityDeductionRepo) CreateSettlementAdjustment(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSettlementAdjustment) (*domain.AssetWorkbenchSettlementAdjustment, error) {

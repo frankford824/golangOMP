@@ -16468,11 +16468,18 @@ export interface paths {
                         business_month: string;
                         original_filename?: string;
                         records: {
+                            /**
+                             * @description Explicit override. Blank resolves by order or filename for the payee and month
+                             * @enum {string}
+                             */
+                            payroll_row_type?: "normal_piecework" | "supplement_piecework";
                             payee_user_id?: number | null;
                             /** @description Upload/payee display name from the quality error sheet. */
                             payee_name?: string;
-                            /** @description Optional uploaded filename/order trace; not required for deduction calculation. */
+                            /** @description Optional order number for exact work matching. */
                             order_no?: string;
+                            /** @description Optional filename or relative path for exact work matching. */
+                            file_name?: string;
                             /** @description Difficulty class code or name */
                             difficulty_class?: string;
                             /** @description Optional YYYY-MM-DD or Excel date serial used for effective-rule matching. */
@@ -16542,6 +16549,13 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description Settlement month is locked */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         delete?: never;
@@ -16561,7 +16575,7 @@ export interface paths {
         put?: never;
         /**
          * Import asset workbench quality error deductions from Excel
-         * @description Accepts the formal quality error template with Chinese headers such as `线上订单号`, `分类`, `出错人`, `问题描述`, `抽查/售后`, `处理方法`, `登记人`, `备注`, and optional hidden `出错数`. Missing `出错数` defaults to 1. `线上订单号` is retained for traceability only; deduction calculation matches by payee and difficulty class.
+         * @description Imports all data sheets atomically. Explicit payroll type wins. Otherwise, an exact and unique order or filename for the same payee and month selects the payroll row. Unresolved work references require manual selection. A row without work references defaults to normal piecework. A month with an active settlement batch is locked.
          */
         post: {
             parameters: {
@@ -16576,6 +16590,8 @@ export interface paths {
                         business_month: string;
                         /** Format: binary */
                         file: string;
+                        /** @description Optional JSON array of objects with one-based sheet and row and payroll_row_type normal_piecework or supplement_piecework. */
+                        payroll_overrides?: string;
                     };
                 };
             };
@@ -16628,6 +16644,111 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Settlement month is locked */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/error-imports/excel/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review quality Excel payroll row assignments
+         * @description Validates quality records and resolves payroll row types without creating an import.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        business_month: string;
+                        /** Format: binary */
+                        file: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Per-row payroll assignment and review feedback */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                rows?: {
+                                    /** @description One-based worksheet index. */
+                                    sheet: number;
+                                    /** @description One-based worksheet row. */
+                                    row: number;
+                                    payee_name: string;
+                                    occurred_date: string;
+                                    difficulty_class: string;
+                                    error_count: number;
+                                    issue_description: string;
+                                    order_no: string;
+                                    file_name: string;
+                                    /** @enum {string} */
+                                    payroll_row_type: "" | "normal_piecework" | "supplement_piecework";
+                                    needs_payroll_type: boolean;
+                                    /** @enum {string} */
+                                    match_status: "" | "matched" | "unmatched" | "ambiguous";
+                                    message: string;
+                                    blocking: boolean;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Settlement month is locked */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16704,6 +16825,8 @@ export interface paths {
                                     raw_payload_json?: {
                                         [key: string]: unknown;
                                     };
+                                    /** @enum {string} */
+                                    payroll_row_type?: "normal_piecework" | "supplement_piecework";
                                     match_status?: string;
                                     submission_item_id?: number | null;
                                     /** Format: date-time */
@@ -17864,6 +17987,8 @@ export interface paths {
                                 locked: boolean;
                                 deductions: {
                                     payee_user_id: number;
+                                    /** @enum {string} */
+                                    payroll_row_type: "normal_piecework" | "supplement_piecework";
                                     quality_actual_deduction_amount: number;
                                 }[];
                             };
@@ -17895,7 +18020,7 @@ export interface paths {
         };
         /**
          * Save one person's manual quality deduction for a payroll month
-         * @description A positive amount replaces the rule-based deduction when calculating actual net pay. Zero restores the rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
+         * @description A positive amount replaces the rule-based deduction for the selected person, month and payroll row type. Zero restores that row's rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
          */
         put: {
             parameters: {
@@ -17909,6 +18034,11 @@ export interface paths {
                     "application/json": {
                         business_month: string;
                         payee_user_id: number;
+                        /**
+                         * @default normal_piecework
+                         * @enum {string}
+                         */
+                        payroll_row_type?: "normal_piecework" | "supplement_piecework";
                         quality_actual_deduction_amount: number;
                     };
                 };
@@ -18052,7 +18182,7 @@ export interface paths {
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework";
                                     adjustment_amount?: number;
-                                    /** @description Manual deduction applied to the normal payroll row. Omitted when the rule-based deduction applies. */
+                                    /** @description Manual deduction applied to this payroll row. Omitted when the rule-based deduction applies. */
                                     quality_actual_deduction_amount?: number;
                                 })[];
                             };
@@ -18143,7 +18273,7 @@ export interface paths {
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework";
                                     adjustment_amount?: number;
-                                    /** @description Manual deduction applied to the normal payroll row. Omitted when the rule-based deduction applies. */
+                                    /** @description Manual deduction applied to this payroll row. Omitted when the rule-based deduction applies. */
                                     quality_actual_deduction_amount?: number;
                                 })[];
                                 actual_net_amount?: number;
@@ -19088,6 +19218,8 @@ export interface paths {
                                     adjustment_amount?: number;
                                     net_amount?: number;
                                     quality_actual_deduction_amount?: number;
+                                    supplement_deduction_amount?: number;
+                                    supplement_actual_deduction_amount?: number;
                                     actual_net_amount?: number;
                                     confirmed?: boolean;
                                     /** @enum {string} */

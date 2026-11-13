@@ -489,6 +489,15 @@ type AssetWorkbenchBatchJobFilter struct {
 	PageSize    int
 }
 
+type AssetWorkbenchQualityWorkReference struct {
+	WorkID       int64
+	Supplement   bool
+	OrderNo      string
+	OriginalName string
+	DisplayName  string
+	RelativePath string
+}
+
 type AssetWorkbenchRepo interface {
 	ReadPersonalIncome(ctx context.Context, payeeUserID int64) (*AssetWorkbenchIncomeSources, error)
 	SetSettlementVisibility(ctx context.Context, tx Tx, userID int64, visible bool, actorID int64) error
@@ -609,6 +618,7 @@ type AssetWorkbenchRepo interface {
 	ListSubmissions(ctx context.Context, filter AssetWorkbenchSubmissionFilter) ([]*domain.AssetWorkbenchSubmission, int64, error)
 	ListSubmissionItems(ctx context.Context, submissionID int64) ([]*domain.AssetWorkbenchSubmissionItem, error)
 	ListSubmissionItemsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)
+	ListQualityImportWorkReferences(ctx context.Context, businessMonth string, payeeID int64) ([]AssetWorkbenchQualityWorkReference, error)
 	ListPendingGradeSubmissionItemsForPayee(ctx context.Context, tx Tx, payeeUserID int64, limit int) ([]*domain.AssetWorkbenchSubmissionItem, error)
 	ListSubmissionFiles(ctx context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	ListSubmissionFilesForUpdate(ctx context.Context, tx Tx, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error)

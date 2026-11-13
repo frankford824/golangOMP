@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `207` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `208` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## POST /v1/integration/asset-media/workers/claim
 
@@ -12233,6 +12233,7 @@ Content-Type: `application/json`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
 | 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 409 | 见 `error.code` | 见 `deny_code` | Settlement month is locked |
 
 ##### curl 示例
 ```bash
@@ -12256,7 +12257,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/error-imports \
 ### 简介
 支持方法: POST。
 
-- `POST`: Accepts the formal quality error template with Chinese headers such as `线上订单号`, `分类`, `出错人`, `问题描述`, `抽查/售后`, `处理方法`, `登记人`, `备注`, and optional hidden `出错数`. Missing `出错数` defaults to 1. `线上订单号` is retained for traceability only; deduction calculation matches by payee and difficulty class.
+- `POST`: Imports all data sheets atomically. Explicit payroll type wins. Otherwise, an exact and unique order or filename for the same payee and month selects the payroll row. Unresolved work references require manual selection. A row without work references defaults to normal piecework. A month with an active settlement batch is locked.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -12274,6 +12275,7 @@ Content-Type: `multipart/form-data`
 |---|---|---|---|
 | `business_month` | string | 是 | - |
 | `file` | string | 是 | - |
+| `payroll_overrides` | string | 否 | Optional JSON array of objects with one-based sheet and row and payroll_row_type normal_piecework or supplement_piecework. |
 
 ### 响应体 schema
 成功响应: `201 application/json`
@@ -12299,10 +12301,76 @@ Content-Type: `multipart/form-data`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
 | 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 409 | 见 `error.code` | 见 `deny_code` | Settlement month is locked |
 
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/asset-workbench/error-imports/excel \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@example.xlsx"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/asset-workbench/error-imports/excel/preview
+
+### 简介
+支持方法: POST。
+
+- `POST`: Validates quality records and resolves payroll row types without creating an import.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: AssetManager, AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `multipart/form-data`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `business_month` | string | 是 | - |
+| `file` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "rows": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 409 | 见 `error.code` | 见 `deny_code` | Settlement month is locked |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/asset-workbench/error-imports/excel/preview \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@example.xlsx"
 ```
@@ -13158,7 +13226,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/browse \
 支持方法: GET, PUT。
 
 - `GET`: List manual quality deductions for a payroll month
-- `PUT`: A positive amount replaces the rule-based deduction when calculating actual net pay. Zero restores the rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
+- `PUT`: A positive amount replaces the rule-based deduction for the selected person, month and payroll row type. Zero restores that row's rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13222,6 +13290,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `business_month` | string | 是 | - |
 | `payee_user_id` | integer | 是 | - |
+| `payroll_row_type` | enum(normal_piecework/supplement_piecework) | 否 | - |
 | `quality_actual_deduction_amount` | number | 是 | - |
 
 ##### 响应体 schema

@@ -5,6 +5,23 @@ import (
 	"time"
 )
 
+// WorkbenchPayrollRowType reads the classification saved with a quality record
+// or deduction. Older records without a classification belong to normal pay.
+func WorkbenchPayrollRowType(payload json.RawMessage) string {
+	var value struct {
+		PayrollRowType string `json:"payroll_row_type"`
+		Input          struct {
+			PayrollRowType string `json:"payroll_row_type"`
+		} `json:"input"`
+	}
+	if json.Unmarshal(payload, &value) == nil &&
+		(value.PayrollRowType == AssetWorkbenchPayrollRowTypeSupplementPiecework ||
+			value.Input.PayrollRowType == AssetWorkbenchPayrollRowTypeSupplementPiecework) {
+		return AssetWorkbenchPayrollRowTypeSupplementPiecework
+	}
+	return AssetWorkbenchPayrollRowTypeNormalPiecework
+}
+
 type AssetWorkbenchErrorImportBatch struct {
 	ID               int64                        `json:"id" db:"id"`
 	ImportNo         string                       `json:"import_no" db:"import_no"`
@@ -39,6 +56,7 @@ type AssetWorkbenchErrorRecord struct {
 	CreatedAt        time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at" db:"updated_at"`
 	PayeeName        string          `json:"payee_name,omitempty" db:"-"`
+	PayrollRowType   string          `json:"payroll_row_type,omitempty" db:"-"`
 	DeductionAmount  float64         `json:"deduction_amount" db:"-"`
 }
 
