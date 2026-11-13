@@ -3,6 +3,7 @@ package assetworkbench
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
@@ -15,6 +16,7 @@ func TestQualityImportReviewsAllSheetsAndPersistsPayrollAssignment(t *testing.T)
 	const month = "2026-10"
 	const normal = domain.AssetWorkbenchPayrollRowTypeNormalPiecework
 	const supplement = domain.AssetWorkbenchPayrollRowTypeSupplementPiecework
+	longFileName := strings.Repeat("长", 129) + ".psd"
 	r := &errorImportRepo{
 		profiles: []*domain.AssetWorkbenchProfile{{UserID: 100, RealName: "测试人员"}},
 		qualityRefs: map[string]map[int64][]repo.AssetWorkbenchQualityWorkReference{
@@ -22,7 +24,7 @@ func TestQualityImportReviewsAllSheetsAndPersistsPayrollAssignment(t *testing.T)
 				100: {
 					{WorkID: 5, OrderNo: "共同订单", OriginalName: "日常.psd"},
 					{WorkID: 6, Supplement: true, OrderNo: "共同订单", OriginalName: "补录.psd"},
-					{WorkID: 6, Supplement: true, OrderNo: "共同订单", OriginalName: "补录2.psd"},
+					{WorkID: 6, Supplement: true, OrderNo: "共同订单", OriginalName: longFileName},
 					{WorkID: -7, Supplement: true, OrderNo: "手工补录"},
 				},
 				101: {{WorkID: 9, OrderNo: "其他人员"}},
@@ -56,16 +58,17 @@ func TestQualityImportReviewsAllSheetsAndPersistsPayrollAssignment(t *testing.T)
 	add("补录", "A7", "2026-10-05", "测试人员", "A", 6, "手工补录")
 	add("补录", "A8", "2026-10-05", "测试人员", "A", 7, "上月作品")
 	add("补录", "A9", "2026-10-05", "测试人员", "A", 8, "", "", "错误类型")
+	add("补录", "A10", "2026-10-05", "测试人员", "A", 1, "", longFileName)
 	buf, err := f.WriteToBuffer()
 	if err != nil {
 		t.Fatal(err)
 	}
 	read := func() *bytes.Reader { return bytes.NewReader(buf.Bytes()) }
 	review, appErr := svc.PreviewQualityImportExcel(ctx, actor, month, read())
-	if appErr != nil || len(review.Rows) != 8 || len(r.records) != 0 {
+	if appErr != nil || len(review.Rows) != 9 || len(r.records) != 0 {
 		t.Fatalf("preview=%+v error=%v records=%d", review, appErr, len(r.records))
 	}
-	want := []string{normal, normal, supplement, "", "", supplement, "", ""}
+	want := []string{normal, normal, supplement, "", "", supplement, "", "", supplement}
 	for i, row := range review.Rows {
 		if row.PayrollRowType != want[i] || row.NeedsPayrollType != (want[i] == "") || row.Blocking != (want[i] == "") {
 			t.Errorf("review row %d: %+v", i, row)
@@ -92,10 +95,13 @@ func TestQualityImportReviewsAllSheetsAndPersistsPayrollAssignment(t *testing.T)
 	}
 	r.qualityMonthStates[month] = false
 	batch, appErr := svc.ImportErrorRecordsExcel(ctx, actor, month, "test.xlsx", read(), overrides...)
-	if appErr != nil || batch.TotalRows != 8 || batch.MatchedRows != 8 || len(r.records) != 8 {
+	if appErr != nil || batch.TotalRows != 9 || batch.MatchedRows != 9 || len(r.records) != 9 {
 		t.Fatalf("batch=%+v err=%v records=%d", batch, appErr, len(r.records))
 	}
-	want = []string{normal, normal, supplement, supplement, normal, supplement, supplement, normal}
+	if record := r.records[8]; len([]rune(record.OrderNo)) != 128 || !strings.Contains(string(record.RawPayload), longFileName) {
+		t.Fatalf("long reference lost from audit or exceeded display column: %+v", record)
+	}
+	want = []string{normal, normal, supplement, supplement, normal, supplement, supplement, normal, supplement}
 	for i, record := range r.records {
 		if got := domain.WorkbenchPayrollRowType(record.RawPayload); got != want[i] {
 			t.Errorf("persisted row %d has type %s, want %s", i, got, want[i])

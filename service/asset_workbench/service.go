@@ -4551,6 +4551,11 @@ func (s *Service) ImportErrorRecords(ctx context.Context, actor domain.RequestAc
 			if orderNo == "" {
 				orderNo = strings.TrimSpace(input.FileName)
 			}
+			// The searchable display field is limited to 128 characters. Keep the full
+			// reference in the raw payload used to audit the import.
+			if runes := []rune(orderNo); len(runes) > 128 {
+				orderNo = string(runes[:128])
+			}
 			match := matches[idx]
 			raw := errorRecordRawPayload(input, match)
 			payeeUserID := input.PayeeUserID
