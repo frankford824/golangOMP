@@ -54,6 +54,10 @@ func (r *productManagementRepo) RefreshReadModel(ctx context.Context) error {
 	return r.refreshMaterializedFields(ctx)
 }
 
+// Filter unchanged rows before INSERT: duplicate inserts into AUTO_INCREMENT tables
+// retain InnoDB memory on the deployed MySQL version even when every value is unchanged.
+// The predicate mirrors the duplicate assignments, including nulls and sync transitions;
+// textual comparisons are binary so case-only business edits are not lost.
 func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) error {
 	_, err := r.db.db.ExecContext(ctx, `
 		INSERT INTO erp_product_sync_records (
@@ -63,6 +67,11 @@ func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) erro
 		  erp_sync_status, base_sync_status, image_sync_status, last_erp_synced_at, last_base_synced_at,
 		  updated_at
 		)
+		WITH incoming (record_key, task_id, task_sku_item_id, task_no, task_type, source_mode,
+		  sku_code, product_i_id, erp_i_id, category_name, product_family,
+		  product_name, cost_price, creator_id, creator_name, task_created_at,
+		  erp_sync_status, base_sync_status, image_sync_status, last_erp_synced_at, last_base_synced_at,
+		  updated_at) AS (
 		SELECT
 		  CONCAT('task:', t.id, ':main'),
 		  t.id,
@@ -111,6 +120,108 @@ func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) erro
 		  AND NOT EXISTS (
 		    SELECT 1 FROM task_sku_items tsi WHERE tsi.task_id = t.id
 		  )
+
+		)
+		SELECT incoming.* FROM incoming
+		LEFT JOIN erp_product_sync_records current_record ON current_record.record_key = incoming.record_key
+		WHERE current_record.id IS NULL
+		   OR NOT (CAST(current_record.task_no AS BINARY) <=> CAST((incoming.task_no) AS BINARY))
+		   OR NOT (CAST(current_record.task_type AS BINARY) <=> CAST((incoming.task_type) AS BINARY))
+		   OR NOT (CAST(current_record.source_mode AS BINARY) <=> CAST((incoming.source_mode) AS BINARY))
+		   OR NOT (CAST(current_record.last_sync_error AS BINARY) <=> CAST((CASE
+		    WHEN incoming.erp_sync_status = 'pending_sync'
+		      AND current_record.erp_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN ''
+		    ELSE current_record.last_sync_error
+		  END) AS BINARY))
+		   OR NOT (CAST(current_record.base_sync_error AS BINARY) <=> CAST((CASE
+		    WHEN incoming.base_sync_status = 'pending_sync'
+		      AND current_record.base_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN ''
+		    ELSE current_record.base_sync_error
+		  END) AS BINARY))
+		   OR NOT (current_record.sync_cooldown_until <=> (CASE
+		    WHEN (
+		      incoming.erp_sync_status = 'pending_sync'
+		      AND current_record.erp_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at
+		    ) OR (
+		      incoming.base_sync_status = 'pending_sync'
+		      AND current_record.base_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at
+		    ) THEN NULL
+		    ELSE current_record.sync_cooldown_until
+		  END))
+		   OR NOT (current_record.latest_cost_snapshot_id <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN NULL ELSE current_record.latest_cost_snapshot_id
+		  END))
+		   OR NOT (current_record.latest_erp_trace_id <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN NULL ELSE current_record.latest_erp_trace_id
+		  END))
+		   OR NOT (CAST(current_record.combo_search_text AS BINARY) <=> CAST((CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		    THEN NULL ELSE current_record.combo_search_text
+		  END) AS BINARY))
+		   OR NOT (current_record.cost_legacy_alias_fallback <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN 0 ELSE current_record.cost_legacy_alias_fallback
+		  END))
+		   OR NOT (current_record.cost_area_spec_abnormal <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN 0 ELSE current_record.cost_area_spec_abnormal
+		  END))
+		   OR NOT (CAST(current_record.erp_sync_status AS BINARY) <=> CAST((CASE
+		    WHEN current_record.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN current_record.erp_sync_status
+		    WHEN current_record.erp_sync_status IN ('synced', 'failed')
+		      AND (
+		        NOT (current_record.sku_code <=> incoming.sku_code)
+		        OR NOT (current_record.product_i_id <=> incoming.product_i_id)
+		        OR NOT (current_record.product_name <=> incoming.product_name)
+		        OR NOT (current_record.cost_price <=> incoming.cost_price)
+		      ) THEN 'pending_sync'
+		    WHEN incoming.erp_sync_status = 'synced' THEN 'synced'
+		    WHEN incoming.erp_sync_status = 'pending_sync'
+		      AND current_record.erp_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN 'pending_sync'
+		    ELSE current_record.erp_sync_status
+		  END) AS BINARY))
+		   OR NOT (CAST(current_record.base_sync_status AS BINARY) <=> CAST((CASE
+		    WHEN current_record.base_sync_status IN ('queued', 'cooling_down', 'syncing') THEN current_record.base_sync_status
+		    WHEN current_record.base_sync_status IN ('synced', 'failed')
+		      AND (
+		        NOT (current_record.sku_code <=> incoming.sku_code)
+		        OR NOT (current_record.erp_i_id <=> incoming.erp_i_id)
+		        OR NOT (current_record.product_name <=> incoming.product_name)
+		        OR NOT (current_record.cost_price <=> incoming.cost_price)
+		      ) THEN 'pending_sync'
+		    WHEN incoming.base_sync_status = 'synced' THEN 'synced'
+		    WHEN incoming.base_sync_status = 'pending_sync'
+		      AND current_record.base_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN 'pending_sync'
+		    ELSE current_record.base_sync_status
+		  END) AS BINARY))
+		   OR NOT (CAST(current_record.sku_code AS BINARY) <=> CAST((incoming.sku_code) AS BINARY))
+		   OR NOT (CAST(current_record.product_i_id AS BINARY) <=> CAST((incoming.product_i_id) AS BINARY))
+		   OR NOT (CAST(current_record.erp_i_id AS BINARY) <=> CAST((incoming.erp_i_id) AS BINARY))
+		   OR NOT (CAST(current_record.category_name AS BINARY) <=> CAST((incoming.category_name) AS BINARY))
+		   OR NOT (CAST(current_record.product_family AS BINARY) <=> CAST((incoming.product_family) AS BINARY))
+		   OR NOT (CAST(current_record.product_name AS BINARY) <=> CAST((incoming.product_name) AS BINARY))
+		   OR NOT (current_record.cost_price <=> (incoming.cost_price))
+		   OR NOT (current_record.creator_id <=> (incoming.creator_id))
+		   OR NOT (CAST(current_record.creator_name AS BINARY) <=> CAST((incoming.creator_name) AS BINARY))
+		   OR NOT (current_record.task_created_at <=> (incoming.task_created_at))
+		   OR NOT (current_record.last_erp_synced_at <=> (COALESCE(incoming.last_erp_synced_at, current_record.last_erp_synced_at)))
+		   OR NOT (current_record.last_base_synced_at <=> (COALESCE(incoming.last_base_synced_at, current_record.last_base_synced_at)))
 		ON DUPLICATE KEY UPDATE
 		  task_no = VALUES(task_no),
 		  task_type = VALUES(task_type),
@@ -224,6 +335,11 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 		  erp_sync_status, base_sync_status, image_sync_status, last_erp_synced_at, last_base_synced_at,
 		  updated_at
 		)
+		WITH incoming (record_key, task_id, task_sku_item_id, task_no, task_type, source_mode,
+		  sku_code, product_i_id, erp_i_id, category_name, product_family,
+		  product_name, cost_price, creator_id, creator_name, task_created_at,
+		  erp_sync_status, base_sync_status, image_sync_status, last_erp_synced_at, last_base_synced_at,
+		  updated_at) AS (
 		SELECT
 		  CONCAT('task:', t.id, ':sku:', tsi.id),
 		  t.id,
@@ -274,6 +390,108 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 		JOIN task_details td ON td.task_id = t.id
 		LEFT JOIN users u ON u.id = t.creator_id
 		WHERE COALESCE(tsi.sku_code, '') <> ''
+
+		)
+		SELECT incoming.* FROM incoming
+		LEFT JOIN erp_product_sync_records current_record ON current_record.record_key = incoming.record_key
+		WHERE current_record.id IS NULL
+		   OR NOT (CAST(current_record.task_no AS BINARY) <=> CAST((incoming.task_no) AS BINARY))
+		   OR NOT (CAST(current_record.task_type AS BINARY) <=> CAST((incoming.task_type) AS BINARY))
+		   OR NOT (CAST(current_record.source_mode AS BINARY) <=> CAST((incoming.source_mode) AS BINARY))
+		   OR NOT (CAST(current_record.last_sync_error AS BINARY) <=> CAST((CASE
+		    WHEN incoming.erp_sync_status = 'pending_sync'
+		      AND current_record.erp_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN ''
+		    ELSE current_record.last_sync_error
+		  END) AS BINARY))
+		   OR NOT (CAST(current_record.base_sync_error AS BINARY) <=> CAST((CASE
+		    WHEN incoming.base_sync_status = 'pending_sync'
+		      AND current_record.base_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN ''
+		    ELSE current_record.base_sync_error
+		  END) AS BINARY))
+		   OR NOT (current_record.sync_cooldown_until <=> (CASE
+		    WHEN (
+		      incoming.erp_sync_status = 'pending_sync'
+		      AND current_record.erp_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at
+		    ) OR (
+		      incoming.base_sync_status = 'pending_sync'
+		      AND current_record.base_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at
+		    ) THEN NULL
+		    ELSE current_record.sync_cooldown_until
+		  END))
+		   OR NOT (current_record.latest_cost_snapshot_id <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN NULL ELSE current_record.latest_cost_snapshot_id
+		  END))
+		   OR NOT (current_record.latest_erp_trace_id <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN NULL ELSE current_record.latest_erp_trace_id
+		  END))
+		   OR NOT (CAST(current_record.combo_search_text AS BINARY) <=> CAST((CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		    THEN NULL ELSE current_record.combo_search_text
+		  END) AS BINARY))
+		   OR NOT (current_record.cost_legacy_alias_fallback <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN 0 ELSE current_record.cost_legacy_alias_fallback
+		  END))
+		   OR NOT (current_record.cost_area_spec_abnormal <=> (CASE
+		    WHEN NOT (current_record.sku_code <=> incoming.sku_code)
+		      OR NOT (current_record.task_id <=> incoming.task_id)
+		      OR NOT (current_record.task_sku_item_id <=> incoming.task_sku_item_id)
+		    THEN 0 ELSE current_record.cost_area_spec_abnormal
+		  END))
+		   OR NOT (CAST(current_record.erp_sync_status AS BINARY) <=> CAST((CASE
+		    WHEN current_record.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN current_record.erp_sync_status
+		    WHEN current_record.erp_sync_status IN ('synced', 'failed')
+		      AND (
+		        NOT (current_record.sku_code <=> incoming.sku_code)
+		        OR NOT (current_record.product_i_id <=> incoming.product_i_id)
+		        OR NOT (current_record.product_name <=> incoming.product_name)
+		        OR NOT (current_record.cost_price <=> incoming.cost_price)
+		      ) THEN 'pending_sync'
+		    WHEN incoming.erp_sync_status = 'synced' THEN 'synced'
+		    WHEN incoming.erp_sync_status = 'pending_sync'
+		      AND current_record.erp_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN 'pending_sync'
+		    ELSE current_record.erp_sync_status
+		  END) AS BINARY))
+		   OR NOT (CAST(current_record.base_sync_status AS BINARY) <=> CAST((CASE
+		    WHEN current_record.base_sync_status IN ('queued', 'cooling_down', 'syncing') THEN current_record.base_sync_status
+		    WHEN current_record.base_sync_status IN ('synced', 'failed')
+		      AND (
+		        NOT (current_record.sku_code <=> incoming.sku_code)
+		        OR NOT (current_record.erp_i_id <=> incoming.erp_i_id)
+		        OR NOT (current_record.product_name <=> incoming.product_name)
+		        OR NOT (current_record.cost_price <=> incoming.cost_price)
+		      ) THEN 'pending_sync'
+		    WHEN incoming.base_sync_status = 'synced' THEN 'synced'
+		    WHEN incoming.base_sync_status = 'pending_sync'
+		      AND current_record.base_sync_status = 'failed'
+		      AND incoming.updated_at > current_record.updated_at THEN 'pending_sync'
+		    ELSE current_record.base_sync_status
+		  END) AS BINARY))
+		   OR NOT (CAST(current_record.sku_code AS BINARY) <=> CAST((incoming.sku_code) AS BINARY))
+		   OR NOT (CAST(current_record.product_i_id AS BINARY) <=> CAST((incoming.product_i_id) AS BINARY))
+		   OR NOT (CAST(current_record.erp_i_id AS BINARY) <=> CAST((incoming.erp_i_id) AS BINARY))
+		   OR NOT (CAST(current_record.category_name AS BINARY) <=> CAST((incoming.category_name) AS BINARY))
+		   OR NOT (CAST(current_record.product_family AS BINARY) <=> CAST((incoming.product_family) AS BINARY))
+		   OR NOT (CAST(current_record.product_name AS BINARY) <=> CAST((incoming.product_name) AS BINARY))
+		   OR NOT (current_record.cost_price <=> (incoming.cost_price))
+		   OR NOT (current_record.creator_id <=> (incoming.creator_id))
+		   OR NOT (CAST(current_record.creator_name AS BINARY) <=> CAST((incoming.creator_name) AS BINARY))
+		   OR NOT (current_record.task_created_at <=> (incoming.task_created_at))
+		   OR NOT (current_record.last_erp_synced_at <=> (COALESCE(incoming.last_erp_synced_at, current_record.last_erp_synced_at)))
+		   OR NOT (current_record.last_base_synced_at <=> (COALESCE(incoming.last_base_synced_at, current_record.last_base_synced_at)))
 		ON DUPLICATE KEY UPDATE
 		  task_no = VALUES(task_no),
 		  task_type = VALUES(task_type),
