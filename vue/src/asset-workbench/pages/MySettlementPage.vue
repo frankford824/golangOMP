@@ -130,11 +130,11 @@ function formatMonthLabel(month: string) {
 }
 
 function normalPieceworkAmount(month: MySettlementMonthRow) {
-  return (month.actual_net_amount ?? month.net_amount) - month.supplement_amount
+  return (month.actual_net_amount ?? month.net_amount) - supplementAmount(month)
 }
 
 function supplementAmount(month: MySettlementMonthRow) {
-  return month.supplement_amount
+  return month.supplement_amount - (month.supplement_actual_deduction_amount ?? 0)
 }
 
 function todayDate() {
@@ -429,8 +429,8 @@ onBeforeUnmount(() => {
                 <div class="aw-pay-slip__copy">
                   <strong>正常作品工资</strong>
                   <span>{{ formatInt(month.item_count) }} 个作品 · {{ formatInt(month.page_count) }} 个计价单位</span>
-                  <small v-if="month.deduction_amount > 0 || month.quality_actual_deduction_amount != null">
-                    质检应扣 {{ formatMoney(month.deduction_amount) }} · 实际扣款 {{ formatMoney(month.quality_actual_deduction_amount ?? month.deduction_amount) }}
+                  <small v-if="month.deduction_amount - (month.supplement_deduction_amount ?? 0) > 0 || month.gross_amount - normalPieceworkAmount(month) + month.welfare_amount + month.adjustment_amount > 0.005">
+                    质检应扣 {{ formatMoney(month.deduction_amount - (month.supplement_deduction_amount ?? 0)) }} · 实际扣款 {{ formatMoney(month.gross_amount + month.welfare_amount + month.adjustment_amount - normalPieceworkAmount(month)) }}
                   </small>
                   <small>计件毛额 {{ formatMoney(month.gross_amount) }} · 福利 {{ formatMoney(month.welfare_amount) }} · 调整 {{ formatMoney(month.adjustment_amount) }}</small>
                 </div>
@@ -445,6 +445,9 @@ onBeforeUnmount(() => {
                   <strong>补交作品工资</strong>
                   <span>漏交后补的作品会单独列在这里</span>
                   <small>{{ formatInt(month.supplement_item_count ?? 0) }} 个作品 · {{ formatInt(month.supplement_page_count ?? 0) }} 个计价单位</small>
+                  <small v-if="month.supplement_deduction_amount || month.supplement_actual_deduction_amount">
+                    质检应扣 {{ formatMoney(month.supplement_deduction_amount ?? 0) }} · 实际扣款 {{ formatMoney(month.supplement_actual_deduction_amount ?? 0) }}
+                  </small>
                 </div>
                 <b class="aw-cell-money">{{ formatMoney(supplementAmount(month)) }}</b>
               </section>

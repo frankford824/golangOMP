@@ -17,7 +17,7 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook } from '@aw/features/export/settlementExport'
+import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook, payrollRowLabel } from '@aw/features/export/settlementExport'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
@@ -35,6 +35,7 @@ import {
   workerTypeMeta,
 } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
+import QualityImportReview from '@aw/features/settlement/QualityImportReview.vue'
 import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
 import { buildImportReviewSource, workbookReviewRowsToFiles } from '@aw/shared/spreadsheet/excelReview'
 import type {
@@ -114,7 +115,7 @@ const supplementInputRef = ref<HTMLInputElement | null>(null)
 const settlementSpreadsheetOpen = ref(false)
 const importReviewSource = ref<WorkbenchSpreadsheetSource | null>(null)
 const importReviewLoading = ref(false)
-const pendingImportKind = ref<'error-deduction' | 'supplement' | ''>('')
+const qualityImportFile = ref<File | null>(null)
 const importReviewRevision = ref(0)
 const supplementPage = ref(1)
 const supplementPageSize = ref(20)
@@ -237,6 +238,7 @@ const errorImportRecordGridRows = computed(() => (selectedErrorImport.value?.rec
   ...row,
   payee_name_label: row.payee_name || (row.payee_user_id ? `用户 ${row.payee_user_id}` : '未匹配'),
   match_status_label: errorImportMatchStatusLabel(row.match_status),
+  payroll_row_type_label: row.match_status === 'matched' ? payrollRowLabel(row.payroll_row_type ?? 'normal_piecework') : '—',
   occurred_date_label: row.occurred_date?.slice(0, 10) || '—',
   issue_label: errorImportIssueLabel(row),
 })) as unknown as Record<string, unknown>[])
@@ -354,6 +356,7 @@ const errorImportGridColumns = computed<GridColumn[]>(() => [
 ])
 const errorImportRecordGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_name_label', label: '人员', width: 120 },
+  { key: 'payroll_row_type_label', label: '工资条', width: 120 },
   { key: 'order_no', label: '作品/订单', width: 180 },
   { key: 'difficulty_class', label: '难度', width: 76 },
   { key: 'occurred_date_label', label: '发生日期', width: 110 },
@@ -765,25 +768,26 @@ async function downloadSupplementTemplate() {
   }
 }
 
-async function handleErrorImport(event: Event) {
+function handleErrorImport(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   target.value = ''
   if (!file) return
-  await prepareImportReview('error-deduction', [file])
+  cancelImportReview()
+  error.value = ''
+  qualityImportFile.value = file
 }
 
-async function prepareImportReview(kind: 'error-deduction' | 'supplement', files: File[]) {
+async function prepareSupplementReview(files: File[]) {
   if (!files.length) return
   error.value = ''
   notice.value = ''
   importReviewLoading.value = true
   try {
-    pendingImportKind.value = kind
-    importReviewSource.value = await buildImportReviewSource(kind, files, ++importReviewRevision.value)
-    notice.value = kind === 'supplement' ? `已载入 ${formatInt(files.length)} 个补录 Excel，确认前可先校对。` : '质检扣款 Excel 已载入，确认前可先校对。'
+    qualityImportFile.value = null
+    importReviewSource.value = await buildImportReviewSource('supplement', files, ++importReviewRevision.value)
+    notice.value = `已载入 ${formatInt(files.length)} 个补录 Excel，确认前可先校对。`
   } catch (err) {
-    pendingImportKind.value = ''
     importReviewSource.value = null
     error.value = err instanceof Error ? err.message : 'Excel 预览加载失败'
   } finally {
@@ -795,12 +799,12 @@ async function handleSupplementImport(event: Event) {
   const target = event.target as HTMLInputElement
   const files = Array.from(target.files ?? [])
   target.value = ''
-  await prepareImportReview('supplement', files)
+  await prepareSupplementReview(files)
 }
 
 async function handleSupplementDrop(event: DragEvent) {
   const files = Array.from(event.dataTransfer?.files ?? []).filter(isExcelFile)
-  await prepareImportReview('supplement', files)
+  await prepareSupplementReview(files)
 }
 
 function isExcelFile(file: File) {
@@ -845,17 +849,13 @@ async function handleImportReviewAction(payload: WorkbenchSpreadsheetActionPaylo
     cancelImportReview()
     return
   }
-  if (payload.action.key !== 'confirm_import' || !importReviewSource.value || !pendingImportKind.value) return
+  if (payload.action.key !== 'confirm_import' || !importReviewSource.value || importReviewLoading.value) return
   importReviewLoading.value = true
   error.value = ''
   notice.value = ''
   try {
-    const files = await workbookReviewRowsToFiles(importReviewSource.value, payload.sheets, `asset-workbench-${pendingImportKind.value}`)
-    if (pendingImportKind.value === 'error-deduction') {
-      await importErrorReviewFiles(files)
-    } else {
-      await importSupplementFiles(files)
-    }
+    const files = await workbookReviewRowsToFiles(importReviewSource.value, payload.sheets, 'asset-workbench-supplement')
+    await importSupplementFiles(files)
     cancelImportReview({ keepNotice: true })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '导入校对表提交失败'
@@ -864,17 +864,9 @@ async function handleImportReviewAction(payload: WorkbenchSpreadsheetActionPaylo
   }
 }
 
-async function importErrorReviewFiles(files: File[]) {
-  let matched = 0
-  let unmatched = 0
-  let ambiguous = 0
-  for (const file of files) {
-    const batch = await assetWorkbenchApi.importErrorExcel(month.value, file)
-    matched += batch.matched_rows
-    unmatched += batch.unmatched_rows
-    ambiguous += batch.ambiguous_rows
-  }
-  notice.value = `质检出错 Excel 已导入：匹配 ${formatInt(matched)} 行，未匹配 ${formatInt(unmatched)} 行，多匹配 ${formatInt(ambiguous)} 行`
+async function handleQualityImported(batch: ErrorImportBatchRow) {
+  qualityImportFile.value = null
+  notice.value = `质检 Excel 已导入 ${formatInt(batch.total_rows)} 行，${formatInt(batch.matched_rows)} 行计入扣款。`
   await loadSettlement({ keepNotice: true })
 }
 
@@ -923,7 +915,6 @@ async function deleteErrorImport() {
 
 function cancelImportReview(options: { keepNotice?: boolean } = {}) {
   importReviewSource.value = null
-  pendingImportKind.value = ''
   if (!options.keepNotice) notice.value = ''
 }
 
@@ -1200,7 +1191,7 @@ onMounted(() => {
       <div class="aw-page-bar__actions">
         <label class="aw-month-control">
           <span>结算月</span>
-          <input v-model="month" type="month" aria-label="结算月份" />
+          <input v-model="month" type="month" :disabled="!!qualityImportFile" aria-label="结算月份" />
         </label>
         <button class="aw-secondary-button" type="button" @click="() => loadSettlement()">刷新</button>
         <button class="aw-secondary-button" type="button" @click="settlementSpreadsheetOpen = !settlementSpreadsheetOpen">
@@ -1213,7 +1204,7 @@ onMounted(() => {
       ref="errorInputRef"
       class="aw-visually-hidden"
       type="file"
-      accept=".xlsx,.xls"
+      accept=".xlsx"
       aria-label="导入质检扣款 Excel"
       @change="handleErrorImport"
     />
@@ -1229,6 +1220,13 @@ onMounted(() => {
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="importReviewLoading" class="aw-inline-alert">正在处理导入校对表…</p>
 
+    <QualityImportReview
+      v-if="qualityImportFile"
+      :file="qualityImportFile"
+      :month="month"
+      @close="qualityImportFile = null"
+      @imported="handleQualityImported"
+    />
     <SpreadsheetWorkbench
       v-if="importReviewSource"
       :source="importReviewSource"

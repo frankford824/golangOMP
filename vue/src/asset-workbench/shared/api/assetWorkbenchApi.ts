@@ -433,6 +433,8 @@ export interface SettlementBatchDetail {
 }
 
 export interface MySettlementMonthRow {
+  supplement_deduction_amount?: number
+  supplement_actual_deduction_amount?: number
   quality_actual_deduction_amount?: number
   actual_net_amount?: number
   settlement_state?: 'accumulating' | 'pending_confirmation' | 'partially_confirmed' | 'confirmed'
@@ -528,6 +530,29 @@ export interface SupplementPermissionRow {
   revoked_at?: string
 }
 
+export interface QualityImportRowOverride {
+  sheet: number
+  row: number
+  payroll_row_type: SettlementPayrollRow['row_type']
+}
+
+export interface QualityImportReviewRow {
+  sheet: number
+  row: number
+  payee_name: string
+  occurred_date: string
+  difficulty_class: string
+  error_count: number
+  issue_description: string
+  order_no: string
+  file_name: string
+  payroll_row_type: SettlementPayrollRow['row_type'] | ''
+  needs_payroll_type: boolean
+  match_status: 'matched' | 'unmatched' | 'ambiguous' | ''
+  message: string
+  blocking: boolean
+}
+
 export interface ErrorImportBatchRow {
   id: number
   import_no: string
@@ -559,6 +584,7 @@ export interface ErrorImportRecordRow {
   error_count: number
   deduction_amount: number
   raw_payload_json?: Record<string, unknown>
+  payroll_row_type?: SettlementPayrollRow['row_type']
   match_status: string
   submission_item_id?: number
   created_at: string
@@ -1608,16 +1634,17 @@ export const assetWorkbenchApi = {
     const res = await http.get<ApiEnvelope<{
       business_month: string
       locked: boolean
-      deductions: Array<{ payee_user_id: number; quality_actual_deduction_amount: number }>
+      deductions: Array<{ payee_user_id: number; quality_actual_deduction_amount: number; payroll_row_type?: SettlementPayrollRow['row_type'] }>
     }>>('/v1/asset-workbench/settlement/quality-actual-deductions', { params: { business_month: businessMonth }, signal })
     return unwrap(res.data)
   },
 
-  async saveQualityActualDeduction(businessMonth: string, payeeUserID: number, amount: number) {
+  async saveQualityActualDeduction(businessMonth: string, payeeUserID: number, amount: number, rowType: SettlementPayrollRow['row_type'] = 'normal_piecework') {
     await http.put('/v1/asset-workbench/settlement/quality-actual-deductions', {
       business_month: businessMonth,
       payee_user_id: payeeUserID,
       quality_actual_deduction_amount: amount,
+      payroll_row_type: rowType,
     })
   },
 
@@ -1734,10 +1761,22 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async importErrorExcel(businessMonth: string, file: File, signal?: AbortSignal): Promise<ErrorImportBatchRow> {
+  async previewQualityImportExcel(businessMonth: string, file: File, signal?: AbortSignal): Promise<QualityImportReviewRow[]> {
     const form = new FormData()
     form.set('business_month', businessMonth)
     form.set('file', file)
+    const res = await http.post<ApiEnvelope<{ rows: QualityImportReviewRow[] }>>('/v1/asset-workbench/error-imports/excel/preview', form, {
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return unwrap(res.data).rows
+  },
+
+  async importErrorExcel(businessMonth: string, file: File, signal?: AbortSignal, overrides: QualityImportRowOverride[] = []): Promise<ErrorImportBatchRow> {
+    const form = new FormData()
+    form.set('business_month', businessMonth)
+    form.set('file', file)
+    if (overrides.length) form.set('payroll_overrides', JSON.stringify(overrides))
     const res = await http.post<ApiEnvelope<ErrorImportBatchRow>>('/v1/asset-workbench/error-imports/excel', form, {
       signal,
       headers: { 'Content-Type': 'multipart/form-data' },

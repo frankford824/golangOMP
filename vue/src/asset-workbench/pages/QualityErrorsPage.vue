@@ -6,7 +6,9 @@ import { Calculator, CheckCircle2, Download, FileSpreadsheet, RefreshCw, UploadC
 import {
   assetWorkbenchApi,
   type DeductionRuleRow,
+  type ErrorImportBatchRow,
   type SettlementPreview,
+  type SettlementPayrollRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { exportErrorImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
@@ -14,9 +16,7 @@ import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import PersonnelPicker from '@aw/shared/ui/PersonnelPicker.vue'
-import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
-import { buildImportReviewSource, workbookReviewRowsToFiles } from '@aw/shared/spreadsheet/excelReview'
-import type { WorkbenchSpreadsheetActionPayload, WorkbenchSpreadsheetSource } from '@aw/shared/spreadsheet/types'
+import QualityImportReview from '@aw/features/settlement/QualityImportReview.vue'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 
@@ -33,15 +33,14 @@ const preview = ref<SettlementPreview | null>(null)
 const deductionRules = ref<DeductionRuleRow[]>([])
 const lastImportWarningCount = ref(0)
 const loading = ref(false)
-const importing = ref(false)
 const dragActive = ref(false)
 const notice = ref('')
 const error = ref('')
 const fileInputRef = ref<HTMLInputElement | null>(null)
-const reviewSource = ref<WorkbenchSpreadsheetSource | null>(null)
-const reviewRevision = ref(0)
+const reviewFile = ref<File | null>(null)
 const actualDeductions = ref<Awaited<ReturnType<typeof assetWorkbenchApi.qualityActualDeductions>> | null>(null)
 const deductionPayeeID = ref(0)
+const deductionRowType = ref<SettlementPayrollRow['row_type']>('normal_piecework')
 const deductionInput = ref('')
 const savingDeduction = ref(false)
 let loadSequence = 0
@@ -74,25 +73,50 @@ const importHasWarnings = computed(() => lastImportWarningCount.value > 0)
 const canEditActualDeduction = computed(() =>
   actualDeductions.value?.business_month === month.value && !actualDeductions.value.locked && !loading.value && !savingDeduction.value,
 )
-const selectedPayroll = computed(() => preview.value?.payroll_rows.find(
-  row => row.payee_user_id === deductionPayeeID.value && row.row_type === 'normal_piecework',
-))
+const selectedPayroll = computed(() => {
+  const result = preview.value
+  if (loading.value || !result || result.business_month !== month.value) return undefined
+  return result.payroll_rows.find(
+    row => row.payee_user_id === deductionPayeeID.value && row.row_type === deductionRowType.value,
+  )
+})
+const savedDeduction = computed(() => actualDeductions.value?.deductions.find(
+  row => row.payee_user_id === deductionPayeeID.value && (row.payroll_row_type ?? 'normal_piecework') === deductionRowType.value,
+)?.quality_actual_deduction_amount ?? 0)
+const enteredDeduction = computed(() => {
+  if (deductionInput.value === '') return null
+  const amount = Number(deductionInput.value)
+  const rounded = Math.round(amount * 100) / 100
+  return Number.isFinite(amount) && amount >= 0 && amount <= 9999999999.99 &&
+    Math.abs(amount - rounded) <= 1e-8 ? rounded : null
+})
+const hasUnsavedDeduction = computed(() =>
+  enteredDeduction.value !== null && enteredDeduction.value !== savedDeduction.value,
+)
+const draftActualNet = computed(() => {
+  const row = selectedPayroll.value
+  const amount = enteredDeduction.value
+  if (!row || amount === null || !hasUnsavedDeduction.value || actualDeductions.value?.locked ||
+    (row.item_count === 0 && row.error_count === 0 && row.welfare_amount === 0)) return null
+  const applicable = amount === 0 ? row.deduction_amount : amount
+  const difference = Math.round((row.deduction_amount - applicable) * 10000) / 10000
+  return row.net_amount + difference
+})
 
 function fillSavedDeduction() {
-  const saved = actualDeductions.value?.deductions.find(row => row.payee_user_id === deductionPayeeID.value)
-  deductionInput.value = saved ? String(saved.quality_actual_deduction_amount) : ''
+  deductionInput.value = savedDeduction.value > 0 ? String(savedDeduction.value) : ''
 }
 
 async function saveActualDeduction() {
-  if (!canEditActualDeduction.value || !deductionPayeeID.value || deductionInput.value === '') return
-  const amount = Number(deductionInput.value)
+  const amount = enteredDeduction.value
+  if (!canEditActualDeduction.value || !deductionPayeeID.value || amount === null) return
   const targetMonth = month.value
   const targetPayee = deductionPayeeID.value
   savingDeduction.value = true
   error.value = ''
   notice.value = ''
   try {
-    await assetWorkbenchApi.saveQualityActualDeduction(targetMonth, targetPayee, amount)
+    await assetWorkbenchApi.saveQualityActualDeduction(targetMonth, targetPayee, amount, deductionRowType.value)
     if (month.value !== targetMonth) return
     notice.value = amount === 0 ? '已恢复按质检应扣计算。' : '已保存质检实际扣款。'
     await loadQualityOverview({ keepFeedback: true })
@@ -151,74 +175,38 @@ function chooseFile() {
   fileInputRef.value?.click()
 }
 
-async function handleFileInput(event: Event) {
+function handleFileInput(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (file) await prepareReview(file)
+  if (file) prepareReview(file)
 }
 
-async function handleDrop(event: DragEvent) {
+function handleDrop(event: DragEvent) {
   dragActive.value = false
-  const file = Array.from(event.dataTransfer?.files ?? []).find((item) => /\.(xlsx|xls)$/i.test(item.name))
+  const file = Array.from(event.dataTransfer?.files ?? []).find((item) => /\.xlsx$/i.test(item.name))
   if (!file) {
-    error.value = '请选择 Excel 文件（.xlsx 或 .xls）'
+    error.value = '请选择 .xlsx 格式的 Excel 文件'
     return
   }
-  await prepareReview(file)
+  prepareReview(file)
 }
 
-async function prepareReview(file: File) {
-  importing.value = true
+function prepareReview(file: File) {
   notice.value = ''
   error.value = ''
-  try {
-    reviewSource.value = await buildImportReviewSource('error-deduction', [file], ++reviewRevision.value)
-    notice.value = `已载入 ${file.name}，请先核对必填项，再确认导入到 ${month.value}。`
-  } catch (err) {
-    reviewSource.value = null
-    error.value = resolveApiUserMessage(err, { fallback: 'Excel 读取失败，请检查文件格式' })
-  } finally {
-    importing.value = false
-  }
+  reviewFile.value = file
 }
 
-async function handleReviewAction(payload: WorkbenchSpreadsheetActionPayload) {
-  if (payload.action.key === 'cancel_import') {
-    reviewSource.value = null
-    notice.value = ''
-    return
-  }
-  if (payload.action.key !== 'confirm_import' || !reviewSource.value || importing.value) return
-  importing.value = true
-  notice.value = ''
-  error.value = ''
-  try {
-    const files = await workbookReviewRowsToFiles(reviewSource.value, payload.sheets, 'asset-workbench-quality-errors')
-    let matched = 0
-    let unmatched = 0
-    let ambiguous = 0
-    let total = 0
-    for (const file of files) {
-      const result = await assetWorkbenchApi.importErrorExcel(month.value, file)
-      matched += result.matched_rows
-      unmatched += result.unmatched_rows
-      ambiguous += result.ambiguous_rows
-      total += result.total_rows
-    }
-    lastImportWarningCount.value = unmatched + ambiguous
-    notice.value = `已导入 ${formatInt(total)} 行：成功匹配 ${formatInt(matched)} 行，未匹配 ${formatInt(unmatched)} 行，多人重名 ${formatInt(ambiguous)} 行。`
-    reviewSource.value = null
-    await loadQualityOverview({ keepFeedback: true })
-  } catch (err) {
-    error.value = resolveApiUserMessage(err, { fallback: '出错记录导入失败，请检查表格内容后重试' })
-  } finally {
-    importing.value = false
-  }
+async function handleQualityImported(result: ErrorImportBatchRow) {
+  lastImportWarningCount.value = result.unmatched_rows + result.ambiguous_rows
+  notice.value = `已导入 ${formatInt(result.total_rows)} 行，${formatInt(result.matched_rows)} 行计入扣款，${formatInt(lastImportWarningCount.value)} 行未计入扣款。`
+  reviewFile.value = null
+  await loadQualityOverview({ keepFeedback: true })
 }
 
 watch(month, () => {
-  reviewSource.value = null
+  reviewFile.value = null
   lastImportWarningCount.value = 0
   void loadQualityOverview()
 })
@@ -237,7 +225,7 @@ onMounted(() => void loadQualityOverview())
       <div class="aw-page-bar__actions">
         <label class="aw-month-control">
           <span>扣款月份</span>
-          <input v-model="month" type="month" lang="zh-CN" aria-label="出错记录月份" :disabled="savingDeduction" />
+          <input v-model="month" type="month" lang="zh-CN" aria-label="出错记录月份" :disabled="savingDeduction || !!reviewFile" />
         </label>
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadQualityOverview()">
           <RefreshCw :size="16" aria-hidden="true" />
@@ -306,23 +294,22 @@ onMounted(() => void loadQualityOverview())
             ref="fileInputRef"
             class="aw-visually-hidden"
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx"
             aria-label="选择出错记录 Excel"
             @change="handleFileInput"
           />
-          <SpreadsheetWorkbench
-            v-if="reviewSource"
-            :source="reviewSource"
-            :height="470"
-            @close="reviewSource = null"
-            @action="handleReviewAction"
+          <QualityImportReview
+            v-if="reviewFile"
+            :file="reviewFile"
+            :month="month"
+            @close="reviewFile = null"
+            @imported="handleQualityImported"
           />
           <button
             v-else
             class="aw-quality-errors__dropzone"
             :class="{ 'is-active': dragActive }"
             type="button"
-            :disabled="importing"
             @click="chooseFile"
             @dragenter.prevent="dragActive = true"
             @dragover.prevent="dragActive = true"
@@ -330,8 +317,8 @@ onMounted(() => void loadQualityOverview())
             @drop.prevent="handleDrop"
           >
             <UploadCloud :size="30" aria-hidden="true" />
-            <strong>{{ importing ? '正在读取 Excel…' : '选择或拖入出错记录 Excel' }}</strong>
-            <span>导入前会先显示表格校对，不会直接写入。</span>
+            <strong>选择或拖入出错记录 Excel</strong>
+            <span>填写订单号或文件名可自动识别日常与补录作品。</span>
           </button>
 
           <div class="aw-quality-errors__required" aria-label="Excel 必填列">
@@ -346,12 +333,19 @@ onMounted(() => void loadQualityOverview())
           <div class="aw-settlement-section__head">
             <div>
               <h3>质检实际扣款</h3>
-              <p>{{ month }} · 按人员录入。填 0 恢复按系统质检应扣计算。</p>
+              <p>{{ month }} · 按人员和工资条类型录入。填 0 恢复按该行质检应扣计算。</p>
             </div>
           </div>
           <p v-if="actualDeductions?.locked" class="aw-inline-alert">该月已有生成或确认的批次，实扣金额已锁定。</p>
           <form class="aw-form-grid" @submit.prevent="saveActualDeduction">
             <PersonnelPicker v-model="deductionPayeeID" label="扣款人员" clearable @selected="fillSavedDeduction" @cleared="fillSavedDeduction" />
+            <label>
+              工资条类型
+              <select v-model="deductionRowType" aria-label="工资条类型" :disabled="savingDeduction" @change="fillSavedDeduction">
+                <option value="normal_piecework">日常计件工资</option>
+                <option value="supplement_piecework">补录计件工资</option>
+              </select>
+            </label>
             <label>
               质检实际扣款（元）
               <input v-model="deductionInput" type="number" min="0" max="9999999999.99" step="0.01" required :disabled="!canEditActualDeduction || !deductionPayeeID" />
@@ -359,8 +353,9 @@ onMounted(() => void loadQualityOverview())
             <div class="aw-inline-actions aw-form-grid__full">
               <span v-if="selectedPayroll">质检应扣 {{ formatMoney(selectedPayroll.deduction_amount) }}</span>
               <span v-if="selectedPayroll">应发 {{ formatMoney(selectedPayroll.net_amount) }}</span>
-              <span v-if="selectedPayroll">实发 {{ formatMoney(selectedPayroll.actual_net_amount ?? selectedPayroll.net_amount) }}</span>
-              <button class="aw-primary-button" type="submit" :disabled="!canEditActualDeduction || !deductionPayeeID || deductionInput === ''">
+              <span v-if="draftActualNet !== null" class="aw-cell-money" role="status">保存前实发预览 {{ formatMoney(draftActualNet) }}</span>
+              <span v-else-if="selectedPayroll">实发 {{ formatMoney(selectedPayroll.actual_net_amount ?? selectedPayroll.net_amount) }}</span>
+              <button class="aw-primary-button" type="submit" :disabled="!canEditActualDeduction || !deductionPayeeID || enteredDeduction === null">
                 {{ savingDeduction ? '保存中…' : '保存实际扣款' }}
               </button>
             </div>
