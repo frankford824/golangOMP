@@ -32,6 +32,9 @@ func TestProductRefreshMemoryIntegration(t *testing.T) {
 		}
 	}
 	exec("SET FOREIGN_KEY_CHECKS=0")
+	// TABLES caches AUTO_INCREMENT for 24 hours by default. Read the live
+	// counter so this assertion fails for the original duplicate-insert query.
+	exec("SET SESSION information_schema_stats_expiry=0")
 	for _, table := range []string{"erp_product_sync_records", "task_sku_items", "task_details", "tasks", "users"} {
 		exec("DELETE FROM " + table)
 	}
