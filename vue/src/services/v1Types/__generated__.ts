@@ -16863,7 +16863,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one quality error import batch and all its rows
-         * @description Deletes the selected import batch so its deductions no longer contribute to settlement preview. Rejected while the month has a generated or confirmed settlement batch.
+         * @description Removes the import and clears saved actual deductions for affected payroll rows when no matching quality records remain. Active settlement batches lock deletion.
          */
         delete: {
             parameters: {
@@ -17975,7 +17975,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Positive manual overrides and month lock state */
+                /** @description Saved manual deductions, including explicit zero, for payroll rows with matching quality records, and month lock state */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -18020,7 +18020,7 @@ export interface paths {
         };
         /**
          * Save one person's manual quality deduction for a payroll month
-         * @description A positive amount replaces the rule-based deduction for the selected person, month and payroll row type. Zero restores that row's rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
+         * @description Actual net uses the manual deduction only, with zero when no amount was entered. A positive amount requires matching quality records for the selected person, month and payroll row type. Net due uses the rule-based deduction. Batch generation freezes both calculations. Generated or confirmed batches lock edits for the month.
          */
         put: {
             parameters: {
@@ -18182,7 +18182,7 @@ export interface paths {
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework";
                                     adjustment_amount?: number;
-                                    /** @description Manual deduction applied to this payroll row. Omitted when the rule-based deduction applies. */
+                                    /** @description Actual deduction applied to this payroll row. New previews use zero when no manual deduction applies. Older frozen batches may omit this field. */
                                     quality_actual_deduction_amount?: number;
                                 })[];
                             };
@@ -18273,7 +18273,7 @@ export interface paths {
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework";
                                     adjustment_amount?: number;
-                                    /** @description Manual deduction applied to this payroll row. Omitted when the rule-based deduction applies. */
+                                    /** @description Actual deduction applied to this payroll row. New previews use zero when no manual deduction applies. Older frozen batches may omit this field. */
                                     quality_actual_deduction_amount?: number;
                                 })[];
                                 actual_net_amount?: number;

@@ -44,8 +44,13 @@ func (s *Service) QualityActualDeductions(ctx context.Context, actor domain.Requ
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality actual deductions.", nil)
 	}
 	result := &QualityActualDeductionSettings{BusinessMonth: month, Locked: states[month], Deductions: []QualityActualDeduction{}}
+	records, err := s.repo.ListErrorRecordsByMonth(ctx, month)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", nil)
+	}
+	active := qualityImportPayrollKeys(records, 0)
 	for _, row := range rows {
-		if row.Amount > 0 {
+		if active[qualityPayrollKey{row.PayeeUserID, domain.WorkbenchPayrollRowType(row.Payload)}] {
 			result.Deductions = append(result.Deductions, QualityActualDeduction{row.PayeeUserID, row.Amount, domain.WorkbenchPayrollRowType(row.Payload)})
 		}
 	}
@@ -94,7 +99,16 @@ func (s *Service) SaveQualityActualDeductionForPayroll(ctx context.Context, acto
 				break
 			}
 		}
-		if (before == nil && amount == 0) || (before != nil && before.Amount == amount) {
+		if amount > 0 {
+			records, err := s.repo.ListErrorRecordsByMonth(ctx, month)
+			if err != nil {
+				return err
+			}
+			if !qualityImportPayrollKeys(records, 0)[qualityPayrollKey{payeeID, rowType}] {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "该人员在这个月的工资条没有匹配的质检记录，请先导入。", nil)
+			}
+		}
+		if before != nil && before.Amount == amount {
 			return nil
 		}
 		saved, err := s.repo.CreateSettlementAdjustment(ctx, tx, &domain.AssetWorkbenchSettlementAdjustment{
@@ -133,6 +147,61 @@ type qualityPayrollKey struct {
 	rowType string
 }
 
+func qualityImportPayrollKeys(records []*domain.AssetWorkbenchErrorRecord, excludedBatchID int64) map[qualityPayrollKey]bool {
+	keys := make(map[qualityPayrollKey]bool)
+	for _, record := range records {
+		if record != nil && (excludedBatchID == 0 || record.ImportBatchID != excludedBatchID) &&
+			record.PayeeUserID != nil && record.ErrorCount > 0 && record.MatchStatus == domain.AssetWorkbenchErrorMatchStatusMatched {
+			keys[qualityPayrollKey{*record.PayeeUserID, domain.WorkbenchPayrollRowType(record.RawPayload)}] = true
+		}
+	}
+	return keys
+}
+
+func (s *Service) clearDeletedQualityDeductions(ctx context.Context, tx repo.Tx, actor domain.RequestActor, month string, batchID int64, deleted []*domain.AssetWorkbenchErrorRecord) error {
+	affected := qualityImportPayrollKeys(deleted, 0)
+	if len(affected) == 0 {
+		return nil
+	}
+	records, err := s.repo.ListErrorRecordsByMonth(ctx, month)
+	if err != nil {
+		return err
+	}
+	remaining := qualityImportPayrollKeys(records, batchID)
+	return s.clearOrphanQualityDeductions(ctx, tx, actor, month, affected, remaining,
+		"删除最后一份关联质检记录，清除手填实扣")
+}
+
+// Also clear old orphaned overrides before a new import can bring them back.
+func (s *Service) clearOrphanQualityDeductions(ctx context.Context, tx repo.Tx, actor domain.RequestActor, month string, affected, remaining map[qualityPayrollKey]bool, reason string) error {
+	if len(affected) == 0 {
+		return nil
+	}
+	overrides, err := s.repo.ListQualityActualDeductions(ctx, tx, month)
+	if err != nil {
+		return err
+	}
+	for _, before := range overrides {
+		key := qualityPayrollKey{before.PayeeUserID, domain.WorkbenchPayrollRowType(before.Payload)}
+		if before.Amount == 0 || !affected[key] || remaining[key] {
+			continue
+		}
+		cleared, err := s.repo.CreateSettlementAdjustment(ctx, tx, &domain.AssetWorkbenchSettlementAdjustment{
+			PayeeUserID: key.payeeID, BusinessMonth: month, AdjustmentType: domain.AssetWorkbenchAdjustmentTypeQualityActualDeduction,
+			Amount: 0, Reason: reason, Status: domain.AssetWorkbenchAdjustmentStatusApplied,
+			Payload: mustJSON(map[string]string{"payroll_row_type": key.rowType}), CreatedBy: actor.ID,
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventQualityActualDeductionSaved, domain.AssetWorkbenchEntityAdjustment,
+			&cleared.ID, before, cleared, cleared.Reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) checkQualityDeductionAccess(actor domain.RequestActor, month string) *domain.AppError {
 	if appErr := s.requireRepo(); appErr != nil {
 		return appErr
@@ -165,28 +234,23 @@ func applyQualityActualDeductions(preview *SettlementPreview, entries []*domain.
 	differences := map[int64]float64{}
 	for i := range preview.PayrollRows {
 		row := &preview.PayrollRows[i]
-		if row.ItemCount == 0 && row.ErrorCount == 0 && row.WelfareAmount == 0 {
-			continue
-		}
 		var actual float64
 		var sourceID *int64
 		key := qualityPayrollKey{row.PayeeUserID, row.RowType}
 		if previous := used[key]; previous != nil {
 			// Later batches for this person/month must not deduct the manual
 			// amount again. The first batch already froze that amount.
-			if row.DeductionAmount == 0 {
-				continue
-			}
 			sourceID = previous.SourceRefID
-		} else if entry := overrides[key]; entry != nil {
+		} else if entry := overrides[key]; entry != nil && (row.ErrorCount > 0 || row.DeductionAmount > 0) {
 			actual, sourceID = entry.Amount, &entry.ID
-		} else {
-			continue
 		}
 		delta := math.Round((row.DeductionAmount-actual)*10000) / 10000
 		row.QualityActualDeductionAmount = &actual
 		row.ActualNetAmount = incomeMoney(row.NetAmount + delta)
 		differences[row.PayeeUserID] += delta
+		if delta == 0 && actual == 0 {
+			continue
+		}
 		direction := "credit"
 		if delta < 0 {
 			direction = "debit"

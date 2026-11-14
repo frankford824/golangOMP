@@ -70,8 +70,8 @@ func (s *Service) validateQualityImport(actor domain.RequestActor, params Import
 		return "", domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers or settlement roles can import error records.", nil)
 	}
 	month := strings.TrimSpace(params.BusinessMonth)
-	if _, err := time.Parse("2006-01", month); err != nil {
-		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择有效的结算月。", nil)
+	if _, err := time.Parse("2006-01", month); err != nil || month > s.businessMonth(s.nowFn().UTC()) {
+		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择当前或历史结算月。", nil)
 	}
 	if len(params.Records) == 0 || len(params.Records) > 50000 {
 		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "质检记录须在 1 至 50000 行之间。", nil)

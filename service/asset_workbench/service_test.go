@@ -164,7 +164,28 @@ type errorImportRepo struct {
 	rule               *domain.AssetWorkbenchDeductionRule
 	settlementBatches  []*domain.AssetWorkbenchSettlementBatch
 	deletedBatchID     int64
+	qualityDeductions  []*domain.AssetWorkbenchSettlementAdjustment
 	events             []*domain.AssetWorkbenchEvent
+}
+
+func (r *errorImportRepo) ListQualityActualDeductions(_ context.Context, _ repo.Tx, month string) ([]*domain.AssetWorkbenchSettlementAdjustment, error) {
+	var result []*domain.AssetWorkbenchSettlementAdjustment
+	seen := make(map[qualityPayrollKey]bool)
+	for i := len(r.qualityDeductions) - 1; i >= 0; i-- {
+		item := r.qualityDeductions[i]
+		key := qualityPayrollKey{item.PayeeUserID, domain.WorkbenchPayrollRowType(item.Payload)}
+		if item.BusinessMonth == month && !seen[key] {
+			seen[key] = true
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+func (r *errorImportRepo) CreateSettlementAdjustment(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSettlementAdjustment) (*domain.AssetWorkbenchSettlementAdjustment, error) {
+	item.ID = int64(len(r.qualityDeductions) + 1)
+	r.qualityDeductions = append(r.qualityDeductions, item)
+	return item, nil
 }
 
 func (r *errorImportRepo) ListQualityImportWorkReferences(_ context.Context, month string, payeeID int64) ([]repo.AssetWorkbenchQualityWorkReference, error) {
@@ -256,7 +277,7 @@ func (r *errorImportRepo) GetErrorImportBatch(_ context.Context, batchID int64) 
 func (r *errorImportRepo) ListErrorRecordsByMonth(_ context.Context, businessMonth string) ([]*domain.AssetWorkbenchErrorRecord, error) {
 	items := []*domain.AssetWorkbenchErrorRecord{}
 	for _, item := range r.records {
-		if item != nil && item.BusinessMonth == businessMonth {
+		if item != nil && item.BusinessMonth == businessMonth && item.ImportBatchID != r.deletedBatchID {
 			copyItem := *item
 			items = append(items, &copyItem)
 		}
@@ -3037,8 +3058,8 @@ func TestQualityErrorImportHistoryDetailAndDelete(t *testing.T) {
 
 func TestDeleteQualityErrorImportBlockedByGeneratedSettlementBatch(t *testing.T) {
 	workbenchRepo := &errorImportRepo{
-		batches:           []*domain.AssetWorkbenchErrorImportBatch{{ID: 9001, BusinessMonth: "2026-08"}},
-		settlementBatches: []*domain.AssetWorkbenchSettlementBatch{{ID: 7001, BusinessMonth: "2026-08", Status: domain.AssetWorkbenchBatchStatusGenerated}},
+		batches:            []*domain.AssetWorkbenchErrorImportBatch{{ID: 9001, BusinessMonth: "2026-08"}},
+		qualityMonthStates: map[string]bool{"2026-08": true},
 	}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
 	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}

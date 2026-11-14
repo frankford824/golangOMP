@@ -125,7 +125,7 @@ export async function exportErrorImportTemplateWorkbook(): Promise<void> {
     { key: 'file_name', width: 28 },
     { key: 'order_no', width: 24 },
   ]
-  sheet.addRow(['说明：前四列必填。填写线上订单号或完整文件名可匹配日常、补录作品，也可手填工资条类型。无作品线索且类型留空时按日常计件。'])
+  sheet.addRow(['说明：前四列必填。填写线上订单号或完整文件名可匹配日常、补录作品，也可手填工资条类型。无作品线索且类型留空时按日常计件。导入时请选择结算年月，实际扣款在工作台录入。'])
   sheet.mergeCells(1, 1, 1, errorImportTemplateHeaders.length)
   sheet.addRow([...errorImportTemplateHeaders])
   sheet.addRow([new Date(2026, 6, 1), '张三', 'C类', 1, '年龄做错了', '抽查', '重修', '李四', '', '', '', ''])

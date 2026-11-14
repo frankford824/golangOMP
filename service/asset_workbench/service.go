@@ -4517,18 +4517,33 @@ func (s *Service) ImportErrorRecords(ctx context.Context, actor domain.RequestAc
 			return appErr
 		}
 		var matchedRows, unmatchedRows, ambiguousRows int
+		affected := make(map[qualityPayrollKey]bool)
 		for idx, row := range review {
 			if row.Blocking {
 				return qualityImportRowError(row)
 			}
 			params.Records[idx].PayrollRowType = row.PayrollRowType
-			switch matches[idx].Status {
+			match := matches[idx]
+			switch match.Status {
 			case domain.AssetWorkbenchErrorMatchStatusMatched:
 				matchedRows++
+				if match.PayeeUserID != nil && params.Records[idx].ErrorCount > 0 {
+					affected[qualityPayrollKey{*match.PayeeUserID, row.PayrollRowType}] = true
+				}
 			case domain.AssetWorkbenchErrorMatchStatusAmbiguous:
 				ambiguousRows++
 			default:
 				unmatchedRows++
+			}
+		}
+		if len(affected) > 0 {
+			records, err := s.repo.ListErrorRecordsByMonth(ctx, businessMonth)
+			if err != nil {
+				return err
+			}
+			if err := s.clearOrphanQualityDeductions(ctx, tx, actor, businessMonth, affected,
+				qualityImportPayrollKeys(records, 0), "重新导入质检前清除无关联记录的旧实扣"); err != nil {
+				return err
 			}
 		}
 		var err error
@@ -4756,23 +4771,19 @@ func (s *Service) DeleteErrorImportBatch(ctx context.Context, actor domain.Reque
 		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality error import.", err.Error())
 	}
-	for _, status := range []string{domain.AssetWorkbenchBatchStatusGenerated, domain.AssetWorkbenchBatchStatusConfirmed} {
-		_, total, err := s.repo.ListSettlementBatches(ctx, repo.AssetWorkbenchSettlementBatchFilter{BusinessMonth: batch.BusinessMonth, Status: status, Page: 1, PageSize: 1})
+	var records []*domain.AssetWorkbenchErrorRecord
+	if err := s.repo.RunSettlementMonthTx(ctx, batch.BusinessMonth, func(tx repo.Tx) error {
+		if appErr := s.checkQualityImportMonth(ctx, batch.BusinessMonth); appErr != nil {
+			return appErr
+		}
+		var err error
+		records, err = s.repo.ListErrorRecordsByBatch(ctx, batchID)
 		if err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to check settlement batch state.", err.Error())
+			return err
 		}
-		if total > 0 {
-			return nil, domain.NewAppError(domain.ErrCodeConflict, "Cancel the active settlement batch before deleting a quality error import.", map[string]interface{}{
-				"business_month": batch.BusinessMonth,
-				"batch_status":   status,
-			})
+		if err := s.clearDeletedQualityDeductions(ctx, tx, actor, batch.BusinessMonth, batchID, records); err != nil {
+			return err
 		}
-	}
-	records, err := s.repo.ListErrorRecordsByBatch(ctx, batchID)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load quality error import records.", err.Error())
-	}
-	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		if err := s.repo.DeleteErrorImportBatch(ctx, tx, batchID); err != nil {
 			return err
 		}

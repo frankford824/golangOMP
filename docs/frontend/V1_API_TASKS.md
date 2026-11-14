@@ -12390,7 +12390,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/error-imports/excel/prev
 支持方法: GET, DELETE。
 
 - `GET`: Get one quality error import batch with row details
-- `DELETE`: Deletes the selected import batch so its deductions no longer contribute to settlement preview. Rejected while the month has a generated or confirmed settlement batch.
+- `DELETE`: Removes the import and clears saved actual deductions for affected payroll rows when no matching quality records remain. Active settlement batches lock deletion.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13226,7 +13226,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/browse \
 支持方法: GET, PUT。
 
 - `GET`: List manual quality deductions for a payroll month
-- `PUT`: A positive amount replaces the rule-based deduction for the selected person, month and payroll row type. Zero restores that row's rule-based deduction. The existing net amount remains the amount due. Batch generation freezes the difference and the manual amount. Generated or confirmed batches lock edits for the month.
+- `PUT`: Actual net uses the manual deduction only, with zero when no amount was entered. A positive amount requires matching quality records for the selected person, month and payroll row type. Net due uses the rule-based deduction. Batch generation freezes both calculations. Generated or confirmed batches lock edits for the month.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { assetWorkbenchApi, type ErrorImportBatchRow, type QualityImportReviewRow, type QualityImportRowOverride } from '@aw/shared/api/assetWorkbenchApi'
+import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
-const props = defineProps<{ file: File; month: string }>()
+const props = defineProps<{ file: File }>()
 const emit = defineEmits<{ close: []; imported: [batch: ErrorImportBatchRow] }>()
 const rows = ref<QualityImportReviewRow[]>([])
+const selectedMonth = ref('')
+const month = ref('')
+const latestMonth = currentBusinessMonth()
+const monthReady = computed(() => /^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth.value) && selectedMonth.value <= latestMonth)
 const choices = ref<Record<string, QualityImportRowOverride['payroll_row_type'] | ''>>({})
 const reviewing = ref(false)
 const submitting = ref(false)
@@ -28,7 +33,7 @@ const filtered = computed(() => showAll.value ? rows.value : rows.value.filter(n
 const lastPage = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
 const visibleRows = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
-watch(() => [props.file, props.month] as const, async ([file, month]) => {
+watch(() => [props.file, month.value] as const, async ([file, targetMonth]) => {
   request?.abort()
   const current = new AbortController()
   request = current
@@ -36,9 +41,10 @@ watch(() => [props.file, props.month] as const, async ([file, month]) => {
   choices.value = {}
   error.value = ''
   page.value = 1
-  reviewing.value = true
+  reviewing.value = !!targetMonth
+  if (!targetMonth) return
   try {
-    const result = await assetWorkbenchApi.previewQualityImportExcel(month, file, current.signal)
+    const result = await assetWorkbenchApi.previewQualityImportExcel(targetMonth, file, current.signal)
     if (!current.signal.aborted) {
       rows.value = result
       showAll.value = !result.some(needsAttention)
@@ -69,7 +75,7 @@ async function submit() {
     if (type) overrides.push({ sheet: row.sheet, row: row.row, payroll_row_type: type })
   }
   try {
-    emit('imported', await assetWorkbenchApi.importErrorExcel(props.month, props.file, undefined, overrides))
+    emit('imported', await assetWorkbenchApi.importErrorExcel(month.value, props.file, undefined, overrides))
   } catch (err) {
     error.value = resolveApiUserMessage(err, { fallback: '质检导入失败，请核对后重试。' })
   } finally {
@@ -83,9 +89,20 @@ async function submit() {
     <div class="aw-settlement-section__head">
       <div>
         <h3>质检导入校对</h3>
-        <p class="aw-copy">{{ month }} · {{ file.name }}</p>
+        <p class="aw-copy">{{ file.name }}</p>
       </div>
       <button class="aw-secondary-button" type="button" :disabled="submitting" @click="emit('close')">取消</button>
+    </div>
+    <form v-if="!month" class="aw-quality-import__summary" @submit.prevent="monthReady && (month = selectedMonth)">
+      <label class="aw-month-control">
+        <span>导入结算年月</span>
+        <input v-model="selectedMonth" type="month" lang="zh-CN" :max="latestMonth" required />
+      </label>
+      <button class="aw-primary-button" type="submit" :disabled="!monthReady">按所选年月校对</button>
+    </form>
+    <div v-else class="aw-quality-import__summary">
+      <span>将导入到 <strong>{{ month }}</strong></span>
+      <button class="aw-secondary-button" type="button" :disabled="submitting" @click="month = ''; selectedMonth = ''">重新选择年月</button>
     </div>
     <p v-if="reviewing" class="aw-copy" role="status">正在核对人员和作品归属…</p>
     <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>

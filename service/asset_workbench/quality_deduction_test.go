@@ -18,6 +18,14 @@ type qualityDeductionRepo struct {
 	saved  []*domain.AssetWorkbenchSettlementAdjustment
 }
 
+func (r *qualityDeductionRepo) ListErrorRecordsByMonth(context.Context, string) ([]*domain.AssetWorkbenchErrorRecord, error) {
+	payeeID := int64(350)
+	return []*domain.AssetWorkbenchErrorRecord{
+		{PayeeUserID: &payeeID, ErrorCount: 1, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched},
+		{PayeeUserID: &payeeID, ErrorCount: 1, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched, RawPayload: mustJSON(map[string]string{"payroll_row_type": domain.AssetWorkbenchPayrollRowTypeSupplementPiecework})},
+	}, nil
+}
+
 func (r *qualityDeductionRepo) ListSettlementMonthStates(context.Context) (map[string]bool, error) {
 	return map[string]bool{"2026-10": r.locked}, nil
 }
@@ -71,7 +79,7 @@ func TestSupplementQualityDeductionStaysOnSupplementPayroll(t *testing.T) {
 	if err := s.SaveQualityActualDeductionForPayroll(ctx, admin, "2026-10", 350, 0, supplement); err != nil {
 		t.Fatal(err)
 	}
-	check(20)
+	check(30)
 }
 
 func TestQualityExcelKeepsSupplementPayrollType(t *testing.T) {
@@ -103,7 +111,7 @@ func (r *qualityDeductionRepo) CreateSettlementAdjustment(_ context.Context, _ r
 	return item, nil
 }
 
-func TestQualityActualDeductionSaveResetAndLock(t *testing.T) {
+func TestQualityActualDeductionSavesExplicitZeroAndLocks(t *testing.T) {
 	ctx := context.Background()
 	r := &qualityDeductionRepo{}
 	s := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
@@ -119,8 +127,8 @@ func TestQualityActualDeductionSaveResetAndLock(t *testing.T) {
 		}
 	}
 	settings, err := s.QualityActualDeductions(ctx, admin, "2026-10")
-	if err != nil || len(settings.Deductions) != 0 || len(r.saved) != 2 || len(r.events) != 2 {
-		t.Fatalf("reset and retry must leave one active default and two audit rows: settings=%+v err=%v saved=%d", settings, err, len(r.saved))
+	if err != nil || len(settings.Deductions) != 1 || settings.Deductions[0].QualityActualDeductionAmount != 0 || len(r.saved) != 2 || len(r.events) != 2 {
+		t.Fatalf("zero and retry must leave one active zero and two audit rows: settings=%+v err=%v saved=%d", settings, err, len(r.saved))
 	}
 	r.locked = true
 	if err := s.SaveQualityActualDeduction(ctx, admin, "2026-10", 350, 50); err == nil || err.Code != domain.ErrCodeConflict || len(r.saved) != 2 {
@@ -159,5 +167,94 @@ func TestQualityActualDeductionReplacesSystemDeductionOnce(t *testing.T) {
 	regeneratedLines := applyQualityActualDeductions(regenerated, override, laterLines)
 	if len(regeneratedLines) != 1 || regeneratedLines[0].UnitPrice == nil || *regeneratedLines[0].UnitPrice != 50 || regenerated.PayrollRows[0].ActualNetAmount != 1091.96 {
 		t.Fatalf("regenerated batch must restore the released override: %+v", regenerated.PayrollRows)
+	}
+}
+
+func TestQualityPayrollWithoutAnActualDeductionUsesZero(t *testing.T) {
+	const month = "2026-10"
+	const payeeID = 350
+	gross := &domain.AssetWorkbenchSettlementItem{PayeeUserID: payeeID, ItemType: domain.AssetWorkbenchItemTypeGrossPiecework, Amount: 283.06}
+	due := &domain.AssetWorkbenchSettlementItem{PayeeUserID: payeeID, ItemType: domain.AssetWorkbenchItemTypeErrorDeduction, Amount: 45, Quantity: 1}
+	historical := buildSettlementPayrollRowsFromItems(month, []*domain.AssetWorkbenchSettlementItem{gross, due})
+	if historical[0].ActualNetAmount != 238.06 {
+		t.Fatalf("historical batch changed: %+v", historical)
+	}
+	preview := &SettlementPreview{BusinessMonth: month, PayrollRows: historical}
+	frozen := applyQualityActualDeductions(preview, nil, nil)
+	if len(frozen) != 1 || frozen[0].Amount != 45 || frozen[0].Direction != "credit" {
+		t.Fatalf("system deduction was not offset: %+v", frozen)
+	}
+	rows := buildSettlementPayrollRowsFromItems(month, append([]*domain.AssetWorkbenchSettlementItem{gross, due}, frozen...))
+	if rows[0].ActualNetAmount != 283.06 || rows[0].NetAmount != 238.06 || rows[0].QualityActualDeductionAmount == nil || *rows[0].QualityActualDeductionAmount != 0 {
+		t.Fatalf("new frozen batch did not preserve zero actual deduction: %+v", rows)
+	}
+	preview = &SettlementPreview{BusinessMonth: month, PayrollRows: buildSettlementPayrollRowsFromItems(month, []*domain.AssetWorkbenchSettlementItem{gross})}
+	overrides := []*domain.AssetWorkbenchSettlementAdjustment{{ID: 1, PayeeUserID: payeeID, Amount: 25}}
+	if lines := applyQualityActualDeductions(preview, overrides, nil); len(lines) != 0 || preview.PayrollRows[0].ActualNetAmount != 283.06 {
+		t.Fatalf("orphaned actual deduction affected preview: %+v", preview.PayrollRows)
+	}
+}
+
+func TestDeleteQualityImportClearsActualOnlyForTheLastMatchingPayrollRecord(t *testing.T) {
+	const month = "2026-10"
+	const normal = domain.AssetWorkbenchPayrollRowTypeNormalPiecework
+	const supplement = domain.AssetWorkbenchPayrollRowTypeSupplementPiecework
+	person := int64(350)
+	payload := mustJSON(map[string]string{"payroll_row_type": supplement})
+	r := &errorImportRepo{
+		batches: []*domain.AssetWorkbenchErrorImportBatch{{ID: 1, BusinessMonth: month}, {ID: 2, BusinessMonth: month}},
+		records: []*domain.AssetWorkbenchErrorRecord{
+			{ImportBatchID: 1, BusinessMonth: month, PayeeUserID: &person, ErrorCount: 1, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched},
+			{ImportBatchID: 1, BusinessMonth: month, PayeeUserID: &person, ErrorCount: 1, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched, RawPayload: payload},
+			{ImportBatchID: 2, BusinessMonth: month, PayeeUserID: &person, ErrorCount: 1, MatchStatus: domain.AssetWorkbenchErrorMatchStatusMatched, RawPayload: payload},
+		},
+		qualityDeductions: []*domain.AssetWorkbenchSettlementAdjustment{
+			{ID: 1, PayeeUserID: person, BusinessMonth: month, Amount: 25},
+			{ID: 2, PayeeUserID: person, BusinessMonth: month, Amount: 5, Payload: payload},
+		},
+	}
+	svc := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetSettlement}}
+	if _, err := svc.DeleteErrorImportBatch(context.Background(), actor, 1, "重复导入"); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := r.ListQualityActualDeductions(context.Background(), nil, month)
+	if len(entries) != 2 || domain.WorkbenchPayrollRowType(entries[0].Payload) != normal || entries[0].Amount != 0 ||
+		domain.WorkbenchPayrollRowType(entries[1].Payload) != supplement || entries[1].Amount != 5 || len(r.events) != 2 {
+		t.Fatalf("delete affected incorrect payroll rows: adjustments=%+v events=%+v", entries, r.events)
+	}
+}
+
+func TestQualityReimportDoesNotInheritPreviouslyOrphanedActualDeduction(t *testing.T) {
+	const month = "2026-10"
+	payeeID := int64(350)
+	r := &errorImportRepo{
+		profiles: []*domain.AssetWorkbenchProfile{{UserID: payeeID, RealName: "测试人员"}},
+		qualityDeductions: []*domain.AssetWorkbenchSettlementAdjustment{
+			{ID: 1, PayeeUserID: payeeID, BusinessMonth: month, Amount: 25},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(r, assetWorkbenchTestTxRunner{}))
+	svc.nowFn = func() time.Time { return time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC) }
+	admin := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetSettlement}}
+	ctx := context.Background()
+
+	settings, appErr := svc.QualityActualDeductions(ctx, admin, month)
+	if appErr != nil || len(settings.Deductions) != 0 {
+		t.Fatalf("previously deleted records still expose an actual deduction: %+v, %v", settings, appErr)
+	}
+	if appErr := svc.SaveQualityActualDeduction(ctx, admin, month, payeeID, 25); appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("positive actual deduction accepted without a quality record: %v", appErr)
+	}
+
+	_, appErr = svc.ImportErrorRecords(ctx, admin, ImportErrorRecordsParams{BusinessMonth: month, Records: []ImportErrorRecordInput{
+		{PayeeUserID: &payeeID, DifficultyClass: "A", ErrorCount: 1},
+	}})
+	if appErr != nil {
+		t.Fatal(appErr)
+	}
+	settings, appErr = svc.QualityActualDeductions(ctx, admin, month)
+	if appErr != nil || len(settings.Deductions) != 1 || settings.Deductions[0].QualityActualDeductionAmount != 0 {
+		t.Fatalf("reimport restored the orphaned deduction: %+v, %v", settings, appErr)
 	}
 }
