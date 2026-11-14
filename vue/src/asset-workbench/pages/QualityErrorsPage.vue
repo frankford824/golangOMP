@@ -82,7 +82,7 @@ const selectedPayroll = computed(() => {
 })
 const savedDeduction = computed(() => actualDeductions.value?.deductions.find(
   row => row.payee_user_id === deductionPayeeID.value && (row.payroll_row_type ?? 'normal_piecework') === deductionRowType.value,
-)?.quality_actual_deduction_amount ?? 0)
+)?.quality_actual_deduction_amount)
 const enteredDeduction = computed(() => {
   if (deductionInput.value === '') return null
   const amount = Number(deductionInput.value)
@@ -97,19 +97,19 @@ const draftActualNet = computed(() => {
   const row = selectedPayroll.value
   const amount = enteredDeduction.value
   if (!row || amount === null || !hasUnsavedDeduction.value || actualDeductions.value?.locked ||
-    (row.item_count === 0 && row.error_count === 0 && row.welfare_amount === 0)) return null
-  const applicable = amount === 0 ? row.deduction_amount : amount
-  const difference = Math.round((row.deduction_amount - applicable) * 10000) / 10000
+    (amount > 0 && row.error_count === 0)) return null
+  const difference = Math.round((row.deduction_amount - amount) * 10000) / 10000
   return row.net_amount + difference
 })
 
 function fillSavedDeduction() {
-  deductionInput.value = savedDeduction.value > 0 ? String(savedDeduction.value) : ''
+  deductionInput.value = savedDeduction.value === undefined ? '' : String(savedDeduction.value)
 }
 
 async function saveActualDeduction() {
   const amount = enteredDeduction.value
-  if (!canEditActualDeduction.value || !deductionPayeeID.value || amount === null) return
+  if (!canEditActualDeduction.value || !deductionPayeeID.value || amount === null ||
+    (amount > 0 && !selectedPayroll.value?.error_count)) return
   const targetMonth = month.value
   const targetPayee = deductionPayeeID.value
   savingDeduction.value = true
@@ -118,7 +118,7 @@ async function saveActualDeduction() {
   try {
     await assetWorkbenchApi.saveQualityActualDeduction(targetMonth, targetPayee, amount, deductionRowType.value)
     if (month.value !== targetMonth) return
-    notice.value = amount === 0 ? '已恢复按质检应扣计算。' : '已保存质检实际扣款。'
+    notice.value = amount === 0 ? '已保存，实际扣款为 ¥0.00。' : '已保存质检实际扣款。'
     await loadQualityOverview({ keepFeedback: true })
   } catch (err) {
     error.value = resolveApiUserMessage(err, { fallback: '保存质检实际扣款失败' })
@@ -199,17 +199,19 @@ function prepareReview(file: File) {
 }
 
 async function handleQualityImported(result: ErrorImportBatchRow) {
+  reviewFile.value = null
+  const monthChanged = month.value !== result.business_month
+  month.value = result.business_month
   lastImportWarningCount.value = result.unmatched_rows + result.ambiguous_rows
   notice.value = `已导入 ${formatInt(result.total_rows)} 行，${formatInt(result.matched_rows)} 行计入扣款，${formatInt(lastImportWarningCount.value)} 行未计入扣款。`
-  reviewFile.value = null
-  await loadQualityOverview({ keepFeedback: true })
+  if (!monthChanged) await loadQualityOverview({ keepFeedback: true })
 }
 
 watch(month, () => {
   reviewFile.value = null
   lastImportWarningCount.value = 0
   void loadQualityOverview()
-})
+}, { flush: 'sync' })
 
 onMounted(() => void loadQualityOverview())
 </script>
@@ -301,7 +303,6 @@ onMounted(() => void loadQualityOverview())
           <QualityImportReview
             v-if="reviewFile"
             :file="reviewFile"
-            :month="month"
             @close="reviewFile = null"
             @imported="handleQualityImported"
           />
@@ -333,7 +334,7 @@ onMounted(() => void loadQualityOverview())
           <div class="aw-settlement-section__head">
             <div>
               <h3>质检实际扣款</h3>
-              <p>{{ month }} · 按人员和工资条类型录入。填 0 恢复按该行质检应扣计算。</p>
+              <p>{{ month }} · 按人员和工资条类型录入。实发只按实际扣款计算，未录入或填 0 时不扣。</p>
             </div>
           </div>
           <p v-if="actualDeductions?.locked" class="aw-inline-alert">该月已有生成或确认的批次，实扣金额已锁定。</p>
@@ -350,12 +351,15 @@ onMounted(() => void loadQualityOverview())
               质检实际扣款（元）
               <input v-model="deductionInput" type="number" min="0" max="9999999999.99" step="0.01" required :disabled="!canEditActualDeduction || !deductionPayeeID" />
             </label>
+            <p v-if="canEditActualDeduction && deductionPayeeID && !selectedPayroll?.error_count" class="aw-copy aw-form-grid__full">
+              该人员在所选月份和工资条类型下暂无匹配的质检记录。
+            </p>
             <div class="aw-inline-actions aw-form-grid__full">
               <span v-if="selectedPayroll">质检应扣 {{ formatMoney(selectedPayroll.deduction_amount) }}</span>
               <span v-if="selectedPayroll">应发 {{ formatMoney(selectedPayroll.net_amount) }}</span>
               <span v-if="draftActualNet !== null" class="aw-cell-money" role="status">保存前实发预览 {{ formatMoney(draftActualNet) }}</span>
               <span v-else-if="selectedPayroll">实发 {{ formatMoney(selectedPayroll.actual_net_amount ?? selectedPayroll.net_amount) }}</span>
-              <button class="aw-primary-button" type="submit" :disabled="!canEditActualDeduction || !deductionPayeeID || enteredDeduction === null">
+              <button class="aw-primary-button" type="submit" :disabled="!canEditActualDeduction || !deductionPayeeID || enteredDeduction === null || (enteredDeduction > 0 && !selectedPayroll?.error_count)">
                 {{ savingDeduction ? '保存中…' : '保存实际扣款' }}
               </button>
             </div>

@@ -116,6 +116,10 @@ const settlementSpreadsheetOpen = ref(false)
 const importReviewSource = ref<WorkbenchSpreadsheetSource | null>(null)
 const importReviewLoading = ref(false)
 const qualityImportFile = ref<File | null>(null)
+const supplementImportMonth = ref('')
+const latestImportMonth = currentBusinessMonth()
+const supplementImportMonthReady = computed(() => /^\d{4}-(0[1-9]|1[0-2])$/.test(supplementImportMonth.value) &&
+  supplementImportMonth.value <= latestImportMonth)
 const importReviewRevision = ref(0)
 const supplementPage = ref(1)
 const supplementPageSize = ref(20)
@@ -209,7 +213,7 @@ const ledgerSegments = computed(() => {
     { key: 'deduction', label: '质检扣款', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错`, expandable: true },
     { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行', expandable: true },
     { key: 'net', label: '应发净额', value: formatMoney(value.net_amount), hint: '按系统质检应扣计算', money: true, expandable: true },
-    { key: 'actual-net', label: '实发净额', value: formatMoney(value.actual_net_amount ?? value.net_amount), hint: '按适用的质检扣款计算', money: true },
+    { key: 'actual-net', label: '实发净额', value: formatMoney(value.actual_net_amount ?? value.net_amount), hint: '按质检实际扣款计算', money: true },
   ]
 })
 const payrollGridRows = computed(() => payrollRows.value.map(toPayrollGridRow) as unknown as Record<string, unknown>[])
@@ -374,7 +378,7 @@ const settlementSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => (
   readonly: true,
   actions: [
     { key: 'refresh_settlement', label: '刷新预览', tone: 'neutral' },
-    { key: 'export_settlement', label: '导出工资条', tone: 'money', disabled: exporting.value || (!preview.value && !selectedBatch.value) },
+    { key: 'export_settlement', label: '导出工资条', tone: 'money', disabled: exporting.value || errorImportDeleting.value || loading.value || (!preview.value && !selectedBatch.value) },
     { key: 'open_error_import', label: '导入质检扣款', tone: 'neutral' },
     { key: 'open_supplement_import', label: '导入补录', tone: 'neutral' },
   ],
@@ -785,6 +789,7 @@ async function prepareSupplementReview(files: File[]) {
   importReviewLoading.value = true
   try {
     qualityImportFile.value = null
+    supplementImportMonth.value = ''
     importReviewSource.value = await buildImportReviewSource('supplement', files, ++importReviewRevision.value)
     notice.value = `已载入 ${formatInt(files.length)} 个补录 Excel，确认前可先校对。`
   } catch (err) {
@@ -811,21 +816,17 @@ function isExcelFile(file: File) {
   return /\.(xlsx|xls)$/i.test(file.name)
 }
 
-async function importSupplementFiles(files: File[]) {
+async function importSupplementFiles(files: File[], targetMonth: string) {
   if (!files.length) return
   error.value = ''
   notice.value = ''
   try {
-    if (!supplementMonth.value) {
-      error.value = '请选择补录月份'
-      return
-    }
     let created = 0
     let failed = 0
     const messages: string[] = []
     for (const file of files) {
       try {
-        const result = await assetWorkbenchApi.importSettlementSupplementsExcel(supplementMonth.value, file)
+        const result = await assetWorkbenchApi.importSettlementSupplementsExcel(targetMonth, file)
         created += result.created?.length ?? 0
         failed += result.failures?.length ?? 0
         messages.push(...(result.failures ?? []).slice(0, 3).map((item) => `${file.name} 第 ${item.row} 行：${item.reason}`))
@@ -834,7 +835,8 @@ async function importSupplementFiles(files: File[]) {
         messages.push(`${file.name}：${err instanceof Error ? err.message : '导入失败'}`)
       }
     }
-    notice.value = `补录 Excel 已导入：文件 ${formatInt(files.length)} 个，成功 ${formatInt(created)} 行，失败 ${formatInt(failed)} 项`
+    if (created > 0) month.value = targetMonth
+    notice.value = `补录 Excel 已导入 ${targetMonth}：文件 ${formatInt(files.length)} 个，成功 ${formatInt(created)} 行，失败 ${formatInt(failed)} 项`
     if (messages.length > 0) {
       error.value = messages.slice(0, 5).join('；')
     }
@@ -849,13 +851,14 @@ async function handleImportReviewAction(payload: WorkbenchSpreadsheetActionPaylo
     cancelImportReview()
     return
   }
-  if (payload.action.key !== 'confirm_import' || !importReviewSource.value || importReviewLoading.value) return
+  if (payload.action.key !== 'confirm_import' || !importReviewSource.value || importReviewLoading.value || !supplementImportMonthReady.value) return
+  const targetMonth = supplementImportMonth.value
   importReviewLoading.value = true
   error.value = ''
   notice.value = ''
   try {
     const files = await workbookReviewRowsToFiles(importReviewSource.value, payload.sheets, 'asset-workbench-supplement')
-    await importSupplementFiles(files)
+    await importSupplementFiles(files, targetMonth)
     cancelImportReview({ keepNotice: true })
   } catch (err) {
     error.value = err instanceof Error ? err.message : '导入校对表提交失败'
@@ -866,7 +869,8 @@ async function handleImportReviewAction(payload: WorkbenchSpreadsheetActionPaylo
 
 async function handleQualityImported(batch: ErrorImportBatchRow) {
   qualityImportFile.value = null
-  notice.value = `质检 Excel 已导入 ${formatInt(batch.total_rows)} 行，${formatInt(batch.matched_rows)} 行计入扣款。`
+  month.value = batch.business_month
+  notice.value = `质检 Excel 已导入 ${batch.business_month}，共 ${formatInt(batch.total_rows)} 行，${formatInt(batch.matched_rows)} 行计入扣款。`
   await loadSettlement({ keepNotice: true })
 }
 
@@ -915,6 +919,7 @@ async function deleteErrorImport() {
 
 function cancelImportReview(options: { keepNotice?: boolean } = {}) {
   importReviewSource.value = null
+  supplementImportMonth.value = ''
   if (!options.keepNotice) notice.value = ''
 }
 
@@ -1152,17 +1157,20 @@ async function createAdjustment() {
 }
 
 async function exportSettlement() {
-  if (!preview.value && !selectedBatch.value) return
+  if (exporting.value || loading.value || errorImportDeleting.value || (!preview.value && !selectedBatch.value)) return
   error.value = ''
   notice.value = ''
   exporting.value = true
+  const batch = selectedBatch.value
+  const targetMonth = batch?.batch.business_month ?? month.value
   try {
+    const currentPreview = batch ? null : await assetWorkbenchApi.previewSettlement(targetMonth)
     await exportSettlementWorkbook({
-      businessMonth: selectedBatch.value?.batch.business_month ?? month.value,
-      preview: preview.value,
-      batchDetail: selectedBatch.value,
+      businessMonth: targetMonth,
+      preview: currentPreview,
+      batchDetail: batch,
     })
-    notice.value = selectedBatch.value ? '已导出批次工资条与明细' : '已导出预览工资条'
+    notice.value = batch ? '已导出批次工资条与明细' : '已导出预览工资条'
   } catch (err) {
     error.value = err instanceof Error ? err.message : '导出结算工资条失败'
   } finally {
@@ -1223,13 +1231,21 @@ onMounted(() => {
     <QualityImportReview
       v-if="qualityImportFile"
       :file="qualityImportFile"
-      :month="month"
       @close="qualityImportFile = null"
       @imported="handleQualityImported"
     />
+    <section v-if="importReviewSource" class="aw-inline-alert" aria-label="补录导入年月">
+      <label class="aw-month-control">
+        <span>补录导入结算年月</span>
+        <input v-model="supplementImportMonth" type="month" lang="zh-CN" :max="latestImportMonth" :disabled="importReviewLoading" required />
+      </label>
+    </section>
     <SpreadsheetWorkbench
       v-if="importReviewSource"
-      :source="importReviewSource"
+      :source="{ ...importReviewSource, actions: importReviewSource.actions?.map(action => action.key === 'confirm_import'
+        ? { ...action, disabled: action.disabled || !supplementImportMonthReady || importReviewLoading,
+          label: supplementImportMonthReady ? `确认导入 ${supplementImportMonth}` : '请先选择导入年月' }
+        : action) }"
       :height="460"
       @close="cancelImportReview"
       @action="handleImportReviewAction"
@@ -1281,7 +1297,7 @@ onMounted(() => {
                 下载质检扣款表
               </button>
               <button class="aw-secondary-button" type="button" @click="openErrorImport">导入质检扣款</button>
-              <button class="aw-secondary-button" type="button" :disabled="exporting || (!preview && !selectedBatch)" @click="exportSettlement">
+              <button class="aw-secondary-button" type="button" :disabled="exporting || loading || errorImportDeleting || (!preview && !selectedBatch)" @click="exportSettlement">
                 导出工资条
               </button>
             </div>
@@ -1422,7 +1438,7 @@ onMounted(() => {
               </div>
               <span class="aw-chip aw-chip--warning">会重新计算工资预览</span>
             </div>
-            <p class="aw-inline-alert aw-inline-alert--warning">删除会移除这份 Excel 产生的全部质检扣款记录。若本月已有待确认或已确认结算批次，必须先取消或撤销批次。</p>
+            <p class="aw-inline-alert aw-inline-alert--warning">删除会移除本表的质检应扣。该人员同一工资条的最后一份质检记录被删除时，手填实扣也会清除。已有待确认或已确认批次时，须先取消或撤销批次。</p>
             <label class="aw-field">
               <span>删除原因</span>
               <input v-model="errorImportDeleteReason" required placeholder="填写为何撤销这次质检导入" />
