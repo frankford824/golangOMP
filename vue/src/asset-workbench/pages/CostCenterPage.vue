@@ -1204,7 +1204,7 @@ onMounted(async () => {
         >
           <template #cell="{ row, column, value }">
             <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="togglePromoRule(gridRowAsPromo(row))">{{ gridRowAsPromo(row).enabled ? '停用' : '启用' }}</button>
+              <button class="aw-grid-button" type="button" @click="togglePromoRule(gridRowAsPromo(row))">{{ gridRowAsPromo(row).enabled ? '停用' : '启用' }}</button>
               <button class="aw-grid-button" type="button" @click="startPromoSupersede(gridRowAsPromo(row))">替代</button>
             </div>
             <span v-else-if="column.key === 'mode_label'" :class="chipClass(promoModeMeta(gridRowAsPromo(row).mode).tone)">{{ value }}</span>

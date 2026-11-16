@@ -1473,8 +1473,8 @@ onMounted(async () => {
             >
               <template #cell="{ row, column, value }">
                 <div v-if="column.key === 'action'" class="aw-inline-actions">
-                  <button type="button" :disabled="errorImportDetailLoading" @click="openErrorImportDetail(gridRowAsErrorImport(row))">明细</button>
-                  <button type="button" @click="startDeleteErrorImport(gridRowAsErrorImport(row))">删除</button>
+                  <button class="aw-grid-button" type="button" :disabled="errorImportDetailLoading" @click="openErrorImportDetail(gridRowAsErrorImport(row))">明细</button>
+                  <button class="aw-grid-button" type="button" @click="startDeleteErrorImport(gridRowAsErrorImport(row))">删除</button>
                 </div>
                 <span v-else-if="column.key === 'status_label'" class="aw-chip aw-chip--success">{{ value }}</span>
                 <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
