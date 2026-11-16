@@ -980,21 +980,23 @@ onBeforeUnmount(() => {
         </label>
         <UploadLedgerDateField v-model="createdFrom" label="开始日期" :max="createdTo" :filter-key="uploadDayFilterKey" :load-days="loadUploadDays" />
         <UploadLedgerDateField v-model="createdTo" label="结束日期" :min="createdFrom" :filter-key="uploadDayFilterKey" :load-days="loadUploadDays" />
-        <div class="aw-upload-ledger__filter-actions">
-          <button class="aw-primary-button" type="submit" :disabled="loading">查询</button>
-          <button v-if="personalLedger || activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">{{ personalLedger ? '恢复今天' : `重置 ${activeFilterCount}` }}</button>
+        <div class="aw-upload-ledger__filter-bar">
+          <div class="aw-upload-ledger__filter-actions">
+            <button class="aw-primary-button" type="submit" :disabled="loading">查询</button>
+            <button v-if="personalLedger || activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">{{ personalLedger ? '恢复今天' : '重置筛选' }}</button>
+          </div>
+          <div class="aw-upload-ledger__tools">
+            <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadFiles()">
+              <RefreshCw :size="15" aria-hidden="true" />
+              刷新
+            </button>
+            <button class="aw-secondary-button" type="button" :disabled="exporting || loading" @click="exportCurrentFilter">
+              <FileDown :size="15" aria-hidden="true" />
+              {{ exporting ? '导出中…' : '导出' }}
+            </button>
+          </div>
         </div>
       </form>
-      <div class="aw-upload-ledger__tools">
-        <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadFiles()">
-          <RefreshCw :size="15" aria-hidden="true" />
-          刷新
-        </button>
-        <button class="aw-secondary-button" type="button" :disabled="exporting || loading" @click="exportCurrentFilter">
-          <FileDown :size="15" aria-hidden="true" />
-          {{ exporting ? '导出中' : '导出' }}
-        </button>
-      </div>
     </section>
 
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>

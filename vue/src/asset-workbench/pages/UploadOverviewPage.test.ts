@@ -193,7 +193,7 @@ describe('UploadOverviewPage operation source', () => {
       operation_source: 'supplement',
       page: 1,
     }), expect.any(AbortSignal))
-    expect(wrapper.text()).toContain('重置 1')
+    expect(wrapper.text()).toContain('重置筛选')
   })
 })
 

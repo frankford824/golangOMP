@@ -691,19 +691,19 @@ onActivated(() => {
 </script>
 
 <template>
-  <section class="aw-page-stack">
+  <section class="aw-page-stack aw-upload-page">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">{{ isSimpleUser ? '交作品' : '成品交付' }}</p>
-        <h2>{{ isSimpleUser ? '把做好的文件交上来' : '成品上传中心' }}</h2>
+        <h2>{{ isSimpleUser ? '上传成品' : '成品上传中心' }}</h2>
         <p>{{ isSimpleUser ? '先选上传目录，再拖入文件。点一次提交，系统会自动处理。' : '批量拖拽文件，提交前校正难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
       </div>
-      <div class="aw-page-bar__actions">
-        <button class="aw-secondary-button" type="button" :aria-controls="uploadSpreadsheetOpen ? 'aw-upload-review' : undefined" :aria-expanded="uploadSpreadsheetOpen" @click="toggleUploadReview">
-          <Table2 :size="16" aria-hidden="true" />
-          {{ uploadSpreadsheetOpen ? '收起表格校对' : '表格校对' }}
-        </button>
-        <span class="aw-action-stack">
+      <div class="aw-upload-header-actions">
+        <div class="aw-upload-header-actions__buttons">
+          <button class="aw-secondary-button" type="button" :aria-controls="uploadSpreadsheetOpen ? 'aw-upload-review' : undefined" :aria-expanded="uploadSpreadsheetOpen" @click="toggleUploadReview">
+            <Table2 :size="16" aria-hidden="true" />
+            {{ uploadSpreadsheetOpen ? '收起校对' : '表格校对' }}
+          </button>
           <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
             <FileUp :size="16" aria-hidden="true" />
             {{ simpleSubmitLabel }}
@@ -712,8 +712,8 @@ onActivated(() => {
             <FileUp :size="16" aria-hidden="true" />
             {{ adminUploadLabel }}
           </button>
-          <small>{{ selectedUploadDirectory?.name || '默认目录' }} · {{ selectedUploadDirectory ? uploadDirectoryDifficulty(selectedUploadDirectory) : '默认计价分类' }} · {{ pieceworkSubmitHint }}</small>
-        </span>
+        </div>
+        <small>{{ selectedUploadDirectory?.name || '默认目录' }} · {{ uploadUnitLabel }}</small>
       </div>
     </div>
 

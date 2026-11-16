@@ -44,7 +44,7 @@ describe('UploadPage simple piecework copy', () => {
     expect(wrapper.get('.aw-dropzone > span').text()).toBe('点击提交上传会自动完成上传和提交。允许：全部格式')
     expect(wrapper.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 2个作品=计件数量')
     expect(wrapper.find('.aw-dropzone__piecework-confirmation').exists()).toBe(false)
-    expect(wrapper.get('.aw-page-bar__actions').text()).toContain('提交上传')
+    expect(wrapper.get('.aw-upload-header-actions__buttons').text()).toContain('提交上传')
     expect(wrapper.get('.aw-dropzone__actions').text()).not.toContain('提交上传')
 
     uploadCenter.clearIdle()

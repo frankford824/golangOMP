@@ -285,40 +285,44 @@ watch(commandQuery, () => {
 
     <section class="aw-shell__workspace">
       <header class="aw-topbar">
-        <div>
+        <div class="aw-topbar__heading">
           <p class="aw-eyebrow">{{ settingsActive ? '设置' : '资产交付与计件结算' }}</p>
           <h1>{{ activeLabel }}</h1>
         </div>
-        <div class="aw-page-bar__actions">
-          <button class="aw-secondary-button" type="button" :disabled="lanMediaBusy" :aria-pressed="lanMediaEnabled" :title="lanMediaNotice" @click="toggleLANMedia">
-            {{ lanMediaBusy ? '连接中…' : lanMediaEnabled ? '内网加速已启用' : '启用公司内网加速' }}
-          </button>
-          <button class="aw-command-button" type="button" @click="toggleCommand">
-            <IconfontActionIcon name="search" :size="16" />
-            <span>搜索或执行动作</span>
-            <kbd>{{ commandShortcut }}</kbd>
-          </button>
-          <RouterLink class="aw-icon-action aw-icon-action--bell" to="/notifications" :aria-label="bellLabel" @click="refreshUnreadCount">
-            <Bell :size="18" aria-hidden="true" />
-            <span v-if="bellBadge" class="aw-icon-action__badge" aria-hidden="true">{{ bellBadge }}</span>
-          </RouterLink>
-          <RouterLink
-            v-if="showSettingsGear"
-            class="aw-icon-action"
-            :class="{ 'aw-icon-action--active': settingsActive }"
-            :to="settingsTarget"
-            aria-label="设置"
-          >
-            <Settings :size="18" aria-hidden="true" />
-          </RouterLink>
-          <RouterLink class="aw-secondary-button" to="/account">
-            <UserRound :size="16" aria-hidden="true" />
-            {{ displayName }}
-          </RouterLink>
-          <button class="aw-secondary-button" type="button" @click="logout">
-            <LogOut :size="16" aria-hidden="true" />
-            退出
-          </button>
+        <div class="aw-topbar__actions">
+          <div class="aw-topbar__utilities">
+            <button class="aw-secondary-button" type="button" :disabled="lanMediaBusy" :aria-pressed="lanMediaEnabled" :title="lanMediaNotice" @click="toggleLANMedia">
+              {{ lanMediaBusy ? '连接中…' : lanMediaEnabled ? '内网加速已启用' : '启用内网加速' }}
+            </button>
+            <button class="aw-command-button" type="button" @click="toggleCommand">
+              <IconfontActionIcon name="search" :size="16" />
+              <span>搜索或执行动作</span>
+              <kbd>{{ commandShortcut }}</kbd>
+            </button>
+          </div>
+          <div class="aw-topbar__account">
+            <RouterLink class="aw-icon-action aw-icon-action--bell" to="/notifications" :aria-label="bellLabel" @click="refreshUnreadCount">
+              <Bell :size="18" aria-hidden="true" />
+              <span v-if="bellBadge" class="aw-icon-action__badge" aria-hidden="true">{{ bellBadge }}</span>
+            </RouterLink>
+            <RouterLink
+              v-if="showSettingsGear"
+              class="aw-icon-action"
+              :class="{ 'aw-icon-action--active': settingsActive }"
+              :to="settingsTarget"
+              aria-label="设置"
+            >
+              <Settings :size="18" aria-hidden="true" />
+            </RouterLink>
+            <RouterLink class="aw-secondary-button" to="/account">
+              <UserRound :size="16" aria-hidden="true" />
+              {{ displayName }}
+            </RouterLink>
+            <button class="aw-secondary-button" type="button" @click="logout">
+              <LogOut :size="16" aria-hidden="true" />
+              退出
+            </button>
+          </div>
         </div>
       </header>
       <p v-if="lanMediaNotice" class="aw-inline-note" role="status">{{ lanMediaNotice }}</p>

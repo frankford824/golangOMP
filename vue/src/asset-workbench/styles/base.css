@@ -20,7 +20,7 @@ body {
   background: var(--aw-paper);
   font-family: var(--aw-font-sans);
   font-size: var(--aw-font-size-md);
-  line-height: 1.55;
+  line-height: var(--aw-leading-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -30,7 +30,7 @@ body {
   box-sizing: border-box;
   font-family: var(--aw-font-sans);
   font-size: var(--aw-font-size-md);
-  line-height: 1.55;
+  line-height: var(--aw-leading-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -42,10 +42,7 @@ body {
   box-sizing: border-box;
 }
 
-.aw-token-scope button,
-.aw-token-scope input,
-.aw-token-scope select,
-.aw-token-scope textarea {
+:where(.aw-root, .aw-token-scope) :where(button, input, select, textarea) {
   font: inherit;
 }
 
@@ -70,13 +67,6 @@ body {
 .aw-root *::before,
 .aw-root *::after {
   box-sizing: border-box;
-}
-
-.aw-root button,
-.aw-root input,
-.aw-root select,
-.aw-root textarea {
-  font: inherit;
 }
 
 .aw-root button {
