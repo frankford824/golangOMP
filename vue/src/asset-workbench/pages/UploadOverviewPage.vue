@@ -145,7 +145,7 @@ const activeFilterCount = computed(() =>
 )
 const directoryOptions = computed(() => directories.value.filter((dir) => Number(dir.directory_id || 0) > 0))
 const archiveBreadcrumbs = computed(() => {
-  const crumbs = [{ label: archiveSource.value ? fileDisplayName(archiveSource.value) : '压缩包', path: '' }]
+  const crumbs = [{ label: '根目录', path: '' }]
   const segments = archivePath.value.split('/').filter(Boolean)
   let current = ''
   for (const segment of segments) {
@@ -1272,66 +1272,69 @@ onBeforeUnmount(() => {
             <p class="aw-eyebrow">压缩包内容</p>
             <h3 :title="archiveSource ? fileDisplayName(archiveSource) : '压缩包'">{{ archiveSource ? fileDisplayName(archiveSource) : '压缩包' }}</h3>
           </div>
-          <button type="button" class="aw-upload-ledger__detail-close" aria-label="关闭压缩包内容" @click="closeArchiveView">
-            <X :size="15" aria-hidden="true" />
-          </button>
+          <div class="aw-upload-ledger-archive__actions">
+            <button v-if="archiveSource" class="aw-secondary-button" type="button" @click="downloadFile(archiveSource)">
+              <Download :size="16" aria-hidden="true" />
+              下载压缩包
+            </button>
+            <button class="aw-secondary-button" type="button" aria-label="关闭压缩包内容" @click="closeArchiveView">
+              <X :size="16" aria-hidden="true" />
+              关闭
+            </button>
+          </div>
         </header>
-        <nav class="aw-upload-ledger-archive__breadcrumbs" aria-label="压缩包路径">
-          <button
-            v-for="(crumb, index) in archiveBreadcrumbs"
-            :key="`${crumb.path || '__root__'}:${index}`"
-            type="button"
-            :class="{ 'is-active': index === archiveBreadcrumbs.length - 1 }"
-            @click="openArchiveFolder(crumb.path)"
-          >
-            {{ crumb.label }}
-          </button>
-        </nav>
-        <p v-if="archiveLoading" class="aw-drive-empty">正在读取压缩包…</p>
-        <div v-else-if="archiveError" class="aw-upload-ledger-archive__empty">
-          <FileArchive :size="34" aria-hidden="true" />
-          <strong>{{ archiveError }}</strong>
-          <button v-if="archiveSource" class="aw-secondary-button" type="button" @click="downloadFile(archiveSource)">下载压缩包</button>
-        </div>
-        <template v-else>
-          <div class="aw-drive-archive-head">
-            <div>
-              <strong>{{ archivePath || '根目录' }}</strong>
-              <span>{{ archiveFolders.length }} 个文件夹 · {{ archiveFiles.length }} 个文件</span>
+        <div class="aw-upload-ledger-archive__body">
+          <nav class="aw-upload-ledger-archive__breadcrumbs" aria-label="压缩包路径">
+            <button
+              v-for="(crumb, index) in archiveBreadcrumbs"
+              :key="`${crumb.path || '__root__'}:${index}`"
+              type="button"
+              :class="{ 'is-active': index === archiveBreadcrumbs.length - 1 }"
+              :aria-current="index === archiveBreadcrumbs.length - 1 ? 'location' : undefined"
+              @click="openArchiveFolder(crumb.path)"
+            >
+              {{ crumb.label }}
+            </button>
+          </nav>
+          <p v-if="archiveLoading" class="aw-drive-empty">正在读取压缩包…</p>
+          <div v-else-if="archiveError" class="aw-upload-ledger-archive__empty">
+            <FileArchive :size="34" aria-hidden="true" />
+            <strong>{{ archiveError }}</strong>
+          </div>
+          <template v-else>
+            <p class="aw-upload-ledger-archive__count">{{ archiveFolders.length }} 个文件夹 · {{ archiveFiles.length }} 个文件</p>
+            <div v-if="archiveFolders.length" class="aw-upload-ledger-archive__grid">
+              <button
+                v-for="folder in archiveFolders"
+                :key="folder.path"
+                class="aw-upload-ledger-archive__folder"
+                type="button"
+                @click="openArchiveFolder(folder.path)"
+              >
+                <span class="aw-upload-ledger-archive__symbol"><FolderOpen :size="34" aria-hidden="true" /></span>
+                <strong :title="folder.name">{{ folder.name }}</strong>
+                <small>{{ folder.file_count }} 个文件</small>
+              </button>
             </div>
-            <button v-if="archiveSource" class="aw-grid-button" type="button" @click="downloadFile(archiveSource)">下载压缩包</button>
-          </div>
-          <div v-if="archiveFolders.length" class="aw-upload-ledger-archive__grid">
-            <button
-              v-for="folder in archiveFolders"
-              :key="folder.path"
-              class="aw-upload-ledger-archive__folder"
-              type="button"
-              @click="openArchiveFolder(folder.path)"
-            >
-              <FolderOpen :size="34" aria-hidden="true" />
-              <strong :title="folder.name">{{ folder.name }}</strong>
-              <small>{{ folder.file_count }} 个文件</small>
-            </button>
-          </div>
-          <div v-if="archiveFiles.length" class="aw-upload-ledger-archive__grid">
-            <button
-              v-for="file in archiveFiles"
-              :key="file.path"
-              class="aw-upload-ledger-archive__file"
-              type="button"
-              @click="openArchiveVirtualFile(file)"
-            >
-              <span>
-                <ArchiveVirtualThumb v-if="archiveSource" :file-id="archiveSource.id" :file="file" />
-                <FileArchive v-else :size="26" aria-hidden="true" />
-              </span>
-              <strong :title="file.name">{{ file.name }}</strong>
-              <small>{{ archiveVirtualFileKind(file) }} · {{ formatSize(file.file_size) }}</small>
-            </button>
-          </div>
-          <p v-if="archiveFolders.length === 0 && archiveFiles.length === 0" class="aw-drive-empty">压缩包内没有可显示的文件</p>
-        </template>
+            <div v-if="archiveFiles.length" class="aw-upload-ledger-archive__grid">
+              <button
+                v-for="file in archiveFiles"
+                :key="file.path"
+                class="aw-upload-ledger-archive__file"
+                type="button"
+                @click="openArchiveVirtualFile(file)"
+              >
+                <span>
+                  <ArchiveVirtualThumb v-if="archiveSource" :file-id="archiveSource.id" :file="file" />
+                  <FileArchive v-else :size="26" aria-hidden="true" />
+                </span>
+                <strong :title="file.name">{{ file.name }}</strong>
+                <small>{{ archiveVirtualFileKind(file) }} · {{ formatSize(file.file_size) }}</small>
+              </button>
+            </div>
+            <p v-if="archiveFolders.length === 0 && archiveFiles.length === 0" class="aw-drive-empty">压缩包内没有可显示的文件</p>
+          </template>
+        </div>
       </article>
     </section>
     <DriveDeleteConfirmDialog :selection="pendingDeletion" :busy="actionLoading" @close="pendingDeletion = null" @confirm="confirmDeleteSelectedFiles" />

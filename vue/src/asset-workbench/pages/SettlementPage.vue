@@ -1626,10 +1626,19 @@ onMounted(async () => {
               <div class="aw-panel__head">
                 <div>
                   <h3>撤销已确认批次</h3>
-                  <p class="aw-copy">撤销批次 {{ pendingReverseBatch.batch_no }}</p>
                 </div>
                 <span class="aw-chip aw-chip--danger">高风险操作</span>
               </div>
+              <dl class="aw-batch-reversal__facts">
+                <div>
+                  <dt>批次编号</dt>
+                  <dd>{{ pendingReverseBatch.batch_no }}</dd>
+                </div>
+                <div>
+                  <dt>结算月份</dt>
+                  <dd>{{ pendingReverseBatch.business_month }}</dd>
+                </div>
+              </dl>
               <p class="aw-inline-alert aw-inline-alert--error">
                 撤销后作品和补录将恢复为未结算/待结算状态，但原结算明细、付款快照和审计事件会保留。若工资已经实际发放，请勿撤销，必须使用工资调整。
               </p>
@@ -1642,6 +1651,7 @@ onMounted(async () => {
                 <span>我确认该批次尚未实际发放，且理解原结算快照会永久保留</span>
               </label>
               <div class="aw-inline-actions">
+                <button class="aw-secondary-button" type="button" :disabled="reversingBatchId === pendingReverseBatch.id" @click="closeReverseBatchConfirmation">取消</button>
                 <button
                   class="aw-secondary-button aw-secondary-button--danger"
                   type="button"
@@ -1650,7 +1660,6 @@ onMounted(async () => {
                 >
                   {{ reversingBatchId === pendingReverseBatch.id ? '撤销中…' : '确认撤销' }}
                 </button>
-                <button class="aw-secondary-button" type="button" :disabled="reversingBatchId === pendingReverseBatch.id" @click="closeReverseBatchConfirmation">返回</button>
               </div>
             </div>
             <div v-if="!batches.length" class="aw-empty-state">

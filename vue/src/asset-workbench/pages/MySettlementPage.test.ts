@@ -188,6 +188,7 @@ describe('MySettlementPage supplement deletion', () => {
     await deleteButton.trigger('click')
     const dialog = wrapper.get('[role="dialog"]')
     expect(dialog.text()).toContain('确认删除这条补录')
+    expect(dialog.get('[aria-label="待删除作品"]').text()).toContain('wrong-a.jpg')
     expect(dialog.text()).toContain('¥1.14')
 
     await dialog.get('input').setValue('上传错文件')
@@ -211,6 +212,7 @@ describe('MySettlementPage supplement deletion', () => {
     await toolbar.get('.aw-secondary-button--danger').trigger('click')
     const dialog = wrapper.get('[role="dialog"]')
     expect(dialog.text()).toContain('确认删除选中的补录')
+    expect(dialog.get('[aria-label="待删除作品"]').findAll('li').map((row) => row.get('strong').text())).toEqual(['wrong-a.jpg', 'wrong-b.jpg'])
     expect(dialog.text()).toContain('2 条')
     expect(dialog.text()).toContain('¥3.42')
 

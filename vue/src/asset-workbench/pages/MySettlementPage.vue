@@ -665,7 +665,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="deleteDialogOpen" class="aw-dialog-backdrop" role="presentation" @click.self="closeDeleteDialog">
-      <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="supplement-delete-title" @keydown.esc.prevent="closeDeleteDialog">
+      <section class="aw-confirm-dialog aw-supplement-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="supplement-delete-title" @keydown.esc.prevent="closeDeleteDialog">
         <div>
           <p class="aw-eyebrow">删除补录</p>
           <h3 id="supplement-delete-title">确认删除{{ deleteDialogMode === 'single' ? '这条' : '选中的' }}补录？</h3>
@@ -681,11 +681,21 @@ onBeforeUnmount(() => {
             <strong>{{ formatMoney(selectedSupplementAmount) }}</strong>
           </div>
         </div>
+        <section class="aw-supplement-delete-selection" aria-label="待删除作品">
+          <h4>待删除作品</h4>
+          <ul>
+            <li v-for="row in selectedSupplements" :key="row.id">
+              <strong>{{ row.order_no }}</strong>
+              <small>{{ row.business_month }} 结算 · {{ formatMoney(row.gross_amount) }}</small>
+            </li>
+          </ul>
+        </section>
         <label class="aw-field">
           <span>删除原因</span>
           <input v-model="supplementDeleteReason" autofocus placeholder="例如：上传错文件" />
         </label>
         <div class="aw-inline-actions">
+          <button class="aw-secondary-button" type="button" :disabled="deletingSupplements" @click="closeDeleteDialog">取消</button>
           <button
             class="aw-secondary-button aw-secondary-button--danger"
             type="button"
@@ -695,7 +705,6 @@ onBeforeUnmount(() => {
             <Trash2 :size="15" aria-hidden="true" />
             {{ deletingSupplements ? '删除中' : `确认删除 ${formatInt(selectedSupplements.length)} 条` }}
           </button>
-          <button class="aw-secondary-button" type="button" :disabled="deletingSupplements" @click="closeDeleteDialog">取消</button>
         </div>
       </section>
     </div>
