@@ -111,8 +111,15 @@
         </header>
         <div class="grid external-grid">
           <button v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" @click="openExternal(asset)">
-            <span class="cover">
-              <AssetPreviewMedia v-if="externalResourceID(asset)" :asset-id="externalResourceID(asset)" :alt="externalFileName(asset)" rendition="thumbnail" :open-full-on-click="false" />
+            <span class="cover external-cover">
+              <AssetPreviewMedia
+                v-if="externalResourceID(asset)"
+                :asset-id="externalResourceID(asset)"
+                :alt="externalFileName(asset)"
+                img-class="external-cover-media"
+                rendition="thumbnail"
+                :open-full-on-click="false"
+              />
               <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(externalFileName(asset)) }}</span><small>外部资源</small></span>
               <span class="mode-badge">外部</span>
             </span>
@@ -360,7 +367,36 @@ onMounted(load)
 
 .external-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr;
+}
+
+.external-cover {
+  width: 100%;
+  overflow: hidden;
+}
+
+:deep(.external-cover-media) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.external-cover :deep(.apm-img) {
+  object-fit: contain;
+  border-radius: 0;
+}
+
+.external-card .card-body {
+  align-content: start;
+}
+
+.external-card .product-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 :deep(.resource-cover-media) {
