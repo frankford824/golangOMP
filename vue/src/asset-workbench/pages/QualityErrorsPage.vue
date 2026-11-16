@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { Calculator, CheckCircle2, Download, FileSpreadsheet, RefreshCw, UploadCloud } from 'lucide-vue-next'
 
 import {
@@ -27,7 +27,10 @@ type DeductionGridRow = DeductionRuleRow & Record<string, unknown> & {
   enabled_label: string
 }
 
-const month = ref(currentBusinessMonth())
+const route = useRoute()
+const requestedMonth = String(route.query.month ?? '')
+const month = ref(/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth) && requestedMonth <= currentBusinessMonth()
+  ? requestedMonth : currentBusinessMonth())
 const session = useAssetWorkbenchSessionStore()
 const preview = ref<SettlementPreview | null>(null)
 const deductionRules = ref<DeductionRuleRow[]>([])
@@ -39,8 +42,11 @@ const error = ref('')
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const reviewFile = ref<File | null>(null)
 const actualDeductions = ref<Awaited<ReturnType<typeof assetWorkbenchApi.qualityActualDeductions>> | null>(null)
-const deductionPayeeID = ref(0)
-const deductionRowType = ref<SettlementPayrollRow['row_type']>('normal_piecework')
+const requestedPayee = Number(route.query.payee_id)
+const deductionPayeeID = ref(Number.isSafeInteger(requestedPayee) && requestedPayee > 0 ? requestedPayee : 0)
+const deductionRowType = ref<SettlementPayrollRow['row_type']>(
+  route.query.row_type === 'supplement_piecework' ? 'supplement_piecework' : 'normal_piecework',
+)
 const deductionInput = ref('')
 const savingDeduction = ref(false)
 let loadSequence = 0

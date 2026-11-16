@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { Download, Table2 } from 'lucide-vue-next'
 
 import {
@@ -17,13 +18,14 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
+import { payrollMetricRows, payrollMetrics, reportDifficultyKey, reportDifficultyLabel } from '@aw/features/settlement/reportMetrics'
 import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook, payrollRowLabel as payrollTypeLabel } from '@aw/features/export/settlementExport'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes } from '@aw/shared/format/difficulty'
-import { formatInt, formatMoney } from '@aw/shared/format/number'
+import { formatInt, formatMoney, formatPercent } from '@aw/shared/format/number'
 import {
   batchStatusMeta,
   chipClass,
@@ -160,6 +162,9 @@ const settlementRequest = usePageRequest(
   null,
   '结算数据加载失败',
 )
+const monthlyReportRequest = usePageRequest((signal) => assetWorkbenchApi.settlementReport(month.value, signal))
+const monthlyReport = computed(() => monthlyReportRequest.data.value?.business_month === month.value ? monthlyReportRequest.data.value : null)
+const monthlyMetricsByRow = computed(() => payrollMetricRows(monthlyReport.value))
 const loading = settlementRequest.loading
 const error = settlementRequest.error
 const supplementForm = ref({
@@ -192,6 +197,7 @@ const adjustmentMode = computed({
 })
 const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'quality_actual_deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'actual_net_amount', 'amount'])
 const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity', 'total_rows', 'matched_rows', 'unmatched_rows', 'ambiguous_rows'])
+const percentageColumns = ['error_rate', 'worker_type_average_error_rate', 'monthly_contribution_rate'] as const
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const selectedSupplementUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === supplementUploadDirectoryId.value) ?? null)
 
@@ -305,10 +311,13 @@ const settlementNavGroups = computed(() => [
 const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_name_label', label: '姓名', width: 116 },
   { key: 'worker_type_label', label: '人员类型', width: 96 },
-  { key: 'payee_user_id', label: '人员编号', width: 96 },
+  { key: 'personnel_no', label: '人员编号', width: 96 },
   { key: 'row_label', label: '工资条', width: 140 },
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
   { key: 'gross_amount', label: '毛额', width: 100, align: 'right' },
+  { key: 'error_count', label: '出错数', width: 90, align: 'right' },
+  { key: 'error_rate', label: '出错率', width: 92, align: 'right' },
+  { key: 'worker_type_average_error_rate', label: '出错及格线平均水平', width: 160, align: 'right' },
   { key: 'deduction_amount', label: '质检应扣', width: 112, align: 'right' },
   { key: 'quality_actual_deduction_amount', label: '质检实际扣款', width: 126, align: 'right' },
   { key: 'welfare_amount', label: '福利', width: 100, align: 'right' },
@@ -316,6 +325,14 @@ const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'adjustment_amount', label: '调整', width: 100, align: 'right' },
   { key: 'net_amount', label: '应发净额', width: 112, align: 'right' },
   { key: 'actual_net_amount', label: '实发净额', width: 112, align: 'right' },
+  ...(monthlyReport.value?.difficulty_classes ?? []).map(difficulty => ({
+    key: reportDifficultyKey(difficulty, 'coefficient_subtotal'),
+    label: `${reportDifficultyLabel(difficulty)}小计系数`,
+    width: 128,
+    align: 'right' as const,
+  })),
+  { key: 'monthly_coefficient', label: '月度综合系数', width: 130, align: 'right' },
+  { key: 'monthly_contribution_rate', label: '月度贡献率', width: 112, align: 'right' },
 ])
 const batchGridColumns = computed<GridColumn[]>(() => [
   { key: 'batch_no', label: '批次号', width: 190 },
@@ -390,7 +407,10 @@ const settlementSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => (
       readonly: true,
       freezeHeader: true,
       columns: toSpreadsheetColumns(payrollGridColumns.value),
-      rows: payrollGridRows.value,
+      rows: payrollGridRows.value.map(row => ({
+        ...row,
+        ...Object.fromEntries(percentageColumns.map(key => [key, gridValue(key, row[key])])),
+      })),
     },
     {
       id: 'error-imports',
@@ -440,6 +460,7 @@ function payrollRowLabel(row: SettlementPayrollRow) {
 function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
   return {
     ...row,
+    ...payrollMetrics(row, monthlyReport.value, monthlyMetricsByRow.value),
     actual_net_amount: row.actual_net_amount ?? row.net_amount,
     grid_id: `${row.payee_user_id}-${row.row_type}`,
     row_label: payrollRowLabel(row),
@@ -515,7 +536,10 @@ function gridValue(key: string, value: unknown) {
   if (key === 'quality_actual_deduction_amount' && value == null) return '—'
   if (moneyColumns.has(key)) return formatMoney(value)
   if (intColumns.has(key)) return formatInt(value)
-  return value || '—'
+  if (percentageColumns.some(column => column === key)) {
+    return value == null ? '—' : formatPercent(Number(value) * 100, 2)
+  }
+  return value ?? '—'
 }
 
 function defaultBusinessMonth() {
@@ -605,7 +629,7 @@ async function changeSupplementPage(delta: number) {
 async function loadSettlement(options: { keepNotice?: boolean } = {}) {
   error.value = ''
   if (!options.keepNotice) notice.value = ''
-  const data = await settlementRequest.run()
+  const [data] = await Promise.all([settlementRequest.run(), monthlyReportRequest.run()])
   if (!data) return
   preview.value = data.preview
   batches.value = data.batches
@@ -1164,11 +1188,15 @@ async function exportSettlement() {
   const batch = selectedBatch.value
   const targetMonth = batch?.batch.business_month ?? month.value
   try {
-    const currentPreview = batch ? null : await assetWorkbenchApi.previewSettlement(targetMonth)
+    const [currentPreview, report] = await Promise.all([
+      batch ? Promise.resolve(null) : assetWorkbenchApi.previewSettlement(targetMonth),
+      assetWorkbenchApi.settlementReport(targetMonth),
+    ])
     await exportSettlementWorkbook({
       businessMonth: targetMonth,
       preview: currentPreview,
       batchDetail: batch,
+      monthlyReport: report,
     })
     notice.value = batch ? '已导出批次工资条与明细' : '已导出预览工资条'
   } catch (err) {
@@ -1335,9 +1363,13 @@ onMounted(() => {
 
           <div class="aw-panel">
             <div class="aw-panel__head">
-              <h3>工资条明细</h3>
-              <span class="aw-chip aw-chip--neutral">无补录时第二行显示 0</span>
+              <div>
+                <h3>工资条明细</h3>
+                <p v-if="monthlyReport" class="aw-copy">小计系数按本行作品数计算，月度综合系数和贡献率按人员汇总。</p>
+              </div>
+              <span v-if="monthlyReport" class="aw-chip aw-chip--neutral">总月度综合系数指标 {{ monthlyReport.totals.monthly_coefficient }}</span>
             </div>
+            <p v-if="monthlyReportRequest.error.value" class="aw-inline-alert aw-inline-alert--error" role="alert">月度指标加载失败，请刷新后重试。</p>
             <AsyncBoundary
               :loading="loading"
               :error="error"
@@ -1354,8 +1386,14 @@ onMounted(() => {
                 :height="260"
                 :row-height="34"
               >
-                <template #cell="{ column, value }">
-                  <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <template #cell="{ row, column, value }">
+                  <RouterLink
+                    v-if="column.key === 'quality_actual_deduction_amount' && Number(row.error_count) > 0"
+                    :to="{ path: '/quality-errors', query: { month: String(row.business_month), payee_id: String(row.payee_user_id), row_type: String(row.row_type) } }"
+                    class="aw-text-link"
+                    :aria-label="`维护 ${row.payee_name_label} ${row.row_label}质检实际扣款`"
+                  >{{ gridValue(column.key, value) }}</RouterLink>
+                  <span v-else-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
                   <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
                   <span v-else>{{ gridValue(column.key, value) }}</span>
                 </template>
@@ -1438,7 +1476,7 @@ onMounted(() => {
               </div>
               <span class="aw-chip aw-chip--warning">会重新计算工资预览</span>
             </div>
-            <p class="aw-inline-alert aw-inline-alert--warning">删除会移除本表的质检应扣。该人员同一工资条的最后一份质检记录被删除时，手填实扣也会清除。已有待确认或已确认批次时，须先取消或撤销批次。</p>
+            <p class="aw-inline-alert aw-inline-alert--warning">删除会移除本表的质检应扣。受本表影响的人员及工资条会清除手填实扣。还有质检记录时可以重新维护实扣。已有待确认或已确认批次时，须先取消或撤销批次。</p>
             <label class="aw-field">
               <span>删除原因</span>
               <input v-model="errorImportDeleteReason" required placeholder="填写为何撤销这次质检导入" />

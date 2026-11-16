@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { SettlementReportRow } from '@aw/shared/api/assetWorkbenchApi'
+import type { SettlementReport, SettlementReportRow } from '@aw/shared/api/assetWorkbenchApi'
 
 import {
   buildSettlementPayrollExportRows,
@@ -68,6 +68,34 @@ describe('asset workbench settlement export', () => {
     expect(rows[0]).not.toHaveProperty('pageCount')
   })
 
+  it('exports each person-month total once, including people with only supplement work', () => {
+    const payroll = {
+      payee_user_id: 1001,
+      business_month: '2026-06',
+      row_type: 'normal_piecework' as const,
+      item_count: 0,
+      page_count: 0,
+      gross_amount: 0,
+      error_count: 0,
+      deduction_amount: 0,
+      welfare_amount: 0,
+      supplement_amount: 0,
+      adjustment_amount: 0,
+      net_amount: 0,
+    }
+    const supplement = { ...payroll, row_type: 'supplement_piecework' as const }
+    const reportRow = {
+      payee_user_id: 1001, row_type: 'supplement_piecework',
+      monthly_coefficient: 3, monthly_contribution_rate: 0.12,
+    } as SettlementReportRow
+    const report = { rows: [reportRow] } as SettlementReport
+    expect(buildSettlementPayrollExportRows([payroll, supplement], report).map(row => row.monthly_coefficient))
+      .toEqual([undefined, 3])
+    report.rows.unshift({ ...reportRow, row_type: 'normal_piecework' })
+    expect(buildSettlementPayrollExportRows([payroll, supplement], report).map(row => row.monthly_contribution_rate))
+      .toEqual([0.12, undefined])
+  })
+
   it('keeps unknown row types on the normal payroll side', () => {
     expect(payrollRowLabel('legacy')).toBe('日常计件工资')
   })
@@ -77,6 +105,14 @@ describe('asset workbench settlement export', () => {
       row_type: 'normal_piecework',
       payee_user_id: 1001,
       business_month: '2026-06',
+      personnel_no: 'P-001',
+      worker_type: 'parttime',
+      monthly_coefficient: 3,
+      monthly_contribution_rate: 0.12,
+      monthly_error_rate: 0,
+      quality_actual_deduction_amount: 0,
+      actual_net_amount: 50,
+      adjustment_amount: 0,
       creator_name: '张三',
       job_grade: 'P1',
       created_date: '2026-06-02',
@@ -100,6 +136,9 @@ describe('asset workbench settlement export', () => {
     expect(buildSettlementReportExportRow(row, [])).toEqual(expect.objectContaining({
       created_date: '2026-06-02',
       created_date_end: '2026-06-10',
+      personnel_no: 'P-001',
+      monthly_contribution_rate: 0.12,
+      error_rate: 0,
     }))
   })
 

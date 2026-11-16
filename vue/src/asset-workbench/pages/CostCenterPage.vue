@@ -67,6 +67,7 @@ const difficultyForm = ref({
   name: '',
   description: '',
   enabled: true,
+  difficulty_coefficient: '' as number | string,
   sort_order: 50,
 })
 const priceForm = ref({
@@ -121,7 +122,7 @@ const pricingNavGroups = computed(() => [
     label: '一级菜单：基础档案',
     items: [
       { key: 'guide' as const, title: '配置向导', meta: '先看设置顺序', count: '建议先读' },
-      { key: 'difficulty' as const, title: '难度分类', meta: '三级字段：代码 / 名称 / 启用', count: `${difficultyRows.value.length} 项` },
+      { key: 'difficulty' as const, title: '难度分类', meta: '代码、名称、难度系数和启用状态', count: `${difficultyRows.value.length} 项` },
     ],
   },
   {
@@ -202,6 +203,7 @@ const difficultyGridColumns = computed<GridColumn[]>(() => [
   { key: 'code', label: '代码', width: 120 },
   { key: 'name', label: '名称', width: 120 },
   { key: 'description', label: '说明', width: 220 },
+  { key: 'difficulty_coefficient', label: '难度系数', width: 100, align: 'right' },
   { key: 'sort_order', label: '排序', width: 80, align: 'right' },
   { key: 'enabled_label', label: '状态', width: 88 },
   { key: 'action', label: '动作', width: 156, align: 'center' },
@@ -369,6 +371,7 @@ function resetDifficultyForm() {
     name: '',
     description: '',
     enabled: true,
+    difficulty_coefficient: '',
     sort_order: (difficultyRows.value.length + 1) * 10,
   }
 }
@@ -380,6 +383,7 @@ function startDifficultyEdit(row: DifficultyGridRow) {
     name: row.name,
     description: row.description,
     enabled: row.enabled,
+    difficulty_coefficient: row.difficulty_coefficient ?? 1,
     sort_order: row.sort_order,
   }
 }
@@ -387,12 +391,20 @@ function startDifficultyEdit(row: DifficultyGridRow) {
 async function saveDifficultyClass() {
   error.value = ''
   notice.value = ''
+  const value = difficultyForm.value.difficulty_coefficient
+  const coefficient = value === '' && !difficultyEditingCode.value ? undefined : Number(value)
+  if (coefficient !== undefined && (!Number.isFinite(coefficient) || coefficient <= 0 || coefficient > 999999.9999 ||
+      Math.abs(coefficient - Math.round(coefficient * 10000) / 10000) > 1e-9)) {
+    error.value = '难度系数须大于 0，最多 6 位整数和 4 位小数。'
+    return
+  }
   try {
     const payload = {
       code: difficultyForm.value.code.trim(),
       name: difficultyForm.value.name.trim(),
       description: difficultyForm.value.description.trim(),
       enabled: difficultyForm.value.enabled,
+      difficulty_coefficient: coefficient,
       sort_order: difficultyForm.value.sort_order,
     }
     if (difficultyEditingCode.value) {
@@ -776,6 +788,7 @@ onMounted(async () => {
       <div class="aw-pricing-field-help">
         <span><b>代码</b>：系统识别用，创建后不要随意改</span>
         <span><b>名称</b>：给管理员看的显示名</span>
+        <span><b>难度系数</b> 用于计算作品系数和月度贡献率</span>
         <span><b>启用</b>：停用后不会再给新配置选择</span>
       </div>
       <div class="aw-form-grid">
@@ -786,6 +799,10 @@ onMounted(async () => {
         <label>
           名称
           <input v-model.trim="difficultyForm.name" placeholder="例如 D类" />
+        </label>
+        <label>
+          难度系数
+          <input v-model.number="difficultyForm.difficulty_coefficient" type="number" min="0.0001" max="999999.9999" step="0.0001" placeholder="按分类使用默认值" />
         </label>
         <label>
           排序
