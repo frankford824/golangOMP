@@ -1653,6 +1653,7 @@ export const assetWorkbenchApi = {
     const res = await http.get<ApiEnvelope<{
       business_month: string
       locked: boolean
+      eligible_payroll_rows: Array<{ payee_user_id: number; payroll_row_type: SettlementPayrollRow['row_type'] }>
       deductions: Array<{ payee_user_id: number; quality_actual_deduction_amount: number; payroll_row_type?: SettlementPayrollRow['row_type'] }>
     }>>('/v1/asset-workbench/settlement/quality-actual-deductions', { params: { business_month: businessMonth }, signal })
     return unwrap(res.data)

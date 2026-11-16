@@ -8,3 +8,7 @@ export function currentBusinessMonth(date = new Date(), timeZone = 'Asia/Shangha
   const month = parts.find((part) => part.type === 'month')?.value || String(date.getMonth() + 1)
   return `${year}-${month.padStart(2, '0')}`
 }
+
+export function isImportBusinessMonth(value: string, maxMonth = currentBusinessMonth()) {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && value <= maxMonth
+}

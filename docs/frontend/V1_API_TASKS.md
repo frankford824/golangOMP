@@ -13229,7 +13229,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/browse \
 支持方法: GET, PUT。
 
 - `GET`: List manual quality deductions for a payroll month
-- `PUT`: Actual net uses the manual deduction only, with zero when no amount was entered. A positive amount requires matching quality records for the selected person, month and payroll row type. Net due uses the rule-based deduction. Batch generation freezes both calculations. Generated or confirmed batches lock edits for the month.
+- `PUT`: Actual net uses the manual deduction only, with zero when no amount was entered. Saving any amount, including zero, requires matching imported quality records for the selected person, month and payroll row type. Only the latest amount for that person, month and row type applies. Net due uses the rule-based deduction. Batch generation freezes both calculations. Generated or confirmed batches lock edits for the month.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13256,6 +13256,9 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/browse \
   "data": {
     "business_month": "string",
     "locked": true,
+    "eligible_payroll_rows": [
+      "..."
+    ],
     "deductions": [
       "..."
     ]

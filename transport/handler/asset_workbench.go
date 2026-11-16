@@ -1647,9 +1647,10 @@ func (h *AssetWorkbenchHandler) PreviewSettlement(c *gin.Context) {
 }
 
 type qualityActualDeductionResponse struct {
-	BusinessMonth string                                  `json:"business_month"`
-	Locked        bool                                    `json:"locked"`
-	Deductions    []assetworkbench.QualityActualDeduction `json:"deductions"`
+	BusinessMonth       string                                        `json:"business_month"`
+	Locked              bool                                          `json:"locked"`
+	Deductions          []assetworkbench.QualityActualDeduction       `json:"deductions"`
+	EligiblePayrollRows []assetworkbench.QualityActualDeductionTarget `json:"eligible_payroll_rows"`
 }
 
 type qualityActualDeductionSavedResponse struct {
@@ -1667,7 +1668,10 @@ func (h *AssetWorkbenchHandler) QualityActualDeductions(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
-	respondOK(c, qualityActualDeductionResponse{BusinessMonth: result.BusinessMonth, Locked: result.Locked, Deductions: result.Deductions})
+	respondOK(c, qualityActualDeductionResponse{
+		BusinessMonth: result.BusinessMonth, Locked: result.Locked,
+		Deductions: result.Deductions, EligiblePayrollRows: result.EligiblePayrollRows,
+	})
 }
 
 func (h *AssetWorkbenchHandler) SaveQualityActualDeduction(c *gin.Context) {

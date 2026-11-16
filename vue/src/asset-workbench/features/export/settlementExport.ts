@@ -115,7 +115,7 @@ export async function exportSettlementWorkbook(input: SettlementWorkbookInput): 
   appendPayrollSheet(workbook, payrollRows, input.monthlyReport?.difficulty_classes ?? [])
   if (input.monthlyReport) appendMonthlyContributionSheet(workbook, input.monthlyReport)
   if (input.preview?.rows?.length) {
-    appendSummarySheet(workbook, input.preview.rows, input.preview.totals)
+    appendSummarySheet(workbook, input.preview, input.monthlyReport)
   }
   if (input.batchDetail?.items?.length) {
     appendItemSheet(workbook, input.batchDetail.items)
@@ -322,7 +322,7 @@ function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: Settleme
     { header: '出错数', key: 'errorCount', width: 10 },
     { header: '出错率', key: 'error_rate', width: 12, style: { numFmt: '0.00%' } },
     { header: '出错及格线平均水平', key: 'worker_type_average_error_rate', width: 20, style: { numFmt: '0.00%' } },
-    { header: '质检应扣', key: 'deductionAmount', width: 12 },
+    { header: '质检应扣款', key: 'deductionAmount', width: 12 },
     { header: '质检实际扣款', key: 'qualityActualDeductionAmount', width: 16 },
     { header: '福利', key: 'welfareAmount', width: 12 },
     { header: '补录', key: 'supplementAmount', width: 12 },
@@ -358,23 +358,57 @@ function appendMonthlyContributionSheet(workbook: import('exceljs').Workbook, re
   formatSheet(sheet)
 }
 
-function appendSummarySheet(workbook: import('exceljs').Workbook, rows: SettlementPreviewRow[], totals: SettlementPreviewRow) {
+function appendSummarySheet(workbook: import('exceljs').Workbook, preview: SettlementPreview, report?: SettlementReport | null) {
   const sheet = workbook.addWorksheet('人月汇总')
   sheet.columns = [
     { header: '姓名', key: 'payee_name', width: 16 },
     { header: '人员类型', key: 'worker_type_label', width: 12 },
-    { header: '人员编号', key: 'payee_user_id', width: 12 },
+    { header: '人员编号', key: 'personnel_no', width: 16 },
     { header: '单数', key: 'item_count', width: 10 },
     { header: '毛额', key: 'gross_amount', width: 12 },
     { header: '出错数', key: 'error_count', width: 10 },
-    { header: '质检扣款', key: 'deduction_amount', width: 12 },
+    { header: '出错率', key: 'error_rate', width: 12, style: { numFmt: '0.00%' } },
+    { header: '出错及格线平均水平', key: 'worker_type_average_error_rate', width: 20, style: { numFmt: '0.00%' } },
+    { header: '质检应扣款', key: 'deduction_amount', width: 12 },
+    { header: '质检实际扣款', key: 'quality_actual_deduction_amount', width: 16 },
     { header: '福利', key: 'welfare_amount', width: 12 },
     { header: '补录', key: 'supplement_amount', width: 12 },
     { header: '应发净额', key: 'net_amount', width: 12 },
     { header: '实发净额', key: 'actual_net_amount', width: 12 },
   ]
-  sheet.addRows(rows.map(summaryExportRow))
-  sheet.addRow({ ...summaryExportRow(totals), payee_user_id: '合计', payee_name: '合计', worker_type_label: '全部' })
+  const infoByPayee = new Map<number, { personnelNo?: string; supplementCount: number; actualDeduction?: number }>()
+  for (const row of preview.payroll_rows ?? []) {
+    const info = infoByPayee.get(row.payee_user_id) ?? { supplementCount: 0 }
+    info.personnelNo ||= row.personnel_no
+    if (row.row_type === 'supplement_piecework') info.supplementCount += row.item_count
+    if (row.quality_actual_deduction_amount != null) {
+      info.actualDeduction = (info.actualDeduction ?? 0) + row.quality_actual_deduction_amount
+    }
+    infoByPayee.set(row.payee_user_id, info)
+  }
+
+  let itemCount = 0
+  let actualDeduction: number | undefined
+  for (const row of preview.rows) {
+    const info = infoByPayee.get(row.payee_user_id)
+    const workCount = row.item_count + (info?.supplementCount ?? 0)
+    itemCount += workCount
+    if (info?.actualDeduction !== undefined) actualDeduction = (actualDeduction ?? 0) + info.actualDeduction
+    sheet.addRow({
+      ...summaryExportRow(row),
+      personnel_no: info?.personnelNo || row.payee_user_id,
+      item_count: workCount,
+      worker_type_average_error_rate: report?.worker_type_average_error_rates?.[row.worker_type ?? ''],
+      quality_actual_deduction_amount: info?.actualDeduction,
+    })
+  }
+  sheet.addRow({
+    ...summaryExportRow(preview.totals),
+    payee_name: '合计',
+    worker_type_label: '全部',
+    item_count: itemCount,
+    quality_actual_deduction_amount: actualDeduction,
+  })
   formatSheet(sheet)
 }
 
@@ -491,6 +525,7 @@ function workerTypeLabel(value?: string | null): string {
 function summaryExportRow(row: SettlementPreviewRow) {
   const output: Record<string, string | number | undefined> = {
     ...row,
+    error_rate: row.page_count > 0 ? row.error_count / row.page_count : 0,
     actual_net_amount: row.actual_net_amount ?? row.net_amount,
     payee_name: row.payee_name || (row.payee_user_id ? `用户 ${row.payee_user_id}` : ''),
     worker_type_label: workerTypeLabel(row.worker_type),

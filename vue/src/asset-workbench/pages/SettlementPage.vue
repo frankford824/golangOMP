@@ -24,7 +24,7 @@ import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupp
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
-import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
+import { currentBusinessMonth, isImportBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes } from '@aw/shared/format/difficulty'
 import { formatInt, formatMoney, formatPercent } from '@aw/shared/format/number'
 import {
@@ -124,7 +124,7 @@ async function selectAdjustmentBatch(event: Event) {
   if (!batch) return
   await openBatch(batch, 'adjustments')
 }
-const showPayrollBreakdown = ref(false)
+const showPayrollBreakdown = ref(true)
 const notice = ref('')
 const errorInputRef = ref<HTMLInputElement | null>(null)
 const supplementInputRef = ref<HTMLInputElement | null>(null)
@@ -132,10 +132,11 @@ const settlementSpreadsheetOpen = ref(false)
 const importReviewSource = ref<WorkbenchSpreadsheetSource | null>(null)
 const importReviewLoading = ref(false)
 const qualityImportFile = ref<File | null>(null)
-const supplementImportMonth = ref('')
+const pendingImportKind = ref<'quality' | 'supplement' | null>(null)
+const importMonthInput = ref<HTMLInputElement | null>(null)
+const importMonth = ref('')
 const latestImportMonth = currentBusinessMonth()
-const supplementImportMonthReady = computed(() => /^\d{4}-(0[1-9]|1[0-2])$/.test(supplementImportMonth.value) &&
-  supplementImportMonth.value <= latestImportMonth)
+const importMonthReady = computed(() => isImportBusinessMonth(importMonth.value, latestImportMonth))
 const importReviewRevision = ref(0)
 const supplementPage = ref(1)
 const supplementPageSize = ref(20)
@@ -336,7 +337,7 @@ const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'error_count', label: '出错数', width: 90, align: 'right' },
   { key: 'error_rate', label: '出错率', width: 92, align: 'right' },
   { key: 'worker_type_average_error_rate', label: '出错及格线平均水平', width: 160, align: 'right' },
-  { key: 'deduction_amount', label: '质检应扣', width: 112, align: 'right' },
+  { key: 'deduction_amount', label: '质检应扣款', width: 112, align: 'right' },
   { key: 'quality_actual_deduction_amount', label: '质检实际扣款', width: 126, align: 'right' },
   { key: 'welfare_amount', label: '福利', width: 100, align: 'right' },
   { key: 'supplement_amount', label: '补录', width: 100, align: 'right' },
@@ -784,12 +785,27 @@ async function openBatch(batch: SettlementBatchRow, section: SettlementSectionKe
   }
 }
 
+async function startImport(kind: 'quality' | 'supplement') {
+  if (importReviewLoading.value || qualityImportFile.value || importReviewSource.value) return
+  cancelImportReview()
+  error.value = ''
+  pendingImportKind.value = kind
+  await nextTick()
+  importMonthInput.value?.focus()
+}
+
 function openErrorImport() {
-  errorInputRef.value?.click()
+  void startImport('quality')
 }
 
 function openSupplementImport() {
-  supplementInputRef.value?.click()
+  void startImport('supplement')
+}
+
+function chooseImportFiles() {
+  if (!importMonthReady.value) return
+  if (pendingImportKind.value === 'quality') errorInputRef.value?.click()
+  if (pendingImportKind.value === 'supplement') supplementInputRef.value?.click()
 }
 
 async function downloadErrorTemplate() {
@@ -818,21 +834,20 @@ function handleErrorImport(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   target.value = ''
-  if (!file) return
-  cancelImportReview()
+  if (!file || pendingImportKind.value !== 'quality' || !importMonthReady.value) return
+  pendingImportKind.value = null
   error.value = ''
   qualityImportFile.value = file
 }
 
 async function prepareSupplementReview(files: File[]) {
-  if (!files.length) return
+  if (!files.length || pendingImportKind.value !== 'supplement' || !importMonthReady.value || importReviewLoading.value) return
   error.value = ''
   notice.value = ''
   importReviewLoading.value = true
   try {
-    qualityImportFile.value = null
-    supplementImportMonth.value = ''
     importReviewSource.value = await buildImportReviewSource('supplement', files, ++importReviewRevision.value)
+    pendingImportKind.value = null
     notice.value = `已载入 ${formatInt(files.length)} 个补录 Excel，确认前可先校对。`
   } catch (err) {
     importReviewSource.value = null
@@ -850,6 +865,10 @@ async function handleSupplementImport(event: Event) {
 }
 
 async function handleSupplementDrop(event: DragEvent) {
+  if (pendingImportKind.value !== 'supplement' || !importMonthReady.value) {
+    if (pendingImportKind.value !== 'supplement') openSupplementImport()
+    return
+  }
   const files = Array.from(event.dataTransfer?.files ?? []).filter(isExcelFile)
   await prepareSupplementReview(files)
 }
@@ -893,8 +912,8 @@ async function handleImportReviewAction(payload: WorkbenchSpreadsheetActionPaylo
     cancelImportReview()
     return
   }
-  if (payload.action.key !== 'confirm_import' || !importReviewSource.value || importReviewLoading.value || !supplementImportMonthReady.value) return
-  const targetMonth = supplementImportMonth.value
+  if (payload.action.key !== 'confirm_import' || !importReviewSource.value || importReviewLoading.value || !importMonthReady.value) return
+  const targetMonth = importMonth.value
   importReviewLoading.value = true
   error.value = ''
   notice.value = ''
@@ -910,7 +929,7 @@ async function handleImportReviewAction(payload: WorkbenchSpreadsheetActionPaylo
 }
 
 async function handleQualityImported(batch: ErrorImportBatchRow) {
-  qualityImportFile.value = null
+  cancelImportReview()
   month.value = batch.business_month
   notice.value = `质检 Excel 已导入 ${batch.business_month}，共 ${formatInt(batch.total_rows)} 行，${formatInt(batch.matched_rows)} 行计入扣款。`
   await loadSettlement({ keepNotice: true })
@@ -960,8 +979,10 @@ async function deleteErrorImport() {
 }
 
 function cancelImportReview(options: { keepNotice?: boolean } = {}) {
+  pendingImportKind.value = null
+  qualityImportFile.value = null
   importReviewSource.value = null
-  supplementImportMonth.value = ''
+  importMonth.value = ''
   if (!options.keepNotice) notice.value = ''
 }
 
@@ -1290,6 +1311,7 @@ onMounted(async () => {
       type="file"
       accept=".xlsx"
       aria-label="导入质检扣款 Excel"
+      :disabled="pendingImportKind !== 'quality' || !importMonthReady"
       @change="handleErrorImport"
     />
     <input
@@ -1299,28 +1321,35 @@ onMounted(async () => {
       accept=".xlsx,.xls"
       multiple
       aria-label="导入补录 Excel"
+      :disabled="pendingImportKind !== 'supplement' || !importMonthReady"
       @change="handleSupplementImport"
     />
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="importReviewLoading" class="aw-inline-alert">正在处理导入校对表…</p>
 
+    <section v-if="pendingImportKind" class="aw-inline-alert" aria-label="选择导入结算年月"
+      @dragover.prevent @drop.prevent="pendingImportKind === 'supplement' && handleSupplementDrop($event)"
+    >
+      <label class="aw-month-control">
+        <span>{{ pendingImportKind === 'quality' ? '质检' : '补录' }}导入结算年月</span>
+        <input ref="importMonthInput" v-model="importMonth" type="month" lang="zh-CN" :max="latestImportMonth" :disabled="importReviewLoading" required />
+      </label>
+      <button class="aw-primary-button" type="button" :disabled="!importMonthReady || importReviewLoading" @click="chooseImportFiles">选择 Excel 文件</button>
+      <button class="aw-secondary-button" type="button" :disabled="importReviewLoading" @click="cancelImportReview()">取消</button>
+    </section>
     <QualityImportReview
       v-if="qualityImportFile"
       :file="qualityImportFile"
-      @close="qualityImportFile = null"
+      :business-month="importMonth"
+      @close="cancelImportReview()"
       @imported="handleQualityImported"
     />
-    <section v-if="importReviewSource" class="aw-inline-alert" aria-label="补录导入年月">
-      <label class="aw-month-control">
-        <span>补录导入结算年月</span>
-        <input v-model="supplementImportMonth" type="month" lang="zh-CN" :max="latestImportMonth" :disabled="importReviewLoading" required />
-      </label>
-    </section>
+    <p v-if="importReviewSource" class="aw-inline-alert">补录将导入至 {{ importMonth }}</p>
     <SpreadsheetWorkbench
       v-if="importReviewSource"
       :source="{ ...importReviewSource, actions: importReviewSource.actions?.map(action => action.key === 'confirm_import'
-        ? { ...action, disabled: action.disabled || !supplementImportMonthReady || importReviewLoading,
-          label: supplementImportMonthReady ? `确认导入 ${supplementImportMonth}` : '请先选择导入年月' }
+        ? { ...action, disabled: action.disabled || !importMonthReady || importReviewLoading,
+          label: importMonthReady ? `确认导入 ${importMonth}` : '请先选择导入年月' }
         : action) }"
       :height="460"
       @close="cancelImportReview"
@@ -1413,7 +1442,7 @@ onMounted(async () => {
             <div class="aw-panel__head">
               <div>
                 <h3>工资条明细</h3>
-              <label class="aw-inline-check"><input v-model="showPayrollBreakdown" type="checkbox" /> 展开全部列</label>
+                <label class="aw-inline-check"><input v-model="showPayrollBreakdown" type="checkbox" /> 展开全部列</label>
                 <p v-if="monthlyReport" class="aw-copy">小计系数按本行作品数计算，月度综合系数和贡献率按人员汇总。</p>
               </div>
               <span v-if="monthlyReport" class="aw-chip aw-chip--neutral">总月度综合系数指标 {{ monthlyReport.totals.monthly_coefficient }}</span>
@@ -1427,10 +1456,10 @@ onMounted(async () => {
             >
               <WorkbenchDataGrid
                 v-if="payrollRows.length"
-                :columns="showPayrollBreakdown ? payrollGridColumns : payrollGridColumns.filter(column => ['payee_name_label', 'row_label', 'item_count', 'gross_amount', 'deduction_amount', 'quality_actual_deduction_amount', 'net_amount', 'actual_net_amount'].includes(column.key))"
+                :columns="showPayrollBreakdown ? payrollGridColumns : payrollGridColumns.filter(column => ['payee_name_label', 'personnel_no', 'row_label', 'item_count', 'gross_amount', 'error_rate', 'worker_type_average_error_rate', 'deduction_amount', 'quality_actual_deduction_amount', 'net_amount', 'actual_net_amount'].includes(column.key))"
                 :rows="payrollGridRows"
                 row-key="grid_id"
-                storage-key="settlement-preview-payroll"
+                storage-key="settlement-preview-payroll-v2"
                 group-by="payee_user_id"
                 :height="260"
                 :row-height="34"
@@ -1881,7 +1910,7 @@ onMounted(async () => {
               <p class="aw-copy">选择文件时，系统会保存具体文件并按上传目录自动计价；不选文件则创建手工补录。补录工资计入所选结算月，并在该月工资条中单独显示。</p>
               <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
                 <span>补录 Excel 批量导入</span>
-                <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>
+                <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择导入年月</button>
               </div>
             </div>
           </div>

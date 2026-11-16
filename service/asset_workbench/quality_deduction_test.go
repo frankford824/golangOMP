@@ -121,7 +121,7 @@ func TestQualityActualDeductionSavesExplicitZeroAndLocks(t *testing.T) {
 	if err := s.SaveQualityActualDeduction(ctx, worker, "2026-10", 350, 50); err == nil || err.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("worker save error = %v", err)
 	}
-	for _, amount := range []float64{50, 50, 0} {
+	for _, amount := range []float64{20, 20, 0} {
 		if err := s.SaveQualityActualDeduction(ctx, admin, "2026-10", 350, amount); err != nil {
 			t.Fatal(err)
 		}
@@ -248,8 +248,13 @@ func TestQualityReimportDoesNotInheritPreviouslyOrphanedActualDeduction(t *testi
 	if appErr != nil || len(settings.Deductions) != 0 {
 		t.Fatalf("previously deleted records still expose an actual deduction: %+v, %v", settings, appErr)
 	}
-	if appErr := svc.SaveQualityActualDeduction(ctx, admin, month, payeeID, 25); appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
-		t.Fatalf("positive actual deduction accepted without a quality record: %v", appErr)
+	if len(settings.EligiblePayrollRows) != 0 {
+		t.Fatalf("payroll rows without matching quality records were eligible: %+v", settings.EligiblePayrollRows)
+	}
+	for _, amount := range []float64{0, 25} {
+		if appErr := svc.SaveQualityActualDeduction(ctx, admin, month, payeeID, amount); appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+			t.Fatalf("actual deduction %v accepted without a quality record: %v", amount, appErr)
+		}
 	}
 
 	_, appErr = svc.ImportErrorRecords(ctx, admin, ImportErrorRecordsParams{BusinessMonth: month, Records: []ImportErrorRecordInput{
@@ -259,7 +264,9 @@ func TestQualityReimportDoesNotInheritPreviouslyOrphanedActualDeduction(t *testi
 		t.Fatal(appErr)
 	}
 	settings, appErr = svc.QualityActualDeductions(ctx, admin, month)
-	if appErr != nil || len(settings.Deductions) != 1 || settings.Deductions[0].QualityActualDeductionAmount != 0 {
-		t.Fatalf("reimport restored the orphaned deduction: %+v, %v", settings, appErr)
+	if appErr != nil || len(settings.Deductions) != 1 || settings.Deductions[0].QualityActualDeductionAmount != 0 ||
+		len(settings.EligiblePayrollRows) != 1 || settings.EligiblePayrollRows[0].PayeeUserID != payeeID ||
+		settings.EligiblePayrollRows[0].PayrollRowType != domain.AssetWorkbenchPayrollRowTypeNormalPiecework {
+		t.Fatalf("reimport did not restore eligibility with a cleared deduction: %+v, %v", settings, appErr)
 	}
 }

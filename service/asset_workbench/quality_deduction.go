@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,10 +19,16 @@ type QualityActualDeduction struct {
 	PayrollRowType               string  `json:"payroll_row_type"`
 }
 
+type QualityActualDeductionTarget struct {
+	PayeeUserID    int64  `json:"payee_user_id"`
+	PayrollRowType string `json:"payroll_row_type"`
+}
+
 type QualityActualDeductionSettings struct {
-	BusinessMonth string                   `json:"business_month"`
-	Locked        bool                     `json:"locked"`
-	Deductions    []QualityActualDeduction `json:"deductions"`
+	BusinessMonth       string                         `json:"business_month"`
+	Locked              bool                           `json:"locked"`
+	Deductions          []QualityActualDeduction       `json:"deductions"`
+	EligiblePayrollRows []QualityActualDeductionTarget `json:"eligible_payroll_rows"`
 }
 
 func signedSettlementAmount(item *domain.AssetWorkbenchSettlementItem) float64 {
@@ -49,6 +56,17 @@ func (s *Service) QualityActualDeductions(ctx context.Context, actor domain.Requ
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", nil)
 	}
 	active := qualityImportPayrollKeys(records, 0)
+	result.EligiblePayrollRows = make([]QualityActualDeductionTarget, 0, len(active))
+	for key := range active {
+		result.EligiblePayrollRows = append(result.EligiblePayrollRows, QualityActualDeductionTarget{key.payeeID, key.rowType})
+	}
+	sort.Slice(result.EligiblePayrollRows, func(i, j int) bool {
+		left, right := result.EligiblePayrollRows[i], result.EligiblePayrollRows[j]
+		if left.PayeeUserID != right.PayeeUserID {
+			return left.PayeeUserID < right.PayeeUserID
+		}
+		return left.PayrollRowType < right.PayrollRowType
+	})
 	for _, row := range rows {
 		if active[qualityPayrollKey{row.PayeeUserID, domain.WorkbenchPayrollRowType(row.Payload)}] {
 			result.Deductions = append(result.Deductions, QualityActualDeduction{row.PayeeUserID, row.Amount, domain.WorkbenchPayrollRowType(row.Payload)})
@@ -99,14 +117,12 @@ func (s *Service) SaveQualityActualDeductionForPayroll(ctx context.Context, acto
 				break
 			}
 		}
-		if amount > 0 {
-			records, err := s.repo.ListErrorRecordsByMonth(ctx, month)
-			if err != nil {
-				return err
-			}
-			if !qualityImportPayrollKeys(records, 0)[qualityPayrollKey{payeeID, rowType}] {
-				return domain.NewAppError(domain.ErrCodeInvalidRequest, "该人员在这个月的工资条没有匹配的质检记录，请先导入。", nil)
-			}
+		records, err := s.repo.ListErrorRecordsByMonth(ctx, month)
+		if err != nil {
+			return err
+		}
+		if !qualityImportPayrollKeys(records, 0)[qualityPayrollKey{payeeID, rowType}] {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "该人员在这个月的工资条没有匹配的质检记录，请先导入。", nil)
 		}
 		if before != nil && before.Amount == amount {
 			return nil
