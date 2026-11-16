@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAutoAnimate } from '@formkit/auto-animate/vue'
 import { AlertCircle, CheckCircle2, ChevronDown, FileUp, LoaderCircle, UploadCloud, X } from 'lucide-vue-next'
 
@@ -9,6 +9,7 @@ import { useDownloadCenterStore } from '@aw/shared/download/downloadCenter.store
 import { useUploadCenterStore, type UploadCenterItem, type UploadCenterStatus } from './uploadCenter.store'
 
 const router = useRouter()
+const route = useRoute()
 const uploadCenter = useUploadCenterStore()
 const downloadCenter = useDownloadCenterStore()
 const [listRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' })
@@ -20,6 +21,10 @@ watch(
   },
 )
 
+const onIncomePage = computed(() => route.name === 'asset-my-settlement')
+watch(onIncomePage, (income) => {
+  if (income) uploadCenter.closePanel()
+}, { immediate: true })
 const shellVisible = computed(() => uploadCenter.hasItems)
 const ringStyle = computed(() => ({
   '--aw-upload-center-progress': `${Math.max(uploadCenter.overallProgress, uploadCenter.hasActive ? 8 : 100)}%`,
@@ -74,12 +79,14 @@ async function goUploadPage() {
 <template>
   <Teleport to="body">
     <Transition name="aw-upload-center-shell">
-      <section v-if="shellVisible" class="aw-token-scope aw-upload-center" :class="{ 'is-open': uploadCenter.panelOpen }" aria-label="全局上传中心">
+      <section v-if="shellVisible" class="aw-token-scope aw-upload-center" :class="{ 'is-open': uploadCenter.panelOpen, 'aw-upload-center--income': onIncomePage }" aria-label="全局上传中心">
         <button
           class="aw-upload-center__orb"
           type="button"
           :style="ringStyle"
           :aria-expanded="uploadCenter.panelOpen"
+          :aria-label="onIncomePage ? `上传中心，${uploadCenter.summaryText}` : undefined"
+          :title="onIncomePage ? `上传中心，${uploadCenter.summaryText}` : undefined"
           aria-controls="aw-upload-center-panel"
           @click="uploadCenter.panelOpen ? uploadCenter.closePanel() : uploadCenter.openPanel()"
         >

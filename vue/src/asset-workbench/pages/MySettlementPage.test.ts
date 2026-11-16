@@ -54,6 +54,23 @@ const supplements = [
 ]
 
 describe('MySettlementPage supplement deletion', () => {
+  it('keeps the permission and record states unknown until income loads', async () => {
+    let finish!: (value: unknown) => void
+    mocks.mySettlement.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    const wrapper = mount(MySettlementPage)
+    expect(wrapper.get('.aw-self-supplement-upload').text()).toContain('正在读取补录权限')
+    expect(wrapper.text()).not.toContain('当前没有可用的补录权限')
+    expect(wrapper.text()).not.toContain('还没有补录记录')
+    finish({
+      months: [], supplements: [],
+      supplement_permissions: [{ id: 1, business_month: '2026-11', enabled: true }],
+    })
+    await flushPromises()
+    expect(wrapper.get('.aw-self-supplement-upload').text()).toContain('已开放 2026-11')
+    expect(wrapper.text()).toContain('还没有补录记录')
+    wrapper.unmount()
+  })
+
   it('uploads into the selected historical payroll month and removes permission after refresh', async () => {
     const permissions = [
       { id: 2, payee_user_id: 1001, business_month: '2026-11', enabled: true },

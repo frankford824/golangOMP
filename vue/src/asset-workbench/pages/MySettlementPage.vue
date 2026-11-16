@@ -98,6 +98,11 @@ const selectedSupplementGroups = computed(() => groupDriveUploadPieceworkItems(s
 const selectedSupplementWorkNames = computed(() => selectedSupplementGroups.value.map((group) => ({ name: supplementGroupName(group) })))
 const duplicateFilenames = computed(() => duplicateSupplementFileNames(selectedSupplementWorkNames.value, supplements.value.filter((row) => row.business_month === supplementMonth.value)))
 const supplementUploadOpen = computed(() => Boolean(supplementPermission.value?.enabled))
+const supplementAccessLabel = computed(() => {
+  if (accessClosed.value) return '不可访问'
+  if (!result.value) return error.value ? '读取失败' : '正在读取'
+  return supplementUploadOpen.value ? `已开放 ${supplementPermission.value?.business_month}` : '当前未开放'
+})
 const canUploadSupplement = computed(() =>
   supplementUploadOpen.value && Boolean(selectedDirectory.value) && selectedSupplementGroups.value.length > 0 && Boolean(supplementDate.value) && !uploading.value,
 )
@@ -190,8 +195,10 @@ function selectSupplementFiles(event: Event) {
 
 async function dropSupplementFiles(event: DragEvent) {
   supplementDragActive.value = false
+  if (uploading.value) return
   try {
-    applySupplementFiles(await filesFromDriveDrop(event.dataTransfer))
+    const files = await filesFromDriveDrop(event.dataTransfer)
+    if (!uploading.value) applySupplementFiles(files)
   } catch (err) {
     uploadError.value = resolveApiUserMessage(err, { fallback: '读取文件夹失败，请改用“选择文件夹”' })
   }
@@ -217,7 +224,8 @@ function clearSupplementQueue() {
 async function uploadSupplements() {
   const permission = supplementPermission.value
   const directory = selectedDirectory.value
-  if (!permission?.enabled || !directory || !supplementDate.value || !selectedSupplementGroups.value.length) return
+  const date = supplementDate.value
+  if (!permission?.enabled || !directory || !date || !selectedSupplementGroups.value.length) return
   uploading.value = true
   uploadProgress.value = 0
   uploadError.value = ''
@@ -246,7 +254,7 @@ async function uploadSupplements() {
         processedFiles += 1
       }
       await assetWorkbenchApi.createSettlementSupplement(
-        buildSelfSupplementPayload({ name: supplementGroupName(group) }, sessionIds, supplementDate.value, permission, directory),
+        buildSelfSupplementPayload({ name: supplementGroupName(group) }, sessionIds, date, permission, directory),
       )
       completedWorks += 1
     }
@@ -476,11 +484,13 @@ onBeforeUnmount(() => {
           <p class="aw-copy">选择管理员已开放的结算月补交遗漏作品；补录工资计入所选月份，单独列示。已有生成或确认批次的月份不能补录。</p>
         </div>
         <span class="aw-chip" :class="supplementUploadOpen ? 'aw-chip--success' : 'aw-chip--neutral'">
-          {{ supplementUploadOpen ? `已开放 ${supplementPermission?.business_month}` : '当前未开放' }}
+          {{ supplementAccessLabel }}
         </span>
       </div>
 
-      <div v-if="supplementPermissions.length" class="aw-form-grid">
+      <p v-if="accessClosed" class="aw-inline-alert aw-inline-alert--info">结算页面暂未开放，无法读取补录权限。</p>
+      <p v-else-if="!result" class="aw-inline-alert aw-inline-alert--info" role="status">{{ error ? '补录权限读取失败，请刷新重试。' : '正在读取补录权限…' }}</p>
+      <div v-else-if="supplementPermissions.length" class="aw-form-grid">
         <label>
           补录结算月
           <select v-model="supplementMonth" :disabled="uploading" aria-describedby="supplement-month-help">
@@ -491,12 +501,12 @@ onBeforeUnmount(() => {
         </label>
         <label>
           补录日期
-          <input v-model="supplementDate" type="date" aria-describedby="supplement-date-help" />
+          <input v-model="supplementDate" type="date" :disabled="uploading" aria-describedby="supplement-date-help" />
           <span id="supplement-date-help" class="aw-copy">指作品原本应该上传、但因遗漏未上传的日期。</span>
         </label>
         <label>
           上传目录 / 计价分类
-          <select v-model.number="selectedDirectoryId">
+          <select v-model.number="selectedDirectoryId" :disabled="uploading">
             <option :value="0" disabled>请选择上传目录</option>
             <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
               {{ directory.name }} · {{ directory.difficulty_class }}类
@@ -519,15 +529,15 @@ onBeforeUnmount(() => {
               <span>文件夹按正常交稿规则计为 1 个作品；允许：{{ supplementAllowedLabel }}。</span>
             </div>
             <div class="aw-supplement-file-picker__actions">
-              <button class="aw-secondary-button" type="button" @click="fileInput?.click()">选择文件</button>
-              <button class="aw-secondary-button" type="button" @click="folderInput?.click()">
+              <button class="aw-secondary-button" type="button" :disabled="uploading" @click="fileInput?.click()">选择文件</button>
+              <button class="aw-secondary-button" type="button" :disabled="uploading" @click="folderInput?.click()">
                 <FolderOpen :size="15" aria-hidden="true" />
                 选择文件夹
               </button>
             </div>
           </div>
-          <input ref="fileInput" class="aw-visually-hidden" type="file" :accept="supplementAcceptString" multiple aria-label="选择补录文件" @change="selectSupplementFiles" />
-          <input ref="folderInput" class="aw-visually-hidden" type="file" :accept="supplementAcceptString" multiple webkitdirectory directory aria-label="选择补录文件夹" @change="selectSupplementFiles" />
+          <input ref="fileInput" class="aw-visually-hidden" type="file" :disabled="uploading" :accept="supplementAcceptString" multiple aria-label="选择补录文件" @change="selectSupplementFiles" />
+          <input ref="folderInput" class="aw-visually-hidden" type="file" :disabled="uploading" :accept="supplementAcceptString" multiple webkitdirectory directory aria-label="选择补录文件夹" @change="selectSupplementFiles" />
           <span v-if="fileSelectionNotice" class="aw-supplement-file-picker__notice">{{ fileSelectionNotice }}</span>
         </div>
         <section v-if="selectedSupplementGroups.length" class="aw-form-grid__full aw-supplement-upload-queue" aria-label="补录待上传队列">
@@ -585,7 +595,7 @@ onBeforeUnmount(() => {
           <p class="aw-eyebrow">补录查询</p>
           <h3>我的补录记录</h3>
         </div>
-        <span class="aw-chip aw-chip--neutral">{{ formatInt(activeSupplements.length) }} 条</span>
+        <span v-if="result" class="aw-chip aw-chip--neutral">{{ formatInt(activeSupplements.length) }} 条</span>
       </div>
       <div v-if="deletableSupplements.length" class="aw-grid-toolbar aw-supplement-delete-toolbar">
         <label class="aw-inline-check">
@@ -603,7 +613,8 @@ onBeforeUnmount(() => {
           删除已选 {{ formatInt(selectedSupplementIds.length) }} 条
         </button>
       </div>
-      <div v-if="activeSupplements.length" class="aw-simple-income__list">
+      <p v-if="!result && !accessClosed" class="aw-inline-alert aw-inline-alert--info" role="status">{{ error ? '补录记录读取失败，请刷新重试。' : '正在读取补录记录…' }}</p>
+      <div v-else-if="activeSupplements.length" class="aw-simple-income__list">
         <article v-for="row in activeSupplements" :key="row.id" class="aw-simple-income__row">
           <header class="aw-simple-income__month">
             <label class="aw-inline-check aw-supplement-row__main">
@@ -647,7 +658,7 @@ onBeforeUnmount(() => {
           <p v-else class="aw-copy">这是一条管理员手工补录记录，没有关联上传文件。</p>
         </article>
       </div>
-      <div v-else class="aw-empty-state">
+      <div v-else-if="result" class="aw-empty-state">
         <h3>还没有补录记录</h3>
         <p>补录权限开放后，在上方选择日期、目录和文件即可上传。</p>
       </div>

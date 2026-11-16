@@ -10829,3 +10829,15 @@ body.aw-submission-dialog-locked {
     grid-column: 1 / -1;
   }
 }
+
+.aw-upload-center--income .aw-upload-center__orb {
+  width: 58px;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  justify-self: end;
+  padding: var(--aw-space-2);
+}
+
+.aw-upload-center--income .aw-upload-center__orb-copy {
+  display: none;
+}
