@@ -408,7 +408,7 @@ onMounted(() => {
           <div class="aw-form-grid">
             <label>
               人员编号
-              <input v-model.trim="hrForm.personnel_no" maxlength="32" pattern="[A-Za-z0-9_\-]+" :placeholder="`默认 ${selectedProfile.user_id}`" />
+              <input v-model.trim="hrForm.personnel_no" :disabled="profileDetailLoading || !!profileDetailError" maxlength="32" pattern="[A-Za-z0-9_\-]+" :placeholder="`默认 ${selectedProfile.user_id}`" />
             </label>
             <label>
               人员类型

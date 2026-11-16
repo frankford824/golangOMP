@@ -77,6 +77,7 @@ type ErrorImportRecordGridRow = ErrorImportRecordRow & { payee_name_label: strin
 type SettlementSectionKey = 'preview' | 'batches' | 'supplements' | 'adjustments'
 
 const session = useAssetWorkbenchSessionStore()
+const canAttachSupplementFile = computed(() => session.hasAnyCapability(['asset.workbench.submit', 'asset.workbench.manage']))
 const canReverseConfirmedBatch = computed(() => Boolean(
   session.bootstrap?.access?.asset_roles?.includes('SuperAdmin') || session.bootstrap?.user?.roles?.includes('SuperAdmin'),
 ))
@@ -160,7 +161,7 @@ const settlementRequest = usePageRequest(
       assetWorkbenchApi.listSettlementSupplements(buildSupplementListParams()),
       assetWorkbenchApi.listSupplementPermissions({ business_month: month.value, page: 1, page_size: 50 }),
       assetWorkbenchApi.listDifficultyClasses(),
-      assetWorkbenchApi.listUploadDirectories(),
+      canAttachSupplementFile.value ? assetWorkbenchApi.listUploadDirectories() : Promise.resolve([]),
       assetWorkbenchApi.listErrorImports({ business_month: month.value, page: 1, page_size: 100 }),
     ])
     return {
@@ -1866,7 +1867,7 @@ onMounted(async () => {
                 </label>
                 <label>
                   关联补录文件（可选）
-                  <input ref="supplementUploadInput" type="file" accept="image/*" @change="selectAdminSupplementFile" />
+                  <input ref="supplementUploadInput" type="file" accept="image/*" :disabled="!canAttachSupplementFile" @change="selectAdminSupplementFile" />
                 </label>
                 <label>
                   文件上传目录 / 计价分类
@@ -1907,7 +1908,10 @@ onMounted(async () => {
               <p v-if="manualSupplementDuplicateWarning" class="aw-inline-alert aw-inline-alert--warning">
                 {{ manualSupplementDuplicateWarning }}
               </p>
-              <p class="aw-copy">选择文件时，系统会保存具体文件并按上传目录自动计价；不选文件则创建手工补录。补录工资计入所选结算月，并在该月工资条中单独显示。</p>
+              <p class="aw-copy">
+                {{ canAttachSupplementFile ? '选择文件时按上传目录自动计价，也可创建手工补录。' : '当前账号可创建手工补录或导入 Excel。关联作品文件需上传权限。' }}
+                补录工资计入所选结算月，并在该月工资条中单独显示。
+              </p>
               <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
                 <span>补录 Excel 批量导入</span>
                 <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择导入年月</button>
