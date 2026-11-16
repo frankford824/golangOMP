@@ -47,7 +47,7 @@ describe('UploadDirectoriesSettingsPage', () => {
   })
 
   it('creates, edits, and safely disables upload directories from one visible admin page', async () => {
-    const wrapper = mount(UploadDirectoriesSettingsPage)
+    const wrapper = mount(UploadDirectoriesSettingsPage, { attachTo: document.body, global: { stubs: { DialogPortal: { template: '<slot />' } } } })
     await flushPromises()
 
     expect(wrapper.text()).toContain('已配置 2 个上传目录')

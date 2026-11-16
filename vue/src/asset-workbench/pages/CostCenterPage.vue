@@ -801,8 +801,8 @@ onMounted(async () => {
       >
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'action'" class="aw-grid-actions">
-            <button type="button" @click="startDifficultyEdit(gridRowAsDifficulty(row))">编辑</button>
-            <button type="button" @click="toggleDifficultyClass(gridRowAsDifficulty(row))">
+            <button class="aw-grid-button" type="button" @click="startDifficultyEdit(gridRowAsDifficulty(row))">编辑</button>
+            <button class="aw-grid-button" type="button" @click="toggleDifficultyClass(gridRowAsDifficulty(row))">
               {{ gridRowAsDifficulty(row).enabled ? '停用' : '启用' }}
             </button>
           </div>
@@ -1054,8 +1054,8 @@ onMounted(async () => {
         >
           <template #cell="{ row, column, value }">
             <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="toggleDeductionRule(gridRowAsDeduction(row))">{{ gridRowAsDeduction(row).enabled ? '停用' : '启用' }}</button>
-              <button type="button" @click="startDeductionSupersede(gridRowAsDeduction(row))">替代</button>
+              <button class="aw-grid-button" type="button" @click="toggleDeductionRule(gridRowAsDeduction(row))">{{ gridRowAsDeduction(row).enabled ? '停用' : '启用' }}</button>
+              <button class="aw-grid-button" type="button" @click="startDeductionSupersede(gridRowAsDeduction(row))">替代</button>
             </div>
             <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsDeduction(row).worker_type).tone)">{{ value }}</span>
             <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsDeduction(row).enabled).tone)">{{ value }}</span>
@@ -1130,8 +1130,8 @@ onMounted(async () => {
         >
           <template #cell="{ row, column, value }">
             <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="toggleWelfareRule(gridRowAsWelfare(row))">{{ gridRowAsWelfare(row).enabled ? '停用' : '启用' }}</button>
-              <button type="button" @click="startWelfareSupersede(gridRowAsWelfare(row))">替代</button>
+              <button class="aw-grid-button" type="button" @click="toggleWelfareRule(gridRowAsWelfare(row))">{{ gridRowAsWelfare(row).enabled ? '停用' : '启用' }}</button>
+              <button class="aw-grid-button" type="button" @click="startWelfareSupersede(gridRowAsWelfare(row))">替代</button>
             </div>
             <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsWelfare(row).worker_type).tone)">{{ value }}</span>
             <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsWelfare(row).enabled).tone)">{{ value }}</span>
@@ -1205,7 +1205,7 @@ onMounted(async () => {
           <template #cell="{ row, column, value }">
             <div v-if="column.key === 'action'" class="aw-inline-actions">
               <button type="button" @click="togglePromoRule(gridRowAsPromo(row))">{{ gridRowAsPromo(row).enabled ? '停用' : '启用' }}</button>
-              <button type="button" @click="startPromoSupersede(gridRowAsPromo(row))">替代</button>
+              <button class="aw-grid-button" type="button" @click="startPromoSupersede(gridRowAsPromo(row))">替代</button>
             </div>
             <span v-else-if="column.key === 'mode_label'" :class="chipClass(promoModeMeta(gridRowAsPromo(row).mode).tone)">{{ value }}</span>
             <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPromo(row).worker_type).tone)">{{ value }}</span>

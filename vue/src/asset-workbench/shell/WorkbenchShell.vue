@@ -30,6 +30,7 @@ const SETTLEMENT_HUB_TAB_KEY = 'aw-settlement-hub-tab'
 const route = useRoute()
 const router = useRouter()
 const commandOpen = ref(false)
+const commandListRef = ref<HTMLElement | null>(null)
 const commandQuery = ref('')
 const commandIndex = ref(0)
 const commandInputRef = ref<HTMLInputElement | null>(null)
@@ -187,6 +188,7 @@ function moveCommandSelection(delta: number) {
   const total = flatCommandItems.value.length
   if (!total) return
   commandIndex.value = (commandIndex.value + delta + total) % total
+  void nextTick(() => commandListRef.value?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }))
 }
 
 function runSelectedCommand() {
@@ -221,7 +223,7 @@ function handleCommandKeydown(event: KeyboardEvent) {
     moveCommandSelection(-1)
     return
   }
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' && event.target === commandInputRef.value) {
     event.preventDefault()
     runSelectedCommand()
   }
@@ -364,7 +366,7 @@ watch(commandQuery, () => {
             aria-controls="aw-command-list"
           />
         </div>
-        <div id="aw-command-list" class="aw-command__list">
+        <div id="aw-command-list" ref="commandListRef" class="aw-command__list">
           <template v-for="group in groupedCommandItems" :key="group.label">
             <p class="aw-command__group">{{ group.label }}</p>
             <button

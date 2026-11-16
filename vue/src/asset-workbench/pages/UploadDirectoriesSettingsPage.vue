@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { FolderCog, Plus } from 'lucide-vue-next'
+import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 
 import {
   assetWorkbenchApi,
@@ -197,53 +198,67 @@ onMounted(loadDirectories)
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
 
-    <section v-if="editorOpen" class="aw-panel aw-upload-directory-editor" role="dialog" :aria-label="editorTitle">
-      <div class="aw-panel__head">
-        <div>
-          <p class="aw-eyebrow">{{ editingID ? '修改目录' : '添加目录' }}</p>
-          <h3>{{ editorTitle }}</h3>
+    <DialogRoot :open="editorOpen" @update:open="(open) => { if (!open && !saving) closeEditor() }">
+      <DialogPortal>
+        <div v-if="editorOpen" class="aw-token-scope aw-account-dialog-layer">
+          <DialogOverlay class="aw-account-dialog-backdrop" />
+          <DialogContent
+            class="aw-account-dialog aw-upload-directory-editor"
+            :aria-label="editorTitle"
+            @escape-key-down="(event) => { if (saving) event.preventDefault() }"
+            @interact-outside="(event) => { if (saving) event.preventDefault() }"
+          >
+            <div class="aw-panel__head">
+              <div>
+                <p class="aw-eyebrow">{{ editingID ? '修改目录' : '添加目录' }}</p>
+                <DialogTitle as="h3">{{ editorTitle }}</DialogTitle>
+              </div>
+              <span class="aw-chip aw-chip--info">{{ editingID ? `目录 ID ${editingID}` : '新目录' }}</span>
+            </div>
+            <DialogDescription class="aw-visually-hidden">维护上传目录和计价分类</DialogDescription>
+            <div class="aw-form-grid">
+              <label class="aw-field">
+                <span>目录名称</span>
+                <input v-model.trim="form.name" aria-label="目录名称" placeholder="例如 A类定稿" required />
+              </label>
+              <label class="aw-field">
+                <span>存储路径</span>
+                <input v-model.trim="form.oss_prefix" aria-label="存储路径" placeholder="不填则按名称自动生成" />
+                <small>修改路径只影响之后的新上传，历史文件仍保留原路径快照。</small>
+              </label>
+              <label class="aw-field">
+                <span>计价分类</span>
+                <select v-model="form.difficulty_class" aria-label="计价分类" required>
+                  <option value="" disabled>请选择</option>
+                  <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
+                </select>
+              </label>
+              <label class="aw-field">
+                <span>允许格式</span>
+                <input v-model.trim="form.allowed_file_types" aria-label="允许格式" placeholder="jpg, png, psd, psb；不填则不限" />
+              </label>
+              <label class="aw-field">
+                <span>排序</span>
+                <input v-model.number="form.sort_order" type="number" min="0" aria-label="目录排序" />
+              </label>
+              <label class="aw-inline-check aw-upload-directory-editor__enabled">
+                <input v-model="form.enabled" type="checkbox" />
+                <span>启用后在上传中心显示</span>
+              </label>
+            </div>
+            <label class="aw-field">
+              <span>说明</span>
+              <textarea v-model.trim="form.description" rows="3" aria-label="目录说明" placeholder="用途、文件要求或交付说明" />
+            </label>
+            <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
+            <div class="aw-account-dialog__footer">
+              <button class="aw-secondary-button" type="button" :disabled="saving" @click="closeEditor">取消</button>
+              <button class="aw-primary-button" type="button" :disabled="saving" @click="saveDirectory">{{ saving ? '保存中…' : '保存目录' }}</button>
+            </div>
+          </DialogContent>
         </div>
-        <span class="aw-chip aw-chip--info">{{ editingID ? `目录 ID ${editingID}` : '新目录' }}</span>
-      </div>
-      <div class="aw-form-grid">
-        <label class="aw-field">
-          <span>目录名称</span>
-          <input v-model.trim="form.name" aria-label="目录名称" placeholder="例如 A类定稿" required />
-        </label>
-        <label class="aw-field">
-          <span>存储路径</span>
-          <input v-model.trim="form.oss_prefix" aria-label="存储路径" placeholder="不填则按名称自动生成" />
-          <small>修改路径只影响之后的新上传，历史文件仍保留原路径快照。</small>
-        </label>
-        <label class="aw-field">
-          <span>计价分类</span>
-          <select v-model="form.difficulty_class" aria-label="计价分类" required>
-            <option value="" disabled>请选择</option>
-            <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
-          </select>
-        </label>
-        <label class="aw-field">
-          <span>允许格式</span>
-          <input v-model.trim="form.allowed_file_types" aria-label="允许格式" placeholder="jpg, png, psd, psb；不填则不限" />
-        </label>
-        <label class="aw-field">
-          <span>排序</span>
-          <input v-model.number="form.sort_order" type="number" min="0" aria-label="目录排序" />
-        </label>
-        <label class="aw-inline-check aw-upload-directory-editor__enabled">
-          <input v-model="form.enabled" type="checkbox" />
-          <span>启用后在上传中心显示</span>
-        </label>
-      </div>
-      <label class="aw-field">
-        <span>说明</span>
-        <textarea v-model.trim="form.description" rows="3" aria-label="目录说明" placeholder="用途、文件要求或交付说明" />
-      </label>
-      <div class="aw-inline-actions">
-        <button class="aw-primary-button" type="button" :disabled="saving" @click="saveDirectory">{{ saving ? '保存中…' : '保存目录' }}</button>
-        <button class="aw-secondary-button" type="button" :disabled="saving" @click="closeEditor">取消</button>
-      </div>
-    </section>
+      </DialogPortal>
+    </DialogRoot>
 
     <section class="aw-data-surface">
       <div class="aw-grid-toolbar">
@@ -292,23 +307,32 @@ onMounted(loadDirectories)
       </div>
     </section>
 
-    <div v-if="pendingToggle" class="aw-modal-backdrop" @click.self="pendingToggle = null">
-      <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-label="确认上传目录状态">
-        <p class="aw-eyebrow">{{ pendingToggle.enabled ? '安全删除' : '恢复目录' }}</p>
-        <h3>{{ pendingToggle.enabled ? '确认停用上传目录' : '确认恢复上传目录' }}</h3>
-        <p>
-          {{ pendingToggle.enabled
-            ? `${pendingToggle.name} 停用后不再出现在新上传选择中，历史文件和计价记录不会删除。`
-            : `${pendingToggle.name} 恢复后会重新出现在上传中心。`
-          }}
-        </p>
-        <div class="aw-inline-actions">
-          <button class="aw-secondary-button" :class="{ 'aw-secondary-button--danger': pendingToggle.enabled }" type="button" :disabled="saving" @click="confirmToggleDirectory">
-            {{ saving ? '处理中…' : pendingToggle.enabled ? '确认停用' : '确认恢复' }}
-          </button>
-          <button class="aw-secondary-button" type="button" :disabled="saving" @click="pendingToggle = null">取消</button>
+    <DialogRoot :open="Boolean(pendingToggle)" @update:open="(open) => { if (!open && !saving) pendingToggle = null }">
+      <DialogPortal>
+        <div v-if="pendingToggle" class="aw-token-scope aw-account-dialog-layer">
+          <DialogOverlay class="aw-account-dialog-backdrop" />
+          <DialogContent
+            class="aw-account-dialog aw-account-dialog--password"
+            aria-label="确认上传目录状态"
+            @escape-key-down="(event) => { if (saving) event.preventDefault() }"
+            @interact-outside="(event) => { if (saving) event.preventDefault() }"
+          >
+            <DialogTitle as="h3">{{ pendingToggle.enabled ? '确认停用上传目录' : '确认恢复上传目录' }}</DialogTitle>
+            <DialogDescription class="aw-copy">
+              {{ pendingToggle.enabled
+                ? `${pendingToggle.name} 停用后不再出现在新上传选择中，历史文件和计价记录不会删除。`
+                : `${pendingToggle.name} 恢复后会重新出现在上传中心。` }}
+            </DialogDescription>
+            <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
+            <div class="aw-account-dialog__footer">
+              <button class="aw-secondary-button" type="button" :disabled="saving" @click="pendingToggle = null">取消</button>
+              <button class="aw-secondary-button" :class="{ 'aw-secondary-button--danger': pendingToggle.enabled }" type="button" :disabled="saving" @click="confirmToggleDirectory">
+                {{ saving ? '处理中…' : pendingToggle.enabled ? '确认停用' : '确认恢复' }}
+              </button>
+            </div>
+          </DialogContent>
         </div>
-      </section>
-    </div>
+      </DialogPortal>
+    </DialogRoot>
   </section>
 </template>

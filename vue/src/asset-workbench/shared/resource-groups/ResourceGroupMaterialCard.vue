@@ -31,7 +31,7 @@
       <section ref="publisherDialog" class="aw-resource-publisher" role="dialog" aria-modal="true" aria-labelledby="aw-resource-publisher-title" tabindex="-1" @keydown.esc.prevent="closePublisher" @keydown.tab="trapPublisherFocus">
         <header>
           <div><p>客户发布</p><h3 id="aw-resource-publisher-title">{{ published ? '重新发布资源组' : '发布资源组' }}</h3></div>
-          <button ref="publisherClose" type="button" aria-label="关闭发布窗口" :disabled="publishing" @click="closePublisher">关闭</button>
+          <button ref="publisherClose" class="aw-secondary-button" type="button" aria-label="关闭发布窗口" :disabled="publishing" @click="closePublisher">关闭</button>
         </header>
         <p>本次将固定资源版本 {{ revision?.id }}。资源组以后更新不会影响客户端，只有再次重新发布才会切换。</p>
         <div v-if="loadError" class="aw-resource-publisher__error" role="alert">{{ loadError }}</div>
@@ -44,8 +44,8 @@
         </fieldset>
         <p v-else>正在读取当前最终成品…</p>
         <footer>
-          <button type="button" :disabled="publishing" @click="closePublisher">取消</button>
-          <button type="button" :disabled="publishing || !revision || !selectedCoverID" @click="confirmPublish">
+          <button class="aw-secondary-button" type="button" :disabled="publishing" @click="closePublisher">取消</button>
+          <button class="aw-primary-button" type="button" :disabled="publishing || !revision || !selectedCoverID" @click="confirmPublish">
             {{ publishing ? '发布中…' : published ? '确认重新发布' : '确认发布' }}
           </button>
         </footer>

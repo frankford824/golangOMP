@@ -246,8 +246,8 @@ watch(
           :aria-selected="isSelectedRow(item.row)"
           :tabindex="rowClickable ? 0 : undefined"
           @click="activateRow(item.row)"
-          @keydown.enter.prevent="activateRow(item.row)"
-          @keydown.space.prevent="activateRow(item.row)"
+          @keydown.enter.self.prevent="activateRow(item.row)"
+          @keydown.space.self.prevent="activateRow(item.row)"
         >
           <div
             v-for="(column, columnIndex) in orderedColumns"

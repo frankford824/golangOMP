@@ -33,43 +33,28 @@ const { lock, unlock } = useScrollLock('aw-ledger-locked')
 
 let originEl: HTMLElement | null = null
 let lastFocused: HTMLElement | null = null
-let busy = false
+let closing = false
+let openingMotion: Animation[] = []
 
 function segmentId(segment: LedgerSegment, index: number) {
   return segment.key || `seg-${index}`
 }
 
 async function openSegment(segment: LedgerSegment, event: MouseEvent) {
-  if (activeSegment.value || busy) return
-  busy = true
+  if (activeSegment.value || closing) return
   originEl = event.currentTarget as HTMLElement
   lastFocused = originEl
   activeSegment.value = segment
   lock()
 
   await nextTick()
+  if (activeSegment.value !== segment || closing || prefersReducedMotion()) return
   const surface = surfaceRef.value
   const backdrop = backdropRef.value
-  void focusCloseButton()
   const motion = readAssetMotionTokens(surface)
 
-  if (backdrop && !prefersReducedMotion()) {
-    animateOpacity(backdrop, 0, 1, motion.standard, 'ease')
-  }
-
-  if (!surface || !originEl || prefersReducedMotion()) {
-    busy = false
-    return
-  }
-
-  const surfaceAnim = ledgerOpenMotion(surface, originEl)
-
-  // The body table reveal is a static motion, owned by recipes.css
-  // (.aw-ledger-sheet__body animation) so business source stays token-only.
-
-  surfaceAnim.finished.catch(() => {}).finally(() => {
-    busy = false
-  })
+  if (backdrop) openingMotion.push(animateOpacity(backdrop, 0, 1, motion.standard, 'ease'))
+  if (surface && originEl) openingMotion.push(ledgerOpenMotion(surface, originEl))
 }
 
 function onDialogOpenChange(open: boolean) {
@@ -79,6 +64,7 @@ function onDialogOpenChange(open: boolean) {
 async function focusCloseButton() {
   await nextTick()
   const focus = () => {
+    if (!activeSegment.value || closing) return
     const closeButton =
       (closeBtnRef.value instanceof HTMLButtonElement ? closeBtnRef.value : null) ??
       document.querySelector<HTMLButtonElement>('.aw-ledger-sheet__close')
@@ -89,8 +75,14 @@ async function focusCloseButton() {
 }
 
 async function closeSegment() {
-  if (!activeSegment.value || busy) return
-  busy = true
+  if (!activeSegment.value || closing) return
+  closing = true
+  const interruptedEntry = openingMotion.some((animation) => animation.pending || animation.playState === 'running')
+  cancelOpeningMotion()
+  if (interruptedEntry) {
+    teardown()
+    return
+  }
 
   const surface = surfaceRef.value
   const backdrop = backdropRef.value
@@ -118,7 +110,7 @@ function teardown() {
   originEl = null
   unlock()
   lastFocused = null
-  busy = false
+  closing = false
   restoreFocus(focusTarget)
 }
 
@@ -131,7 +123,13 @@ function restoreFocus(target: HTMLElement | null) {
   })
 }
 
+function cancelOpeningMotion() {
+  for (const animation of openingMotion) animation.cancel()
+  openingMotion = []
+}
+
 onBeforeUnmount(() => {
+  cancelOpeningMotion()
   unlock()
 })
 

@@ -5253,8 +5253,9 @@ body.aw-submission-dialog-locked {
   grid-template-columns: 1fr;
 }
 
-.aw-account-dialog input,
-.aw-account-dialog select {
+.aw-account-dialog input:not([type="checkbox"]):not([type="radio"]),
+.aw-account-dialog select,
+.aw-account-dialog textarea {
   width: 100%;
   min-height: var(--aw-row-md);
   border: 1px solid var(--aw-hairline);
@@ -5264,11 +5265,22 @@ body.aw-submission-dialog-locked {
   padding: 0 var(--aw-space-3);
 }
 
-.aw-account-dialog input::placeholder {
+.aw-account-dialog textarea {
+  min-height: calc(2 * var(--aw-row-md));
+  padding-block: var(--aw-space-2);
+  resize: vertical;
+}
+
+.aw-account-dialog input[type="checkbox"] {
+  accent-color: var(--aw-accent);
+}
+
+.aw-account-dialog input::placeholder,
+.aw-account-dialog textarea::placeholder {
   color: var(--aw-ink-muted);
 }
 
-.aw-account-dialog :is(input, select, button):focus-visible {
+.aw-account-dialog :is(input, select, textarea, button):focus-visible {
   outline: 2px solid var(--aw-accent);
   outline-offset: 2px;
 }
@@ -5524,6 +5536,9 @@ body.aw-submission-dialog-locked {
 
 .aw-command__panel {
   position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-block-size: calc(100dvh - 12dvh);
   z-index: 1;
   width: min(640px, calc(100vw - 32px));
   margin: 9vh auto 0;
@@ -5551,6 +5566,10 @@ body.aw-submission-dialog-locked {
 
 .aw-command__list {
   display: grid;
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   gap: var(--aw-space-1);
   padding: var(--aw-space-2);
 }
@@ -10189,8 +10208,7 @@ body.aw-submission-dialog-locked {
   gap: var(--aw-space-2);
 }
 
-.aw-resource-card__actions button,
-.aw-resource-publisher button {
+.aw-resource-card__actions button {
   min-height: var(--aw-row-sm);
   padding: 0 var(--aw-space-3);
   border: 1px solid var(--aw-hairline);
@@ -10200,15 +10218,13 @@ body.aw-submission-dialog-locked {
   cursor: pointer;
 }
 
-.aw-resource-card__actions button:last-child,
-.aw-resource-publisher footer button:last-child {
+.aw-resource-card__actions button:last-child {
   border-color: var(--aw-accent);
   background: var(--aw-accent);
   color: var(--aw-on-console);
 }
 
-.aw-resource-card__actions button:disabled,
-.aw-resource-publisher button:disabled {
+.aw-resource-card__actions button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -10234,6 +10250,8 @@ body.aw-submission-dialog-locked {
 
 .aw-resource-publisher {
   display: grid;
+  max-block-size: calc(100dvh - 2 * var(--aw-space-5));
+  overflow: auto;
   gap: var(--aw-space-4);
   width: min(34rem, 100%);
   padding: var(--aw-space-5);
@@ -10250,6 +10268,11 @@ body.aw-submission-dialog-locked {
   align-items: center;
   justify-content: space-between;
   gap: var(--aw-space-3);
+}
+
+.aw-resource-publisher footer {
+  justify-content: flex-end;
+  gap: var(--aw-space-2);
 }
 
 .aw-resource-publisher h3,
@@ -10277,6 +10300,12 @@ body.aw-submission-dialog-locked {
   padding: var(--aw-space-2);
   border-radius: var(--aw-radius-sm);
   background: var(--aw-surface-muted);
+}
+
+.aw-resource-cover-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .aw-resource-publisher__error {
@@ -11073,6 +11102,15 @@ body.aw-submission-dialog-locked {
 
 .aw-confirm-dialog :is(h3, p) {
   margin-block: 0;
+  overflow-wrap: anywhere;
+}
+
+.aw-confirm-dialog h3 {
+  text-wrap: balance;
+}
+
+.aw-confirm-dialog p {
+  text-wrap: pretty;
 }
 
 .aw-confirm-dialog :is(.aw-button-row, .aw-inline-actions) {

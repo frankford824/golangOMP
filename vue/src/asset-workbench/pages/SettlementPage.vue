@@ -1239,6 +1239,17 @@ async function exportSettlement() {
   }
 }
 
+watch([selectedErrorImport, pendingDeleteErrorImport, permissionReview, pendingReverseBatch], ([detail, deletion, permission, reversal]) => {
+  const dialog = [
+    deletion && 'aw-quality-delete',
+    detail && 'aw-quality-detail',
+    permission && 'aw-supplement-permission-review',
+    reversal && 'aw-batch-reversal',
+  ].map((id) => id ? document.getElementById(id) : null).find(Boolean)
+  dialog?.scrollIntoView?.({ block: 'nearest' })
+  dialog?.focus({ preventScroll: true })
+}, { flush: 'post' })
+
 watch(month, () => {
   supplementPage.value = 1
 })
@@ -1477,7 +1488,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div v-if="selectedErrorImport" class="aw-panel" role="dialog" aria-label="质检导入明细">
+          <div v-if="selectedErrorImport" class="aw-panel" role="dialog" id="aw-quality-detail" tabindex="-1" aria-label="质检导入明细">
             <div class="aw-panel__head">
               <div>
                 <p class="aw-eyebrow">质检 Excel 明细</p>
@@ -1506,7 +1517,7 @@ onMounted(async () => {
             <p v-else class="aw-copy">这份质检表没有可显示的明细行。</p>
           </div>
 
-          <div v-if="pendingDeleteErrorImport" class="aw-panel" role="dialog" aria-label="删除质检导入">
+          <div v-if="pendingDeleteErrorImport" class="aw-panel" role="dialog" id="aw-quality-delete" tabindex="-1" aria-label="删除质检导入">
             <div class="aw-panel__head">
               <div>
                 <h3>删除质检导入</h3>
@@ -1561,7 +1572,7 @@ onMounted(async () => {
             >
               <template #cell="{ row, column, value }">
                 <div v-if="column.key === 'actions'" class="aw-inline-actions">
-                  <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
+                  <button class="aw-grid-button" type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
                   <button
                     v-if="gridRowAsBatch(row).status === 'generated'"
                     type="button"
@@ -1611,7 +1622,7 @@ onMounted(async () => {
                 <button class="aw-secondary-button" type="button" @click="pendingCancelBatch = null">返回</button>
               </div>
             </div>
-            <div v-if="pendingReverseBatch" class="aw-panel aw-settlement-reversal" role="dialog" aria-label="撤销已确认批次">
+            <div v-if="pendingReverseBatch" class="aw-panel aw-settlement-reversal" role="dialog" id="aw-batch-reversal" tabindex="-1" aria-label="撤销已确认批次">
               <div class="aw-panel__head">
                 <div>
                   <h3>撤销已确认批次</h3>
@@ -1768,7 +1779,7 @@ onMounted(async () => {
                 </button>
                 <button class="aw-primary-button" type="button" :disabled="!permissionForm.payee_user_id || eligibleMonthsLoading || (permissionForm.enabled && eligibleSupplementMonths.length === 0)" @click="reviewSupplementPermission">核对开放设置</button>
               </div>
-              <section v-if="permissionReview" class="aw-panel" role="dialog" aria-label="核对补录权限">
+              <section v-if="permissionReview" class="aw-panel" role="dialog" id="aw-supplement-permission-review" tabindex="-1" aria-label="核对补录权限">
                 <div class="aw-panel__head">
                   <h3>核对补录权限</h3>
                 </div>
