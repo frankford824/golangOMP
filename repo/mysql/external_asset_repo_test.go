@@ -2,7 +2,9 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql/driver"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -55,13 +57,13 @@ func TestPendingExternalAssetQueriesScopeMountsAndBackOffFailures(t *testing.T) 
 }
 
 func TestBuildExternalAssetWhereIncludesOnlyOSSReadyMissingArchiveWhenRequested(t *testing.T) {
-	where, _, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{IncludeOSSArchive: true})
+	where, _, _ := buildExternalAssetWhereWithMode(domain.ExternalAssetSearchQuery{IncludeOSSArchive: true}, false)
 	for _, fragment := range []string{"status = 'missing'", "oss_sync_status = 'ready'", "oss_original_key"} {
 		if !strings.Contains(where, fragment) {
 			t.Fatalf("archive packaging where clause missing %q: %s", fragment, where)
 		}
 	}
-	ordinary, _, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{})
+	ordinary, _, _ := buildExternalAssetWhereWithMode(domain.ExternalAssetSearchQuery{}, false)
 	if !strings.Contains(ordinary, "status <> 'missing'") || strings.Contains(ordinary, "status = 'missing'") {
 		t.Fatalf("ordinary external search changed missing-file visibility: %s", ordinary)
 	}
@@ -187,12 +189,12 @@ func TestClaimedOSSCompletionUsesClaimTokenCAS(t *testing.T) {
 }
 
 func TestBuildExternalAssetWhereUsesFullTextForKeyword(t *testing.T) {
-	where, args, orderBy := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{Keyword: "KT poster", Page: 1, Size: 20})
+	where, args, orderBy := buildExternalAssetWhereWithMode(domain.ExternalAssetSearchQuery{Keyword: "KT poster", Page: 1, Size: 20}, true)
 
 	if !strings.Contains(where, "MATCH(file_name, origin_path, parent_path, searchable_text) AGAINST (? IN BOOLEAN MODE)") {
 		t.Fatalf("where clause should use fulltext: %s", where)
 	}
-	if strings.Contains(where, "file_name LIKE ? OR origin_path LIKE ?") {
+	if strings.Contains(where, "file_name LIKE ? ESCAPE '!' OR origin_path LIKE ? ESCAPE '!'") {
 		t.Fatalf("keyword clause should not use contains LIKE in fulltext mode: %s", where)
 	}
 	if len(args) == 0 || args[0] != "+KT* +poster*" {
@@ -203,10 +205,84 @@ func TestBuildExternalAssetWhereUsesFullTextForKeyword(t *testing.T) {
 	}
 }
 
+func TestExternalAssetSearchUsesLiteralSKUWithoutFullText(t *testing.T) {
+	for _, tc := range []struct{ keyword, pattern string }{
+		{"HSC07106", "%HSC07106%"},
+		{"HQT02091", "%HQT02091%"},
+		{"ABC_12345", "%ABC!_12345%"},
+	} {
+		t.Run(tc.keyword, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectQuery(`SELECT COUNT.*file_name LIKE \? ESCAPE '!'.*origin_path = \? OR origin_path LIKE \?`).
+				WithArgs(externalSearchTestArgs(tc.pattern, tc.pattern, tc.pattern, tc.pattern, "/p3", "/p3/%")...).
+				WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+			query := domain.ExternalAssetSearchQuery{Keyword: tc.keyword, OriginPrefixes: []string{"/p3"}}
+			_, total, err := NewExternalAssetRepo(New(db)).Search(context.Background(), query)
+			if err != nil || total != 0 {
+				t.Fatalf("Search: total=%d err=%v", total, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestExternalAssetSearchFallsBackWhenFullTextCacheIsExhausted(t *testing.T) {
+	cacheLimit := &mysql.MySQLError{Number: 188, Message: "FTS query exceeds result cache limit"}
+	fullText := regexp.QuoteMeta("MATCH(file_name, origin_path, parent_path, searchable_text) AGAINST (? IN BOOLEAN MODE)")
+	like := regexp.QuoteMeta("file_name LIKE ? ESCAPE '!'")
+	for _, failOnPage := range []bool{false, true} {
+		t.Run(fmt.Sprintf("page failure=%t", failOnPage), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			count := mock.ExpectQuery("SELECT COUNT.*" + fullText).WithArgs(externalSearchTestArgs("+poster*")...)
+			if failOnPage {
+				count.WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(12))
+				mock.ExpectQuery("SELECT id, provider.*" + fullText).
+					WithArgs(append(externalSearchTestArgs("+poster*"), 10, 10)...).WillReturnError(cacheLimit)
+			} else {
+				count.WillReturnError(cacheLimit)
+			}
+			mock.ExpectQuery("SELECT COUNT.*" + like).
+				WithArgs(externalSearchTestArgs("%poster%", "%poster%", "%poster%", "%poster%")...).
+				WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(3))
+			mock.ExpectQuery("SELECT id, provider.*" + like).
+				WithArgs(append(externalSearchTestArgs("%poster%", "%poster%", "%poster%", "%poster%"), 10, 10)...).
+				WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			_, total, err := NewExternalAssetRepo(New(db)).Search(context.Background(), domain.ExternalAssetSearchQuery{Keyword: "poster", Page: 2, Size: 10})
+			if err != nil || total != 3 {
+				t.Fatalf("Search: total=%d err=%v", total, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func externalSearchTestArgs(args ...driver.Value) []driver.Value {
+	// Keep query argument assertions focused on the keyword and access scope.
+	_, formats := appendAssetFormatCategoryWhere(nil, nil,
+		[]string{"LOWER(file_name)", "LOWER(COALESCE(file_ext, ''))"},
+		"LOWER(COALESCE(mime_type, ''))", domain.AssetFormatCategoryAll)
+	for _, value := range formats {
+		args = append(args, value)
+	}
+	return args
+}
+
 func TestBuildExternalAssetWhereRestrictsVisibleOriginPrefixes(t *testing.T) {
-	where, args, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{
+	where, args, _ := buildExternalAssetWhereWithMode(domain.ExternalAssetSearchQuery{
 		OriginPrefixes: []string{"/p3", "/quark/海报", "/quark/kt板"},
-	})
+	}, false)
 	if got := strings.Count(where, "origin_path = ? OR origin_path LIKE ?"); got != 3 {
 		t.Fatalf("visible prefix clauses = %d, want 3: %s", got, where)
 	}
@@ -243,7 +319,7 @@ func TestIsMySQLLockConflictRecognizesRetryableWriteConflicts(t *testing.T) {
 }
 
 func TestBuildExternalAssetLikeWhereKeepsFallbackContainsMatch(t *testing.T) {
-	where, args, _ := buildExternalAssetLikeWhere(domain.ExternalAssetSearchQuery{Keyword: "海报", Page: 1, Size: 20})
+	where, args, _ := buildExternalAssetWhereWithMode(domain.ExternalAssetSearchQuery{Keyword: "海报", Page: 1, Size: 20}, false)
 
 	if strings.Contains(where, "MATCH(") {
 		t.Fatalf("fallback where should not use fulltext: %s", where)
@@ -368,7 +444,7 @@ func TestExternalAssetNeedsOSSRealignmentOnSourceFingerprintChange(t *testing.T)
 }
 
 func TestBuildExternalAssetWhereAppliesOperationalVisibilityBeforeCountAndPage(t *testing.T) {
-	where, args, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{OperationalVisibleOnly: true, Page: 3, Size: 75})
+	where, args, _ := buildExternalAssetWhereWithMode(domain.ExternalAssetSearchQuery{OperationalVisibleOnly: true, Page: 3, Size: 75}, false)
 	if !strings.Contains(where, "origin_path NOT LIKE '/quark/%'") || !strings.Contains(where, "origin_path = ? OR origin_path LIKE ?") {
 		t.Fatalf("operational visibility where = %s", where)
 	}

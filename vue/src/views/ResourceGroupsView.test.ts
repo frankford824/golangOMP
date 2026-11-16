@@ -239,6 +239,30 @@ describe('ResourceGroupsView', () => {
     expect(mocks.push).toHaveBeenCalledWith('/asset-center/ext-77')
   })
 
+  it('shows historical search failure instead of no results and retries the same SKU', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    mocks.list.mockResolvedValue({ items: [], flat_items: [], view_mode: 'group', page: 1, page_size: 24, total: 0 })
+    mocks.batchSearchAssets.mockResolvedValueOnce({
+      data: { data: { results: [{ term: 'HSC07106', status: 'error', message: '搜索失败', candidates: 0 }] } },
+    }).mockResolvedValueOnce({
+      data: { data: { results: [{ term: 'HSC07106', status: 'not_found', candidates: 0 }] } },
+    })
+
+    await wrapper.get('.search-field input').setValue('HSC07106')
+    await wrapper.get('.search-row').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('历史素材查询失败')
+    expect(wrapper.text()).not.toContain('没有找到符合条件')
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.batchSearchAssets).toHaveBeenLastCalledWith(expect.objectContaining({ terms: ['HSC07106'] }))
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('没有找到符合条件')
+  })
+
   it('switches to flat resource grid when the API returns flat view_mode', async () => {
     mocks.list.mockResolvedValueOnce({
       items: [],

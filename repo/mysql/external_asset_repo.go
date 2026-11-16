@@ -210,34 +210,47 @@ const externalAssetBrowseSelect = externalAssetSelectColumns + `
 
 func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
 	query = query.Normalized()
-	where, args, orderBy := buildExternalAssetWhere(query)
+	preferFullText := externalAssetUsesFullText(query.Keyword)
+	items, total, err := r.searchWithMode(ctx, query, preferFullText)
+	if preferFullText && ctx.Err() == nil && (isExternalAssetFullTextFallbackError(err) || (err == nil && total == 0)) {
+		// Use the same replacement predicate for both the count and the page.
+		return r.searchWithMode(ctx, query, false)
+	}
+	return items, total, err
+}
+
+func (r *externalAssetRepo) searchWithMode(ctx context.Context, query domain.ExternalAssetSearchQuery, preferFullText bool) ([]*domain.ExternalAssetRecord, int64, error) {
+	where, args, orderBy := buildExternalAssetWhereWithMode(query, preferFullText)
 	var total int64
-	usedFallback := false
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
-		if strings.TrimSpace(query.Keyword) == "" || !isMySQLFullTextIndexMissing(err) {
-			return nil, 0, fmt.Errorf("count external assets: %w", err)
-		}
-		where, args, orderBy = buildExternalAssetLikeWhere(query)
-		usedFallback = true
-		if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
-			return nil, 0, fmt.Errorf("count external assets fallback: %w", err)
-		}
+		return nil, 0, fmt.Errorf("count external assets: %w", err)
 	}
-	if !usedFallback && total == 0 && strings.TrimSpace(query.Keyword) != "" && externalAssetBooleanQuery(query.Keyword) != "" {
-		where, args, orderBy = buildExternalAssetLikeWhere(query)
-		if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records`+where, args...).Scan(&total); err != nil {
-			return nil, 0, fmt.Errorf("count external assets fallback: %w", err)
-		}
+	if total == 0 {
+		return []*domain.ExternalAssetRecord{}, 0, nil
 	}
+	items, err := r.searchPage(ctx, query, where, args, orderBy)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search external assets: %w", err)
+	}
+	return items, total, nil
+}
+
+func (r *externalAssetRepo) searchPage(ctx context.Context, query domain.ExternalAssetSearchQuery, where string, args []interface{}, orderBy string) ([]*domain.ExternalAssetRecord, error) {
 	args = append(args, (query.Page-1)*query.Size, query.Size)
 	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+where+orderBy+`
 		LIMIT ?, ?`, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("search external assets: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
-	items, err := scanExternalAssetRows(rows)
-	return items, total, err
+	return scanExternalAssetRows(rows)
+}
+
+func externalAssetUsesFullText(keyword string) bool {
+	// The ngram index can expand a SKU query into a large set of shared
+	// tokens. Use a literal substring search for identifiers from the start.
+	code := normalizeSearchKeyword(keyword)
+	return !code.IsSKUCode && !code.IsTaskNo && externalAssetBooleanQuery(keyword) != ""
 }
 
 // SearchPreview serves latency-sensitive global-search suggestions. Unlike the
@@ -247,15 +260,10 @@ func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAss
 // only renders a handful of suggestions.
 func (r *externalAssetRepo) SearchPreview(ctx context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, error) {
 	query = query.Normalized()
-	items, err := r.searchPreviewWithMode(ctx, query, true)
-	if err != nil {
-		if !isMySQLFullTextIndexMissing(err) {
-			return nil, err
-		}
-		return r.searchPreviewWithMode(ctx, query, false)
-	}
-	if len(items) > 0 || strings.TrimSpace(query.Keyword) == "" || ctx.Err() != nil {
-		return items, nil
+	preferFullText := externalAssetUsesFullText(query.Keyword)
+	items, err := r.searchPreviewWithMode(ctx, query, preferFullText)
+	if !preferFullText || ctx.Err() != nil || (err != nil && !isExternalAssetFullTextFallbackError(err)) || len(items) > 0 {
+		return items, err
 	}
 	// Preserve substring recall for filenames that the full-text parser cannot
 	// tokenize. The caller gives this fallback a small context budget, so a
@@ -266,14 +274,11 @@ func (r *externalAssetRepo) SearchPreview(ctx context.Context, query domain.Exte
 
 func (r *externalAssetRepo) searchPreviewWithMode(ctx context.Context, query domain.ExternalAssetSearchQuery, preferFullText bool) ([]*domain.ExternalAssetRecord, error) {
 	where, args, orderBy := buildExternalAssetWhereWithMode(query, preferFullText)
-	args = append(args, (query.Page-1)*query.Size, query.Size)
-	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+where+orderBy+`
-		LIMIT ?, ?`, args...)
+	items, err := r.searchPage(ctx, query, where, args, orderBy)
 	if err != nil {
 		return nil, fmt.Errorf("search external asset preview: %w", err)
 	}
-	defer rows.Close()
-	return scanExternalAssetRows(rows)
+	return items, nil
 }
 
 func (r *externalAssetRepo) ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int, formatCategory domain.AssetFormatCategoryFilter) ([]domain.ExternalAssetDirectoryEntry, error) {
@@ -421,14 +426,6 @@ func (r *externalAssetRepo) ListDirectoryFiles(ctx context.Context, parentPath s
 	return items, total, err
 }
 
-func buildExternalAssetWhere(query domain.ExternalAssetSearchQuery) (string, []interface{}, string) {
-	return buildExternalAssetWhereWithMode(query, true)
-}
-
-func buildExternalAssetLikeWhere(query domain.ExternalAssetSearchQuery) (string, []interface{}, string) {
-	return buildExternalAssetWhereWithMode(query, false)
-}
-
 func buildExternalAssetWhereWithMode(query domain.ExternalAssetSearchQuery, preferFullText bool) (string, []interface{}, string) {
 	statusClause := `status <> 'missing'`
 	if query.IncludeOSSArchive {
@@ -447,8 +444,8 @@ func buildExternalAssetWhereWithMode(query domain.ExternalAssetSearchQuery, pref
 			clauses = append(clauses, `MATCH(file_name, origin_path, parent_path, searchable_text) AGAINST (? IN BOOLEAN MODE)`)
 			args = append(args, fullText)
 		} else {
-			like := "%" + strings.TrimSpace(query.Keyword) + "%"
-			clauses = append(clauses, `(file_name LIKE ? OR origin_path LIKE ? OR parent_path LIKE ? OR searchable_text LIKE ?)`)
+			like := "%" + strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(strings.TrimSpace(query.Keyword)) + "%"
+			clauses = append(clauses, `(file_name LIKE ? ESCAPE '!' OR origin_path LIKE ? ESCAPE '!' OR parent_path LIKE ? ESCAPE '!' OR searchable_text LIKE ? ESCAPE '!')`)
 			args = append(args, like, like, like, like)
 		}
 	}

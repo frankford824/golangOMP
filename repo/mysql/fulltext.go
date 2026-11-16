@@ -29,6 +29,13 @@ func isMySQLFullTextIndexMissing(err error) bool {
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1191
 }
 
+// External asset searches can retry these full-text failures as literal LIKE queries.
+func isExternalAssetFullTextFallbackError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	// 188 is the InnoDB result cache limit, 1191 is a missing FULLTEXT index.
+	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 188 || mysqlErr.Number == 1191)
+}
+
 func isMySQLLockConflict(err error) bool {
 	var mysqlErr *mysql.MySQLError
 	return errors.As(err, &mysqlErr) && (mysqlErr.Number == 1205 || mysqlErr.Number == 1213)

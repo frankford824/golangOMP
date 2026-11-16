@@ -39,8 +39,8 @@
 
     <template v-if="!loading || result.items.length || result.flat_items.length">
     <template v-if="isFlatMode">
-      <div v-if="!result.flat_items.length" class="empty">没有找到符合条件的资源。</div>
-      <section v-else class="grid flat-grid" aria-label="匹配资源列表">
+      <div v-if="!result.flat_items.length && !error" class="empty">没有找到符合条件的资源。</div>
+      <section v-else-if="result.flat_items.length" class="grid flat-grid" aria-label="匹配资源列表">
         <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
           <span class="cover">
             <AssetPreviewMedia v-if="item.task_asset_id && (item.resource_role !== 'default_style' || item.preview_url)" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" rendition="thumbnail" :open-full-on-click="false" />
@@ -58,8 +58,8 @@
     </template>
 
     <template v-else>
-      <div v-if="!result.items.length && !externalItems.length" class="empty">没有找到符合条件的 SKU 资源。</div>
-      <section v-else class="grid" aria-label="SKU 资源列表">
+      <div v-if="!result.items.length && !externalItems.length && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
+      <section v-else-if="result.items.length || externalItems.length" class="grid" aria-label="SKU 资源列表">
         <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" @click="openGroup(group.id)">
           <span class="cover">
             <AssetPreviewMedia
@@ -248,11 +248,16 @@ async function load() {
       resourceGroupsApi.list({ q: exactSKUQuery ? undefined : filters.q || undefined, sku_code: exactSKUQuery ? filters.q.toUpperCase() : undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, page: result.page, page_size: result.page_size }),
       externalSearch,
     ])
+    if (requestVersion !== liveCostRequestVersion) return
     result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (isFlatMode.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
     const externalBody = externalResponse?.data
     const externalManifest = externalBody && typeof externalBody === 'object' && 'data' in externalBody
       ? externalBody.data as AssetBatchSearchManifest | undefined
       : externalBody as AssetBatchSearchManifest | undefined
+    const externalResults = externalManifest?.results
+    if (exactSKUQuery && (!externalResults?.length || externalResults.some(row => row.status === 'error'))) {
+      error.value = '历史素材查询失败，请重试。'
+    }
     const seenExternal = new Set<string>()
     externalItems.value = (externalManifest?.results || [])
       .flatMap((row) => row.assets || [])
@@ -265,7 +270,13 @@ async function load() {
       })
     brokenImages.value = new Set(); brokenFlat.value = new Set()
     if (exactSKUQuery && result.view_mode === 'group' && result.items.length <= 20) void refreshLiveCosts(result.items, requestVersion)
-  } catch (cause) { externalItems.value = []; error.value = cause instanceof Error ? cause.message : '资产中心加载失败。' } finally { loading.value = false }
+  } catch (cause) {
+    if (requestVersion !== liveCostRequestVersion) return
+    externalItems.value = []
+    error.value = cause instanceof Error ? cause.message : '资产中心加载失败。'
+  } finally {
+    if (requestVersion === liveCostRequestVersion) loading.value = false
+  }
 }
 async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number) {
   await Promise.all(groups.map(async (group) => {
