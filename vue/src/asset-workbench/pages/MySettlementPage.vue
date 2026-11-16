@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import type { HttpAppError } from '@/services/http'
 import { Eye, FolderOpen, Gift, Images, RefreshCw, Trash2, Upload, WalletCards, X } from 'lucide-vue-next'
 
@@ -506,13 +507,22 @@ onBeforeUnmount(() => {
         </label>
         <label>
           上传目录 / 计价分类
-          <select v-model.number="selectedDirectoryId" :disabled="uploading">
+          <select v-model.number="selectedDirectoryId" :disabled="uploading" aria-describedby="aw-supplement-price-hint">
             <option :value="0" disabled>请选择上传目录</option>
             <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
               {{ directory.name }} · {{ directory.difficulty_class }}类
             </option>
           </select>
         </label>
+        <div class="aw-form-grid__full">
+          <p id="aw-supplement-price-hint" class="aw-inline-alert aw-inline-alert--info">
+            补录前需匹配生效单价，匹配依据是当前人员类型、岗级和上传目录的计价分类。没有匹配单价的作品无法补录。
+          </p>
+          <p v-if="selectedDirectory?.difficulty_class === '0'" class="aw-copy" role="status">
+            所选目录是 0 类。补录前请确认当前岗级已有适用的 0 类单价。只交不计费文件时，请走
+            <RouterLink class="aw-text-link" to="/upload">上传成品</RouterLink>。
+          </p>
+        </div>
         <div class="aw-form-grid__full aw-supplement-file-picker">
           <span class="aw-supplement-file-picker__label">选择补录文件</span>
           <div
@@ -580,7 +590,7 @@ onBeforeUnmount(() => {
           <Upload :size="16" aria-hidden="true" />
           {{ uploading ? `上传中 ${uploadProgress}%` : `上传 ${formatInt(selectedSupplementGroups.length)} 个补录作品` }}
         </button>
-        <span v-if="selectedDirectory" class="aw-copy">按 {{ selectedDirectory.difficulty_class }} 类自动计价</span>
+        <span v-if="selectedDirectory" class="aw-copy">计价分类：{{ selectedDirectory.difficulty_class }} 类</span>
       </div>
       <p v-if="duplicateFilenames.length" class="aw-inline-alert aw-inline-alert--warning" role="alert">
         同名提醒：{{ duplicateFilenames.join('、') }} 已存在补录记录，请确认后再上传。

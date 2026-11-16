@@ -71,6 +71,29 @@ describe('MySettlementPage supplement deletion', () => {
     wrapper.unmount()
   })
 
+  it('explains the active price requirement before file selection and gives context for class zero', async () => {
+    mocks.mySettlement.mockResolvedValue({
+      months: [], supplements: [],
+      supplement_permissions: [{ id: 1, business_month: '2026-11', enabled: true }],
+    })
+    mocks.listUploadDirectories.mockResolvedValue([
+      { id: 8, name: 'C类', difficulty_class: 'C', enabled: true },
+      { id: 16, name: '看效果-不计费', difficulty_class: '0', enabled: true },
+    ])
+    const wrapper = mount(MySettlementPage, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } },
+    })
+    await flushPromises()
+    const directory = wrapper.get('select[aria-describedby="aw-supplement-price-hint"]')
+    expect(wrapper.get('#aw-supplement-price-hint').text()).toContain('没有匹配单价的作品无法补录')
+    expect(wrapper.find('a[href="/upload"]').exists()).toBe(false)
+    await directory.setValue('16')
+    expect(wrapper.text()).toContain('所选目录是 0 类')
+    expect(wrapper.get('a[href="/upload"]').text()).toBe('上传成品')
+    expect(mocks.uploadWorkbenchFile).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('uploads into the selected historical payroll month and removes permission after refresh', async () => {
     const permissions = [
       { id: 2, payee_user_id: 1001, business_month: '2026-11', enabled: true },

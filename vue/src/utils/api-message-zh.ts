@@ -175,6 +175,7 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   'settlement supplements must be recorded in the current natural month.': '补录工资只能计入当前自然月，请刷新后重新提交。',
   'supplement upload is not open for this payee and business month.': '当前人员尚未开放本月补录，请先在补录管理中开放权限。',
   'supplement upload files must be managed through their supplement record.': '补录文件不能在上传台账中单独删除，请进入对应补录记录执行删除，系统会同步移除文件和未结算金额。',
+  'supplement work cannot be submitted until its payee and upload category have an active price.': '无法补录：当前人员类型、岗级和目录计价分类未匹配到生效单价。若确属计件补录，请联系管理员核对定级和单价设置；只交不计费文件请用「上传成品」。',
   'supplement_date must use yyyy-mm-dd.': '补录日期格式异常，请重新选择日期。',
   'payee payout profile is incomplete; confirm is blocked.': '无法确认批次：批次内有人员尚未补全姓名、身份证或支付宝信息。请先在人员资料中补齐后重试。',
   'settlement batch is not confirmable.': '当前批次状态不能确认，请刷新后查看最新状态。',

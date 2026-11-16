@@ -213,3 +213,14 @@ describe('resolveApiUserMessage', () => {
     )
   })
 })
+
+it('explains a supplement price rejection instead of falling back to a generic conflict', () => {
+  expect(resolveApiUserMessage({
+    status: 409,
+    responseData: { error: {
+      code: 'INVALID_STATE_TRANSITION',
+      message: 'Supplement work cannot be submitted until its payee and upload category have an active price.',
+      details: { difficulty_class: '0', pricing_status: 'unpriced' },
+    } },
+  })).toContain('当前人员类型、岗级和目录计价分类未匹配到生效单价')
+})
