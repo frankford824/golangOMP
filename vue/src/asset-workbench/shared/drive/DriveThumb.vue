@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
-import { FileText, ImageOff } from 'lucide-vue-next'
+import { FileText, Film, ImageOff } from 'lucide-vue-next'
 
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
-import { isPsbFilename } from '@aw/shared/materials/systemAssetPreview'
+import { isPsbFilename, isVideoMimeOrFilename } from '@aw/shared/materials/systemAssetPreview'
 
 const props = defineProps<{
   fileId: number
@@ -70,7 +70,7 @@ async function loadPreview() {
 }
 
 onMounted(() => {
-  if (!rootRef.value) return
+  if (!rootRef.value || isVideoMimeOrFilename(props.mimeType, props.filename)) return
   observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
@@ -95,7 +95,8 @@ onBeforeUnmount(() => {
 
 <template>
   <span ref="rootRef" class="aw-drive-thumb" :class="{ 'aw-drive-thumb--sm': size === 'sm' }">
-    <img v-if="previewUrl" :src="previewUrl" :alt="filename" loading="lazy" />
+    <span v-if="isVideoMimeOrFilename(mimeType, filename)" class="aw-drive-thumb__video"><Film :size="20" aria-hidden="true" /> 视频</span>
+    <img v-else-if="previewUrl" :src="previewUrl" :alt="filename" loading="lazy" />
     <span v-else-if="loading" class="aw-drive-thumb__ph" aria-hidden="true" />
     <FileText v-else-if="!failed" :size="20" aria-hidden="true" />
     <ImageOff v-else :size="20" aria-hidden="true" />

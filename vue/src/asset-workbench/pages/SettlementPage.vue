@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import { Download, Table2 } from 'lucide-vue-next'
 
 import {
@@ -79,7 +79,9 @@ const session = useAssetWorkbenchSessionStore()
 const canReverseConfirmedBatch = computed(() => Boolean(
   session.bootstrap?.access?.asset_roles?.includes('SuperAdmin') || session.bootstrap?.user?.roles?.includes('SuperAdmin'),
 ))
-const month = ref(defaultBusinessMonth())
+const route = useRoute()
+const requestedMonth = route?.query?.month
+const month = ref(typeof requestedMonth === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth) ? requestedMonth : defaultBusinessMonth())
 const preview = ref<SettlementPreview | null>(null)
 const batches = ref<SettlementBatchRow[]>([])
 const supplements = ref<SettlementSupplementRow[]>([])
@@ -111,6 +113,17 @@ const reversingBatchId = ref<number | null>(null)
 const eligibleMonthsLoading = ref(false)
 const entryEligibleMonthsLoading = ref(false)
 const activeSettlementSection = ref<SettlementSectionKey>('preview')
+watch(() => route?.query?.section, (section) => {
+  activeSettlementSection.value = section === 'supplements' ? section : 'preview'
+}, { immediate: true })
+const confirmedBatches = computed(() => batches.value.filter((batch) => batch.status === 'confirmed' && batch.business_month === month.value))
+async function selectAdjustmentBatch(event: Event) {
+  const id = Number((event.target as HTMLSelectElement).value)
+  const batch = confirmedBatches.value.find((row) => row.id === id)
+  if (!batch) return
+  await openBatch(batch, 'adjustments')
+}
+const showPayrollBreakdown = ref(false)
 const notice = ref('')
 const errorInputRef = ref<HTMLInputElement | null>(null)
 const supplementInputRef = ref<HTMLInputElement | null>(null)
@@ -270,7 +283,7 @@ const manualSupplementDuplicateWarning = computed(() => {
 const entryEligibleReady = computed(() =>
   entryEligiblePayeeUserId.value === supplementForm.value.payee_user_id && entryEligibleSupplementMonths.value.length > 0,
 )
-const selectedBatchConfirmed = computed(() => selectedBatch.value?.batch.status === 'confirmed')
+const selectedBatchConfirmed = computed(() => selectedBatch.value?.batch.status === 'confirmed' && selectedBatch.value.batch.business_month === month.value)
 const hasGeneratedBatch = computed(() => batches.value.some((batch) => batch.status === 'generated'))
 const settlementNavGroups = computed(() => [
   {
@@ -756,11 +769,11 @@ async function reverseBatchConfirmation() {
   }
 }
 
-async function openBatch(batch: SettlementBatchRow) {
+async function openBatch(batch: SettlementBatchRow, section: SettlementSectionKey = 'batches') {
   error.value = ''
   try {
     selectedBatch.value = await assetWorkbenchApi.getSettlementBatchDetail(batch.id)
-    activeSettlementSection.value = 'batches'
+    activeSettlementSection.value = section
   } catch (err) {
     error.value = settlementActionError(err, '批次明细加载失败')
   }
@@ -1210,8 +1223,12 @@ watch(month, () => {
   supplementPage.value = 1
 })
 
-onMounted(() => {
-  void loadSettlement()
+onMounted(async () => {
+  await loadSettlement()
+  if (route?.hash === '#aw-quality-import-history') {
+    await nextTick()
+    document.getElementById('aw-quality-import-history')?.scrollIntoView({ block: 'start' })
+  }
 })
 </script>
 
@@ -1331,7 +1348,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <LedgerReadout :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
+          <LedgerReadout payroll :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
             <template #actions>
               <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
             </template>
@@ -1365,6 +1382,7 @@ onMounted(() => {
             <div class="aw-panel__head">
               <div>
                 <h3>工资条明细</h3>
+              <label class="aw-inline-check"><input v-model="showPayrollBreakdown" type="checkbox" /> 展开全部列</label>
                 <p v-if="monthlyReport" class="aw-copy">小计系数按本行作品数计算，月度综合系数和贡献率按人员汇总。</p>
               </div>
               <span v-if="monthlyReport" class="aw-chip aw-chip--neutral">总月度综合系数指标 {{ monthlyReport.totals.monthly_coefficient }}</span>
@@ -1378,7 +1396,7 @@ onMounted(() => {
             >
               <WorkbenchDataGrid
                 v-if="payrollRows.length"
-                :columns="payrollGridColumns"
+                :columns="showPayrollBreakdown ? payrollGridColumns : payrollGridColumns.filter(column => ['payee_name_label', 'row_label', 'item_count', 'gross_amount', 'deduction_amount', 'quality_actual_deduction_amount', 'net_amount', 'actual_net_amount'].includes(column.key))"
                 :rows="payrollGridRows"
                 row-key="grid_id"
                 storage-key="settlement-preview-payroll"
@@ -1408,7 +1426,7 @@ onMounted(() => {
           <div class="aw-panel">
             <div class="aw-panel__head">
               <div>
-                <h3>质检导入记录</h3>
+                <h3 id="aw-quality-import-history">质检导入记录</h3>
                 <p class="aw-copy">每份 Excel 单独列示扣款；工资预览中的“质检扣款”是下列有效导入的合计。</p>
               </div>
               <span class="aw-chip aw-chip--neutral">{{ formatInt(errorImports.length) }} 份</span>
@@ -1981,10 +1999,16 @@ onMounted(() => {
               <h3>工资调整</h3>
               <p>已确认批次不直接修改原始工资明细。需要补发或扣回时，在这里记录金额和原因。</p>
             </div>
-            <button class="aw-secondary-button" type="button" @click="activeSettlementSection = 'batches'">选择批次</button>
+            <label v-if="confirmedBatches.length" class="aw-field">
+              <span>已确认批次</span>
+              <select :value="selectedBatch?.batch.id ?? ''" @change="selectAdjustmentBatch">
+                <option value="" disabled>选择批次</option>
+                <option v-for="batch in confirmedBatches" :key="batch.id" :value="batch.id">{{ batch.batch_no }}</option>
+              </select>
+            </label>
           </div>
 
-          <div v-if="selectedBatch" class="aw-panel">
+          <div v-if="selectedBatchConfirmed && selectedBatch" class="aw-panel">
             <div class="aw-panel__head">
               <div>
                 <p class="aw-eyebrow">当前批次</p>
@@ -2019,9 +2043,8 @@ onMounted(() => {
             <p v-else class="aw-copy">批次确认后才能记录工资调整。</p>
           </div>
           <div v-else class="aw-empty-state">
-            <h3>还没有选择批次</h3>
-            <p>先进入“批次确认”，打开一个已确认批次后再记录工资调整。</p>
-            <button class="aw-primary-button" type="button" @click="activeSettlementSection = 'batches'">去选择批次</button>
+            <h3>{{ confirmedBatches.length ? '请选择已确认批次' : '本月暂无可调整的已确认批次' }}</h3>
+            <p>{{ confirmedBatches.length ? '从上方选择批次后，可填写补发或扣回。' : '请核对结算月份，或到批次确认查看当前处理进度。' }}</p>
           </div>
         </section>
       </main>

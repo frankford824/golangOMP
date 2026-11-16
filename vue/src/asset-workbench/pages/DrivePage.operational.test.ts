@@ -296,7 +296,7 @@ describe('DrivePage operational browsing', () => {
     })
     await flushPromises()
 
-    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('DZK000394')
+    await wrapper.get('form.aw-drive__search--global input[type="search"]').setValue('DZK000394')
     await wrapper.get('form.aw-drive__search--global').trigger('submit')
     await flushPromises()
 
@@ -341,7 +341,7 @@ describe('DrivePage operational browsing', () => {
     })
     await flushPromises()
 
-    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('HSC11066')
+    await wrapper.get('form.aw-drive__search--global input[type="search"]').setValue('HSC11066')
     await wrapper.get('form.aw-drive__search--global').trigger('submit')
     await flushPromises()
 
@@ -382,7 +382,7 @@ describe('DrivePage operational browsing', () => {
     await flushPromises()
 
     await wrapper.get('select[aria-label="搜索范围"]').setValue('operational')
-    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('HSC11066')
+    await wrapper.get('form.aw-drive__search--global input[type="search"]').setValue('HSC11066')
     await wrapper.get('form.aw-drive__search--global').trigger('submit')
     await flushPromises()
 
@@ -427,7 +427,7 @@ describe('DrivePage operational browsing', () => {
     })
     await flushPromises()
 
-    await wrapper.get('input[placeholder="搜索运营素材、文件名、上传目录"]').setValue('HSC33647')
+    await wrapper.get('form.aw-drive__search--global input[type="search"]').setValue('HSC33647')
     await wrapper.get('form.aw-drive__search--global').trigger('submit')
     await flushPromises()
     const locateButtons = wrapper.findAll('button').filter((button) => button.text() === '在网盘中定位')

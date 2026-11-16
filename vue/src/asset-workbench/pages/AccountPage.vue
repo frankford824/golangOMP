@@ -96,7 +96,9 @@ const identityLabel = computed(() => {
 })
 const profileState = computed(() => {
   if (!bootstrap.value?.profile) return '资料待填写'
+  if (bootstrap.value.profile.status === 'disabled') return '账号已停用'
   if (!bootstrap.value.profile.pii_completed) return '资料待补全'
+  if (bootstrap.value.profile.status === 'pending') return '资料审核中'
   return '资料已完成'
 })
 const accountName = computed(() => bootstrap.value?.user?.username || bootstrap.value?.user?.account || '-')

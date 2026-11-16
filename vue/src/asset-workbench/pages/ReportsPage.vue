@@ -416,6 +416,7 @@ onMounted(() => {
               <article v-for="metric in difficultySummary" :key="metric.difficulty_class" class="aw-metric-card">
                 <span>{{ difficultyLabel(metric.difficulty_class) }}</span>
                 <strong>{{ formatInt(metric.page_count) }}</strong>
+                <meter class="aw-difficulty-share" min="0" max="1" :value="metric.month_page_count_share || 0" :aria-label="`作图量占比 ${percent(metric.month_page_count_share)}`" />
                 <small>{{ formatMoney(metric.gross_amount) }} · 出错 {{ formatInt(metric.error_count) }} · {{ percent(metric.month_page_count_share) }}</small>
               </article>
             </div>
@@ -484,7 +485,7 @@ onMounted(() => {
             <div v-else class="aw-empty-state">
               <h3>没有补录计件</h3>
               <p>{{ month }} 尚未创建已批准的补录记录。补录不会延迟同步，创建后刷新即可在这里单独核对。</p>
-              <RouterLink class="aw-secondary-button" to="/settlement">进入补录管理</RouterLink>
+              <RouterLink class="aw-secondary-button" :to="{ path: '/settlement', query: { section: 'supplements', month } }">进入补录管理</RouterLink>
             </div>
           </AsyncBoundary>
         </section>

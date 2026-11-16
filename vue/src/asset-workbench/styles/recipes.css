@@ -866,15 +866,6 @@
   margin-bottom: 0;
 }
 
-.aw-supplement-console > .aw-hub-tabs .aw-hub-tabs__tab {
-  min-height: 38px;
-  padding-block: var(--aw-space-1);
-}
-
-.aw-supplement-console > .aw-hub-tabs .aw-hub-tabs__tab small {
-  display: none;
-}
-
 .aw-supplement-console__header {
   display: flex;
   align-items: center;
@@ -10690,5 +10681,135 @@ body.aw-submission-dialog-locked {
   .aw-resource-library__batch-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+/* Keep detail-heavy workspaces wide and preserve readable forms elsewhere. */
+.aw-shell__content--wide {
+  width: min(100%, 1800px);
+}
+
+.aw-upload-ledger__table :is(th, td):last-child {
+  position: sticky;
+  right: 0;
+  background: var(--aw-paper);
+  border-inline-start: 1px solid var(--aw-hairline);
+}
+
+.aw-payroll-readout {
+  container-type: inline-size;
+}
+
+.aw-payroll-readout .aw-ledger {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) repeat(2, minmax(0, 1.3fr));
+}
+
+.aw-payroll-readout .aw-ledger__value {
+  font-size: clamp(15px, 2.6cqi, 30px);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.aw-difficulty-share {
+  width: 100%;
+  accent-color: var(--aw-accent);
+}
+
+.aw-client-material-manager > .aw-client-material-manager__panel > input {
+  flex: none;
+}
+
+.aw-client-material-manager__pager {
+  flex: none;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.aw-drive-thumb__video {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--aw-space-1);
+}
+
+.aw-notifications-page .aw-compact-list {
+  gap: var(--aw-space-1);
+}
+
+.aw-notifications-page .aw-compact-list__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding-block: var(--aw-space-2);
+}
+
+.aw-notifications-page .aw-compact-list__item > .aw-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.aw-personnel-filters {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin-bottom: var(--aw-space-2);
+}
+
+.aw-settings-disclosure > summary {
+  cursor: pointer;
+  color: var(--aw-ink);
+  font-weight: 650;
+}
+
+.aw-settings-disclosure[open] > summary {
+  margin-bottom: var(--aw-space-4);
+}
+
+.aw-quality-errors__dropzone {
+  min-height: 128px;
+}
+
+.aw-upload-directory-card__meta {
+  gap: var(--aw-space-1);
+}
+
+@container (max-width: 1000px) {
+  .aw-payroll-readout .aw-ledger {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .aw-payroll-readout .aw-ledger__cell {
+    grid-column: span 2;
+  }
+
+  .aw-payroll-readout .aw-ledger__cell--money {
+    grid-column: span 3;
+  }
+}
+
+@container (max-width: 480px) {
+  .aw-payroll-readout .aw-ledger__cell {
+    padding-inline: var(--aw-space-2);
+  }
+}
+
+.aw-upload-directory-picker {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .aw-upload-directory-picker {
+    display: grid;
+    gap: var(--aw-space-2);
+  }
+
+  .aw-upload-directory-options > .aw-template-option-grid {
+    display: none;
+  }
+
+  .aw-notifications-page .aw-compact-list__item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .aw-notifications-page .aw-compact-list__item > .aw-inline-actions {
+    grid-row: 2;
+    grid-column: 1 / -1;
   }
 }

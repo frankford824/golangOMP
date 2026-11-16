@@ -225,6 +225,7 @@ onMounted(() => {
 
 <template>
   <section class="aw-page-stack aw-supplement-console">
+    <SettlementHubTabs />
     <header class="aw-supplement-console__header">
       <div>
         <h1>补录查询与删除</h1>
@@ -247,8 +248,6 @@ onMounted(() => {
         </button>
       </div>
     </header>
-
-    <SettlementHubTabs />
 
     <div class="aw-supplement-console__workbench">
       <button

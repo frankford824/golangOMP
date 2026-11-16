@@ -19,6 +19,13 @@ interface DirectoryForm {
   sort_order: number
 }
 
+const directoryQuery = ref('')
+const directoryStatus = ref('all')
+const directoryMatches = computed(() => {
+  const query = directoryQuery.value.trim().toLowerCase()
+  return directories.value.filter((row) => (directoryStatus.value === 'all' || row.enabled === (directoryStatus.value === 'enabled'))
+    && (!query || [row.name, row.oss_prefix, row.difficulty_class].some((value) => value?.toLowerCase().includes(query))))
+})
 const directories = ref<UploadDirectoryRow[]>([])
 const difficultyRows = ref<DifficultyClassRow[]>([])
 const loading = ref(false)
@@ -240,12 +247,18 @@ onMounted(loadDirectories)
 
     <section class="aw-data-surface">
       <div class="aw-grid-toolbar">
-        <span>已配置 {{ directories.length }} 个上传目录</span>
+        <input v-model="directoryQuery" type="search" aria-label="搜索上传目录" placeholder="目录名称、路径或分类" />
+        <select v-model="directoryStatus" aria-label="目录状态">
+          <option value="all">全部状态</option>
+          <option value="enabled">启用中</option>
+          <option value="disabled">已停用</option>
+        </select>
+        <span>已配置 {{ directories.length }} 个上传目录<span v-if="directoryMatches.length !== directories.length">，显示 {{ directoryMatches.length }} 个</span></span>
         <button class="aw-grid-button" type="button" :disabled="loading" @click="loadDirectories">{{ loading ? '刷新中…' : '刷新' }}</button>
       </div>
       <p v-if="loading && !directories.length" class="aw-empty-state">正在加载上传目录…</p>
-      <div v-else-if="directories.length" class="aw-upload-directory-settings__grid">
-        <article v-for="row in directories" :key="row.id" class="aw-upload-directory-card" :class="{ 'is-disabled': !row.enabled }">
+      <div v-else-if="directoryMatches.length" class="aw-upload-directory-settings__grid">
+        <article v-for="row in directoryMatches" :key="row.id" class="aw-upload-directory-card" :class="{ 'is-disabled': !row.enabled }">
           <div class="aw-upload-directory-card__head">
             <span class="aw-upload-directory-card__icon"><FolderCog :size="18" aria-hidden="true" /></span>
             <div>
@@ -274,8 +287,8 @@ onMounted(loadDirectories)
         </article>
       </div>
       <div v-else class="aw-empty-state">
-        <h3>还没有上传目录</h3>
-        <p>点击“新建目录”配置上传中心的第一个目录。</p>
+        <h3>{{ directories.length ? '未找到匹配的上传目录' : '还没有上传目录' }}</h3>
+        <p>{{ directories.length ? '可以调整关键词或状态。' : '点击“新建目录”开始配置。' }}</p>
       </div>
     </section>
 

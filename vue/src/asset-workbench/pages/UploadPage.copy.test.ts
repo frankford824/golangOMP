@@ -40,11 +40,12 @@ describe('UploadPage simple piecework copy', () => {
     await flushPromises()
 
     const dropzoneButtons = wrapper.get('.aw-dropzone').findAll('button').map((button) => button.text().trim())
-    expect(dropzoneButtons).toEqual(['文件', '文件夹', '提交上传'])
+    expect(dropzoneButtons).toEqual(['选择文件', '选择文件夹'])
     expect(wrapper.get('.aw-dropzone > span').text()).toBe('点击提交上传会自动完成上传和提交。允许：全部格式')
     expect(wrapper.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 2个作品=计件数量')
     expect(wrapper.find('.aw-dropzone__piecework-confirmation').exists()).toBe(false)
-    expect(wrapper.get('.aw-dropzone').text()).not.toContain('选择文件')
+    expect(wrapper.get('.aw-page-bar__actions').text()).toContain('提交上传')
+    expect(wrapper.get('.aw-dropzone__actions').text()).not.toContain('提交上传')
 
     uploadCenter.clearIdle()
     uploadCenter.addItems([
@@ -75,7 +76,7 @@ describe('UploadPage simple piecework copy', () => {
     await flushPromises()
 
     const dropzone = wrapper.get('.aw-dropzone')
-    expect(dropzone.findAll('button').map((button) => button.text().trim())).toEqual(['文件', '文件夹', '提交上传'])
+    expect(dropzone.findAll('button').map((button) => button.text().trim())).toEqual(['选择文件', '选择文件夹'])
     expect(dropzone.get(':scope > span').text()).toBe('点击提交上传会自动完成上传和提交。允许：全部格式')
     expect(dropzone.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 1个作品=计件数量')
     expect(dropzone.text()).not.toContain('上传并生成记录')

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref } from 'vue'
+import { computed, onActivated, nextTick, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { RouterLink } from 'vue-router'
 import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, Table2, XCircle } from 'lucide-vue-next'
@@ -63,6 +63,16 @@ const lastUploadResult = ref<UploadBatchResult | null>(null)
 const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
 const draggingFiles = ref(false)
+const uploadReviewRef = ref<HTMLElement | null>(null)
+
+async function toggleUploadReview() {
+  uploadSpreadsheetOpen.value = !uploadSpreadsheetOpen.value
+  if (!uploadSpreadsheetOpen.value) return
+  await nextTick()
+  uploadReviewRef.value?.focus({ preventScroll: true })
+  uploadReviewRef.value?.scrollIntoView({ block: 'start' })
+}
+
 const uploadSpreadsheetOpen = ref(false)
 const pageBusinessMonth = currentBusinessMonth()
 const previewDialog = ref<{
@@ -535,6 +545,11 @@ async function retryAndSubmit() {
   await createSubmission()
 }
 
+function selectUploadDirectoryById(id: number) {
+  const directory = uploadDirectories.value.find((row) => row.id === id)
+  if (directory) selectUploadDirectory(directory)
+}
+
 function selectUploadDirectory(directory: UploadDirectoryRow) {
   selectedUploadDirectoryId.value = directory.id
   for (const item of queue.value) {
@@ -546,9 +561,6 @@ function selectUploadDirectory(directory: UploadDirectoryRow) {
   }
 }
 
-function uploadDirectoryLocation(directory: UploadDirectoryRow) {
-  return directory.oss_prefix ? `目录位置：${directory.oss_prefix}` : '目录位置：默认'
-}
 
 function uploadDirectoryDifficulty(directory?: UploadDirectoryRow) {
   return directory?.difficulty_class || firstDifficultyCode(difficultyRows.value)
@@ -687,9 +699,7 @@ onActivated(() => {
         <p>{{ isSimpleUser ? '先选上传目录，再拖入文件。点一次提交，系统会自动处理。' : '批量拖拽文件，提交前校正难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
       </div>
       <div class="aw-page-bar__actions">
-        <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
-        <button class="aw-secondary-button" type="button" @click="openFolderPicker">选择文件夹</button>
-        <button class="aw-secondary-button" type="button" @click="uploadSpreadsheetOpen = !uploadSpreadsheetOpen">
+        <button class="aw-secondary-button" type="button" :aria-controls="uploadSpreadsheetOpen ? 'aw-upload-review' : undefined" :aria-expanded="uploadSpreadsheetOpen" @click="toggleUploadReview">
           <Table2 :size="16" aria-hidden="true" />
           {{ uploadSpreadsheetOpen ? '收起表格校对' : '表格校对' }}
         </button>
@@ -702,7 +712,7 @@ onActivated(() => {
             <FileUp :size="16" aria-hidden="true" />
             {{ adminUploadLabel }}
           </button>
-          <small>{{ pieceworkSubmitHint }}</small>
+          <small>{{ selectedUploadDirectory?.name || '默认目录' }} · {{ selectedUploadDirectory ? uploadDirectoryDifficulty(selectedUploadDirectory) : '默认计价分类' }} · {{ pieceworkSubmitHint }}</small>
         </span>
       </div>
     </div>
@@ -738,19 +748,31 @@ onActivated(() => {
         loading-label="正在加载上传目录"
         @retry="loadContext"
       >
-        <div v-if="uploadDirectories.length" class="aw-template-option-grid">
-          <button
-            v-for="directory in uploadDirectories"
-            :key="directory.id"
-            class="aw-template-option"
-            :class="{ 'aw-template-option--active': selectedUploadDirectoryId === directory.id }"
-            type="button"
-            @click="selectUploadDirectory(directory)"
-          >
-            <strong>{{ directory.name }}</strong>
-            <span>{{ uploadDirectoryLocation(directory) }}</span>
-            <span>计价分类：{{ uploadDirectoryDifficulty(directory) }}</span>
-          </button>
+        <div v-if="uploadDirectories.length" class="aw-upload-directory-options">
+          <label class="aw-upload-directory-picker aw-field">
+            <span>上传目录</span>
+            <select
+              :value="selectedUploadDirectoryId"
+              @change="selectUploadDirectoryById(Number(($event.target as HTMLSelectElement).value))"
+            >
+              <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
+                {{ directory.name }} · {{ uploadDirectoryDifficulty(directory) }}
+              </option>
+            </select>
+          </label>
+          <div class="aw-template-option-grid">
+            <button
+              v-for="directory in uploadDirectories"
+              :key="directory.id"
+              class="aw-template-option"
+              :class="{ 'aw-template-option--active': selectedUploadDirectoryId === directory.id }"
+              type="button"
+              @click="selectUploadDirectory(directory)"
+            >
+              <strong>{{ directory.name }}</strong>
+              <span>计价分类：{{ uploadDirectoryDifficulty(directory) }}</span>
+            </button>
+          </div>
         </div>
         <div v-else class="aw-empty-state">
           <h3>使用默认目录</h3>
@@ -773,14 +795,8 @@ onActivated(() => {
       <strong>{{ queue.length ? '继续拖拽文件或文件夹到这里' : '拖拽文件或文件夹到这里' }}</strong>
       <span>点击提交上传会自动完成上传和提交。允许：{{ selectedAllowedLabel }}</span>
       <div class="aw-dropzone__actions">
-        <button class="aw-secondary-button" type="button" @click="openFilePicker">文件</button>
-        <button class="aw-secondary-button" type="button" @click="openFolderPicker">文件夹</button>
-        <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
-          {{ simpleSubmitLabel }}
-        </button>
-        <button v-else class="aw-primary-button" type="button" :disabled="!canUseAdminPrimaryAction" @click="runAdminPrimaryAction">
-          {{ adminUploadLabel }}
-        </button>
+        <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
+        <button class="aw-secondary-button" type="button" @click="openFolderPicker">选择文件夹</button>
       </div>
       <small class="aw-dropzone__hint">{{ pieceworkSubmitHint }}</small>
     </div>
@@ -802,13 +818,14 @@ onActivated(() => {
       </div>
     </section>
 
-    <SpreadsheetWorkbench
-      v-if="uploadSpreadsheetOpen"
-      :source="uploadSpreadsheetSource"
-      :height="460"
-      @close="uploadSpreadsheetOpen = false"
-      @action="handleUploadSpreadsheetAction"
-    />
+    <section v-if="uploadSpreadsheetOpen" id="aw-upload-review" ref="uploadReviewRef" tabindex="-1" aria-label="上传队列表格校对">
+      <SpreadsheetWorkbench
+        :source="uploadSpreadsheetSource"
+        :height="460"
+        @close="uploadSpreadsheetOpen = false"
+        @action="handleUploadSpreadsheetAction"
+      />
+    </section>
 
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
@@ -816,8 +833,7 @@ onActivated(() => {
         <span v-if="queue.length">{{ formatInt(uploadStats.percent) }}%</span>
         <span v-if="queue.length">文件成功 {{ formatInt(uploadStats.uploaded) }} · 失败 {{ formatInt(uploadStats.failed) }}</span>
         <span v-if="!isSimpleUser">{{ formatInt(totalPieceworkPages) }} 页</span>
-        <button v-if="isSimpleUser" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">{{ simpleSubmitLabel }}</button>
-        <button v-else type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
+        <button v-if="!isSimpleUser && uploadedItems.length && hasPendingUploads" type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
         <button
           v-if="queue.length"
           class="aw-grid-button aw-upload-queue-clear"

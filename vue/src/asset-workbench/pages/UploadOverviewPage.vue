@@ -23,6 +23,7 @@ import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.vue'
 import { isPsbFilename } from '@aw/shared/materials/systemAssetPreview'
 import { collectFilteredFiles, resolveWholeWorks, type PendingWorkDeletion, type WorkSelectionFile } from '@aw/shared/drive/workSelection'
+import { loadWorkbenchFilePreview } from '@aw/shared/preview/loadWorkbenchFilePreview'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 
 type SortBy = 'created_at' | 'owner' | 'directory' | 'name' | 'format'
@@ -642,11 +643,14 @@ async function openFilePreview(file: DriveFileRow) {
   previewDownloadHandler.value = () => {
     void downloadFile(file)
   }
+  const identity = previewIdentity.value
   try {
-    const meta = await assetWorkbenchApi.getFilePreview(file.id)
-    previewUrl.value = meta.preview_url || ''
-    previewEmptyLabel.value = meta.preview_url ? '' : meta.preparing ? '预览生成中，可先下载原件' : '暂无可展示预览，可下载原文件查看'
+    const result = await loadWorkbenchFilePreview(file)
+    if (!previewOpen.value || previewIdentity.value !== identity) return
+    previewUrl.value = result.url
+    previewEmptyLabel.value = result.label
   } catch (err) {
+    if (!previewOpen.value || previewIdentity.value !== identity) return
     previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
   }
 }

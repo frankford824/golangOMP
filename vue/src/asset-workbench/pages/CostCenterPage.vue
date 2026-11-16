@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 
 import {
   assetWorkbenchApi,
@@ -42,7 +43,11 @@ const priceRows = ref<PriceMatrixRow[]>([])
 const deductionRows = ref<DeductionRuleRow[]>([])
 const welfareRows = ref<WelfareRuleRow[]>([])
 const promoRows = ref<PromoCouponRow[]>([])
+const route = useRoute()
 const activePricingSection = ref<PricingSectionKey>('guide')
+watch(() => route?.query?.section, (section) => {
+  activePricingSection.value = section === 'deduction' ? section : 'guide'
+}, { immediate: true })
 const priceSupersedeId = ref(0)
 const confirmingPriceSupersede = ref(false)
 const pendingPriceToggle = ref<PriceGridRow | null>(null)
@@ -785,6 +790,26 @@ onMounted(async () => {
         </div>
         <span class="aw-chip aw-chip--neutral">{{ difficultyRows.length }} 项</span>
       </div>
+      <WorkbenchDataGrid
+        v-if="difficultyRows.length"
+        :columns="difficultyGridColumns"
+        :rows="difficultyGridRows"
+        row-key="code"
+        storage-key="cost-center-difficulties"
+        :height="220"
+        :row-height="34"
+      >
+        <template #cell="{ row, column, value }">
+          <div v-if="column.key === 'action'" class="aw-grid-actions">
+            <button type="button" @click="startDifficultyEdit(gridRowAsDifficulty(row))">编辑</button>
+            <button type="button" @click="toggleDifficultyClass(gridRowAsDifficulty(row))">
+              {{ gridRowAsDifficulty(row).enabled ? '停用' : '启用' }}
+            </button>
+          </div>
+          <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsDifficulty(row).enabled).tone)">{{ value }}</span>
+          <span v-else>{{ value === 'all' ? '全部' : value || '—' }}</span>
+        </template>
+      </WorkbenchDataGrid>
       <div class="aw-pricing-field-help">
         <span><b>代码</b>：系统识别用，创建后不要随意改</span>
         <span><b>名称</b>：给管理员看的显示名</span>
@@ -837,26 +862,7 @@ onMounted(async () => {
         <button v-if="difficultyEditingCode" class="aw-secondary-button" type="button" @click="resetDifficultyForm">取消编辑</button>
         <button class="aw-secondary-button" type="button" @click="saveDifficultyClass">{{ difficultyEditingCode ? '保存难度' : '新增难度' }}</button>
       </div>
-      <WorkbenchDataGrid
-        v-if="difficultyRows.length"
-        :columns="difficultyGridColumns"
-        :rows="difficultyGridRows"
-        row-key="code"
-        storage-key="cost-center-difficulties"
-        :height="220"
-        :row-height="34"
-      >
-        <template #cell="{ row, column, value }">
-          <div v-if="column.key === 'action'" class="aw-grid-actions">
-            <button type="button" @click="startDifficultyEdit(gridRowAsDifficulty(row))">编辑</button>
-            <button type="button" @click="toggleDifficultyClass(gridRowAsDifficulty(row))">
-              {{ gridRowAsDifficulty(row).enabled ? '停用' : '启用' }}
-            </button>
-          </div>
-          <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsDifficulty(row).enabled).tone)">{{ value }}</span>
-          <span v-else>{{ value || '—' }}</span>
-        </template>
-      </WorkbenchDataGrid>
+
     </div>
     <div v-if="activePricingSection === 'price'" class="aw-panel aw-pricing-section">
       <div class="aw-panel__head">
@@ -895,6 +901,35 @@ onMounted(async () => {
           <strong>从新版生效日之后的新提交开始使用；过往月度、历史提交、已结算记录保持原单价快照。</strong>
       </div>
       </div>
+      <WorkbenchDataGrid
+        v-if="priceRows.length"
+        :columns="priceGridColumns"
+        :rows="priceGridRows"
+        row-key="id"
+        storage-key="cost-center-price"
+        group-by="difficulty_class"
+        :height="260"
+        :row-height="34"
+      >
+        <template #cell="{ row, column, value }">
+          <div v-if="column.key === 'action'" class="aw-grid-actions">
+            <button class="aw-secondary-button" type="button" @click="startPriceSupersede(gridRowAsPrice(row))">修改价格</button>
+            <button
+              class="aw-secondary-button"
+              :class="{ 'aw-secondary-button--danger': gridRowAsPrice(row).enabled }"
+              type="button"
+              :aria-label="`${gridRowAsPrice(row).enabled ? '停用' : '启用'}单价规则：${priceRuleIdentity(gridRowAsPrice(row))}`"
+              @click="requestTogglePriceRule(gridRowAsPrice(row))"
+            >
+              {{ gridRowAsPrice(row).enabled ? '停用' : '启用' }}
+            </button>
+          </div>
+          <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPrice(row).worker_type).tone)">{{ value }}</span>
+          <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPrice(row).enabled).tone)">{{ value }}</span>
+          <span v-else-if="column.key === 'unit_price_label'" class="aw-cell-money">{{ value }}</span>
+          <span v-else>{{ value === 'all' ? '全部' : value || '—' }}</span>
+        </template>
+      </WorkbenchDataGrid>
       <div class="aw-pricing-field-help">
         <span><b>人员类型</b>：全职或兼职</span>
         <span><b>岗级</b>：人员档案里的等级</span>
@@ -914,7 +949,7 @@ onMounted(async () => {
           岗级
           <input v-if="priceSupersedeId" :value="priceForm.job_grade" disabled />
           <select v-else v-model="priceForm.job_grade">
-            <option v-for="grade in priceGradeOptions" :key="grade" :value="grade">{{ grade }}</option>
+            <option v-for="grade in priceGradeOptions" :key="grade" :value="grade">{{ grade === 'all' ? '全部岗级' : grade }}</option>
           </select>
         </label>
         <label>
@@ -954,35 +989,7 @@ onMounted(async () => {
         <span class="aw-timeline-band__active">生效中</span>
         <span class="aw-timeline-band__future">未来</span>
       </div>
-      <WorkbenchDataGrid
-        v-if="priceRows.length"
-        :columns="priceGridColumns"
-        :rows="priceGridRows"
-        row-key="id"
-        storage-key="cost-center-price"
-        group-by="difficulty_class"
-        :height="260"
-        :row-height="34"
-      >
-        <template #cell="{ row, column, value }">
-          <div v-if="column.key === 'action'" class="aw-grid-actions">
-            <button class="aw-secondary-button" type="button" @click="startPriceSupersede(gridRowAsPrice(row))">修改价格</button>
-            <button
-              class="aw-secondary-button"
-              :class="{ 'aw-secondary-button--danger': gridRowAsPrice(row).enabled }"
-              type="button"
-              :aria-label="`${gridRowAsPrice(row).enabled ? '停用' : '启用'}单价规则：${priceRuleIdentity(gridRowAsPrice(row))}`"
-              @click="requestTogglePriceRule(gridRowAsPrice(row))"
-            >
-              {{ gridRowAsPrice(row).enabled ? '停用' : '启用' }}
-            </button>
-          </div>
-          <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPrice(row).worker_type).tone)">{{ value }}</span>
-          <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPrice(row).enabled).tone)">{{ value }}</span>
-          <span v-else-if="column.key === 'unit_price_label'" class="aw-cell-money">{{ value }}</span>
-          <span v-else>{{ value || '—' }}</span>
-        </template>
-      </WorkbenchDataGrid>
+
       <div v-if="confirmingPriceSupersede && priceSupersedeSource" class="aw-dialog-backdrop" role="presentation" @click.self="confirmingPriceSupersede = false">
         <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="price-supersede-confirm-title">
           <div>
@@ -1035,6 +1042,28 @@ onMounted(async () => {
             <p class="aw-copy">结算时读取质检错误记录，再按这里的金额扣款。日常上传不需要设置这一项。</p>
           </div>
         </div>
+        <WorkbenchDataGrid
+          v-if="deductionRows.length"
+          :columns="deductionGridColumns"
+          :rows="deductionGridRows"
+          row-key="id"
+          storage-key="cost-center-deductions"
+          group-by="difficulty_class"
+          :height="220"
+          :row-height="34"
+        >
+          <template #cell="{ row, column, value }">
+            <div v-if="column.key === 'action'" class="aw-inline-actions">
+              <button type="button" @click="toggleDeductionRule(gridRowAsDeduction(row))">{{ gridRowAsDeduction(row).enabled ? '停用' : '启用' }}</button>
+              <button type="button" @click="startDeductionSupersede(gridRowAsDeduction(row))">替代</button>
+            </div>
+            <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsDeduction(row).worker_type).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsDeduction(row).enabled).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'deduction_amount_label'" class="aw-cell-money">{{ value }}</span>
+            <span v-else>{{ value === 'all' ? '全部' : value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <p v-else class="aw-copy">已配置 {{ totals.deduction }} 条质检扣款规则</p>
         <div class="aw-pricing-field-help">
           <span><b>人员类型/岗级</b>：可以选择全部，也可以只对某一类人员生效</span>
           <span><b>难度</b>：可以选择全部或指定难度分类</span>
@@ -1052,7 +1081,7 @@ onMounted(async () => {
           <label>
             岗级
             <select v-model="deductionForm.job_grade">
-              <option v-for="grade in deductionGradeOptions" :key="grade" :value="grade">{{ grade }}</option>
+              <option v-for="grade in deductionGradeOptions" :key="grade" :value="grade">{{ grade === 'all' ? '全部岗级' : grade }}</option>
             </select>
           </label>
           <label>
@@ -1079,28 +1108,7 @@ onMounted(async () => {
           <button v-if="deductionSupersedeId" class="aw-secondary-button" type="button" @click="deductionSupersedeId = 0">取消替代</button>
           <button class="aw-secondary-button" type="button" @click="createDeductionRule">{{ deductionSupersedeId ? '保存替代' : '新增扣款规则' }}</button>
         </div>
-        <WorkbenchDataGrid
-          v-if="deductionRows.length"
-          :columns="deductionGridColumns"
-          :rows="deductionGridRows"
-          row-key="id"
-          storage-key="cost-center-deductions"
-          group-by="difficulty_class"
-          :height="220"
-          :row-height="34"
-        >
-          <template #cell="{ row, column, value }">
-            <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="toggleDeductionRule(gridRowAsDeduction(row))">{{ gridRowAsDeduction(row).enabled ? '停用' : '启用' }}</button>
-              <button type="button" @click="startDeductionSupersede(gridRowAsDeduction(row))">替代</button>
-            </div>
-            <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsDeduction(row).worker_type).tone)">{{ value }}</span>
-            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsDeduction(row).enabled).tone)">{{ value }}</span>
-            <span v-else-if="column.key === 'deduction_amount_label'" class="aw-cell-money">{{ value }}</span>
-            <span v-else>{{ value || '—' }}</span>
-          </template>
-        </WorkbenchDataGrid>
-        <p v-else class="aw-copy">已配置 {{ totals.deduction }} 条质检扣款规则</p>
+
       </div>
 
         <div v-if="activePricingSection === 'welfare'" class="aw-panel aw-pricing-section">
@@ -1110,6 +1118,28 @@ onMounted(async () => {
             <p class="aw-copy">按人员和月份发放补贴，不归属到单个订单。没有固定补贴时可以不配置。</p>
           </div>
         </div>
+        <WorkbenchDataGrid
+          v-if="welfareRows.length"
+          :columns="welfareGridColumns"
+          :rows="welfareGridRows"
+          row-key="id"
+          storage-key="cost-center-welfare"
+          group-by="worker_type"
+          :height="220"
+          :row-height="34"
+        >
+          <template #cell="{ row, column, value }">
+            <div v-if="column.key === 'action'" class="aw-inline-actions">
+              <button type="button" @click="toggleWelfareRule(gridRowAsWelfare(row))">{{ gridRowAsWelfare(row).enabled ? '停用' : '启用' }}</button>
+              <button type="button" @click="startWelfareSupersede(gridRowAsWelfare(row))">替代</button>
+            </div>
+            <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsWelfare(row).worker_type).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsWelfare(row).enabled).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'amount_label'" class="aw-cell-money">{{ value }}</span>
+            <span v-else>{{ value === 'all' ? '全部' : value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <p v-else class="aw-copy">已配置 {{ totals.welfare }} 条福利补贴规则</p>
         <div class="aw-pricing-field-help">
           <span><b>名称</b>：例如月度补贴、临时补贴</span>
           <span><b>人员类型/岗级</b>：决定哪些人可以拿到</span>
@@ -1131,7 +1161,7 @@ onMounted(async () => {
           <label>
             岗级
             <select v-model="welfareForm.job_grade">
-              <option v-for="grade in welfareGradeOptions" :key="grade" :value="grade">{{ grade }}</option>
+              <option v-for="grade in welfareGradeOptions" :key="grade" :value="grade">{{ grade === 'all' ? '全部岗级' : grade }}</option>
             </select>
           </label>
           <label>
@@ -1152,28 +1182,7 @@ onMounted(async () => {
           <button v-if="welfareSupersedeId" class="aw-secondary-button" type="button" @click="welfareSupersedeId = 0">取消替代</button>
           <button class="aw-secondary-button" type="button" @click="createWelfareRule">{{ welfareSupersedeId ? '保存替代' : '新增福利' }}</button>
         </div>
-        <WorkbenchDataGrid
-          v-if="welfareRows.length"
-          :columns="welfareGridColumns"
-          :rows="welfareGridRows"
-          row-key="id"
-          storage-key="cost-center-welfare"
-          group-by="worker_type"
-          :height="220"
-          :row-height="34"
-        >
-          <template #cell="{ row, column, value }">
-            <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="toggleWelfareRule(gridRowAsWelfare(row))">{{ gridRowAsWelfare(row).enabled ? '停用' : '启用' }}</button>
-              <button type="button" @click="startWelfareSupersede(gridRowAsWelfare(row))">替代</button>
-            </div>
-            <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsWelfare(row).worker_type).tone)">{{ value }}</span>
-            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsWelfare(row).enabled).tone)">{{ value }}</span>
-            <span v-else-if="column.key === 'amount_label'" class="aw-cell-money">{{ value }}</span>
-            <span v-else>{{ value || '—' }}</span>
-          </template>
-        </WorkbenchDataGrid>
-        <p v-else class="aw-copy">已配置 {{ totals.welfare }} 条福利补贴规则</p>
+
       </div>
 
         <div v-if="activePricingSection === 'promo'" class="aw-panel aw-pricing-section">
@@ -1183,6 +1192,29 @@ onMounted(async () => {
             <p class="aw-copy">用于临时活动、特殊订单或指定编码价格。没有活动价时可以不配置。</p>
           </div>
         </div>
+        <WorkbenchDataGrid
+          v-if="promoRows.length"
+          :columns="promoGridColumns"
+          :rows="promoGridRows"
+          row-key="id"
+          storage-key="cost-center-promo"
+          group-by="mode"
+          :height="220"
+          :row-height="34"
+        >
+          <template #cell="{ row, column, value }">
+            <div v-if="column.key === 'action'" class="aw-inline-actions">
+              <button type="button" @click="togglePromoRule(gridRowAsPromo(row))">{{ gridRowAsPromo(row).enabled ? '停用' : '启用' }}</button>
+              <button type="button" @click="startPromoSupersede(gridRowAsPromo(row))">替代</button>
+            </div>
+            <span v-else-if="column.key === 'mode_label'" :class="chipClass(promoModeMeta(gridRowAsPromo(row).mode).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPromo(row).worker_type).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPromo(row).enabled).tone)">{{ value }}</span>
+            <span v-else-if="column.key === 'value_label'" class="aw-cell-money">{{ value }}</span>
+            <span v-else>{{ value === 'all' ? '全部' : value || '—' }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <p v-else class="aw-copy">已配置 {{ totals.promo }} 条临时活动价</p>
         <div class="aw-pricing-field-help">
           <span><b>一口价</b>：直接覆盖为指定价格</span>
           <span><b>加价</b>：在原单价上增加固定金额</span>
@@ -1229,7 +1261,7 @@ onMounted(async () => {
           <label>
             岗级
             <select v-model="promoForm.job_grade">
-              <option v-for="grade in promoGradeOptions" :key="grade" :value="grade">{{ grade }}</option>
+              <option v-for="grade in promoGradeOptions" :key="grade" :value="grade">{{ grade === 'all' ? '全部岗级' : grade }}</option>
             </select>
           </label>
           <label>
@@ -1260,29 +1292,7 @@ onMounted(async () => {
           <button v-if="promoSupersedeId" class="aw-secondary-button" type="button" @click="promoSupersedeId = 0">取消替代</button>
           <button class="aw-secondary-button" type="button" @click="createPromoCoupon">{{ promoSupersedeId ? '保存替代' : '新增活动价' }}</button>
         </div>
-        <WorkbenchDataGrid
-          v-if="promoRows.length"
-          :columns="promoGridColumns"
-          :rows="promoGridRows"
-          row-key="id"
-          storage-key="cost-center-promo"
-          group-by="mode"
-          :height="220"
-          :row-height="34"
-        >
-          <template #cell="{ row, column, value }">
-            <div v-if="column.key === 'action'" class="aw-inline-actions">
-              <button type="button" @click="togglePromoRule(gridRowAsPromo(row))">{{ gridRowAsPromo(row).enabled ? '停用' : '启用' }}</button>
-              <button type="button" @click="startPromoSupersede(gridRowAsPromo(row))">替代</button>
-            </div>
-            <span v-else-if="column.key === 'mode_label'" :class="chipClass(promoModeMeta(gridRowAsPromo(row).mode).tone)">{{ value }}</span>
-            <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPromo(row).worker_type).tone)">{{ value }}</span>
-            <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPromo(row).enabled).tone)">{{ value }}</span>
-            <span v-else-if="column.key === 'value_label'" class="aw-cell-money">{{ value }}</span>
-            <span v-else>{{ value || '—' }}</span>
-          </template>
-        </WorkbenchDataGrid>
-        <p v-else class="aw-copy">已配置 {{ totals.promo }} 条临时活动价</p>
+
         </div>
       </main>
     </div>

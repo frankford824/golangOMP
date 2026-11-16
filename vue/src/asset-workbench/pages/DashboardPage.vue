@@ -7,6 +7,8 @@ import { useSetupChecklist } from '@aw/app/useSetupChecklist'
 import { assetWorkbenchApi, type SettlementPreview, type SubmissionRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
+import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
+import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
@@ -17,7 +19,7 @@ interface DashboardData {
   settlement: SettlementPreview | null
 }
 
-const month = ref(new Date().toISOString().slice(0, 7))
+const month = ref(currentBusinessMonth())
 const { bootstrap } = useAssetWorkbenchBootstrap()
 const {
   steps: setupSteps,
@@ -115,31 +117,6 @@ onMounted(() => {
 
 <template>
   <section class="aw-page-stack aw-dashboard-page">
-    <section v-if="setupSteps.length" class="aw-panel aw-setup-checklist">
-      <div class="aw-panel__head">
-        <div>
-          <h3>开站清单</h3>
-          <p class="aw-copy">先完成配置，再接收第一件作品。旧菜单名仍可在 ⌘K 中搜索。</p>
-        </div>
-        <div class="aw-inline-actions">
-          <span class="aw-chip aw-chip--neutral">{{ setupCompletedCount }}/{{ setupSteps.length }} 已完成</span>
-          <button class="aw-secondary-button" type="button" :disabled="setupLoading" @click="refreshSetup()">刷新进度</button>
-          <button class="aw-secondary-button" type="button" @click="toggleSetupCollapsed()">
-            {{ setupCollapsed ? '展开清单' : '折叠清单' }}
-          </button>
-        </div>
-      </div>
-      <ol v-if="!setupCollapsed" class="aw-setup-checklist__list">
-        <li v-for="step in setupSteps" :key="step.id" class="aw-setup-checklist__item" :data-done="step.done">
-          <div>
-            <strong>{{ step.label }}</strong>
-            <span>{{ step.hint }}</span>
-          </div>
-          <RouterLink class="aw-secondary-button" :to="step.to">{{ step.done ? '查看' : '去完成' }}</RouterLink>
-        </li>
-      </ol>
-    </section>
-
     <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日素材工作台事项" :segments="ledgerSegments">
       <template #actions>
         <button class="aw-console-button" type="button" :disabled="loading" @click="loadDashboard">刷新</button>
@@ -153,7 +130,8 @@ onMounted(() => {
               class="aw-contact-tile"
               :to="submissionDriveTarget(submission)"
             >
-              <strong>{{ submission.submission_no }}</strong>
+              <strong :title="submission.submission_no">{{ formatShanghaiDateTime(submission.submitted_at) }}</strong>
+              <small :title="submission.submission_no">单号尾号 {{ submission.submission_no.slice(-8) }}</small>
               <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
             </RouterLink>
           </div>
@@ -220,7 +198,8 @@ onMounted(() => {
               class="aw-contact-tile"
               :to="submissionDriveTarget(submission)"
             >
-              <strong>{{ submission.submission_no }}</strong>
+              <strong :title="submission.submission_no">{{ formatShanghaiDateTime(submission.submitted_at) }}</strong>
+              <small :title="submission.submission_no">单号尾号 {{ submission.submission_no.slice(-8) }}</small>
               <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
             </RouterLink>
           </div>
@@ -232,5 +211,30 @@ onMounted(() => {
         </section>
       </div>
     </AsyncBoundary>
+    <section v-if="setupSteps.length" class="aw-panel aw-setup-checklist">
+      <div class="aw-panel__head">
+        <div>
+          <h3>开站清单</h3>
+          <p class="aw-copy">检查工作台配置和启用进度。</p>
+        </div>
+        <div class="aw-inline-actions">
+          <span class="aw-chip aw-chip--neutral">{{ setupCompletedCount }}/{{ setupSteps.length }} 已完成</span>
+          <button class="aw-secondary-button" type="button" :disabled="setupLoading" @click="refreshSetup()">刷新进度</button>
+          <button class="aw-secondary-button" type="button" @click="toggleSetupCollapsed()">
+            {{ setupCollapsed ? '展开清单' : '折叠清单' }}
+          </button>
+        </div>
+      </div>
+      <ol v-if="!setupCollapsed" class="aw-setup-checklist__list">
+        <li v-for="step in setupSteps" :key="step.id" class="aw-setup-checklist__item" :data-done="step.done">
+          <div>
+            <strong>{{ step.label }}</strong>
+            <span>{{ step.hint }}</span>
+          </div>
+          <RouterLink class="aw-secondary-button" :to="step.to">{{ step.done ? '查看' : '去完成' }}</RouterLink>
+        </li>
+      </ol>
+    </section>
+
   </section>
 </template>

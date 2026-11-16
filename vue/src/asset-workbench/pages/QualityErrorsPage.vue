@@ -266,6 +266,13 @@ onMounted(() => void loadQualityOverview())
       </article>
     </div>
 
+    <nav class="aw-inline-actions" aria-label="质检操作">
+      <a class="aw-secondary-button" href="#aw-quality-import">导入出错记录</a>
+      <a v-if="canPreviewSettlement" class="aw-secondary-button" href="#aw-actual-deductions">维护实际扣款</a>
+      <a class="aw-secondary-button" href="#aw-deduction-rules">查看扣款规则</a>
+      <RouterLink v-if="canPreviewSettlement" class="aw-secondary-button" :to="{ path: '/settlement', query: { month }, hash: '#aw-quality-import-history' }">查看本月导入记录</RouterLink>
+    </nav>
+
     <div class="aw-quality-errors__workbench">
       <aside class="aw-quality-errors__steps" aria-label="出错记录导入步骤">
         <div>
@@ -286,7 +293,7 @@ onMounted(() => void loadQualityOverview())
       </aside>
 
       <main class="aw-quality-errors__workspace">
-        <section class="aw-quality-errors__import">
+        <section id="aw-quality-import" class="aw-quality-errors__import">
           <div class="aw-settlement-section__head">
             <div>
               <h3>导入 {{ month }} 出错记录</h3>
@@ -339,7 +346,7 @@ onMounted(() => void loadQualityOverview())
         <section v-if="canPreviewSettlement" class="aw-quality-errors__rules aw-data-surface">
           <div class="aw-settlement-section__head">
             <div>
-              <h3>质检实际扣款</h3>
+              <h3 id="aw-actual-deductions">质检实际扣款</h3>
               <p>{{ month }} · 按人员和工资条类型录入。实发只按实际扣款计算，未录入或填 0 时不扣。</p>
             </div>
           </div>
@@ -375,10 +382,10 @@ onMounted(() => void loadQualityOverview())
         <section class="aw-quality-errors__rules">
           <div class="aw-settlement-section__head">
             <div>
-              <h3>本月扣款规则</h3>
+              <h3 id="aw-deduction-rules">本月扣款规则</h3>
               <p>导入成功后，系统按下面的“每张扣款”自动计算，不读取 Excel 中的金额。</p>
             </div>
-            <RouterLink v-if="canManageRules" class="aw-secondary-button" to="/settings/pricing">
+            <RouterLink v-if="canManageRules" class="aw-secondary-button" :to="{ path: '/settings/pricing', query: { section: 'deduction' } }">
               <Calculator :size="16" aria-hidden="true" />
               维护扣款规则
             </RouterLink>

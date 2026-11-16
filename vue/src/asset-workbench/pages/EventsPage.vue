@@ -12,6 +12,8 @@ import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 const filters = ref({
   event_type: 'all',
   entity_type: 'all',
+  entity_id: '',
+  actor_user_id: '',
 })
 const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/events')
 type EventGridRow = AssetWorkbenchEventRow & { event_label: string; entity_label: string; actor_label: string; reason_label: string; created_at_label: string }
@@ -43,18 +45,30 @@ const entityFilterOptions = [
   { value: 'member', label: '成员管理' },
   { value: 'profile', label: '人员资料' },
 ]
+const pageSize = 50
+const page = ref(1)
+const appliedFilters = ref({ ...filters.value })
+const visibleDate = ref('')
+const eventDayFormatter = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
 const eventsRequest = usePageRequest(
-  async () =>
+  (signal) =>
     assetWorkbenchApi.listEvents({
-      page: 1,
-      page_size: 50,
-      event_type: filters.value.event_type === 'all' ? undefined : filters.value.event_type,
-      entity_type: filters.value.entity_type === 'all' ? undefined : filters.value.entity_type,
-    }),
+      page: page.value,
+      page_size: pageSize,
+      event_type: appliedFilters.value.event_type === 'all' ? undefined : appliedFilters.value.event_type,
+      entity_type: appliedFilters.value.entity_type === 'all' ? undefined : appliedFilters.value.entity_type,
+      entity_id: appliedFilters.value.entity_id || undefined,
+      actor_user_id: appliedFilters.value.actor_user_id || undefined,
+    }, signal),
   { items: [], total: 0 },
   '操作日志加载失败',
 )
-const rows = computed(() => eventsRequest.data.value?.items ?? [])
+const rows = computed(() => (eventsRequest.data.value?.items ?? []).filter((row) => {
+  if (!visibleDate.value) return true
+  const date = new Date(row.created_at)
+  return !Number.isNaN(date.getTime()) && eventDayFormatter.format(date) === visibleDate.value
+}))
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const total = computed(() => eventsRequest.data.value?.total ?? 0)
 const loading = eventsRequest.loading
 const error = eventsRequest.error
@@ -100,6 +114,17 @@ async function loadEvents() {
   await eventsRequest.run()
 }
 
+function applyFilters() {
+  appliedFilters.value = { ...filters.value }
+  page.value = 1
+  void loadEvents()
+}
+
+function changePage(delta: number) {
+  page.value = Math.min(pageCount.value, Math.max(1, page.value + delta))
+  void loadEvents()
+}
+
 onMounted(() => {
   void loadEvents()
 })
@@ -119,15 +144,21 @@ onMounted(() => {
     </div>
 
     <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
+      <form class="aw-grid-toolbar" @submit.prevent="applyFilters">
         <select v-model="filters.event_type" aria-label="事件类型">
           <option v-for="option in eventFilterOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
         <select v-model="filters.entity_type" aria-label="对象类型">
           <option v-for="option in entityFilterOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
-        <button type="button" @click="loadEvents">筛选</button>
-        <span>{{ formatInt(total) }} 条日志</span>
+        <input v-model.trim="filters.actor_user_id" aria-label="操作者账号编号" placeholder="操作者账号编号" inputmode="numeric" pattern="[1-9][0-9]*" />
+        <input v-model.trim="filters.entity_id" aria-label="对象记录编号" placeholder="对象记录编号" inputmode="numeric" pattern="[1-9][0-9]*" />
+        <button type="submit" :disabled="loading">筛选</button>
+        <span>{{ formatInt(total) }} 条匹配日志</span>
+      </form>
+      <div class="aw-grid-toolbar">
+        <label>筛选本页日期（北京时间） <input v-model="visibleDate" aria-label="筛选本页日期" type="date" /></label>
+        <span v-if="visibleDate">本页 {{ rows.length }} 条符合日期</span>
       </div>
       <AsyncBoundary
         :loading="loading"
@@ -141,7 +172,6 @@ onMounted(() => {
           :rows="eventGridRows"
           row-key="id"
           storage-key="events"
-          group-by="event_label"
         >
           <template #cell="{ row, column, value }">
             <span
@@ -167,6 +197,11 @@ onMounted(() => {
           <p>上传、质检、结算、资料维护等关键操作会在这里留下记录。当前筛选返回 {{ total }} 条。</p>
         </div>
       </AsyncBoundary>
+      <nav v-if="pageCount > 1" class="aw-drive-pager" aria-label="操作记录分页">
+        <button class="aw-grid-button" type="button" :disabled="loading || page <= 1" @click="changePage(-1)">上一页</button>
+        <span>第 {{ page }} / {{ pageCount }} 页</span>
+        <button class="aw-grid-button" type="button" :disabled="loading || page >= pageCount" @click="changePage(1)">下一页</button>
+      </nav>
     </div>
   </section>
 </template>

@@ -30,7 +30,9 @@ const displayUrl = computed(() => (props.previewUrl || props.fallbackSrc || '').
 const isPdf = computed(() => isPdfMimeOrFilename(props.mimeType, props.filename || props.title))
 const isVideo = computed(() => isVideoMimeOrFilename(props.mimeType, props.filename || props.title))
 const showPdfFrame = computed(() => isPdf.value && Boolean(displayUrl.value))
-const showVideoPreview = computed(() => isVideo.value && Boolean(displayUrl.value))
+const videoFailed = ref(false)
+watch([displayUrl, () => props.open], () => { videoFailed.value = false })
+const showVideoPreview = computed(() => isVideo.value && Boolean(displayUrl.value) && !videoFailed.value)
 const showImagePreview = computed(() => !isPdf.value && !isVideo.value && Boolean(displayUrl.value))
 const windowMode = ref<'normal' | 'maximized' | 'minimized'>('normal')
 const windowRect = reactive({ left: 96, top: 64, width: 1120, height: 720 })
@@ -296,6 +298,7 @@ onBeforeUnmount(() => {
             :src="displayUrl"
             controls
             preload="metadata"
+            @error="videoFailed = true"
           />
           <AssetPreviewMedia
             v-else-if="showImagePreview"
@@ -305,7 +308,7 @@ onBeforeUnmount(() => {
             :alt="alt || title"
           />
           <div v-else class="aw-preview-dialog__empty">
-            {{ emptyLabel || '暂无可展示预览' }}
+            {{ videoFailed ? '当前视频无法在线播放，可下载原件查看' : emptyLabel || '暂无可展示预览' }}
           </div>
         </div>
         <aside class="aw-preview-dialog__side">

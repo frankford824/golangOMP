@@ -142,7 +142,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="aw-page-stack">
+  <section class="aw-page-stack aw-notifications-page">
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">消息中心</p>
@@ -168,8 +168,8 @@ onMounted(() => {
           <option value="all">全部</option>
           <option value="read">已读</option>
         </select>
-        <span>{{ rows.length }} 条</span>
-        <span class="aw-chip aw-chip--warn">未读 {{ unreadCount }}</span>
+        <span>已加载 {{ rows.length }} 条</span>
+        <span v-if="filter === 'all'" class="aw-chip aw-chip--warn">其中未读 {{ unreadCount }} 条</span>
       </div>
       <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
       <AsyncBoundary :loading="loading" :error="error" :empty="!rows.length" loading-label="正在加载通知" empty-label="暂无通知" @retry="loadNotifications">
@@ -185,9 +185,9 @@ onMounted(() => {
                 查看
                 <ArrowRight :size="15" aria-hidden="true" />
               </button>
-              <button class="aw-secondary-button" type="button" :disabled="row.is_read" @click="markRead(row)">
+              <button v-if="!row.is_read" class="aw-secondary-button" type="button" @click="markRead(row)">
                 <MailOpen :size="15" aria-hidden="true" />
-                {{ row.is_read ? '已读' : '标为已读' }}
+                标为已读
               </button>
             </div>
             <span :class="chipClass(row.is_read ? 'neutral' : 'warn')">{{ row.is_read ? '已读' : '未读' }}</span>

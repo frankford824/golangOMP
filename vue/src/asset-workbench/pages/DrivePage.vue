@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { loadWorkbenchFilePreview } from '@aw/shared/preview/loadWorkbenchFilePreview'
 import { useRoute } from 'vue-router'
 import {
   CheckCircle2,
@@ -227,6 +228,13 @@ const publishingClientMaterial = ref(false)
 const batchUpdatingClientMaterials = ref(false)
 const selectedMaterialFolderPath = ref('')
 const expandedMaterialFolderPaths = ref<Set<string>>(new Set(['']))
+const clientMaterialPageSize = 40
+const clientMaterialPage = ref(1)
+const clientMaterialListRef = ref<HTMLElement | null>(null)
+watch(clientMaterialPage, () => {
+  if (clientMaterialListRef.value) clientMaterialListRef.value.scrollTop = 0
+})
+const clientMaterialQuery = ref('')
 const clientMaterialFilter = ref<ClientMaterialFilter>('all')
 let batchJobPollTimer: number | null = null
 
@@ -335,11 +343,7 @@ const driveFolderBreadcrumbs = computed(() => {
     ...parts.map((part, index) => ({ path: drivePathFromSegments(parts.slice(0, index + 1)), name: part })),
   ]
 })
-const selectedFileActionIds = computed(() => {
-  const ids = [...selectedFileIds.value]
-  if (ids.length) return ids
-  return selectedFile.value ? [selectedFile.value.id] : []
-})
+const selectedFileActionIds = computed(() => [...selectedFileIds.value])
 const selectedFileActionLabel = computed(() => {
   const count = selectedFileActionIds.value.length
   if (count === 0) return '未选择文件'
@@ -1442,16 +1446,21 @@ const activeClientMaterial = computed(() => {
 const enabledClientMaterialCount = computed(() => clientMaterials.value.filter((material) => material.enabled).length)
 const disabledClientMaterialCount = computed(() => clientMaterials.value.length - enabledClientMaterialCount.value)
 const activeBatchJobCount = computed(() => batchJobs.value.filter((job) => job.status === 'queued' || job.status === 'running').length)
-const visibleClientMaterials = computed(() => {
-  switch (clientMaterialFilter.value) {
-    case 'enabled':
-      return clientMaterials.value.filter((material) => material.enabled)
-    case 'disabled':
-      return clientMaterials.value.filter((material) => !material.enabled)
-    default:
-      return clientMaterials.value
-  }
+const filteredClientMaterials = computed(() => {
+  const query = clientMaterialQuery.value.trim().toLowerCase()
+  return clientMaterials.value.filter((material) => {
+    const matchesStatus = clientMaterialFilter.value === 'all' || material.enabled === (clientMaterialFilter.value === 'enabled')
+    return matchesStatus && (!query || [material.title, material.filename_snapshot, material.resource_id, material.source_ref]
+      .some((value) => value?.toLowerCase().includes(query)))
+  })
 })
+const clientMaterialPageCount = computed(() => Math.max(1, Math.ceil(filteredClientMaterials.value.length / clientMaterialPageSize)))
+const visibleClientMaterials = computed(() => {
+  const offset = (clientMaterialPage.value - 1) * clientMaterialPageSize
+  return filteredClientMaterials.value.slice(offset, offset + clientMaterialPageSize)
+})
+watch([clientMaterialFilter, clientMaterialQuery], () => { clientMaterialPage.value = 1 })
+watch(clientMaterialPageCount, (pages) => { clientMaterialPage.value = Math.min(clientMaterialPage.value, pages) })
 
 async function loadDifficultyClasses() {
   try {
@@ -1641,14 +1650,9 @@ async function changePage(delta: number) {
   await loadFiles()
 }
 
-function selectFile(file: DriveFileRow, additive = false) {
-  if (selectionLoading.value || fileMutationLoading.value) return
+function selectFile(file: DriveFileRow) {
   selectedFile.value = file
   highlightFileId.value = file.id
-  const next = additive ? new Set(selectedFileIds.value) : new Set<number>()
-  next.add(file.id)
-  selectedFileIds.value = next
-  selectionRows.value.set(file.id, file)
 }
 
 function toggleFile(file: DriveFileRow, checked: boolean) {
@@ -1657,8 +1661,8 @@ function toggleFile(file: DriveFileRow, checked: boolean) {
   if (checked) next.add(file.id)
   else next.delete(file.id)
   selectedFileIds.value = next
-  selectionRows.value.set(file.id, file)
-  selectedFile.value = file
+  if (checked) selectionRows.value.set(file.id, file)
+  else selectionRows.value.delete(file.id)
 }
 
 function selectAllFilesInDirectory() {
@@ -1999,6 +2003,8 @@ async function locateSearchRow(row: OverviewSearchRow) {
   await runUnifiedSearch()
 }
 
+let filePreviewRequest = 0
+
 function openPreviewDialog(args: {
   title: string
   eyebrow: string
@@ -2011,6 +2017,7 @@ function openPreviewDialog(args: {
 }) {
   revokeArchivePreviewObjectUrl()
   previewTitle.value = args.title
+  filePreviewRequest += 1
   previewEyebrow.value = args.eyebrow
   previewUrl.value = args.url || ''
   previewMimeType.value = args.mimeType || ''
@@ -2022,6 +2029,7 @@ function openPreviewDialog(args: {
 }
 
 function closePreview() {
+  filePreviewRequest += 1
   previewOpen.value = false
   previewUrl.value = ''
   previewDownload.value = null
@@ -2033,7 +2041,7 @@ async function openFilePreview(file: DriveFileRow) {
     await openArchiveFile(file)
     return
   }
-  selectFile(file, true)
+  selectFile(file)
   openPreviewDialog({
     title: fileDisplayName(file),
     eyebrow: '文件预览',
@@ -2043,11 +2051,14 @@ async function openFilePreview(file: DriveFileRow) {
     rows: filePreviewRows(file),
     download: () => downloadFile(file),
   })
+  const request = filePreviewRequest
   try {
-    const meta = await assetWorkbenchApi.getFilePreview(file.id)
-    previewUrl.value = meta.preview_url || ''
-    previewEmptyLabel.value = meta.preview_url ? '' : meta.preparing ? '预览生成中，可先下载原件' : '暂无可展示预览'
+    const result = await loadWorkbenchFilePreview(file)
+    if (!previewOpen.value || request !== filePreviewRequest) return
+    previewUrl.value = result.url
+    previewEmptyLabel.value = result.label
   } catch (err) {
+    if (!previewOpen.value || request !== filePreviewRequest) return
     previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
   }
 }
@@ -2756,6 +2767,7 @@ async function refreshClientMaterials(options: { silent?: boolean } = {}) {
 }
 
 function openClientMaterialManager() {
+  clientMaterialPage.value = 1
   clientMaterialManagerOpen.value = true
   void refreshClientMaterials()
 }
@@ -3168,14 +3180,14 @@ function downloadContextFile() {
 function selectContextFile() {
   const file = fileFromContext()
   if (!file) return
-  selectFile(file, true)
+  toggleFile(file, true)
   closeContextMenu()
 }
 
 function downloadContextSelection() {
   const file = fileFromContext()
   if (!file) return
-  selectFile(file, true)
+  toggleFile(file, true)
   closeContextMenu()
   void downloadSelectedFiles()
 }
@@ -3189,7 +3201,7 @@ function openContextArchiveFile() {
 function selectContextFileForDelete() {
   const file = fileFromContext()
   if (!file) return
-  selectFile(file, true)
+  toggleFile(file, true)
   notice.value = '已加入多选，可在上方操作栏删除'
   closeContextMenu()
 }
@@ -3285,7 +3297,7 @@ onBeforeUnmount(() => {
         <input
           v-model="searchQuery"
           type="search"
-          placeholder="搜索运营素材、文件名、上传目录"
+          placeholder="全站搜索运营素材、文件名、上传目录"
           @input="scheduleUnifiedSearch"
         />
         <span v-if="searchLoading" class="aw-drive__search-state">搜索中</span>
@@ -3302,7 +3314,7 @@ onBeforeUnmount(() => {
         <button class="aw-secondary-button aw-client-material-button" type="button" @click="openClientMaterialManager">
           <ImageDown :size="16" aria-hidden="true" />
           <span>客户端素材</span>
-          <span class="aw-client-material-button__count">{{ enabledClientMaterialCount }}/{{ clientMaterials.length }}</span>
+          <span v-if="clientMaterials.length" class="aw-client-material-button__count">{{ enabledClientMaterialCount }}/{{ clientMaterials.length }}</span>
         </button>
       </div>
     </header>
@@ -3406,9 +3418,10 @@ onBeforeUnmount(() => {
             {{ clientMaterialLoading ? '刷新中…' : '刷新' }}
           </button>
         </div>
+        <input v-model="clientMaterialQuery" type="search" aria-label="搜索客户端素材" placeholder="搜索名称、文件名或资源编号" />
         <p v-if="clientMaterialError" class="aw-inline-alert aw-inline-alert--error">{{ clientMaterialError }}</p>
         <p v-else-if="clientMaterialLoading && clientMaterials.length === 0" class="aw-drive-empty">正在加载客户端素材…</p>
-        <div v-else-if="visibleClientMaterials.length" class="aw-client-materials-list">
+        <div v-else-if="visibleClientMaterials.length" ref="clientMaterialListRef" class="aw-client-materials-list">
           <article v-for="material in visibleClientMaterials" :key="material.id" class="aw-client-material-row">
             <div class="aw-client-material-row__main">
               <strong :title="material.title || material.filename_snapshot">{{ material.title || material.filename_snapshot }}</strong>
@@ -3427,6 +3440,11 @@ onBeforeUnmount(() => {
         <p v-else class="aw-copy">
           {{ clientMaterials.length ? '当前筛选下没有客户端素材。' : '还没有发布给客户端的素材。' }}
         </p>
+        <nav v-if="filteredClientMaterials.length" class="aw-drive-pager aw-client-material-manager__pager" aria-label="客户端素材分页">
+          <button type="button" class="aw-grid-button" :disabled="clientMaterialPage <= 1" @click="clientMaterialPage--">上一页</button>
+          <span>{{ clientMaterialPage }} / {{ clientMaterialPageCount }} · 匹配 {{ filteredClientMaterials.length }} 条</span>
+          <button type="button" class="aw-grid-button" :disabled="clientMaterialPage >= clientMaterialPageCount" @click="clientMaterialPage++">下一页</button>
+        </nav>
       </section>
     </div>
 
@@ -3542,7 +3560,8 @@ onBeforeUnmount(() => {
                   :size="16"
                   :variant="activeMode === 'directories' && selectedDir?.key === dirKey(dir) ? 'starFilled' : 'star'"
                 />
-                <span class="aw-drive-side__name">{{ dir.name }}</span>
+                <span class="aw-drive-side__name" :title="dir.name">{{ dir.name }}</span>
+                <span v-if="dir.enabled === false" class="aw-chip aw-chip--neutral">已停用</span>
                 <span
                   v-if="dir.allowed_file_types?.length"
                   class="aw-chip aw-chip--subtle aw-drive-column__ext"
@@ -3646,10 +3665,11 @@ onBeforeUnmount(() => {
             <template v-else-if="activeMode === 'directories'">
               <button v-if="selectedDir && files.length" class="aw-secondary-button" type="button" :disabled="selectionLoading || fileMutationLoading" @click="selectAllFilesInDirectory">全选本页</button>
               <button v-if="selectedDir && !archiveView && canDeleteDriveFiles" class="aw-secondary-button" type="button" :disabled="filesLoading || selectionLoading || fileMutationLoading" @click="selectWholeFolder(driveFolderPath)">{{ selectionLoading ? '正在读取文件夹…' : '选择当前文件夹（含子文件夹）' }}</button>
-              <button class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
+              <button v-if="selectedDir" class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
                 <Table2 :size="16" aria-hidden="true" />
                 {{ driveSpreadsheetOpen ? '收起清单模式' : '清单模式' }}
               </button>
+              <span v-if="!selectedDir" class="aw-copy">打开目录后可查看文件清单</span>
               <button
                 v-if="canManageDrive"
                 class="aw-primary-button"
@@ -3688,7 +3708,7 @@ onBeforeUnmount(() => {
                   <span class="aw-material-toolbar__search-icon" aria-hidden="true">
                     <IconfontActionIcon name="search" :size="18" />
                   </span>
-                  <input v-model="materialQuery" type="search" aria-label="搜索运营素材" placeholder="搜索名称、编码、SKU 或路径" />
+                  <input v-model="materialQuery" type="search" aria-label="搜索运营素材" placeholder="在运营素材内搜索名称、编码、SKU 或路径" />
                   <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除搜索" @click="clearMaterialSearch">
                     <IconfontActionIcon name="close" :size="14" />
                   </button>
@@ -3836,7 +3856,7 @@ onBeforeUnmount(() => {
                 >
                   <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="star" />
                   <strong class="aw-drive-tile__name" :title="dir.name">{{ dir.name }}</strong>
-                  <small class="aw-drive-tile__meta">{{ dir.file_count }} 个文件</small>
+                  <small class="aw-drive-tile__meta">{{ dir.file_count }} 个文件{{ dir.enabled === false ? ' · 已停用' : '' }}</small>
                 </button>
               </div>
             </template>
@@ -4180,7 +4200,7 @@ onBeforeUnmount(() => {
               <Download :size="16" aria-hidden="true" />
               下载
             </button>
-            <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">下载所选</button>
+            <button v-if="selectedFileActionIds.length" class="aw-secondary-button" type="button" @click="downloadSelectedFiles">下载所选</button>
             <button
               v-if="canOpenArchive(selectedFile)"
               class="aw-secondary-button"

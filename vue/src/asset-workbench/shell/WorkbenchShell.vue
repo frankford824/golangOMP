@@ -100,15 +100,17 @@ const groupedCommandItems = computed(() => {
 
 const flatCommandItems = computed(() => groupedCommandItems.value.flatMap((group) => group.items))
 
+const commandShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl+K'
 const profileStatusLabel = computed(() => {
   const status = bootstrap.value?.profile?.status
-  if (!status) return '资料待完善，请补全资料'
+  if (!bootstrap.value?.profile) return '资料待填写'
+  if (!bootstrap.value.profile.pii_completed && status !== 'disabled') return '资料待补全'
   const labels: Record<string, string> = {
     pending: '资料审核中',
     active: '资料已完成',
     disabled: '账号已停用',
   }
-  return labels[status] ?? '资料状态待确认'
+  return labels[status ?? ''] ?? '资料状态待确认'
 })
 
 const permissionSummary = computed(() => {
@@ -304,7 +306,7 @@ watch(commandQuery, () => {
           <button class="aw-command-button" type="button" @click="toggleCommand">
             <IconfontActionIcon name="search" :size="16" />
             <span>搜索或执行动作</span>
-            <kbd>⌘K</kbd>
+            <kbd>{{ commandShortcut }}</kbd>
           </button>
           <RouterLink class="aw-icon-action aw-icon-action--bell" to="/notifications" :aria-label="bellLabel" @click="refreshUnreadCount">
             <Bell :size="18" aria-hidden="true" />
@@ -331,7 +333,7 @@ watch(commandQuery, () => {
       </header>
       <p v-if="lanMediaNotice" class="aw-inline-note" role="status">{{ lanMediaNotice }}</p>
 
-      <main class="aw-shell__content">
+      <main class="aw-shell__content" :class="{ 'aw-shell__content--wide': ['/drive', '/upload-overview', '/settlement', '/reports'].includes(route.path) }">
         <div v-if="error" class="aw-inline-alert">{{ error }}</div>
         <div v-else-if="loading" class="aw-inline-alert">正在进入工作台</div>
         <div v-else-if="bootstrap" class="aw-statusline">

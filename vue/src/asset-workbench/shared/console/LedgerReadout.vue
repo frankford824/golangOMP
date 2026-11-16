@@ -20,6 +20,7 @@ interface LedgerSegment {
 defineProps<{
   eyebrow: string
   title: string
+  payroll?: boolean
   segments: LedgerSegment[]
 }>()
 
@@ -146,7 +147,7 @@ watch(
 </script>
 
 <template>
-  <section class="aw-console-hero">
+  <section class="aw-console-hero" :class="{ 'aw-payroll-readout': payroll }">
     <div class="aw-console-hero__head">
       <div>
         <p class="aw-eyebrow">{{ eyebrow }}</p>

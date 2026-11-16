@@ -323,7 +323,6 @@ function refreshFromOtherApp() {
     <p v-if="!canChangeRoles" class="aw-inline-alert">当前账号只能查看成员，不会显示开通、停用、恢复或合并操作。</p>
     <p class="aw-copy">与运营系统使用同一套角色授权，保存后无需员工登录即可维护。切回此页会刷新成员；组织继承角色请在运营系统调整。</p>
 
-    <div class="aw-two-column">
       <section class="aw-panel">
         <div class="aw-panel__head">
           <div>
@@ -350,56 +349,7 @@ function refreshFromOtherApp() {
         </div>
       </section>
 
-      <section v-if="canChangeRoles" class="aw-panel">
-        <div class="aw-panel__head">
-          <div>
-            <p class="aw-eyebrow">主动开通</p>
-            <h3>开通主站账号</h3>
-          </div>
-          <ShieldCheck :size="18" aria-hidden="true" />
-        </div>
-        <div class="aw-form-grid">
-          <label class="aw-form-grid__full">
-            按姓名或账号搜索
-            <input v-model="lookupQuery" placeholder="搜索主站账号" @keydown.enter="searchAllUsers" />
-          </label>
-          <button class="aw-secondary-button" type="button" @click="searchAllUsers">查找账号</button>
-          <label class="aw-form-grid__full">
-            开通原因
-            <input v-model="openReason" />
-          </label>
-        </div>
-        <div v-if="lookupResults.length" class="aw-compact-list">
-          <button
-            v-for="user in lookupResults"
-            :key="user.user_id"
-            class="aw-compact-list__item"
-            type="button"
-            @click="selectLookupUser(user)"
-          >
-            <span class="aw-template-option__icon">
-              <UserRound :size="16" aria-hidden="true" />
-            </span>
-            <span>{{ memberName(user) }} · {{ user.username || user.user_id }}</span>
-          </button>
-        </div>
-        <div v-if="selectedLookupUser" class="aw-panel">
-          <p class="aw-copy">将为 {{ memberName(selectedLookupUser) }} 开通：</p>
-          <label v-for="role in openableRoles" :key="role" class="aw-inline-check">
-            <input
-              type="checkbox"
-              :checked="openRoles.includes(role)"
-              :disabled="role === 'AssetSubmitter'"
-              @change="toggleOpenRole(role, ($event.target as HTMLInputElement).checked)"
-            />
-            <span>{{ roleDisplayName(role) }}</span>
-          </label>
-          <button class="aw-primary-button" type="button" :disabled="savingUserId === selectedLookupUser.user_id" @click="openSelectedAccess">
-            确认开通
-          </button>
-        </div>
-      </section>
-    </div>
+
 
     <section class="aw-data-surface">
       <div class="aw-panel__head">
@@ -481,7 +431,58 @@ function refreshFromOtherApp() {
       @confirm="disableSelectedAccess"
     />
 
-    <section v-if="canChangeRoles" class="aw-panel">
+      <details v-if="canChangeRoles" class="aw-panel aw-settings-disclosure">
+        <summary>开通主站账号</summary>
+        <div class="aw-panel__head">
+          <div>
+            <p class="aw-copy">先查找主站账号，再分配工作台角色。</p>
+          </div>
+          <ShieldCheck :size="18" aria-hidden="true" />
+        </div>
+        <div class="aw-form-grid">
+          <label class="aw-form-grid__full">
+            按姓名或账号搜索
+            <input v-model="lookupQuery" placeholder="搜索主站账号" @keydown.enter="searchAllUsers" />
+          </label>
+          <button class="aw-secondary-button" type="button" @click="searchAllUsers">查找账号</button>
+          <label class="aw-form-grid__full">
+            开通原因
+            <input v-model="openReason" />
+          </label>
+        </div>
+        <div v-if="lookupResults.length" class="aw-compact-list">
+          <button
+            v-for="user in lookupResults"
+            :key="user.user_id"
+            class="aw-compact-list__item"
+            type="button"
+            @click="selectLookupUser(user)"
+          >
+            <span class="aw-template-option__icon">
+              <UserRound :size="16" aria-hidden="true" />
+            </span>
+            <span>{{ memberName(user) }} · {{ user.username || user.user_id }}</span>
+          </button>
+        </div>
+        <div v-if="selectedLookupUser" class="aw-panel">
+          <p class="aw-copy">将为 {{ memberName(selectedLookupUser) }} 开通：</p>
+          <label v-for="role in openableRoles" :key="role" class="aw-inline-check">
+            <input
+              type="checkbox"
+              :checked="openRoles.includes(role)"
+              :disabled="role === 'AssetSubmitter'"
+              @change="toggleOpenRole(role, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>{{ roleDisplayName(role) }}</span>
+          </label>
+          <button class="aw-primary-button" type="button" :disabled="savingUserId === selectedLookupUser.user_id" @click="openSelectedAccess">
+            确认开通
+          </button>
+        </div>
+      </details>
+
+    <details v-if="canChangeRoles" class="aw-panel aw-settings-disclosure">
+      <summary>外部账号合并到主账号</summary>
       <div class="aw-panel__head">
         <div>
           <p class="aw-eyebrow">账号合并</p>
@@ -521,6 +522,6 @@ function refreshFromOtherApp() {
         </div>
         <button class="aw-primary-button" type="button" @click="confirmMerge">确认合并</button>
       </div>
-    </section>
+    </details>
   </section>
 </template>

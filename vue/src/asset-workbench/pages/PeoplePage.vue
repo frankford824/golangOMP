@@ -82,6 +82,15 @@ const availableSelfCities = computed(() => cityOptions(form.province, form.city)
 const availableHRProvinces = computed(() => provinceOptions(hrForm.province))
 const availableHRCities = computed(() => cityOptions(hrForm.province, hrForm.city))
 const focusedUserID = computed(() => Number(route.query.user_id || 0))
+const personnelQuery = ref('')
+const personnelFilter = ref('all')
+const matchingProfiles = computed(() => {
+  const query = personnelQuery.value.trim().toLowerCase()
+  return profiles.value.filter((profile) => {
+    const matchesStatus = personnelFilter.value === 'all' || profileNeedsGrade(profile) === (personnelFilter.value === 'pending')
+    return matchesStatus && (!query || [profile.real_name, profile.personnel_no, String(profile.user_id)].some((value) => value?.toLowerCase().includes(query)))
+  })
+})
 const pendingProfiles = computed(() => profiles.value.filter((profile) => profileNeedsGrade(profile)))
 const readyProfiles = computed(() => profiles.value.filter((profile) => !profileNeedsGrade(profile)))
 const selectedProfileNeedsGrade = computed(() => selectedProfile.value ? profileNeedsGrade(selectedProfile.value) : false)
@@ -332,8 +341,17 @@ onMounted(() => {
             <span class="aw-chip aw-chip--success">可计价 {{ readyProfiles.length }}</span>
           </div>
           <div v-if="profiles.length" class="aw-grade-queue__list aw-grade-queue__list--scroll">
+            <div class="aw-personnel-filters">
+              <input v-model="personnelQuery" type="search" aria-label="搜索人员名单" placeholder="姓名或人员编号" />
+              <select v-model="personnelFilter" aria-label="定级状态">
+                <option value="all">全部状态</option>
+                <option value="pending">待定级</option>
+                <option value="ready">可计价</option>
+              </select>
+              <p v-if="!matchingProfiles.length" class="aw-copy">没有匹配的人员</p>
+            </div>
             <button
-              v-for="profile in profiles"
+              v-for="profile in matchingProfiles"
               :key="profile.id"
               type="button"
               class="aw-grade-queue__item"
