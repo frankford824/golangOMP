@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { chipClass, workbenchProfileStatusMeta } from '@aw/shared/format/status'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { LockKeyhole, LogOut, Save, UserRound, X } from 'lucide-vue-next'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
@@ -94,13 +95,7 @@ const identityLabel = computed(() => {
     : roleDisplayList(bootstrap.value?.access?.asset_roles ?? [])
   return labels.length ? labels.join(' / ') : '未开通'
 })
-const profileState = computed(() => {
-  if (!bootstrap.value?.profile) return '资料待填写'
-  if (bootstrap.value.profile.status === 'disabled') return '账号已停用'
-  if (!bootstrap.value.profile.pii_completed) return '资料待补全'
-  if (bootstrap.value.profile.status === 'pending') return '资料审核中'
-  return '资料已完成'
-})
+const profileState = computed(() => workbenchProfileStatusMeta(bootstrap.value?.profile))
 const accountName = computed(() => bootstrap.value?.user?.username || bootstrap.value?.user?.account || '-')
 const maskedPhone = computed(() => maskPhone(form.phone))
 const maskedIdCard = computed(() => maskIdCard(form.id_card))
@@ -195,7 +190,7 @@ watch(bootstrap, syncForm, { immediate: true })
         <dl class="aw-account-facts">
           <div><dt>账号</dt><dd>{{ accountName }}</dd></div>
           <div><dt>身份</dt><dd><span class="aw-chip" :class="bootstrap?.is_admin ? 'aw-chip--info' : 'aw-chip--neutral'">{{ identityLabel }}</span></dd></div>
-          <div><dt>资料状态</dt><dd><span class="aw-chip" :class="bootstrap?.profile?.pii_completed ? 'aw-chip--success' : 'aw-chip--warn'">{{ profileState }}</span></dd></div>
+          <div><dt>资料状态</dt><dd><span :class="chipClass(profileState.tone)">{{ profileState.label }}</span></dd></div>
           <div><dt>联系资料</dt><dd>{{ maskedPhone || '未填写' }}</dd></div>
           <div><dt>证件 / 收款</dt><dd>{{ maskedIdCard || '未填写' }} · {{ maskedAlipay || '未填写' }}</dd></div>
         </dl>

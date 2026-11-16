@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { HandCoins, HardDrive, ImagePlus, Table2, UserRound } from 'lucide-vue-next'
+import { Bell, HandCoins, HardDrive, ImagePlus, Table2, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 import { canAccessPath } from '@aw/app/access'
+import { workbenchProfileStatusMeta } from '@aw/shared/format/status'
 import GlobalDownloadCenter from '../shared/download/GlobalDownloadCenter.vue'
 import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
@@ -16,11 +17,7 @@ const props = defineProps<{
 const route = useRoute()
 
 const displayName = computed(() => props.bootstrap?.profile?.real_name || props.bootstrap?.user?.name || props.bootstrap?.user?.username || '我的账号')
-const profileHint = computed(() => {
-  if (!props.bootstrap?.profile) return '资料待填写'
-  if (!props.bootstrap.profile.pii_completed) return '资料待补全'
-  return '资料已完成'
-})
+const profileHint = computed(() => workbenchProfileStatusMeta(props.bootstrap?.profile).label)
 
 const navItems = [
   {
@@ -58,13 +55,25 @@ const visibleNavItems = computed(() => {
           <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
-      <RouterLink class="aw-simple-user" to="/account" aria-label="我的资料">
-        <UserRound :size="18" aria-hidden="true" />
-        <span>
-          <b>{{ displayName }}</b>
-          <small>{{ profileHint }}</small>
-        </span>
-      </RouterLink>
+      <div class="aw-simple-account-actions">
+        <RouterLink
+          class="aw-secondary-button aw-simple-messages"
+          to="/notifications"
+          aria-label="消息"
+          :aria-current="route.path === '/notifications' ? 'page' : undefined"
+          title="消息"
+        >
+          <Bell :size="18" aria-hidden="true" />
+          <span>消息</span>
+        </RouterLink>
+        <RouterLink class="aw-simple-user" to="/account" aria-label="我的资料">
+          <UserRound :size="18" aria-hidden="true" />
+          <span>
+            <b>{{ displayName }}</b>
+            <small>{{ profileHint }}</small>
+          </span>
+        </RouterLink>
+      </div>
     </header>
 
     <main class="aw-simple">

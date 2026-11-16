@@ -14,6 +14,7 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import UploadLedgerDateField from '@aw/features/upload/UploadLedgerDateField.vue'
+import { chipClass, pricingStatusMeta } from '@aw/shared/format/status'
 import { formatMoney } from '@aw/shared/format/number'
 import { useGlobalDownload } from '@aw/shared/download/useGlobalDownload'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
@@ -268,33 +269,6 @@ function archiveUnsupportedLabel(file: DriveFileRow): string {
   return `${format || '压缩包'} 暂不能在线打开，可先下载后查看。`
 }
 
-function statusText(value?: string) {
-  const map: Record<string, string> = {
-    pending: '待处理',
-    unpriced: '待补价',
-    priced: '已计件',
-    passed: '已通过',
-    needs_fix: '需修',
-    ready: '可预览',
-    failed: '预览失败',
-    processing: '处理中',
-    unsettled: '未结算',
-    in_batch: '批次中',
-    settled: '已结算',
-  }
-  const normalized = String(value || '').trim()
-  return map[normalized] || normalized || '—'
-}
-
-function statusToneClass(value?: string) {
-  const normalized = String(value || '').trim()
-  if (['priced', 'passed', 'ready', 'settled'].includes(normalized)) return 'aw-chip--success'
-  if (['pending', 'unpriced', 'processing'].includes(normalized)) return 'aw-chip--warn'
-  if (['needs_fix', 'failed'].includes(normalized)) return 'aw-chip--danger'
-  if (normalized === 'in_batch') return 'aw-chip--info'
-  return 'aw-chip--neutral'
-}
-
 function fileOperationLabel(file: DriveFileRow) {
   if (file.operation_source === 'client_supplement') return '客户端补录'
   if (file.operation_source === 'admin_supplement') return '管理员补录'
@@ -313,7 +287,7 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
     ['格式', fileFormatLabel(file)],
     ['数量', fileQuantityLabel(file)],
     ['计件金额', fileAmountLabel(file)],
-    ['计件状态', statusText(file.pricing_status)],
+    ['计件状态', pricingStatusMeta(file.pricing_status).label],
     ['文件大小', formatSize(file.file_size)],
   ]
   const note = filePieceworkNote(file)
@@ -397,7 +371,7 @@ function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDispla
     fileFormatLabel(file),
     fileQuantityLabel(file, lookup),
     fileAmountLabel(file, lookup),
-    statusText(file.pricing_status),
+    pricingStatusMeta(file.pricing_status).label,
     formatSize(file.file_size),
     filePieceworkNote(file, lookup),
   ]
@@ -1206,7 +1180,7 @@ onBeforeUnmount(() => {
                   <strong>{{ fileAmountLabel(file) }}</strong>
                 </td>
                 <td>
-                  <span class="aw-chip" :class="statusToneClass(file.pricing_status)">{{ statusText(file.pricing_status) }}</span>
+                  <span :class="chipClass(pricingStatusMeta(file.pricing_status).tone)">{{ pricingStatusMeta(file.pricing_status).label }}</span>
                 </td>
                 <td class="aw-upload-ledger__num">{{ formatSize(file.file_size) }}</td>
                 <td>

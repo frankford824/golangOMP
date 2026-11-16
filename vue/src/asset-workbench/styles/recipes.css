@@ -619,8 +619,19 @@
   color: var(--aw-ink);
 }
 
-.aw-simple-user {
+.aw-simple-account-actions {
+  display: flex;
+  align-items: center;
   justify-self: end;
+  gap: var(--aw-space-3);
+}
+
+.aw-simple-messages[aria-current="page"] {
+  border-color: var(--aw-accent);
+  color: var(--aw-accent);
+}
+
+.aw-simple-user {
   gap: var(--aw-space-2);
   color: var(--aw-ink-2);
   text-decoration: none;
@@ -5792,8 +5803,13 @@ body.aw-submission-dialog-locked {
 
   .aw-simple-brand,
   .aw-simple-nav,
-  .aw-simple-user {
+  .aw-simple-account-actions {
     justify-self: stretch;
+  }
+
+  .aw-simple-messages {
+    margin-inline-start: auto;
+    order: 1;
   }
 
   .aw-simple-nav {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pricingStatusMeta } from '@aw/shared/format/status'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { loadWorkbenchFilePreview } from '@aw/shared/preview/loadWorkbenchFilePreview'
 import { useRoute } from 'vue-router'
@@ -569,7 +570,7 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
                 page_count: file.page_count || '',
                 gross_amount: canViewAmounts.value ? formatMoney(file.gross_amount || 0) : '',
                 qc_status: statusText(file.qc_status),
-                pricing_status: statusText(file.pricing_status),
+                pricing_status: pricingStatusMeta(file.pricing_status).label,
                 size: formatSize(file.file_size),
                 created_at: formatDateTime(file.created_at),
               })),
@@ -1327,9 +1328,6 @@ function statusText(value?: string) {
     checked: '已通过',
     needs_fix: '需修',
     pending: '待处理',
-    pending_grade: '待定级',
-    unpriced: '待补价',
-    priced: '已计件',
     voided: '已作废',
     unsettled: '未结算',
     in_batch: '批次中',
@@ -2075,7 +2073,7 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
     ['数量', file.page_count ? `${file.page_count}` : '—'],
     ...(canViewAmounts.value ? [['计件金额', formatMoney(file.gross_amount || 0)] as [string, string]] : []),
     ['质检', statusText(file.qc_status)],
-    ['计件', statusText(file.pricing_status)],
+    ['计件', pricingStatusMeta(file.pricing_status).label],
     ['大小', formatSize(file.file_size)],
   ]
 }
@@ -2272,7 +2270,7 @@ async function repriceSelectedItem() {
   if (!file || !canMaintainItems.value) return
   try {
     const updated = await assetWorkbenchApi.repriceSubmissionItem(file.submission_item_id, maintenanceReason.value || '素材网盘重新计件')
-    notice.value = `已重新计件：${statusText(updated.pricing_status)}`
+    notice.value = `已重新计件：${pricingStatusMeta(updated.pricing_status).label}`
     await refreshCurrentDrive()
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '重新计件失败'
@@ -3826,7 +3824,7 @@ onBeforeUnmount(() => {
                   <span>{{ fileFormatLabel(file) }}</span>
                   <span>{{ file.page_count || '—' }}</span>
                   <span v-if="canViewAmounts">{{ formatMoney(file.gross_amount || 0) }}</span>
-                  <span>{{ statusText(file.pricing_status) }}</span>
+                  <span>{{ pricingStatusMeta(file.pricing_status).label }}</span>
                 </article>
               </div>
               <div v-if="fileTotal > 0" class="aw-drive-pager">
@@ -4192,7 +4190,7 @@ onBeforeUnmount(() => {
             <div><dt>数量</dt><dd>{{ selectedFile.page_count || '—' }}</dd></div>
             <div v-if="canViewAmounts"><dt>计件金额</dt><dd>{{ formatMoney(selectedFile.gross_amount || 0) }}</dd></div>
             <div><dt>质检</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
-            <div><dt>计件</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
+            <div><dt>计件</dt><dd>{{ pricingStatusMeta(selectedFile.pricing_status).label }}</dd></div>
             <div><dt>大小</dt><dd>{{ formatSize(selectedFile.file_size) }}</dd></div>
           </dl>
           <div class="aw-drive__detail-actions">

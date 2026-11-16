@@ -14,6 +14,7 @@ describe('SimpleShell personal upload ledger entry', () => {
     const wrapper = shallowMount(SimpleShell, { props: { bootstrap: { profile: { settlement_visible: false }, capabilities: ['asset.workbench.submit'] } as never }, global: { stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } } })
     expect(wrapper.find('a[href="/my-settlement"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/upload"]').exists()).toBe(true)
+    expect(wrapper.get('a[href="/notifications"]').text()).toBe('消息')
     wrapper.unmount()
   })
   it.each([true, false])('shows upload ledger only for submitters: %s', (submitter) => {

@@ -70,6 +70,14 @@ export const pricingStatusMeta = (value?: string | null) =>
     value,
   )
 
+export function workbenchProfileStatusMeta(profile?: { status?: string; pii_completed?: boolean } | null): StatusMeta {
+  if (!profile) return { label: '资料待填写', tone: 'warn' }
+  if (profile.status === 'disabled') return { label: '账号已停用', tone: 'danger' }
+  if (!profile.pii_completed) return { label: '资料待补全', tone: 'warn' }
+  if (profile.status === 'pending') return { label: '资料已完成 · 待定级', tone: 'warn' }
+  return { label: '资料已完成', tone: 'success' }
+}
+
 export const settlementStatusMeta = (value?: string | null) =>
   lookup(
     {

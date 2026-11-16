@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { workbenchProfileStatusMeta } from '@aw/shared/format/status'
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { Bell, Command, LogOut, Settings, UserRound } from 'lucide-vue-next'
@@ -101,17 +102,7 @@ const groupedCommandItems = computed(() => {
 const flatCommandItems = computed(() => groupedCommandItems.value.flatMap((group) => group.items))
 
 const commandShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl+K'
-const profileStatusLabel = computed(() => {
-  const status = bootstrap.value?.profile?.status
-  if (!bootstrap.value?.profile) return '资料待填写'
-  if (!bootstrap.value.profile.pii_completed && status !== 'disabled') return '资料待补全'
-  const labels: Record<string, string> = {
-    pending: '资料审核中',
-    active: '资料已完成',
-    disabled: '账号已停用',
-  }
-  return labels[status ?? ''] ?? '资料状态待确认'
-})
+const profileStatus = computed(() => workbenchProfileStatusMeta(bootstrap.value?.profile))
 
 const permissionSummary = computed(() => {
   const count = bootstrap.value?.capabilities.length ?? 0
@@ -119,9 +110,8 @@ const permissionSummary = computed(() => {
 })
 
 const profileState = computed(() => {
-  const status = bootstrap.value?.profile?.status
-  if (status === 'active') return 'active'
-  if (status === 'pending') return 'pending'
+  if (profileStatus.value.tone === 'success') return 'active'
+  if (profileStatus.value.tone === 'warn') return 'pending'
   return 'idle'
 })
 
@@ -340,7 +330,7 @@ watch(commandQuery, () => {
           <span class="aw-statusline__dot" :data-state="profileState"></span>
           <span class="aw-statusline__item">本月结算 <b>{{ businessMonth }}</b>（北京时间）</span>
           <span class="aw-statusline__sep">·</span>
-          <span class="aw-statusline__item">{{ profileStatusLabel }}</span>
+          <span class="aw-statusline__item">{{ profileStatus.label }}</span>
           <span class="aw-statusline__sep">·</span>
           <span class="aw-statusline__item">{{ permissionSummary }}</span>
         </div>

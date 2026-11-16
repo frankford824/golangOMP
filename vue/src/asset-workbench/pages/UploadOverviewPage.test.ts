@@ -61,13 +61,15 @@ describe('UploadOverviewPage operation source', () => {
   ])('applies income visibility to ledger summaries and actual amount cells: %o', async ({visible,admin,expected}) => {
     mocks.settlementVisible = visible
     mocks.capabilities = admin ? ['asset.workbench.manage'] : ['asset.workbench.submit']
-    mocks.driveFiles.mockResolvedValue({items:[{id:99, submission_item_id:99, original_filename:'sample.png', gross_amount:123.45, page_count:1}],total:1})
+    mocks.driveFiles.mockResolvedValue({items:[{id:99, submission_item_id:99, original_filename:'sample.png', pricing_status:'pending_grade', gross_amount:123.45, page_count:1}],total:1})
     const wrapper = mount(UploadOverviewPage, {global:{stubs:{RouterLink:true}}})
     await flushPromises()
     expect(wrapper.find('.aw-upload-ledger__summary').text().includes('本页计价金额')).toBe(expected)
     expect(wrapper.findAll('th').some(th=>th.text()==='金额')).toBe(expected)
     expect(wrapper.text().includes('123.45')).toBe(expected)
     expect(wrapper.text()).toContain('匹配文件')
+    expect(wrapper.get('tbody').text()).toContain('待定级')
+    expect(wrapper.get('tbody').text()).not.toContain('pending_grade')
     await wrapper.get('button[aria-label="预览"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-testid="preview-metadata"]').text().includes('计件金额')).toBe(expected)
