@@ -17984,7 +17984,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Saved manual deductions, including explicit zero, for payroll rows with matching quality records, and month lock state */
+                /** @description Payroll rows with matching imported quality records, saved manual deductions (including explicit zero), and month lock state */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -17994,6 +17994,11 @@ export interface paths {
                             data?: {
                                 business_month: string;
                                 locked: boolean;
+                                eligible_payroll_rows: {
+                                    payee_user_id: number;
+                                    /** @enum {string} */
+                                    payroll_row_type: "normal_piecework" | "supplement_piecework";
+                                }[];
                                 deductions: {
                                     payee_user_id: number;
                                     /** @enum {string} */
@@ -18029,7 +18034,7 @@ export interface paths {
         };
         /**
          * Save one person's manual quality deduction for a payroll month
-         * @description Actual net uses the manual deduction only, with zero when no amount was entered. A positive amount requires matching quality records for the selected person, month and payroll row type. Net due uses the rule-based deduction. Batch generation freezes both calculations. Generated or confirmed batches lock edits for the month.
+         * @description Actual net uses the manual deduction only, with zero when no amount was entered. Saving any amount, including zero, requires matching imported quality records for the selected person, month and payroll row type. Only the latest amount for that person, month and row type applies. Net due uses the rule-based deduction. Batch generation freezes both calculations. Generated or confirmed batches lock edits for the month.
          */
         put: {
             parameters: {
