@@ -1,3 +1,4 @@
+import { installUsageTelemetry } from '@/shared/telemetry/usage'
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 import { getToken } from '@/services/http'
@@ -247,3 +248,5 @@ router.beforeEach(async (to) => {
   }
   return true
 })
+
+installUsageTelemetry(router, { appId: 'asset-workbench', getToken })

@@ -1,3 +1,4 @@
+import { beginUsageOperation } from '@/shared/telemetry/usage'
 import type JSZipType from 'jszip'
 
 export interface BatchZipDownloadSource {
@@ -181,7 +182,7 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
 }
 
-export async function downloadBatchAsZip(options: BatchZipDownloadOptions): Promise<BatchZipDownloadResult> {
+async function downloadBatchAsZipInternal(options: BatchZipDownloadOptions): Promise<BatchZipDownloadResult> {
   const { default: JSZip } = await import('jszip')
   const zip = new JSZip()
   const usedNames = new Map<string, number>()
@@ -273,4 +274,13 @@ export async function downloadBatchAsZip(options: BatchZipDownloadOptions): Prom
     failureCount: failures.length,
     failures,
   }
+}
+
+export async function downloadBatchAsZip(options: BatchZipDownloadOptions): Promise<BatchZipDownloadResult> {
+  const finish = beginUsageOperation('download.batch', { requested_files: options.items.length })
+  try {
+    const result = await downloadBatchAsZipInternal(options)
+    finish('handed_off', undefined, { successful_files: result.writtenCount, failed_files: result.failureCount })
+    return result
+  } catch (error) { finish('failed', error); throw error }
 }

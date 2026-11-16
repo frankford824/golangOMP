@@ -3259,7 +3259,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/planning-skus/erp-resync \
 ### 简介
 支持方法: POST。
 
-- `POST`: Authenticated frontend endpoint for recording page-view and user-action events. The server enriches the record with session actor, client IP, user agent, and request trace ID.
+- `POST`: Authenticated frontend endpoint for recording page-view, visible-time and user-action events for both applications. usage.v1 payloads are bounded to 16 KiB (32 KiB request body); collection is best-effort and must not block business operations. outcome handed_off means the browser took responsibility for a download, not that a file was saved. The server enriches the record with session actor, client IP, user agent, and request trace ID. usage.v1 event timestamps use UTC server receipt time. Older business events retain their existing occurred_at behavior.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3275,7 +3275,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `event_type` | string | 是 | - |
+| `event_type` | string | 是 | usage.v1 accepts page_view, page_engagement, or user_action; legacy business events remain supported. |
 | `action` | string | 否 | - |
 | `page_url` | string | 否 | - |
 | `page_name` | string | 否 | - |
@@ -3292,7 +3292,7 @@ Content-Type: `application/json`
 | `resource_type` | string | 否 | - |
 | `resource_id` | string | 否 | - |
 | `outcome` | string | 否 | - |
-| `payload` | object | 否 | - |
+| `payload` | UsageTelemetryPayload | 否 | Optional usage.v1 context shared by main-ops and asset-workbench. Existing legacy payloads remain accepted. The server derives actor identity from authentication. Application and automation fields are analytics hints, never proof of human activity or authorization. URLs omit query strings and fragments; usage.v1 stores only documented scalar fields and ignores unknown fields. No filenames, signed URLs, search values or request bodies. page.visible records capped visible intervals, not proof of active work. Browser download handoff is not completion. |
 | `occurred_at` | string | 否 | - |
 
 ### 响应体 schema

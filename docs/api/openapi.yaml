@@ -642,11 +642,46 @@ components:
         created_at:
           type: string
           format: date-time
+    UsageTelemetryPayload:
+      type: object
+      description: |
+        Optional usage.v1 context shared by main-ops and asset-workbench. Existing legacy payloads remain accepted.
+        The server derives actor identity from authentication. Application and automation fields are analytics hints,
+        never proof of human activity or authorization. URLs omit query strings and fragments; usage.v1 stores only
+        documented scalar fields and ignores unknown fields. No filenames, signed URLs, search values or request bodies.
+        page.visible records capped visible intervals, not proof of active work. Browser download handoff is not completion.
+      additionalProperties: true
+      properties:
+        telemetry_schema: { type: string, enum: [usage.v1] }
+        app_id: { type: string, enum: [main-ops, asset-workbench] }
+        session_id: { type: string, maxLength: 256 }
+        page_view_id: { type: string, maxLength: 256 }
+        client_event_id: { type: string, maxLength: 256 }
+        operation_id: { type: string, maxLength: 256 }
+        upload_session_id: { type: string, maxLength: 256 }
+        route_pattern: { type: string, maxLength: 256 }
+        automation: { type: boolean }
+        phase: { type: string, enum: [started, finished] }
+        phase_detail: { type: string, maxLength: 256 }
+        transfer_mode: { type: string, maxLength: 256 }
+        error_code: { type: string, maxLength: 256 }
+        error_type: { type: string, maxLength: 256 }
+        http_status: { type: integer, minimum: 0 }
+        file_size: { type: integer, minimum: 0, description: Nominal bytes, not evidence of persisted or downloaded bytes. }
+        received_bytes: { type: integer, minimum: 0 }
+        duration_ms: { type: integer, minimum: 0 }
+        visible_ms: { type: integer, minimum: 0, maximum: 60000 }
+        dropped_events: { type: integer, minimum: 0 }
+        requested_files: { type: integer, minimum: 0 }
+        successful_files: { type: integer, minimum: 0 }
+        failed_files: { type: integer, minimum: 0 }
     WorkflowTraceEventRecordRequest:
       type: object
       required: [event_type]
       properties:
-        event_type: { type: string }
+        event_type:
+          type: string
+          description: usage.v1 accepts page_view, page_engagement, or user_action; legacy business events remain supported.
         action: { type: string }
         page_url: { type: string }
         page_name: { type: string }
@@ -678,8 +713,7 @@ components:
         resource_id: { type: string }
         outcome: { type: string }
         payload:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/UsageTelemetryPayload'
         occurred_at:
           type: string
           format: date-time
@@ -9573,8 +9607,11 @@ paths:
     post:
       summary: Record frontend business trace event
       description: |
-        Authenticated frontend endpoint for recording page-view and user-action events.
+        Authenticated frontend endpoint for recording page-view, visible-time and user-action events for both applications.
+        usage.v1 payloads are bounded to 16 KiB (32 KiB request body); collection is best-effort and must not block business operations.
+        outcome handed_off means the browser took responsibility for a download, not that a file was saved.
         The server enriches the record with session actor, client IP, user agent, and request trace ID.
+        usage.v1 event timestamps use UTC server receipt time. Older business events retain their existing occurred_at behavior.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [account.use]

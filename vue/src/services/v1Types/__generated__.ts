@@ -3503,8 +3503,11 @@ export interface paths {
         put?: never;
         /**
          * Record frontend business trace event
-         * @description Authenticated frontend endpoint for recording page-view and user-action events.
+         * @description Authenticated frontend endpoint for recording page-view, visible-time and user-action events for both applications.
+         *     usage.v1 payloads are bounded to 16 KiB (32 KiB request body); collection is best-effort and must not block business operations.
+         *     outcome handed_off means the browser took responsibility for a download, not that a file was saved.
          *     The server enriches the record with session actor, client IP, user agent, and request trace ID.
+         *     usage.v1 event timestamps use UTC server receipt time. Older business events retain their existing occurred_at behavior.
          */
         post: {
             parameters: {
@@ -21870,7 +21873,46 @@ export interface components {
             /** Format: date-time */
             created_at?: string;
         };
+        /**
+         * @description Optional usage.v1 context shared by main-ops and asset-workbench. Existing legacy payloads remain accepted.
+         *     The server derives actor identity from authentication. Application and automation fields are analytics hints,
+         *     never proof of human activity or authorization. URLs omit query strings and fragments; usage.v1 stores only
+         *     documented scalar fields and ignores unknown fields. No filenames, signed URLs, search values or request bodies.
+         *     page.visible records capped visible intervals, not proof of active work. Browser download handoff is not completion.
+         */
+        UsageTelemetryPayload: {
+            /** @enum {string} */
+            telemetry_schema?: "usage.v1";
+            /** @enum {string} */
+            app_id?: "main-ops" | "asset-workbench";
+            session_id?: string;
+            page_view_id?: string;
+            client_event_id?: string;
+            operation_id?: string;
+            upload_session_id?: string;
+            route_pattern?: string;
+            automation?: boolean;
+            /** @enum {string} */
+            phase?: "started" | "finished";
+            phase_detail?: string;
+            transfer_mode?: string;
+            error_code?: string;
+            error_type?: string;
+            http_status?: number;
+            /** @description Nominal bytes */
+            file_size?: number;
+            received_bytes?: number;
+            duration_ms?: number;
+            visible_ms?: number;
+            dropped_events?: number;
+            requested_files?: number;
+            successful_files?: number;
+            failed_files?: number;
+        } & {
+            [key: string]: unknown;
+        };
         WorkflowTraceEventRecordRequest: {
+            /** @description usage.v1 accepts page_view, page_engagement, or user_action; legacy business events remain supported. */
             event_type: string;
             action?: string;
             page_url?: string;
@@ -21888,9 +21930,7 @@ export interface components {
             resource_type?: string;
             resource_id?: string;
             outcome?: string;
-            payload?: {
-                [key: string]: unknown;
-            };
+            payload?: components["schemas"]["UsageTelemetryPayload"];
             /** Format: date-time */
             occurred_at?: string;
         };

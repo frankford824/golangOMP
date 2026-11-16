@@ -1,3 +1,4 @@
+import { beginUsageOperation } from '@/shared/telemetry/usage'
 /**
  * 规范资产上传：POST /v1/assets/upload-sessions → 执行 `oss_direct` 上传计划
  * → complete；传输失败可以取消，确认结果不明时必须保留会话。
@@ -198,7 +199,7 @@ function isMultipartOssPlan(mode: string | null | undefined, strategy: string | 
 /**
  * 创建会话、直传 OSS、MAIN complete；确认结果不明时不销毁上传会话。
  */
-async function uploadFileViaAssetSession(
+async function uploadFileViaAssetSessionInternal(
   taskId: string | null | undefined,
   file: File,
   intent: Omit<CreateAssetUploadSessionPayload, 'task_id' | 'file_name'> & {
@@ -637,4 +638,20 @@ export async function uploadReferenceFileRef(
     },
   )
   return toReferenceFileRef(uploaded, file)
+}
+
+async function uploadFileViaAssetSession(
+  taskId: string | null | undefined, file: File,
+  intent: Omit<CreateAssetUploadSessionPayload, 'task_id' | 'file_name'> & { file_name?: string },
+  options?: TaskAssetUploadFlowOptions,
+): Promise<ReturnType<typeof normalizeAssetCenterCompleteData>> {
+  const finish = beginUsageOperation('upload.workflow', { file_size: file.size, task_id: taskId ?? undefined })
+  try {
+    const result = await uploadFileViaAssetSessionInternal(taskId, file, intent, options)
+    finish('succeeded', undefined, { phase_detail: 'server_confirmed' })
+    return result
+  } catch (error) {
+    finish(error instanceof UploadCompletionPendingError ? 'pending' : options?.signal?.aborted ? 'cancelled' : 'failed', error)
+    throw error
+  }
 }

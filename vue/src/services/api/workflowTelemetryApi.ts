@@ -1,7 +1,7 @@
 import http from '@/services/http'
 
 /**
- * 仅记录当前 main-ops 页面访问和用户操作，用于运行质量诊断。
+ * 记录两应用的已登录页面访问和用户操作，用于运行质量诊断。
  * 本模块只负责记录当前页面交互事件，不提供查询或管理页面。
  */
 export const workflowTelemetryApi = {

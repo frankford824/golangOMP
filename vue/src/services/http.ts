@@ -8,6 +8,7 @@
  *   此文件和所有 API 调用代码无需任何修改
  */
 
+import { usageRequestHeaders } from '@/shared/telemetry/context'
 import axios, { type AxiosResponse, type AxiosError } from 'axios'
 import { parseApiErrorPayload, resolveApiUserMessage } from '@/utils/api-message-zh'
 import { createMockAdapter, isMockEnabled } from '@/mocks'
@@ -84,6 +85,9 @@ http.interceptors.request.use((config) => {
   const token = getToken()
   if (token) {
     config.headers['Authorization'] = `Bearer ${token}`
+  }
+  if (config.url?.startsWith('/v1/') || config.url?.startsWith('/api/')) {
+    for (const [name, value] of Object.entries(usageRequestHeaders())) config.headers[name] = value
   }
   config.headers['X-Frontend-Version'] = import.meta.env.VITE_APP_VERSION ?? 'v1'
 

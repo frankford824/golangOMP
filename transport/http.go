@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -482,7 +483,7 @@ func recordHTTPWorkflowTraceEvent(c *gin.Context, recorder workflowTraceRecorder
 	routePath := routePathForLog(c)
 	latencyMS := latency.Milliseconds()
 	outcome := domain.WorkflowTraceOutcomeSucceeded
-	if status >= 500 {
+	if status >= 400 {
 		outcome = domain.WorkflowTraceOutcomeFailed
 	}
 	httpStatus := status
@@ -517,7 +518,8 @@ func recordHTTPWorkflowTraceEvent(c *gin.Context, recorder workflowTraceRecorder
 	if strings.Contains(routePath, "/integration/call-logs/:id") {
 		event.IntegrationCallLogID = positiveInt64Param(c, "id")
 	}
-	ctx := context.WithoutCancel(c.Request.Context())
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 2*time.Second)
+	defer cancel()
 	if _, appErr := recorder.RecordTraceEvent(ctx, event); appErr != nil {
 		logger.Warn("workflow_trace_http_record_failed",
 			zap.String("code", appErr.Code),
@@ -530,7 +532,7 @@ func recordHTTPWorkflowTraceEvent(c *gin.Context, recorder workflowTraceRecorder
 
 func shouldSkipWorkflowTracePath(path string) bool {
 	switch strings.TrimSpace(path) {
-	case "/health", "/healthz", "/ping", "/favicon.ico", "/v1/trace-events", "/v1/search", "/v1/assets/search":
+	case "/health", "/healthz", "/ping", "/favicon.ico", "/v1/trace-events":
 		return true
 	default:
 		return false
@@ -573,19 +575,45 @@ func positiveInt64Param(c *gin.Context, name string) *int64 {
 }
 
 func httpTracePayload(c *gin.Context) json.RawMessage {
-	payload := map[string]string{}
-	if rawQuery := strings.TrimSpace(c.Request.URL.RawQuery); rawQuery != "" {
-		payload["query"] = rawQuery
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	app := domain.UsageAppID(c.GetHeader("Origin"), c.GetHeader("Referer"), c.GetHeader("X-Usage-App"))
+	payload := map[string]string{
+		"telemetry_schema": "usage.v1", "app_id": app,
+		"traffic_class": domain.UsageTrafficClass(actor, c.Request.URL.Path, c.GetHeader("User-Agent"), c.GetHeader("X-Usage-Automation"), app),
+		"request_kind":  domain.UsageRequestKind(c.Request.Method, c.Request.URL.Path),
 	}
-	if referer := strings.TrimSpace(c.GetHeader("Referer")); referer != "" {
+	// Do not persist query values or signed download credentials in trace rows.
+	keys := make([]string, 0, len(c.Request.URL.Query()))
+	for key := range c.Request.URL.Query() {
+		if len(key) <= 64 {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	if len(keys) > 32 {
+		keys = keys[:32]
+	}
+	if len(keys) > 0 {
+		payload["query_keys"] = strings.Join(keys, ",")
+	}
+	if referer := domain.SanitizeTraceURL(c.GetHeader("Referer")); referer != "" {
+		if len(referer) > 512 {
+			referer = referer[:512]
+		}
 		payload["referer"] = referer
 	}
-	if len(payload) == 0 {
-		return nil
+	for key, header := range map[string]string{"session_id": "X-Usage-Session", "page_view_id": "X-Usage-Page"} {
+		if value := c.GetHeader(header); len(value) <= 64 && value != "" {
+			payload[key] = value
+		}
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return nil
+	if status := c.Writer.Status(); status >= 400 {
+		code := c.GetString("usage_error_code")
+		if code == "" {
+			code = "HTTP_" + strconv.Itoa(status)
+		}
+		payload["error_code"] = code
 	}
+	raw, _ := json.Marshal(payload)
 	return raw
 }

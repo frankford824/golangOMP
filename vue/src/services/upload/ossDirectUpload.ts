@@ -1,3 +1,4 @@
+import { observeUsageOperation } from '@/shared/telemetry/usage'
 import axios from 'axios'
 import type { AssetUploadOptions } from '@/services/api/assetsApi'
 
@@ -384,7 +385,7 @@ async function putBlobWithRetry(
   throw lastError
 }
 
-export async function runOssDirectUploadPlan(
+async function runOssDirectUploadPlanInternal(
   file: File,
   plan: OssDirectPlan,
   options?: AssetUploadOptions,
@@ -536,4 +537,8 @@ export async function runOssDirectUploadPlan(
     upload_content_type: requiredMime || undefined,
     oss_parts: confirmedParts,
   }
+}
+
+export async function runOssDirectUploadPlan(file: File, plan: OssDirectPlan, options?: AssetUploadOptions): Promise<OssDirectUploadResult> {
+  return observeUsageOperation('upload.transfer', { file_size: file.size }, () => runOssDirectUploadPlanInternal(file, plan, options))
 }

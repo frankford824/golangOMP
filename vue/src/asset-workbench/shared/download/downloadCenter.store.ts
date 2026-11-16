@@ -1,3 +1,4 @@
+import { beginUsageOperation } from '@/shared/telemetry/usage'
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { MediaPreparationPending } from './preparedDownload'
@@ -239,6 +240,7 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
     const resolve = resolvers.get(id)
     if (!item || item.status !== 'queued' || !resolve) return
 
+    const finishUsage = beginUsageOperation('download.file')
     const controller = new AbortController()
     controllers.set(id, controller)
     updateItem(item, { status: 'preparing', progress: 0, error: undefined })
@@ -261,6 +263,7 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
           progress: progress.progress,
         })
       })
+      finishUsage(result.mode === 'browser' ? 'handed_off' : 'succeeded', undefined, { transfer_mode: result.mode, received_bytes: result.receivedBytes, file_size: result.totalBytes })
       if (result.mode === 'browser') {
         updateItem(item, {
           status: 'handed_off',
@@ -280,10 +283,13 @@ export const useDownloadCenterStore = defineStore('assetWorkbenchDownloadCenter'
       }
     } catch (error) {
       if (error instanceof MediaPreparationPending) {
+        finishUsage('pending', undefined, { phase_detail: 'preparation_pending' })
         updateItem(item, { status: 'waiting', progress: 0, speedBytesPerSecond: 0, requestId: error.requestId, jobId: error.jobId, error: error.message })
       } else if (controller.signal.aborted || isAbortError(error)) {
+        finishUsage('cancelled', error)
         updateItem(item, { status: 'cancelled', speedBytesPerSecond: 0, error: undefined })
       } else {
+        finishUsage('failed', error)
         updateItem(item, {
           status: 'failed',
           speedBytesPerSecond: 0,

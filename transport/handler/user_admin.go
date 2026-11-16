@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -544,12 +545,34 @@ func (h *UserAdminHandler) RecordWorkflowTraceEvent(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "workflow trace service is not configured", nil))
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32*1024)
 	var req recordWorkflowTraceEventReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	app := domain.UsageAppID(c.GetHeader("Origin"), c.GetHeader("Referer"), c.GetHeader("X-Usage-App"))
+	var hints struct {
+		AppID      string `json:"app_id"`
+		Automation bool   `json:"automation"`
+	}
+	_ = json.Unmarshal(req.Payload, &hints)
+	if app == "unknown" {
+		app = domain.UsageAppID("", "", hints.AppID)
+	}
+	automated := hints.Automation || strings.Contains(strings.ToLower(c.GetHeader("User-Agent")), "headless")
+	payload, usage, payloadErr := domain.NormalizeUsagePayload(req.Payload, app, automated)
+	if payloadErr != nil {
+		respondError(c, payloadErr)
+		return
+	}
+	if usage && req.EventType != "page_view" && req.EventType != "page_engagement" && req.EventType != "user_action" {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "unsupported usage event type", nil))
+		return
+	}
+	req.Payload = payload
+	req.PageURL = domain.SanitizeTraceURL(req.PageURL)
 	event := &domain.WorkflowTraceEvent{
 		TraceID:              c.GetString("trace_id"),
 		EventSource:          domain.WorkflowTraceSourceFrontend,
@@ -581,10 +604,15 @@ func (h *UserAdminHandler) RecordWorkflowTraceEvent(c *gin.Context) {
 		Outcome:              req.Outcome,
 		Payload:              req.Payload,
 	}
-	if req.OccurredAt != nil {
+	if usage {
+		// Usage windows follow server receipt time, not a potentially incorrect client clock.
+		event.OccurredAt = time.Now().UTC()
+	} else if req.OccurredAt != nil {
 		event.OccurredAt = req.OccurredAt.UTC()
 	}
-	created, appErr := h.traceEventSvc.RecordTraceEvent(c.Request.Context(), event)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	created, appErr := h.traceEventSvc.RecordTraceEvent(ctx, event)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

@@ -1,3 +1,4 @@
+import { beginUsageOperation } from '@/shared/telemetry/usage'
 /**
  * Single-file download with original upload filename.
  * Reuses naming sanitization aligned with batch zip downloads.
@@ -67,7 +68,7 @@ export function triggerBrowserURLDownload(downloadUrl: string, filename: string,
 /**
  * Download one file (no zip). Prefer GET /v1/assets/{id}/download for canonical filename + URL.
  */
-export async function downloadAssetFileWithOriginalFilename(
+async function downloadAssetFileWithOriginalFilenameInternal(
   options: DownloadAssetFileOptions,
 ): Promise<DownloadAssetFileResult> {
   const numericAssetId = parseNumericAssetId(options.assetId)
@@ -130,5 +131,17 @@ function filenameFromUrl(raw: string): string {
   } catch {
     const clean = trimmed.split('?')[0].split('#')[0]
     return decodeURIComponent(clean.split('/').pop() ?? '')
+  }
+}
+
+export async function downloadAssetFileWithOriginalFilename(options: DownloadAssetFileOptions): Promise<DownloadAssetFileResult> {
+  const finish = beginUsageOperation('download.file')
+  try {
+    const result = await downloadAssetFileWithOriginalFilenameInternal(options)
+    finish(result.ok ? 'handed_off' : options.signal?.aborted ? 'cancelled' : 'failed')
+    return result
+  } catch (error) {
+    finish(options.signal?.aborted ? 'cancelled' : 'failed', error)
+    throw error
   }
 }

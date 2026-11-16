@@ -26,6 +26,7 @@ func respondOKWithPagination(c *gin.Context, data interface{}, pagination interf
 
 func respondError(c *gin.Context, err *domain.AppError) {
 	err.TraceID = c.GetString("trace_id")
+	c.Set("usage_error_code", err.Code)
 	c.JSON(httpStatusFromCode(err.Code), incomeSafeResponse(c, domain.APIErrorResponse{Error: err}))
 	c.Abort()
 }

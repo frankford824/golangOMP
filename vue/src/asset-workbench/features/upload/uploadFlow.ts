@@ -1,3 +1,4 @@
+import { beginUsageOperation } from '@/shared/telemetry/usage'
 import { runOssDirectUploadPlan, type OssDirectPlan } from '@/services/upload/ossDirectUpload'
 
 import { assetWorkbenchApi, type UploadPlan } from '@aw/shared/api/assetWorkbenchApi'
@@ -15,7 +16,7 @@ export interface UploadedWorkbenchFile {
   filename: string
 }
 
-export async function uploadWorkbenchFile(
+async function uploadWorkbenchFileInternal(
   file: File,
   options: {
     signal?: AbortSignal
@@ -83,4 +84,13 @@ function normalizeWorkbenchUploadPlan(plan: UploadPlan): OssDirectPlan {
     object_key: plan.object_key,
     upload_id: plan.upload_id,
   }
+}
+
+export async function uploadWorkbenchFile(file: File, options: Parameters<typeof uploadWorkbenchFileInternal>[1] = {}): Promise<UploadedWorkbenchFile> {
+  const finish = beginUsageOperation('upload.workflow', { file_size: file.size })
+  try {
+    const result = await uploadWorkbenchFileInternal(file, options)
+    finish('succeeded', undefined, { phase_detail: 'server_confirmed', upload_session_id: result.sessionId })
+    return result
+  } catch (error) { finish(options.signal?.aborted ? 'cancelled' : 'failed', error); throw error }
 }

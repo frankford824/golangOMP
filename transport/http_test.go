@@ -87,8 +87,8 @@ func TestRequestLoggerRecordsWorkflowTraceEvent(t *testing.T) {
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		t.Fatalf("payload json err=%v raw=%s", err, string(event.Payload))
 	}
-	if payload["query"] != "tab=audit" {
-		t.Fatalf("payload query = %q, want tab=audit", payload["query"])
+	if payload["query_keys"] != "tab" {
+		t.Fatalf("payload query keys = %q, want tab", payload["query_keys"])
 	}
 }
 
