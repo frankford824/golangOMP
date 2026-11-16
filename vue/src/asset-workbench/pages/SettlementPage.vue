@@ -5,6 +5,7 @@ import { Download, Table2 } from 'lucide-vue-next'
 
 import {
   assetWorkbenchApi,
+  type AssetWorkbenchProfile,
   type DifficultyClassRow,
   type ErrorImportBatchRow,
   type ErrorImportRecordRow,
@@ -189,6 +190,10 @@ const supplementForm = ref({
   gross_amount: 0,
   finalized: true,
 })
+const permissionPayeeName = ref('')
+const permissionSaving = ref(false)
+const permissionReview = ref<(Parameters<typeof assetWorkbenchApi.upsertSupplementPermission>[0] & { payeeName: string }) | null>(null)
+let permissionMonthsRequest = 0
 const permissionForm = ref({
   payee_user_id: 0,
   enabled: true,
@@ -978,47 +983,61 @@ async function handleSettlementSpreadsheetAction(payload: WorkbenchSpreadsheetAc
   }
 }
 
+function reviewSupplementPermission() {
+  const { payee_user_id, enabled, reason } = permissionForm.value
+  if (!payee_user_id || !supplementMonth.value || eligibleMonthsLoading.value || permissionSaving.value) return
+  if (enabled && !eligibleSupplementMonths.value.includes(supplementMonth.value)) return
+  permissionReview.value = {
+    payee_user_id,
+    business_month: supplementMonth.value,
+    enabled,
+    reason,
+    payeeName: permissionPayeeName.value,
+  }
+}
+
 async function upsertSupplementPermission() {
+  const review = permissionReview.value
+  if (!review || permissionSaving.value) return
+  const { payeeName, ...payload } = review
+  permissionSaving.value = true
   error.value = ''
   notice.value = ''
-  if (!permissionForm.value.payee_user_id) {
-    error.value = '请先选择要开放补录的人员'
-    return
-  }
   try {
-    const saved = await assetWorkbenchApi.upsertSupplementPermission({
-      payee_user_id: permissionForm.value.payee_user_id,
-      business_month: supplementMonth.value,
-      enabled: permissionForm.value.enabled,
-      reason: permissionForm.value.reason,
-    })
-    notice.value = saved.enabled ? `已开放 ${saved.payee_user_id} 的 ${saved.business_month} 补录` : `已关闭 ${saved.payee_user_id} 的 ${saved.business_month} 补录`
+    const saved = await assetWorkbenchApi.upsertSupplementPermission(payload)
+    const name = payeeName ? `${payeeName}（编号 ${saved.payee_user_id}）` : `编号 ${saved.payee_user_id}`
+    notice.value = saved.enabled ? `已开放 ${name} 的 ${saved.business_month} 补录` : `已关闭 ${name} 的 ${saved.business_month} 补录`
     month.value = saved.business_month
+    permissionReview.value = null
     permissionForm.value.reason = ''
     await loadSettlement({ keepNotice: true })
   } catch (err) {
     error.value = settlementActionError(err, '保存补录开放设置失败')
+  } finally {
+    permissionSaving.value = false
   }
 }
 
 async function loadSupplementEligibleMonths() {
-  if (!permissionForm.value.payee_user_id) {
+  const payeeUserID = permissionForm.value.payee_user_id
+  if (!payeeUserID) {
     error.value = '请先选择要开放补录的人员'
     return
   }
+  const request = ++permissionMonthsRequest
   error.value = ''
   notice.value = ''
   eligibleMonthsLoading.value = true
   try {
-    eligibleSupplementMonths.value = await assetWorkbenchApi.listSupplementEligibleMonths(permissionForm.value.payee_user_id)
-    if (eligibleSupplementMonths.value.length) {
-      supplementMonth.value = eligibleSupplementMonths.value.includes(month.value) ? month.value : eligibleSupplementMonths.value[0]
-    }
-    notice.value = eligibleSupplementMonths.value.length ? '已读取当前可开放月份' : '当前没有可开放的补录月份'
+    const months = await assetWorkbenchApi.listSupplementEligibleMonths(payeeUserID)
+    if (request !== permissionMonthsRequest) return
+    eligibleSupplementMonths.value = months
+    if (months.length) supplementMonth.value = months.includes(month.value) ? month.value : months[0]
+    notice.value = months.length ? '已读取当前可开放月份' : '当前没有可开放的补录月份'
   } catch (err) {
-    error.value = settlementActionError(err, '读取可补录月份失败')
+    if (request === permissionMonthsRequest) error.value = settlementActionError(err, '读取可补录月份失败')
   } finally {
-    eligibleMonthsLoading.value = false
+    if (request === permissionMonthsRequest) eligibleMonthsLoading.value = false
   }
 }
 
@@ -1065,7 +1084,8 @@ function requireEntrySupplementMonth() {
   return supplementMonth.value
 }
 
-async function selectPermissionPayee() {
+async function selectPermissionPayee(profile: AssetWorkbenchProfile) {
+  permissionPayeeName.value = profile.real_name || ''
   eligibleSupplementMonths.value = []
   await loadSupplementEligibleMonths()
 }
@@ -1716,7 +1736,7 @@ onMounted(async () => {
                 </div>
                 <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
               </div>
-              <div class="aw-form-grid">
+              <div v-show="!permissionReview" class="aw-form-grid">
                 <PersonnelPicker
                   v-model="permissionForm.payee_user_id"
                   label="开放人员"
@@ -1742,12 +1762,27 @@ onMounted(async () => {
                   <input v-model="permissionForm.reason" />
                 </label>
               </div>
-              <div class="aw-inline-actions">
+              <div v-show="!permissionReview" class="aw-inline-actions">
                 <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
                   读取可开放月份
                 </button>
-                <button class="aw-primary-button" type="button" :disabled="eligibleMonthsLoading || (permissionForm.enabled && eligibleSupplementMonths.length === 0)" @click="upsertSupplementPermission">保存开放设置</button>
+                <button class="aw-primary-button" type="button" :disabled="!permissionForm.payee_user_id || eligibleMonthsLoading || (permissionForm.enabled && eligibleSupplementMonths.length === 0)" @click="reviewSupplementPermission">核对开放设置</button>
               </div>
+              <section v-if="permissionReview" class="aw-panel" role="dialog" aria-label="核对补录权限">
+                <div class="aw-panel__head">
+                  <h3>核对补录权限</h3>
+                </div>
+                <p><strong>{{ permissionReview.payeeName || '所选人员' }} · 编号 {{ permissionReview.payee_user_id }}</strong></p>
+                <p>{{ permissionReview.business_month }} · {{ permissionReview.enabled ? '开放补录' : '关闭补录' }}</p>
+                <p v-if="permissionReview.reason" class="aw-copy">{{ permissionReview.reason }}</p>
+                <p v-if="error" role="alert" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
+                <div class="aw-inline-actions">
+                  <button class="aw-secondary-button" type="button" :disabled="permissionSaving" @click="permissionReview = null">返回核对</button>
+                  <button class="aw-primary-button" type="button" :disabled="permissionSaving" @click="upsertSupplementPermission">
+                    {{ permissionSaving ? '保存中…' : permissionReview.enabled ? '确认开放补录' : '确认关闭补录' }}
+                  </button>
+                </div>
+              </section>
             </div>
 
             <div class="aw-panel">
