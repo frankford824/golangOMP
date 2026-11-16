@@ -92,6 +92,7 @@ components:
       type: object
       required: [id, user_id, worker_type, job_grade, real_name, province, city, gender, alipay_account, grade_hidden, status, pii_completed, created_at, updated_at]
       properties:
+        personnel_no: { type: string, maxLength: 32, pattern: '^[a-zA-Z0-9_-]*$', description: Optional maintained payroll identifier. }
         id: { type: integer, format: int64 }
         user_id: { type: integer, format: int64 }
         worker_type: { type: string, enum: [fulltime, parttime] }
@@ -121,6 +122,7 @@ components:
     AssetWorkbenchProfileUpdate:
       type: object
       properties:
+        personnel_no: { type: string, maxLength: 32, pattern: '^[a-zA-Z0-9_-]*$', description: Optional payroll identifier. Empty string clears it and omission preserves it. }
         worker_type: { type: string, enum: [fulltime, parttime] }
         job_grade: { type: string }
         real_name: { type: string }
@@ -15881,6 +15883,7 @@ paths:
                         description: { type: string }
                         enabled: { type: boolean }
                         sort_order: { type: integer }
+                        difficulty_coefficient: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 999999.9999 }
                         created_by: { type: integer, nullable: true }
                         updated_by: { type: integer, nullable: true }
                         created_at: { type: string, format: date-time }
@@ -15907,6 +15910,7 @@ paths:
                 description: { type: string }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
+                difficulty_coefficient: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 999999.9999, multipleOf: 0.0001 }
       responses:
         '201':
           description: Created difficulty class
@@ -15942,7 +15946,7 @@ paths:
   /v1/asset-workbench/difficulty-classes/{difficulty_code}:
     patch:
       summary: Update asset workbench difficulty class
-      description: The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, or sort order.
+      description: The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, sort order, or coefficient.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -15964,6 +15968,7 @@ paths:
                 description: { type: string }
                 enabled: { type: boolean }
                 sort_order: { type: integer }
+                difficulty_coefficient: { type: number, exclusiveMinimum: true, minimum: 0, maximum: 999999.9999, multipleOf: 0.0001 }
       responses:
         '200':
           description: Updated difficulty class
@@ -17572,7 +17577,7 @@ paths:
         '404': { description: Import batch not found }
     delete:
       summary: Delete one quality error import batch and all its rows
-      description: Removes the import and clears saved actual deductions for affected payroll rows when no matching quality records remain. Active settlement batches lock deletion.
+      description: Removes the import and clears saved actual deductions for each payroll row with a matched error in the deleted import. Active settlement batches lock deletion.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -18326,6 +18331,8 @@ paths:
                             - *AssetWorkbenchSettlementPreviewRow
                             - type: object
                               properties:
+                                personnel_no: { type: string }
+                                difficulty_piece_counts: { type: object, additionalProperties: { type: integer, minimum: 0 } }
                                 business_month: { type: string }
                                 row_type: { type: string, enum: [normal_piecework, supplement_piecework] }
                                 adjustment_amount: { type: number }
@@ -18547,7 +18554,7 @@ paths:
   /v1/asset-workbench/settlement/report:
     get:
       summary: Get asset workbench settlement report
-      description: Read-only piecework report for one business month. Rows are split into normal piecework and supplement piecework, with distinct non-empty `order_no` counts and difficulty-level metrics.
+      description: Whole-month piecework report, including open and active-batch work. Counts and coefficient subtotals are per payroll row. Monthly coefficient and contribution rate repeat for the same person across row types. Group benchmarks are arithmetic means of personal monthly error rates among workers of that type with positive page counts.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -18572,6 +18579,12 @@ paths:
                     type: object
                     properties:
                       business_month: { type: string }
+                      difficulty_coefficients: { type: object, additionalProperties: { type: number } }
+                      worker_type_average_error_rates:
+                        type: object
+                        properties:
+                          fulltime: { type: number }
+                          parttime: { type: number }
                       difficulty_classes:
                         type: array
                         items: { type: string }
@@ -18583,6 +18596,15 @@ paths:
                             payee_user_id: { type: integer }
                             business_month: { type: string }
                             row_type: { type: string, enum: [normal_piecework, supplement_piecework, total] }
+                            personnel_no: { type: string }
+                            worker_type: { type: string }
+                            monthly_coefficient: { type: number }
+                            monthly_contribution_rate: { type: number }
+                            monthly_error_rate: { type: number }
+                            worker_type_average_error_rate: { type: number }
+                            quality_actual_deduction_amount: { type: number }
+                            actual_net_amount: { type: number }
+                            adjustment_amount: { type: number }
                             creator_name: { type: string }
                             job_grade: { type: string }
                             created_date: { type: string, format: date, description: Earliest upload or supplement creation date included in this monthly aggregate row. }
@@ -18605,6 +18627,8 @@ paths:
                               items: &AssetWorkbenchSettlementReportDifficultyMetric
                                 type: object
                                 properties:
+                                  difficulty_coefficient: { type: number }
+                                  coefficient_subtotal: { type: number, description: item_count multiplied by the difficulty coefficient. }
                                   difficulty_class: { type: string }
                                   order_count: { type: integer }
                                   item_count: { type: integer }
@@ -18619,7 +18643,7 @@ paths:
                       totals: *AssetWorkbenchSettlementReportRow
                       generated_at: { type: string, format: date-time }
                       order_count_policy: { type: string, enum: [distinct_non_empty_order_no] }
-                      settlement_data_mode: { type: string, enum: [unconfirmed_settleable_items_and_approved_supplements] }
+                      settlement_data_mode: { type: string, enum: [monthly_settlement_sources] }
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }

@@ -321,6 +321,7 @@ type RegisterResponse struct {
 }
 
 type UpsertProfileParams struct {
+	PersonnelNo   *string    `json:"personnel_no"`
 	WorkerType    string     `json:"worker_type"`
 	JobGrade      string     `json:"job_grade"`
 	RealName      string     `json:"real_name"`
@@ -392,18 +393,20 @@ type MergeConflict struct {
 }
 
 type CreateDifficultyClassParams struct {
-	Code        string `json:"code"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Enabled     *bool  `json:"enabled"`
-	SortOrder   int    `json:"sort_order"`
+	DifficultyCoefficient *float64 `json:"difficulty_coefficient"`
+	Code                  string   `json:"code"`
+	Name                  string   `json:"name"`
+	Description           string   `json:"description"`
+	Enabled               *bool    `json:"enabled"`
+	SortOrder             int      `json:"sort_order"`
 }
 
 type UpdateDifficultyClassParams struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Enabled     *bool   `json:"enabled"`
-	SortOrder   *int    `json:"sort_order"`
+	DifficultyCoefficient *float64 `json:"difficulty_coefficient"`
+	Name                  *string  `json:"name"`
+	Description           *string  `json:"description"`
+	Enabled               *bool    `json:"enabled"`
+	SortOrder             *int     `json:"sort_order"`
 }
 
 type CreatePriceMatrixParams struct {
@@ -901,70 +904,85 @@ type SettlementPreviewRow struct {
 }
 
 type SettlementPayrollRow struct {
-	QualityActualDeductionAmount *float64 `json:"quality_actual_deduction_amount,omitempty"`
-	ActualNetAmount              float64  `json:"actual_net_amount"`
-	PayeeUserID                  int64    `json:"payee_user_id"`
-	PayeeName                    string   `json:"payee_name,omitempty"`
-	WorkerType                   string   `json:"worker_type,omitempty"`
-	BusinessMonth                string   `json:"business_month"`
-	RowType                      string   `json:"row_type"`
-	ItemCount                    int      `json:"item_count"`
-	PageCount                    int      `json:"page_count"`
-	GrossAmount                  float64  `json:"gross_amount"`
-	ErrorCount                   int      `json:"error_count"`
-	DeductionAmount              float64  `json:"deduction_amount"`
-	WelfareAmount                float64  `json:"welfare_amount"`
-	SupplementAmount             float64  `json:"supplement_amount"`
-	AdjustmentAmount             float64  `json:"adjustment_amount"`
-	NetAmount                    float64  `json:"net_amount"`
+	PersonnelNo                  string         `json:"personnel_no,omitempty"`
+	DifficultyPieceCounts        map[string]int `json:"difficulty_piece_counts,omitempty"`
+	QualityActualDeductionAmount *float64       `json:"quality_actual_deduction_amount,omitempty"`
+	ActualNetAmount              float64        `json:"actual_net_amount"`
+	PayeeUserID                  int64          `json:"payee_user_id"`
+	PayeeName                    string         `json:"payee_name,omitempty"`
+	WorkerType                   string         `json:"worker_type,omitempty"`
+	BusinessMonth                string         `json:"business_month"`
+	RowType                      string         `json:"row_type"`
+	ItemCount                    int            `json:"item_count"`
+	PageCount                    int            `json:"page_count"`
+	GrossAmount                  float64        `json:"gross_amount"`
+	ErrorCount                   int            `json:"error_count"`
+	DeductionAmount              float64        `json:"deduction_amount"`
+	WelfareAmount                float64        `json:"welfare_amount"`
+	SupplementAmount             float64        `json:"supplement_amount"`
+	AdjustmentAmount             float64        `json:"adjustment_amount"`
+	NetAmount                    float64        `json:"net_amount"`
 }
 
 type SettlementReport struct {
-	BusinessMonth      string                `json:"business_month"`
-	DifficultyClasses  []string              `json:"difficulty_classes"`
-	Rows               []SettlementReportRow `json:"rows"`
-	Totals             SettlementReportRow   `json:"totals"`
-	GeneratedAt        time.Time             `json:"generated_at"`
-	OrderCountPolicy   string                `json:"order_count_policy"`
-	SettlementDataMode string                `json:"settlement_data_mode"`
+	DifficultyCoefficients      map[string]float64    `json:"difficulty_coefficients"`
+	WorkerTypeAverageErrorRates map[string]float64    `json:"worker_type_average_error_rates"`
+	BusinessMonth               string                `json:"business_month"`
+	DifficultyClasses           []string              `json:"difficulty_classes"`
+	Rows                        []SettlementReportRow `json:"rows"`
+	Totals                      SettlementReportRow   `json:"totals"`
+	GeneratedAt                 time.Time             `json:"generated_at"`
+	OrderCountPolicy            string                `json:"order_count_policy"`
+	SettlementDataMode          string                `json:"settlement_data_mode"`
 }
 
 type SettlementReportRow struct {
-	PayeeUserID       int64                              `json:"payee_user_id"`
-	BusinessMonth     string                             `json:"business_month"`
-	RowType           string                             `json:"row_type"`
-	CreatorName       string                             `json:"creator_name"`
-	JobGrade          string                             `json:"job_grade"`
-	CreatedDate       string                             `json:"created_date"`
-	CreatedDateEnd    string                             `json:"created_date_end"`
-	OrderCount        int                                `json:"order_count"`
-	ItemCount         int                                `json:"item_count"`
-	PageCount         int                                `json:"page_count"`
-	GrossAmount       float64                            `json:"gross_amount"`
-	ErrorCount        int                                `json:"error_count"`
-	DeductionAmount   float64                            `json:"deduction_amount"`
-	WelfareAmount     float64                            `json:"welfare_amount"`
-	SupplementAmount  float64                            `json:"supplement_amount"`
-	NetAmount         float64                            `json:"net_amount"`
-	ErrorRate         float64                            `json:"error_rate"`
-	PageCountShare    float64                            `json:"page_count_share"`
-	ErrorCountShare   float64                            `json:"error_count_share"`
-	MonthAmountShare  float64                            `json:"month_amount_share"`
-	DifficultyMetrics []SettlementReportDifficultyMetric `json:"difficulty_metrics"`
+	WorkerType                   string                             `json:"worker_type"`
+	PersonnelNo                  string                             `json:"personnel_no"`
+	MonthlyCoefficient           float64                            `json:"monthly_coefficient"`
+	MonthlyContributionRate      float64                            `json:"monthly_contribution_rate"`
+	MonthlyErrorRate             float64                            `json:"monthly_error_rate"`
+	WorkerTypeAverageErrorRate   *float64                           `json:"worker_type_average_error_rate,omitempty"`
+	QualityActualDeductionAmount float64                            `json:"quality_actual_deduction_amount"`
+	ActualNetAmount              float64                            `json:"actual_net_amount"`
+	AdjustmentAmount             float64                            `json:"adjustment_amount"`
+	PayeeUserID                  int64                              `json:"payee_user_id"`
+	BusinessMonth                string                             `json:"business_month"`
+	RowType                      string                             `json:"row_type"`
+	CreatorName                  string                             `json:"creator_name"`
+	JobGrade                     string                             `json:"job_grade"`
+	CreatedDate                  string                             `json:"created_date"`
+	CreatedDateEnd               string                             `json:"created_date_end"`
+	OrderCount                   int                                `json:"order_count"`
+	ItemCount                    int                                `json:"item_count"`
+	PageCount                    int                                `json:"page_count"`
+	GrossAmount                  float64                            `json:"gross_amount"`
+	ErrorCount                   int                                `json:"error_count"`
+	DeductionAmount              float64                            `json:"deduction_amount"`
+	WelfareAmount                float64                            `json:"welfare_amount"`
+	SupplementAmount             float64                            `json:"supplement_amount"`
+	NetAmount                    float64                            `json:"net_amount"`
+	ErrorRate                    float64                            `json:"error_rate"`
+	PageCountShare               float64                            `json:"page_count_share"`
+	ErrorCountShare              float64                            `json:"error_count_share"`
+	MonthAmountShare             float64                            `json:"month_amount_share"`
+	DifficultyMetrics            []SettlementReportDifficultyMetric `json:"difficulty_metrics"`
 }
 
 type SettlementReportDifficultyMetric struct {
-	DifficultyClass     string  `json:"difficulty_class"`
-	OrderCount          int     `json:"order_count"`
-	ItemCount           int     `json:"item_count"`
-	PageCount           int     `json:"page_count"`
-	GrossAmount         float64 `json:"gross_amount"`
-	ErrorCount          int     `json:"error_count"`
-	DeductionAmount     float64 `json:"deduction_amount"`
-	ErrorRate           float64 `json:"error_rate"`
-	PageCountShare      float64 `json:"page_count_share"`
-	ErrorCountShare     float64 `json:"error_count_share"`
-	MonthPageCountShare float64 `json:"month_page_count_share"`
+	DifficultyCoefficient float64 `json:"difficulty_coefficient"`
+	CoefficientSubtotal   float64 `json:"coefficient_subtotal"`
+	DifficultyClass       string  `json:"difficulty_class"`
+	OrderCount            int     `json:"order_count"`
+	ItemCount             int     `json:"item_count"`
+	PageCount             int     `json:"page_count"`
+	GrossAmount           float64 `json:"gross_amount"`
+	ErrorCount            int     `json:"error_count"`
+	DeductionAmount       float64 `json:"deduction_amount"`
+	ErrorRate             float64 `json:"error_rate"`
+	PageCountShare        float64 `json:"page_count_share"`
+	ErrorCountShare       float64 `json:"error_count_share"`
+	MonthPageCountShare   float64 `json:"month_page_count_share"`
 }
 
 type MySettlementResponse struct {
@@ -1359,6 +1377,7 @@ func (s *Service) UpsertMyProfile(ctx context.Context, actor domain.RequestActor
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load asset workbench profile.", err.Error())
 	}
+	params.PersonnelNo = nil
 	params = preserveSelfManagedProfileFields(params, existing, s.nowFn().UTC())
 	profile, appErr := s.normalizeProfile(actor.ID, actor.ID, params)
 	if appErr != nil {
@@ -2042,14 +2061,19 @@ func (s *Service) CreateDifficultyClass(ctx context.Context, actor domain.Reques
 	if name == "" {
 		name = code
 	}
+	coefficient, appErr := difficultyCoefficient(params.DifficultyCoefficient, defaultDifficultyCoefficient(code))
+	if appErr != nil {
+		return nil, appErr
+	}
 	item := &domain.AssetWorkbenchDifficultyClass{
-		Code:        code,
-		Name:        name,
-		Description: strings.TrimSpace(params.Description),
-		Enabled:     boolValueDefault(params.Enabled, true),
-		SortOrder:   params.SortOrder,
-		CreatedBy:   &actor.ID,
-		UpdatedBy:   &actor.ID,
+		DifficultyCoefficient: coefficient,
+		Code:                  code,
+		Name:                  name,
+		Description:           strings.TrimSpace(params.Description),
+		Enabled:               boolValueDefault(params.Enabled, true),
+		SortOrder:             params.SortOrder,
+		CreatedBy:             &actor.ID,
+		UpdatedBy:             &actor.ID,
 	}
 	var created *domain.AssetWorkbenchDifficultyClass
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -2098,6 +2122,10 @@ func (s *Service) UpdateDifficultyClass(ctx context.Context, actor domain.Reques
 	}
 	if params.SortOrder != nil {
 		item.SortOrder = *params.SortOrder
+	}
+	item.DifficultyCoefficient, appErr = difficultyCoefficient(params.DifficultyCoefficient, existing.DifficultyCoefficient)
+	if appErr != nil {
+		return nil, appErr
 	}
 	item.UpdatedBy = &actor.ID
 	var updated *domain.AssetWorkbenchDifficultyClass
@@ -4781,7 +4809,7 @@ func (s *Service) DeleteErrorImportBatch(ctx context.Context, actor domain.Reque
 		if err != nil {
 			return err
 		}
-		if err := s.clearDeletedQualityDeductions(ctx, tx, actor, batch.BusinessMonth, batchID, records); err != nil {
+		if err := s.clearDeletedQualityDeductions(ctx, tx, actor, batch.BusinessMonth, records); err != nil {
 			return err
 		}
 		if err := s.repo.DeleteErrorImportBatch(ctx, tx, batchID); err != nil {
@@ -4857,27 +4885,11 @@ func (s *Service) SettlementReport(ctx context.Context, actor domain.RequestActo
 	if businessMonth == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month is required.", nil)
 	}
-	items, appErr := s.loadSettleableItems(ctx, businessMonth)
-	if appErr != nil {
-		return nil, appErr
-	}
-	supplements, appErr := s.loadSettleableSupplements(ctx, businessMonth)
-	if appErr != nil {
-		return nil, appErr
-	}
-	errorRecords, err := s.repo.ListErrorRecordsByMonth(ctx, businessMonth)
+	sources, err := s.repo.ReadSettlementReportSources(ctx, businessMonth)
 	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load error records.", err.Error())
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load monthly settlement report sources.", nil)
 	}
-	reserved, err := s.repo.ListReservedSettlementSources(ctx, nil, businessMonth)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load reserved settlement sources.", nil)
-	}
-	report, appErr := s.buildSettlementReport(ctx, businessMonth, items, reservedSettlementSources(reserved).remainingErrors(errorRecords), supplements)
-	if appErr != nil {
-		return nil, appErr
-	}
-	return report, nil
+	return s.buildSettlementReport(ctx, businessMonth, sources.Items, sources.Errors, sources.Supplements, sources)
 }
 
 func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.RequestActor, businessMonth string) (*domain.AssetWorkbenchSettlementBatch, *domain.AppError) {
@@ -4971,7 +4983,7 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 				Direction:        "credit",
 				SourceRefType:    "submission_item",
 				SourceRefID:      &submissionItemID,
-				Snapshot:         item.PricingSnapshot,
+				Snapshot:         payrollPricingSnapshot(item),
 			}); err != nil {
 				return err
 			}
@@ -5012,9 +5024,6 @@ func (s *Service) GenerateSettlementBatch(ctx context.Context, actor domain.Requ
 			deduction, ruleSnapshot, appErr := s.calculateQualityErrorDeductionCached(ctx, businessMonth, record, profile, deductionCache)
 			if appErr != nil {
 				return appErr
-			}
-			if deduction <= 0 && domain.WorkbenchPayrollRowType(record.RawPayload) != domain.AssetWorkbenchPayrollRowTypeSupplementPiecework {
-				continue
 			}
 			sourceID := record.ID
 			if _, err := s.repo.CreateSettlementItem(ctx, tx, &domain.AssetWorkbenchSettlementItem{
@@ -8312,6 +8321,13 @@ func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfilePa
 		CreatedBy:     &createdBy,
 		UpdatedBy:     &updatedBy,
 	}
+	if params.PersonnelNo != nil {
+		number := strings.TrimSpace(*params.PersonnelNo)
+		if number != "" && !personnelNumberPattern.MatchString(number) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "人员编号最多 32 位，可使用字母、数字、短横线和下划线。", nil)
+		}
+		profile.PersonnelNo = &number
+	}
 	refreshProfileCompletion(profile)
 	return profile, nil
 }
@@ -8382,6 +8398,7 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 		row.PageCount += item.PageCount
 		row.GrossAmount += item.GrossAmount
 		normalPayrollRow.ItemCount++
+		countPayrollDifficulty(normalPayrollRow, item.DifficultyClass)
 		normalPayrollRow.PageCount += item.PageCount
 		normalPayrollRow.GrossAmount += item.GrossAmount
 		errorCount := matchedErrorCount(errorRecords, item)
@@ -8457,6 +8474,7 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 		row.SupplementAmount += supplement.GrossAmount
 		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount
 		supplementPayrollRow.ItemCount++
+		countPayrollDifficulty(supplementPayrollRow, supplement.DifficultyClass)
 		supplementPayrollRow.PageCount += supplement.PageCount
 		supplementPayrollRow.SupplementAmount += supplement.GrossAmount
 		supplementPayrollRow.NetAmount = supplementPayrollRow.SupplementAmount - supplementPayrollRow.DeductionAmount
@@ -8509,7 +8527,7 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 	return &SettlementPreview{BusinessMonth: businessMonth, Rows: rows, Totals: total, PayrollRows: payrollRows}, nil
 }
 
-func (s *Service) buildSettlementReport(ctx context.Context, businessMonth string, items []*domain.AssetWorkbenchSubmissionItem, errorRecords []*domain.AssetWorkbenchErrorRecord, supplements []*domain.AssetWorkbenchSettlementSupplement) (*SettlementReport, *domain.AppError) {
+func (s *Service) buildSettlementReport(ctx context.Context, businessMonth string, items []*domain.AssetWorkbenchSubmissionItem, errorRecords []*domain.AssetWorkbenchErrorRecord, supplements []*domain.AssetWorkbenchSettlementSupplement, sources ...*repo.AssetWorkbenchReportSources) (*SettlementReport, *domain.AppError) {
 	rowsByKey := map[string]*SettlementReportRow{}
 	metricsByKey := map[string]map[string]*SettlementReportDifficultyMetric{}
 	orderNosByKey := map[string]map[string]struct{}{}
@@ -8520,6 +8538,20 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 	totalOrderNosByDifficulty := map[string]map[string]struct{}{}
 	profiles := map[int64]*domain.AssetWorkbenchProfile{}
 	deductionCache := map[string]deductionRuleCacheEntry{}
+
+	ledger := settlementReportLedger{}
+	if len(sources) > 0 {
+		ledger = indexSettlementReportLedger(sources[0].Ledger, sources[0].ActualDeductions)
+	}
+	openDue := make(map[string]float64)
+	openQuality := make(map[string]bool)
+	openItems := make([]*domain.AssetWorkbenchSubmissionItem, 0, len(items))
+	legacyErrors := make([]*domain.AssetWorkbenchErrorRecord, 0)
+	for _, record := range errorRecords {
+		if record != nil && strings.TrimSpace(record.DifficultyClass) == "" {
+			legacyErrors = append(legacyErrors, record)
+		}
+	}
 
 	ensureRow := func(payeeID int64, rowType string) *SettlementReportRow {
 		key := settlementReportRowKey(payeeID, rowType)
@@ -8607,34 +8639,48 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 		difficultyClass := settlementReportDifficultyClass(item.DifficultyClass)
 		metric := ensureMetric(key, difficultyClass)
 		totalMetric := ensureTotalMetric(difficultyClass)
+		grossAmount := item.GrossAmount
+		frozen := ledger.gross[item.ID]
+		if frozen != nil {
+			grossAmount = frozen.Amount
+		} else {
+			openItems = append(openItems, item)
+		}
 		row.ItemCount++
 		row.PageCount += item.PageCount
-		row.GrossAmount += item.GrossAmount
+		row.GrossAmount += grossAmount
 		if strings.TrimSpace(row.JobGrade) == "" {
 			row.JobGrade = strings.TrimSpace(item.JobGradeSnapshot)
 		}
 		setSettlementReportCreatedDate(row, item.SubmittedAt, s.loc)
 		metric.ItemCount++
 		metric.PageCount += item.PageCount
-		metric.GrossAmount += item.GrossAmount
+		metric.GrossAmount += grossAmount
 		totalMetric.ItemCount++
 		totalMetric.PageCount += item.PageCount
-		totalMetric.GrossAmount += item.GrossAmount
+		totalMetric.GrossAmount += grossAmount
 		addOrderNoByKey(key, item.OrderNo)
 		addOrderNoByDifficulty(key, difficultyClass, item.OrderNo)
-		errorCount := matchedErrorCount(errorRecords, item)
-		row.ErrorCount += errorCount
-		metric.ErrorCount += errorCount
-		totalMetric.ErrorCount += errorCount
-		if errorCount > 0 {
-			deduction, _, appErr := s.calculateDeductionCached(ctx, item, errorCount, deductionCache)
+		errorCount := matchedErrorCount(legacyErrors, item)
+		deduction := 0.0
+		if booked := ledger.legacyErrors[item.ID]; booked != nil {
+			errorCount = int(booked.Quantity)
+			deduction = booked.Amount
+		} else if frozen == nil && errorCount > 0 {
+			var appErr *domain.AppError
+			deduction, _, appErr = s.calculateDeductionCached(ctx, item, errorCount, deductionCache)
 			if appErr != nil {
 				return nil, appErr
 			}
-			row.DeductionAmount += deduction
-			metric.DeductionAmount += deduction
-			totalMetric.DeductionAmount += deduction
+			openDue[key] += deduction
+			openQuality[key] = true
 		}
+		row.ErrorCount += errorCount
+		metric.ErrorCount += errorCount
+		totalMetric.ErrorCount += errorCount
+		row.DeductionAmount += deduction
+		metric.DeductionAmount += deduction
+		totalMetric.DeductionAmount += deduction
 	}
 	for _, record := range errorRecords {
 		if record == nil || record.PayeeUserID == nil || record.MatchStatus != domain.AssetWorkbenchErrorMatchStatusMatched || strings.TrimSpace(record.DifficultyClass) == "" || record.ErrorCount <= 0 {
@@ -8660,22 +8706,39 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 		totalMetric.ErrorCount += record.ErrorCount
 		addOrderNoByKey(key, record.OrderNo)
 		addOrderNoByDifficulty(key, difficultyClass, record.OrderNo)
-		deduction, _, appErr := s.calculateQualityErrorDeductionCached(ctx, businessMonth, record, profile, deductionCache)
-		if appErr != nil {
-			return nil, appErr
+		var deduction float64
+		if booked := ledger.qualityErrors[record.ID]; booked != nil {
+			deduction = booked.Amount
+		} else {
+			deduction, _, appErr = s.calculateQualityErrorDeductionCached(ctx, businessMonth, record, profile, deductionCache)
+			if appErr != nil {
+				return nil, appErr
+			}
+			openDue[key] += deduction
+			openQuality[key] = true
 		}
 		row.DeductionAmount += deduction
 		metric.DeductionAmount += deduction
 		totalMetric.DeductionAmount += deduction
 	}
 
-	welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, items)
+	welfareLines, appErr := s.buildWelfareLines(ctx, businessMonth, openItems)
 	if appErr != nil {
 		return nil, appErr
 	}
-	for _, line := range welfareLines {
+	for _, line := range ledger.reservations.remainingWelfare(welfareLines) {
 		row := ensureRow(line.PayeeUserID, domain.AssetWorkbenchPayrollRowTypeNormalPiecework)
 		row.WelfareAmount += line.Amount
+	}
+
+	for _, line := range ledger.other {
+		row := ensureRow(line.PayeeUserID, domain.AssetWorkbenchPayrollRowTypeNormalPiecework)
+		switch line.ItemType {
+		case domain.AssetWorkbenchItemTypeWelfare:
+			row.WelfareAmount += signedSettlementAmount(line)
+		case domain.AssetWorkbenchItemTypeAdjustment, domain.AssetWorkbenchItemTypeReversal:
+			row.AdjustmentAmount += signedSettlementAmount(line)
+		}
 	}
 
 	for _, supplement := range supplements {
@@ -8690,7 +8753,11 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 		totalMetric := ensureTotalMetric(difficultyClass)
 		row.ItemCount++
 		row.PageCount += supplement.PageCount
-		row.SupplementAmount += supplement.GrossAmount
+		supplementAmount := supplement.GrossAmount
+		if frozen := ledger.supplements[supplement.ID]; frozen != nil {
+			supplementAmount = frozen.Amount
+		}
+		row.SupplementAmount += supplementAmount
 		setSettlementReportCreatedDate(row, supplement.CreatedAt, s.loc)
 		metric.ItemCount++
 		metric.PageCount += supplement.PageCount
@@ -8702,7 +8769,7 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 		addOrderNoByDifficulty(key, difficultyClass, supplement.OrderNo)
 	}
 
-	difficultyRanks, appErr := s.settlementReportDifficultyRanks(ctx)
+	difficultyRanks, coefficients, appErr := s.settlementReportDifficultyConfig(ctx, allDifficulties)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -8715,14 +8782,24 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 	}
 	for key, row := range rowsByKey {
 		row.OrderCount = len(orderNosByKey[key])
-		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount
+		row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.SupplementAmount + row.AdjustmentAmount
+		delta := ledger.actualDifferences[key] + openDue[key]
+		if openQuality[key] && !ledger.consumedActual[key] {
+			delta -= ledger.manualActual[key]
+		}
+		row.QualityActualDeductionAmount = incomeMoney(row.DeductionAmount - delta)
+		row.ActualNetAmount = incomeMoney(row.NetAmount + delta)
 		profile, appErr := s.settlementReportProfile(ctx, row.PayeeUserID, profiles)
 		if appErr != nil {
 			return nil, appErr
 		}
 		row.CreatorName = settlementReportCreatorName(row.PayeeUserID, profile)
-		if strings.TrimSpace(row.JobGrade) == "" && profile != nil {
-			row.JobGrade = strings.TrimSpace(profile.JobGrade)
+		row.PersonnelNo = payrollPersonnelNo(row.PayeeUserID, profile)
+		if profile != nil {
+			row.WorkerType = strings.TrimSpace(profile.WorkerType)
+			if strings.TrimSpace(row.JobGrade) == "" {
+				row.JobGrade = strings.TrimSpace(profile.JobGrade)
+			}
 		}
 		total.ItemCount += row.ItemCount
 		total.PageCount += row.PageCount
@@ -8732,6 +8809,9 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 		total.WelfareAmount += row.WelfareAmount
 		total.SupplementAmount += row.SupplementAmount
 		total.NetAmount += row.NetAmount
+		total.AdjustmentAmount += row.AdjustmentAmount
+		total.QualityActualDeductionAmount += row.QualityActualDeductionAmount
+		total.ActualNetAmount += row.ActualNetAmount
 		rows = append(rows, *row)
 	}
 	total.OrderCount = len(totalOrderNos)
@@ -8759,15 +8839,17 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 		return rows[i].PayeeUserID < rows[j].PayeeUserID
 	})
 
-	return &SettlementReport{
+	report := &SettlementReport{
 		BusinessMonth:      businessMonth,
 		DifficultyClasses:  difficultyClasses,
 		Rows:               rows,
 		Totals:             total,
 		GeneratedAt:        s.nowFn().In(s.loc),
 		OrderCountPolicy:   "distinct_non_empty_order_no",
-		SettlementDataMode: "unconfirmed_settleable_items_and_approved_supplements",
-	}, nil
+		SettlementDataMode: "monthly_settlement_sources",
+	}
+	fillSettlementReportMetrics(report, coefficients)
+	return report, nil
 }
 
 func (s *Service) buildSettlementPayrollRowsFromItems(ctx context.Context, businessMonth string, items []*domain.AssetWorkbenchSettlementItem) ([]SettlementPayrollRow, *domain.AppError) {
@@ -8822,6 +8904,7 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 		case domain.AssetWorkbenchItemTypeGrossPiecework:
 			row := ensureNormal(item.PayeeUserID)
 			row.ItemCount++
+			countPayrollDifficulty(row, payrollSnapshotDifficulty(item.Snapshot))
 			row.PageCount += int(item.Quantity)
 			row.GrossAmount += item.Amount
 			row.NetAmount = row.GrossAmount - row.DeductionAmount + row.WelfareAmount + row.AdjustmentAmount
@@ -8853,6 +8936,7 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 		case domain.AssetWorkbenchItemTypeSupplement:
 			row := ensureSupplement(item.PayeeUserID)
 			row.ItemCount++
+			countPayrollDifficulty(row, payrollSnapshotDifficulty(item.Snapshot))
 			row.PageCount += int(item.Quantity)
 			row.SupplementAmount += item.Amount
 			row.NetAmount = row.SupplementAmount - row.DeductionAmount
@@ -8912,6 +8996,7 @@ func applySettlementPayrollProfile(row *SettlementPayrollRow, profile *domain.As
 	if row == nil || profile == nil {
 		return
 	}
+	row.PersonnelNo = payrollPersonnelNo(row.PayeeUserID, profile)
 	row.PayeeName = strings.TrimSpace(profile.RealName)
 	row.WorkerType = strings.TrimSpace(profile.WorkerType)
 }
@@ -8955,11 +9040,12 @@ func settlementReportDifficultyClass(value string) string {
 	return value
 }
 
-func (s *Service) settlementReportDifficultyRanks(ctx context.Context) (map[string]int, *domain.AppError) {
+func (s *Service) settlementReportDifficultyConfig(ctx context.Context, classes map[string]struct{}) (map[string]int, map[string]float64, *domain.AppError) {
 	items, err := s.repo.ListDifficultyClasses(ctx, repo.AssetWorkbenchDifficultyClassFilter{})
 	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench difficulty classes.", err.Error())
+		return nil, nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench difficulty classes.", err.Error())
 	}
+	coefficients := make(map[string]float64, len(items))
 	ranks := map[string]int{
 		"unclassified": 1_000_000,
 	}
@@ -8976,8 +9062,14 @@ func (s *Service) settlementReportDifficultyRanks(ctx context.Context) (map[stri
 			rank = (index + 1) * 100
 		}
 		ranks[code] = rank
+		if item.Enabled {
+			classes[code] = struct{}{}
+		}
+		if item.DifficultyCoefficient > 0 {
+			coefficients[code] = item.DifficultyCoefficient
+		}
 	}
-	return ranks, nil
+	return ranks, coefficients, nil
 }
 
 func settlementReportDifficultyClasses(values map[string]struct{}, ranks map[string]int) []string {

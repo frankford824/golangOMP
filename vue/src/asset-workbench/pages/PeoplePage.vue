@@ -61,6 +61,7 @@ const capabilities = computed(() => new Set(peopleRequest.data.value?.bootstrap?
 const canManageProfiles = computed(() => capabilities.value.has('asset.workbench.profile.manage'))
 const canViewUploadOverview = computed(() => capabilities.value.has('asset.workbench.manage') || capabilities.value.has('asset.workbench.settlement'))
 const hrForm = reactive({
+  personnel_no: '',
   worker_type: 'parttime',
   job_grade: '',
   real_name: '',
@@ -167,6 +168,7 @@ function fillHRForm(profile: AssetWorkbenchProfile, includePII: boolean) {
   settlementVisible.value = profile.settlement_visible !== false
   visibilityNotice.value = ''
   Object.assign(hrForm, {
+    personnel_no: profile.personnel_no ?? '',
     worker_type: profile.worker_type || 'parttime',
     job_grade: profile.job_grade || '',
     real_name: profile.real_name || '',
@@ -250,6 +252,7 @@ async function saveHRProfile() {
   notice.value = ''
   try {
     await assetWorkbenchApi.upsertProfile(profile.user_id, {
+      ...(hrForm.personnel_no !== (profile.personnel_no ?? '') ? { personnel_no: hrForm.personnel_no } : {}),
       worker_type: hrForm.worker_type,
       job_grade: hrForm.job_grade,
       real_name: hrForm.real_name,
@@ -356,7 +359,7 @@ onMounted(() => {
             <div>
               <p class="aw-eyebrow">当前人员</p>
               <h3>{{ selectedProfile.real_name || `用户 ${selectedProfile.user_id}` }}</h3>
-              <p class="aw-copy">人员编号 {{ selectedProfile.user_id }} · {{ maskPhone(selectedProfile.phone) }}</p>
+              <p class="aw-copy">人员编号 {{ selectedProfile.personnel_no || selectedProfile.user_id }} · {{ maskPhone(selectedProfile.phone) }}</p>
             </div>
             <span :class="chipClass(profilePricingTone(selectedProfile))">
               {{ profilePricingLabel(selectedProfile) }}
@@ -385,6 +388,10 @@ onMounted(() => {
             <p v-if="visibilityNotice" role="status" class="aw-copy">{{ visibilityNotice }}</p>
           </div>
           <div class="aw-form-grid">
+            <label>
+              人员编号
+              <input v-model.trim="hrForm.personnel_no" maxlength="32" pattern="[A-Za-z0-9_\-]+" :placeholder="`默认 ${selectedProfile.user_id}`" />
+            </label>
             <label>
               人员类型
               <select v-model="hrForm.worker_type">

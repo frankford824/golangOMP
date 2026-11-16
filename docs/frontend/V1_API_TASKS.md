@@ -9414,6 +9414,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
+| `personnel_no` | string | 否 | Optional payroll identifier. Empty string clears it and omission preserves it. |
 | `worker_type` | enum(fulltime/parttime) | 否 | - |
 | `job_grade` | string | 否 | - |
 | `real_name` | string | 否 | - |
@@ -9993,6 +9994,7 @@ Content-Type: `application/json`
 | `description` | string | 否 | - |
 | `enabled` | boolean | 否 | - |
 | `sort_order` | integer | 否 | - |
+| `difficulty_coefficient` | number | 否 | - |
 
 ##### 响应体 schema
 成功响应: `201 application/json`
@@ -10100,7 +10102,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/difficulty-classes/admin 
 ### 简介
 支持方法: PATCH。
 
-- `PATCH`: The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, or sort order.
+- `PATCH`: The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, sort order, or coefficient.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -10122,6 +10124,7 @@ Content-Type: `application/json`
 | `description` | string | 否 | - |
 | `enabled` | boolean | 否 | - |
 | `sort_order` | integer | 否 | - |
+| `difficulty_coefficient` | number | 否 | - |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -12390,7 +12393,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/error-imports/excel/prev
 支持方法: GET, DELETE。
 
 - `GET`: Get one quality error import batch with row details
-- `DELETE`: Removes the import and clears saved actual deductions for affected payroll rows when no matching quality records remain. Active settlement batches lock deletion.
+- `DELETE`: Removes the import and clears saved actual deductions for each payroll row with a matched error in the deleted import. Active settlement batches lock deletion.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13731,7 +13734,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/supplement-eli
 ### 简介
 支持方法: GET。
 
-- `GET`: Read-only piecework report for one business month. Rows are split into normal piecework and supplement piecework, with distinct non-empty `order_no` counts and difficulty-level metrics.
+- `GET`: Whole-month piecework report, including open and active-batch work. Counts and coefficient subtotals are per payroll row. Monthly coefficient and contribution rate repeat for the same person across row types. Group benchmarks are arithmetic means of personal monthly error rates among workers of that type with positive page counts.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -13754,18 +13757,14 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/supplement-eli
 {
   "data": {
     "business_month": "string",
+    "difficulty_coefficients": {},
+    "worker_type_average_error_rates": {
+      "fulltime": "...",
+      "parttime": "..."
+    },
     "difficulty_classes": [
       "..."
-    ],
-    "rows": [
-      "..."
-    ],
-    "totals": {
-      "payee_user_id": "...",
-      "business_month": "...",
-      "row_type": "...",
-      "creator_name": "..."
-    }
+    ]
   }
 }
 ```

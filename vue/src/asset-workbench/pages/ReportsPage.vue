@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { Download, RefreshCw } from 'lucide-vue-next'
 
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
+import { reportDifficultyKey as difficultyKey, reportDifficultyLabel as difficultyLabel } from '@aw/features/settlement/reportMetrics'
 import { exportSettlementReportWorkbook } from '@aw/features/export/settlementExport'
 import {
   mergeBusinessMonths,
@@ -63,10 +64,15 @@ const domainRows = computed(() => report.value?.rows ?? [])
 const summaryCards = computed(() => {
   const row = totals.value
   return [
-    { label: '订单数', value: formatInt(row?.order_count), hint: '非空订单号去重' },
-    { label: '作图量', value: formatInt(row?.page_count), hint: `${formatInt(row?.item_count)} 单` },
-    { label: '质检扣款', value: formatMoney(row?.deduction_amount), hint: `${formatInt(row?.error_count)} 个出错` },
+    { label: '单数', value: formatInt(row?.item_count), hint: '按计件作品统计' },
+    { label: '作图量', value: formatInt(row?.page_count), hint: '按作图张数统计' },
+    { label: '质检应扣', value: formatMoney(row?.deduction_amount), hint: `${formatInt(row?.error_count)} 个出错` },
     { label: '应结净额', value: formatMoney(row?.net_amount), hint: `正常 ${formatMoney(row?.gross_amount)} · 补录 ${formatMoney(row?.supplement_amount)}`, money: true },
+    { label: '总月度综合系数指标', value: row?.monthly_coefficient ?? 0, hint: '全员作品小计系数之和' },
+    ...[['fulltime', '全职'], ['parttime', '兼职']].map(([type, label]) => {
+      const rate = report.value?.worker_type_average_error_rates?.[type]
+      return { label: `${label}出错及格线`, value: rate == null ? '—' : percent(rate), hint: '个人月度出错率平均值' }
+    }),
   ]
 })
 const difficultySummary = computed(() => totals.value?.difficulty_metrics ?? [])
@@ -137,19 +143,24 @@ const exportDisabledReason = computed(() => {
 const exportRangeHint = computed(() => settlementReportRangeHint(reportRangeMode.value, month.value, selectedExportMonths.value))
 
 const baseColumns: GridColumn[] = [
+  { key: 'personnel_no', label: '人员编号', width: 110 },
   { key: 'creator_name', label: '创建人', width: 132 },
   { key: 'job_grade', label: '岗级', width: 84 },
   { key: 'created_date_range', label: '上传/补录日期', width: 196 },
-  { key: 'order_count', label: '订单数', width: 88, align: 'right' },
+  { key: 'order_count', label: '去重订单数', width: 88, align: 'right' },
   { key: 'item_count', label: '单数', width: 80, align: 'right' },
   { key: 'page_count', label: '作图量', width: 88, align: 'right' },
   { key: 'gross_amount', label: '正常金额', width: 112, align: 'right' },
   { key: 'supplement_amount', label: '补录金额', width: 112, align: 'right' },
   { key: 'error_count', label: '出错数', width: 84, align: 'right' },
-  { key: 'deduction_amount', label: '质检扣款', width: 112, align: 'right' },
-  { key: 'welfare_amount', label: '福利', width: 104, align: 'right' },
-  { key: 'net_amount', label: '净额', width: 112, align: 'right' },
   { key: 'error_rate', label: '出错率', width: 92, align: 'right' },
+  { key: 'worker_type_average_error_rate', label: '出错及格线平均水平', width: 160, align: 'right' },
+  { key: 'deduction_amount', label: '质检应扣款', width: 112, align: 'right' },
+  { key: 'quality_actual_deduction_amount', label: '质检实际扣款', width: 122, align: 'right' },
+  { key: 'welfare_amount', label: '福利', width: 104, align: 'right' },
+  { key: 'adjustment_amount', label: '调整', width: 100, align: 'right' },
+  { key: 'net_amount', label: '应发净额', width: 112, align: 'right' },
+  { key: 'actual_net_amount', label: '实发净额', width: 112, align: 'right' },
   { key: 'page_count_share', label: '月作图占比', width: 116, align: 'right' },
   { key: 'error_count_share', label: '月出错占比', width: 116, align: 'right' },
   { key: 'month_amount_share', label: '月金额占比', width: 116, align: 'right' },
@@ -157,10 +168,12 @@ const baseColumns: GridColumn[] = [
 const columns = computed<GridColumn[]>(() => [
   ...baseColumns,
   ...difficultyClasses.value.flatMap((difficulty) => difficultyColumns(difficulty)),
+  { key: 'monthly_coefficient', label: '月度综合系数', width: 130, align: 'right' },
+  { key: 'monthly_contribution_rate', label: '月度贡献率', width: 116, align: 'right' },
 ])
-const moneyColumns = new Set(['gross_amount', 'supplement_amount', 'deduction_amount', 'welfare_amount', 'net_amount'])
+const moneyColumns = new Set(['gross_amount', 'supplement_amount', 'deduction_amount', 'welfare_amount', 'net_amount', 'quality_actual_deduction_amount', 'adjustment_amount', 'actual_net_amount'])
 const intColumns = new Set(['order_count', 'item_count', 'page_count', 'error_count'])
-const percentColumns = new Set(['error_rate', 'page_count_share', 'error_count_share', 'month_amount_share'])
+const percentColumns = new Set(['error_rate', 'page_count_share', 'error_count_share', 'month_amount_share', 'worker_type_average_error_rate', 'monthly_contribution_rate'])
 
 function loadReport() {
   exportError.value = ''
@@ -180,8 +193,7 @@ async function exportReport() {
   try {
     const reports: Array<{ businessMonth: string; report: SettlementReport }> = []
     for (const businessMonth of selectedExportMonths.value) {
-      const current = report.value?.business_month === businessMonth ? report.value : null
-      const next = current ?? await assetWorkbenchApi.settlementReport(businessMonth)
+      const next = await assetWorkbenchApi.settlementReport(businessMonth)
       if (reportHasData(next)) {
         reports.push({ businessMonth, report: next })
       }
@@ -249,6 +261,7 @@ function settlementReportDateRange(row: SettlementReportRow): string {
 
 function flattenDifficultyForGrid(difficulty: string, metric?: SettlementReportDifficultyMetric) {
   return {
+    [difficultyKey(difficulty, 'coefficient_subtotal')]: metric?.coefficient_subtotal ?? 0,
     [difficultyKey(difficulty, 'item_count')]: metric?.item_count ?? 0,
     [difficultyKey(difficulty, 'page_count')]: metric?.page_count ?? 0,
     [difficultyKey(difficulty, 'gross_amount')]: metric?.gross_amount ?? 0,
@@ -262,6 +275,7 @@ function difficultyColumns(difficulty: string): GridColumn[] {
   const label = difficultyLabel(difficulty)
   return [
     { key: difficultyKey(difficulty, 'item_count'), label: `${label}单`, width: 84, align: 'right' },
+    { key: difficultyKey(difficulty, 'coefficient_subtotal'), label: `${label}小计系数`, width: 128, align: 'right' },
     { key: difficultyKey(difficulty, 'page_count'), label: `${label}量`, width: 84, align: 'right' },
     { key: difficultyKey(difficulty, 'gross_amount'), label: `${label}金额`, width: 104, align: 'right' },
     { key: difficultyKey(difficulty, 'error_count'), label: `${label}错`, width: 84, align: 'right' },
@@ -272,9 +286,9 @@ function difficultyColumns(difficulty: string): GridColumn[] {
 
 function gridValue(key: string, value: unknown) {
   if (isMoneyColumn(key)) return formatMoney(value)
-  if (isPercentColumn(key)) return formatPercent(Number(value ?? 0) * 100)
+  if (isPercentColumn(key)) return value == null ? '—' : percent(value)
   if (isIntColumn(key)) return formatInt(value)
-  return value || '—'
+  return value ?? '—'
 }
 
 function isMoneyColumn(key: string) {
@@ -289,12 +303,8 @@ function isPercentColumn(key: string) {
   return percentColumns.has(key) || key.endsWith('_page_count_share')
 }
 
-function difficultyKey(difficulty: string, field: string): string {
-  return `difficulty_${difficulty.replace(/[^a-zA-Z0-9]+/g, '_')}_${field}`
-}
-
-function difficultyLabel(value: string): string {
-  return value === 'unclassified' ? '未定级' : value
+function percent(value: unknown) {
+  return formatPercent(Number(value) * 100, 2)
 }
 
 function defaultBusinessMonth() {
@@ -376,11 +386,11 @@ onMounted(() => {
           <div class="aw-settlement-section__head">
             <div>
               <h3>统计总览</h3>
-              <p>先确认本月总单量、作图量、质检扣款和应结金额，再进入明细核对。</p>
+              <p>月度综合系数和贡献率按人汇总，日常与补录使用同一人员月度值。</p>
             </div>
             <div class="aw-report-section-notes" aria-label="统计说明">
               <span class="aw-chip aw-chip--neutral">订单数按有效订单号去重</span>
-              <span class="aw-chip aw-chip--info">包含待结算作品和已批准补录</span>
+              <span class="aw-chip aw-chip--info">包含待结算和已纳入批次的作品与补录</span>
             </div>
           </div>
           <AsyncBoundary :loading="loading" :error="reportError" :empty="!report" loading-label="正在加载计件统计" empty-label="暂无统计数据" @retry="loadReport">
@@ -406,7 +416,7 @@ onMounted(() => {
               <article v-for="metric in difficultySummary" :key="metric.difficulty_class" class="aw-metric-card">
                 <span>{{ difficultyLabel(metric.difficulty_class) }}</span>
                 <strong>{{ formatInt(metric.page_count) }}</strong>
-                <small>{{ formatMoney(metric.gross_amount) }} · 出错 {{ formatInt(metric.error_count) }} · {{ formatPercent(metric.month_page_count_share * 100) }}</small>
+                <small>{{ formatMoney(metric.gross_amount) }} · 出错 {{ formatInt(metric.error_count) }} · {{ percent(metric.month_page_count_share) }}</small>
               </article>
             </div>
             <div v-else class="aw-empty-state">

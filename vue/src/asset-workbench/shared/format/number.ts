@@ -25,7 +25,8 @@ export function formatInt(value: unknown) {
   return intFormatter.format(numeric(value))
 }
 
-export function formatPercent(value: unknown) {
+export function formatPercent(value: unknown, decimals?: number) {
+  if (decimals !== undefined) return `${numeric(value).toFixed(decimals)}%`
   return `${percentFormatter.format(numeric(value))}%`
 }
 

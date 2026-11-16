@@ -217,6 +217,7 @@ const (
 const AssetWorkbenchEventSettlementConfirmationReversed = "settlement.confirmation_reversed"
 
 type AssetWorkbenchProfile struct {
+	PersonnelNo       *string    `json:"personnel_no,omitempty" db:"personnel_no"`
 	ID                int64      `json:"id" db:"id"`
 	UserID            int64      `json:"user_id" db:"user_id"`
 	WorkerType        string     `json:"worker_type" db:"worker_type"`
@@ -253,16 +254,17 @@ type AssetWorkbenchGradePeriod struct {
 }
 
 type AssetWorkbenchDifficultyClass struct {
-	ID          int64     `json:"id" db:"id"`
-	Code        string    `json:"code" db:"code"`
-	Name        string    `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`
-	Enabled     bool      `json:"enabled" db:"enabled"`
-	SortOrder   int       `json:"sort_order" db:"sort_order"`
-	CreatedBy   *int64    `json:"created_by,omitempty" db:"created_by"`
-	UpdatedBy   *int64    `json:"updated_by,omitempty" db:"updated_by"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	DifficultyCoefficient float64   `json:"difficulty_coefficient" db:"difficulty_coefficient"`
+	ID                    int64     `json:"id" db:"id"`
+	Code                  string    `json:"code" db:"code"`
+	Name                  string    `json:"name" db:"name"`
+	Description           string    `json:"description" db:"description"`
+	Enabled               bool      `json:"enabled" db:"enabled"`
+	SortOrder             int       `json:"sort_order" db:"sort_order"`
+	CreatedBy             *int64    `json:"created_by,omitempty" db:"created_by"`
+	UpdatedBy             *int64    `json:"updated_by,omitempty" db:"updated_by"`
+	CreatedAt             time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchPriceMatrix struct {

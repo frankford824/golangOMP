@@ -23,6 +23,7 @@ function mediaPreviewInfo(assetId: number, info: MediaDeliveryInfo): SystemAsset
 }
 
 export interface AssetWorkbenchProfile {
+  personnel_no?: string
   id: number
   user_id: number
   worker_type: string
@@ -69,6 +70,7 @@ export interface AssetWorkbenchRegisterResult {
 }
 
 export interface UpsertProfilePayload {
+  personnel_no?: string
   worker_type?: string
   job_grade?: string
   real_name?: string
@@ -179,6 +181,7 @@ export interface PromoCouponRow {
 }
 
 export interface DifficultyClassRow {
+  difficulty_coefficient?: number
   id: number
   code: string
   name: string
@@ -320,6 +323,8 @@ export interface SettlementPreviewRow {
 }
 
 export interface SettlementPayrollRow {
+  personnel_no?: string
+  difficulty_piece_counts?: Record<string, number>
   quality_actual_deduction_amount?: number
   actual_net_amount?: number
   payee_user_id: number
@@ -346,6 +351,8 @@ export interface SettlementPreview {
 }
 
 export interface SettlementReportDifficultyMetric {
+  difficulty_coefficient: number
+  coefficient_subtotal: number
   difficulty_class: string
   order_count: number
   item_count: number
@@ -360,6 +367,15 @@ export interface SettlementReportDifficultyMetric {
 }
 
 export interface SettlementReportRow {
+  personnel_no: string
+  worker_type: string
+  monthly_coefficient: number
+  monthly_contribution_rate: number
+  monthly_error_rate: number
+  worker_type_average_error_rate?: number
+  quality_actual_deduction_amount: number
+  actual_net_amount: number
+  adjustment_amount: number
   payee_user_id: number
   business_month: string
   row_type: 'normal_piecework' | 'supplement_piecework' | 'total'
@@ -384,6 +400,8 @@ export interface SettlementReportRow {
 }
 
 export interface SettlementReport {
+  difficulty_coefficients: Record<string, number>
+  worker_type_average_error_rates: Record<string, number>
   business_month: string
   difficulty_classes: string[]
   rows: SettlementReportRow[]
@@ -1273,6 +1291,7 @@ export interface CreatePromoCouponPayload {
 }
 
 export interface UpsertDifficultyClassPayload {
+  difficulty_coefficient?: number
   code?: string
   name?: string
   description?: string

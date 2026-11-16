@@ -13410,6 +13410,7 @@ export interface paths {
                                 description?: string;
                                 enabled?: boolean;
                                 sort_order?: number;
+                                difficulty_coefficient?: number;
                                 created_by?: number | null;
                                 updated_by?: number | null;
                                 /** Format: date-time */
@@ -13454,6 +13455,7 @@ export interface paths {
                         description?: string;
                         enabled?: boolean;
                         sort_order?: number;
+                        difficulty_coefficient?: number;
                     };
                 };
             };
@@ -13472,6 +13474,7 @@ export interface paths {
                                 description?: string;
                                 enabled?: boolean;
                                 sort_order?: number;
+                                difficulty_coefficient?: number;
                                 created_by?: number | null;
                                 updated_by?: number | null;
                                 /** Format: date-time */
@@ -13535,6 +13538,7 @@ export interface paths {
                                 description?: string;
                                 enabled?: boolean;
                                 sort_order?: number;
+                                difficulty_coefficient?: number;
                                 created_by?: number | null;
                                 updated_by?: number | null;
                                 /** Format: date-time */
@@ -13584,7 +13588,7 @@ export interface paths {
         head?: never;
         /**
          * Update asset workbench difficulty class
-         * @description The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, or sort order.
+         * @description The difficulty code is stable and cannot be changed after creation; update the display name, description, enabled state, sort order, or coefficient.
          */
         patch: {
             parameters: {
@@ -13602,6 +13606,7 @@ export interface paths {
                         description?: string;
                         enabled?: boolean;
                         sort_order?: number;
+                        difficulty_coefficient?: number;
                     };
                 };
             };
@@ -13620,6 +13625,7 @@ export interface paths {
                                 description?: string;
                                 enabled?: boolean;
                                 sort_order?: number;
+                                difficulty_coefficient?: number;
                                 created_by?: number | null;
                                 updated_by?: number | null;
                                 /** Format: date-time */
@@ -16863,7 +16869,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one quality error import batch and all its rows
-         * @description Removes the import and clears saved actual deductions for affected payroll rows when no matching quality records remain. Active settlement batches lock deletion.
+         * @description Removes the import and clears saved actual deductions for each payroll row with a matched error in the deleted import. Active settlement batches lock deletion.
          */
         delete: {
             parameters: {
@@ -18178,6 +18184,10 @@ export interface paths {
                                     /** @description Actual net amount after replacing the applicable rule-based deduction with the manual amount. */
                                     actual_net_amount?: number;
                                 } & {
+                                    personnel_no?: string;
+                                    difficulty_piece_counts?: {
+                                        [key: string]: number;
+                                    };
                                     business_month?: string;
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework";
@@ -18269,6 +18279,10 @@ export interface paths {
                                     /** @description Actual net amount after replacing the applicable rule-based deduction with the manual amount. */
                                     actual_net_amount?: number;
                                 } & {
+                                    personnel_no?: string;
+                                    difficulty_piece_counts?: {
+                                        [key: string]: number;
+                                    };
                                     business_month?: string;
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework";
@@ -18650,7 +18664,7 @@ export interface paths {
         };
         /**
          * Get asset workbench settlement report
-         * @description Read-only piecework report for one business month. Rows are split into normal piecework and supplement piecework, with distinct non-empty `order_no` counts and difficulty-level metrics.
+         * @description Whole-month piecework report, including open and active-batch work. Counts and coefficient subtotals are per payroll row. Monthly coefficient and contribution rate repeat for the same person across row types. Group benchmarks are arithmetic means of personal monthly error rates among workers of that type with positive page counts.
          */
         get: {
             parameters: {
@@ -18672,12 +18686,28 @@ export interface paths {
                         "application/json": {
                             data?: {
                                 business_month?: string;
+                                difficulty_coefficients?: {
+                                    [key: string]: number;
+                                };
+                                worker_type_average_error_rates?: {
+                                    fulltime?: number;
+                                    parttime?: number;
+                                };
                                 difficulty_classes?: string[];
                                 rows?: {
                                     payee_user_id?: number;
                                     business_month?: string;
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework" | "total";
+                                    personnel_no?: string;
+                                    worker_type?: string;
+                                    monthly_coefficient?: number;
+                                    monthly_contribution_rate?: number;
+                                    monthly_error_rate?: number;
+                                    worker_type_average_error_rate?: number;
+                                    quality_actual_deduction_amount?: number;
+                                    actual_net_amount?: number;
+                                    adjustment_amount?: number;
                                     creator_name?: string;
                                     job_grade?: string;
                                     /**
@@ -18708,6 +18738,9 @@ export interface paths {
                                     /** @description row net_amount / month total net_amount */
                                     month_amount_share?: number;
                                     difficulty_metrics?: {
+                                        difficulty_coefficient?: number;
+                                        /** @description item_count multiplied by the difficulty coefficient. */
+                                        coefficient_subtotal?: number;
                                         difficulty_class?: string;
                                         order_count?: number;
                                         item_count?: number;
@@ -18730,6 +18763,15 @@ export interface paths {
                                     business_month?: string;
                                     /** @enum {string} */
                                     row_type?: "normal_piecework" | "supplement_piecework" | "total";
+                                    personnel_no?: string;
+                                    worker_type?: string;
+                                    monthly_coefficient?: number;
+                                    monthly_contribution_rate?: number;
+                                    monthly_error_rate?: number;
+                                    worker_type_average_error_rate?: number;
+                                    quality_actual_deduction_amount?: number;
+                                    actual_net_amount?: number;
+                                    adjustment_amount?: number;
                                     creator_name?: string;
                                     job_grade?: string;
                                     /**
@@ -18760,6 +18802,9 @@ export interface paths {
                                     /** @description row net_amount / month total net_amount */
                                     month_amount_share?: number;
                                     difficulty_metrics?: {
+                                        difficulty_coefficient?: number;
+                                        /** @description item_count multiplied by the difficulty coefficient. */
+                                        coefficient_subtotal?: number;
                                         difficulty_class?: string;
                                         order_count?: number;
                                         item_count?: number;
@@ -18782,7 +18827,7 @@ export interface paths {
                                 /** @enum {string} */
                                 order_count_policy?: "distinct_non_empty_order_no";
                                 /** @enum {string} */
-                                settlement_data_mode?: "unconfirmed_settleable_items_and_approved_supplements";
+                                settlement_data_mode?: "monthly_settlement_sources";
                             };
                         };
                     };
@@ -21458,6 +21503,8 @@ export interface components {
         /** @description Read-only identity label returned for account display. It never grants V8 capabilities; authorization is managed only through `/v1/access/*` assignments and stable organization-ID scopes. */
         IdentityRoleCode: string;
         AssetWorkbenchProfile: {
+            /** @description Optional maintained payroll identifier. */
+            personnel_no?: string;
             /** Format: int64 */
             id: number;
             /** Format: int64 */
@@ -21493,6 +21540,8 @@ export interface components {
             updated_at: string;
         };
         AssetWorkbenchProfileUpdate: {
+            /** @description Optional payroll identifier. Empty string clears it and omission preserves it. */
+            personnel_no?: string;
             /** @enum {string} */
             worker_type?: "fulltime" | "parttime";
             job_grade?: string;

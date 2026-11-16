@@ -158,22 +158,20 @@ func qualityImportPayrollKeys(records []*domain.AssetWorkbenchErrorRecord, exclu
 	return keys
 }
 
-func (s *Service) clearDeletedQualityDeductions(ctx context.Context, tx repo.Tx, actor domain.RequestActor, month string, batchID int64, deleted []*domain.AssetWorkbenchErrorRecord) error {
-	affected := qualityImportPayrollKeys(deleted, 0)
-	if len(affected) == 0 {
-		return nil
-	}
-	records, err := s.repo.ListErrorRecordsByMonth(ctx, month)
-	if err != nil {
-		return err
-	}
-	remaining := qualityImportPayrollKeys(records, batchID)
-	return s.clearOrphanQualityDeductions(ctx, tx, actor, month, affected, remaining,
-		"删除最后一份关联质检记录，清除手填实扣")
+func (s *Service) clearDeletedQualityDeductions(ctx context.Context, tx repo.Tx, actor domain.RequestActor, month string, deleted []*domain.AssetWorkbenchErrorRecord) error {
+	return s.clearQualityDeductions(ctx, tx, actor, month, qualityImportPayrollKeys(deleted, 0),
+		"删除关联质检表，清除手填实扣")
 }
 
 // Also clear old orphaned overrides before a new import can bring them back.
 func (s *Service) clearOrphanQualityDeductions(ctx context.Context, tx repo.Tx, actor domain.RequestActor, month string, affected, remaining map[qualityPayrollKey]bool, reason string) error {
+	for key := range remaining {
+		delete(affected, key)
+	}
+	return s.clearQualityDeductions(ctx, tx, actor, month, affected, reason)
+}
+
+func (s *Service) clearQualityDeductions(ctx context.Context, tx repo.Tx, actor domain.RequestActor, month string, affected map[qualityPayrollKey]bool, reason string) error {
 	if len(affected) == 0 {
 		return nil
 	}
@@ -183,7 +181,7 @@ func (s *Service) clearOrphanQualityDeductions(ctx context.Context, tx repo.Tx, 
 	}
 	for _, before := range overrides {
 		key := qualityPayrollKey{before.PayeeUserID, domain.WorkbenchPayrollRowType(before.Payload)}
-		if before.Amount == 0 || !affected[key] || remaining[key] {
+		if before.Amount == 0 || !affected[key] {
 			continue
 		}
 		cleared, err := s.repo.CreateSettlementAdjustment(ctx, tx, &domain.AssetWorkbenchSettlementAdjustment{

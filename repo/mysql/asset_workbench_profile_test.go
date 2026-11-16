@@ -32,7 +32,7 @@ func TestProfileIdentityConflictNeverUpdatesAnotherUser(t *testing.T) {
 					mock.ExpectExec(`UPDATE asset_workbench_profiles SET.*WHERE user_id = \?`).WillReturnError(&mysql.MySQLError{Number: 1062, Message: "Duplicate entry 'private-value' for key 'uq_aw_profile_" + field + "'"})
 				} else {
 					lock.WillReturnError(sql.ErrNoRows)
-					mock.ExpectExec(`INSERT INTO asset_workbench_profiles \(.*\) VALUES \([?, ]+\)$`).WillReturnError(&mysql.MySQLError{Number: 1062, Message: "Duplicate entry 'private-value' for key 'uq_aw_profile_" + field + "'"})
+					mock.ExpectExec(`INSERT INTO asset_workbench_profiles \(.*\) VALUES \([?, ]+NULLIF\(\?, ''\)\)$`).WillReturnError(&mysql.MySQLError{Number: 1062, Message: "Duplicate entry 'private-value' for key 'uq_aw_profile_" + field + "'"})
 				}
 				mock.ExpectRollback()
 				mysqlDB := New(db)
@@ -68,15 +68,15 @@ func TestProfileInsertAndUpdateStayBoundToUserID(t *testing.T) {
 			lock := mock.ExpectQuery(regexp.QuoteMeta(`SELECT id FROM asset_workbench_profiles WHERE user_id = ? FOR UPDATE`)).WithArgs(int64(77))
 			if existing {
 				lock.WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(12))
-				mock.ExpectExec(`UPDATE asset_workbench_profiles SET.*WHERE user_id = \?`).WithArgs("parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, int64(1), int64(77)).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec(`UPDATE asset_workbench_profiles SET.*WHERE user_id = \?`).WithArgs("parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, int64(1), nil, nil, int64(77)).WillReturnResult(sqlmock.NewResult(0, 1))
 			} else {
 				lock.WillReturnError(sql.ErrNoRows)
-				mock.ExpectExec(`INSERT INTO asset_workbench_profiles \(.*\) VALUES \([?, ]+\)$`).WithArgs(int64(77), "parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, int64(1), int64(1)).WillReturnResult(sqlmock.NewResult(12, 1))
+				mock.ExpectExec(`INSERT INTO asset_workbench_profiles \(.*\) VALUES \([?, ]+NULLIF\(\?, ''\)\)$`).WithArgs(int64(77), "parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, int64(1), int64(1), nil).WillReturnResult(sqlmock.NewResult(12, 1))
 			}
 			now := time.Now()
 			mock.ExpectQuery(regexp.QuoteMeta(assetWorkbenchProfileSelect() + ` WHERE user_id = ?`)).WithArgs(int64(77)).WillReturnRows(sqlmock.NewRows([]string{
-				"id", "user_id", "worker_type", "job_grade", "real_name", "phone", "province", "city", "id_card", "gender", "alipay_account", "onboarded_at", "grade_hidden", "status", "pii_completed", "created_by", "updated_by", "created_at", "updated_at", "settlement_visible",
-			}).AddRow(12, 77, "parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, 1, 1, now, now, true))
+				"id", "user_id", "worker_type", "job_grade", "real_name", "phone", "province", "city", "id_card", "gender", "alipay_account", "onboarded_at", "grade_hidden", "status", "pii_completed", "created_by", "updated_by", "created_at", "updated_at", "settlement_visible", "personnel_no",
+			}).AddRow(12, 77, "parttime", "J1", "测试", nil, "", "", nil, "", "", nil, false, "active", false, 1, 1, now, now, true, nil))
 			mock.ExpectCommit()
 			mysqlDB := New(db)
 			actorID := int64(1)

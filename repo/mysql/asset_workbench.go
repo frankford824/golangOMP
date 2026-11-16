@@ -104,8 +104,8 @@ func (r *assetWorkbenchRepo) GetDifficultyClass(ctx context.Context, code string
 func (r *assetWorkbenchRepo) CreateDifficultyClass(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchDifficultyClass) (*domain.AssetWorkbenchDifficultyClass, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_difficulty_classes (
-			code, name, description, enabled, sort_order, created_by, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			code, name, description, enabled, sort_order, created_by, updated_by, difficulty_coefficient
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.Code,
 		item.Name,
 		item.Description,
@@ -113,6 +113,7 @@ func (r *assetWorkbenchRepo) CreateDifficultyClass(ctx context.Context, tx repo.
 		item.SortOrder,
 		toNullInt64(item.CreatedBy),
 		toNullInt64(item.UpdatedBy),
+		item.DifficultyCoefficient,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert asset workbench difficulty class: %w", err)
@@ -128,12 +129,13 @@ func (r *assetWorkbenchRepo) CreateDifficultyClass(ctx context.Context, tx repo.
 func (r *assetWorkbenchRepo) UpdateDifficultyClass(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchDifficultyClass) (*domain.AssetWorkbenchDifficultyClass, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_difficulty_classes
-		SET name = ?, description = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+		SET name = ?, description = ?, enabled = ?, sort_order = ?, difficulty_coefficient = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE code = ?`,
 		item.Name,
 		item.Description,
 		item.Enabled,
 		item.SortOrder,
+		item.DifficultyCoefficient,
 		toNullInt64(item.UpdatedBy),
 		item.Code,
 	)
@@ -452,17 +454,18 @@ func (r *assetWorkbenchRepo) UpsertProfile(ctx context.Context, tx repo.Tx, prof
 		// INSERT must fail on another user's phone/ID-card ownership. An
 		// ON DUPLICATE KEY UPDATE would match those indexes as well as user_id.
 		args := append([]interface{}{profile.UserID}, values...)
-		args = append(args, toNullInt64(profile.CreatedBy))
+		args = append(args, toNullInt64(profile.CreatedBy), toNullString(profile.PersonnelNo))
 		_, err = sqlTx.ExecContext(ctx, `INSERT INTO asset_workbench_profiles (
 			user_id, worker_type, job_grade, real_name, phone, province, city, id_card, gender,
-			alipay_account, onboarded_at, grade_hidden, status, pii_completed, updated_by, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
+			alipay_account, onboarded_at, grade_hidden, status, pii_completed, updated_by, created_by, personnel_no
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`, args...)
 	} else {
-		args := append(values, profile.UserID)
+		args := append(values, toNullString(profile.PersonnelNo), toNullString(profile.PersonnelNo), profile.UserID)
 		_, err = sqlTx.ExecContext(ctx, `UPDATE asset_workbench_profiles SET
 			worker_type = ?, job_grade = ?, real_name = ?, phone = ?, province = ?, city = ?,
 			id_card = ?, gender = ?, alipay_account = ?, onboarded_at = ?, grade_hidden = ?,
-			status = ?, pii_completed = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
+			status = ?, pii_completed = ?, updated_by = ?,
+			personnel_no = IF(? IS NULL, personnel_no, NULLIF(?, '')), updated_at = CURRENT_TIMESTAMP
 			WHERE user_id = ?`, args...)
 	}
 	if err != nil {
@@ -470,6 +473,9 @@ func (r *assetWorkbenchRepo) UpsertProfile(ctx context.Context, tx repo.Tx, prof
 		if errors.As(err, &duplicate) && duplicate.Number == 1062 {
 			field, label := "identity", "手机号、身份证号或账号"
 			key := strings.ToLower(duplicate.Message)
+			if strings.Contains(key, "personnel_no") {
+				return nil, domain.NewAppError(domain.ErrCodeConflict, "该人员编号已被使用。", map[string]string{"field": "personnel_no"})
+			}
 			if strings.Contains(key, "phone") {
 				field, label = "phone", "手机号"
 			}
@@ -4565,7 +4571,7 @@ func uniqueExprForAlias(alias, expr string) string {
 
 func assetWorkbenchProfileSelect() string {
 	return `SELECT id, user_id, worker_type, job_grade, real_name, phone, province, city, id_card, gender,
-		alipay_account, onboarded_at, grade_hidden, status, pii_completed, created_by, updated_by, created_at, updated_at, settlement_visible
+		alipay_account, onboarded_at, grade_hidden, status, pii_completed, created_by, updated_by, created_at, updated_at, settlement_visible, personnel_no
 		FROM asset_workbench_profiles`
 }
 
@@ -4743,7 +4749,7 @@ func assetWorkbenchUploadDirectorySelect() string {
 }
 
 func assetWorkbenchDifficultyClassSelect() string {
-	return `SELECT id, code, name, description, enabled, sort_order, created_by, updated_by, created_at, updated_at
+	return `SELECT id, code, name, description, enabled, sort_order, created_by, updated_by, created_at, updated_at, COALESCE(difficulty_coefficient, 1)
 		FROM asset_workbench_difficulty_classes`
 }
 
@@ -4880,17 +4886,18 @@ func assetWorkbenchSavedViewSelect() string {
 
 func scanAssetWorkbenchProfile(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchProfile, error) {
 	var item domain.AssetWorkbenchProfile
-	var phone, idCard sql.NullString
+	var phone, idCard, personnelNo sql.NullString
 	var onboardedAt sql.NullTime
 	var createdBy, updatedBy sql.NullInt64
 	var settlementVisible bool
 	if err := scanner.Scan(
 		&item.ID, &item.UserID, &item.WorkerType, &item.JobGrade, &item.RealName, &phone,
 		&item.Province, &item.City, &idCard, &item.Gender, &item.AlipayAccount, &onboardedAt,
-		&item.GradeHidden, &item.Status, &item.PIICompleted, &createdBy, &updatedBy, &item.CreatedAt, &item.UpdatedAt, &settlementVisible,
+		&item.GradeHidden, &item.Status, &item.PIICompleted, &createdBy, &updatedBy, &item.CreatedAt, &item.UpdatedAt, &settlementVisible, &personnelNo,
 	); err != nil {
 		return nil, err
 	}
+	item.PersonnelNo = fromNullString(personnelNo)
 	item.Phone = fromNullString(phone)
 	item.IDCard = fromNullString(idCard)
 	item.OnboardedAt = fromNullTime(onboardedAt)
@@ -5092,6 +5099,7 @@ func scanAssetWorkbenchDifficultyClass(scanner interface{ Scan(...interface{}) e
 		&updatedBy,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.DifficultyCoefficient,
 	); err != nil {
 		return nil, err
 	}

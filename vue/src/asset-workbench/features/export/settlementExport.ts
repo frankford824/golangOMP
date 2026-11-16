@@ -9,12 +9,14 @@ import type {
   SettlementReportRow,
   SettlementSupplementRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { payrollMetricRows, payrollMetrics, reportDifficultyKey as difficultyKey, reportDifficultyLabel as difficultyLabel } from '@aw/features/settlement/reportMetrics'
 import { supplementStatusMeta } from '@aw/shared/format/status'
 
 interface SettlementWorkbookInput {
   businessMonth: string
   preview?: SettlementPreview | null
   batchDetail?: SettlementBatchDetail | null
+  monthlyReport?: SettlementReport | null
 }
 
 interface SettlementReportWorkbookInput {
@@ -24,6 +26,7 @@ interface SettlementReportWorkbookInput {
 }
 
 export interface SettlementPayrollExportRow {
+  [field: string]: string | number | undefined
   payeeName: string
   workerTypeLabel: string
   payeeUserId: number
@@ -60,8 +63,10 @@ export function payrollRowLabel(rowType: string): string {
   return rowType === 'supplement_piecework' ? '补录计件工资' : '日常计件工资'
 }
 
-export function buildSettlementPayrollExportRows(rows: SettlementPayrollRow[]): SettlementPayrollExportRow[] {
-  return rows.map((row) => ({
+export function buildSettlementPayrollExportRows(rows: SettlementPayrollRow[], report?: SettlementReport | null): SettlementPayrollExportRow[] {
+  const byRow = payrollMetricRows(report)
+  return exportPersonMonthMetrics(rows, (row) => ({
+    ...payrollMetrics(row, report, byRow),
     payeeName: row.payee_name || `用户 ${row.payee_user_id}`,
     workerTypeLabel: workerTypeLabel(row.worker_type),
     payeeUserId: row.payee_user_id,
@@ -80,6 +85,23 @@ export function buildSettlementPayrollExportRows(rows: SettlementPayrollRow[]): 
   }))
 }
 
+function exportPersonMonthMetrics<
+  Row extends { payee_user_id: number; business_month: string },
+  Output extends { monthly_coefficient?: number; monthly_contribution_rate?: number },
+>(rows: Row[], buildRow: (row: Row) => Output): Output[] {
+  const seen = new Set<string>()
+  return rows.map((row) => {
+    const output = buildRow(row)
+    const key = `${row.business_month}:${row.payee_user_id}`
+    if (seen.has(key)) {
+      delete output.monthly_coefficient
+      delete output.monthly_contribution_rate
+    }
+    if (output.monthly_coefficient !== undefined || output.monthly_contribution_rate !== undefined) seen.add(key)
+    return output
+  })
+}
+
 export async function exportSettlementWorkbook(input: SettlementWorkbookInput): Promise<void> {
   const { Workbook } = await import('exceljs')
   const workbook = new Workbook()
@@ -88,8 +110,10 @@ export async function exportSettlementWorkbook(input: SettlementWorkbookInput): 
 
   const payrollRows = buildSettlementPayrollExportRows(
     input.batchDetail?.payroll_rows?.length ? input.batchDetail.payroll_rows : input.preview?.payroll_rows ?? [],
+    input.monthlyReport,
   )
-  appendPayrollSheet(workbook, payrollRows)
+  appendPayrollSheet(workbook, payrollRows, input.monthlyReport?.difficulty_classes ?? [])
+  if (input.monthlyReport) appendMonthlyContributionSheet(workbook, input.monthlyReport)
   if (input.preview?.rows?.length) {
     appendSummarySheet(workbook, input.preview.rows, input.preview.totals)
   }
@@ -285,17 +309,19 @@ export async function exportSettlementReportWorkbook(input: SettlementReportWork
   )
 }
 
-function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: SettlementPayrollExportRow[]) {
+function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: SettlementPayrollExportRow[], difficulties: string[]) {
   const sheet = workbook.addWorksheet('工资条')
   sheet.columns = [
     { header: '姓名', key: 'payeeName', width: 16 },
     { header: '人员类型', key: 'workerTypeLabel', width: 12 },
-    { header: '人员编号', key: 'payeeUserId', width: 12 },
+    { header: '人员编号', key: 'personnel_no', width: 16 },
     { header: '结算月', key: 'businessMonth', width: 12 },
     { header: '工资条类型', key: 'rowTypeLabel', width: 16 },
     { header: '单数', key: 'itemCount', width: 10 },
     { header: '毛额', key: 'grossAmount', width: 12 },
     { header: '出错数', key: 'errorCount', width: 10 },
+    { header: '出错率', key: 'error_rate', width: 12, style: { numFmt: '0.00%' } },
+    { header: '出错及格线平均水平', key: 'worker_type_average_error_rate', width: 20, style: { numFmt: '0.00%' } },
     { header: '质检应扣', key: 'deductionAmount', width: 12 },
     { header: '质检实际扣款', key: 'qualityActualDeductionAmount', width: 16 },
     { header: '福利', key: 'welfareAmount', width: 12 },
@@ -303,8 +329,32 @@ function appendPayrollSheet(workbook: import('exceljs').Workbook, rows: Settleme
     { header: '调整', key: 'adjustmentAmount', width: 12 },
     { header: '应发净额', key: 'netAmount', width: 12 },
     { header: '实发净额', key: 'actualNetAmount', width: 12 },
+    ...difficulties.map(difficulty => ({
+      header: `${difficultyLabel(difficulty)}小计系数`, key: difficultyKey(difficulty, 'coefficient_subtotal'), width: 18,
+    })),
+    { header: '月度综合系数', key: 'monthly_coefficient', width: 16 },
+    { header: '月度贡献率', key: 'monthly_contribution_rate', width: 16, style: { numFmt: '0.00%' } },
   ]
   sheet.addRows(rows)
+  formatSheet(sheet)
+}
+
+function appendMonthlyContributionSheet(workbook: import('exceljs').Workbook, report: SettlementReport) {
+  const sheet = workbook.addWorksheet('月度贡献')
+  sheet.columns = [
+    { header: '人员编号', key: 'personnel_no', width: 16 },
+    { header: '姓名', key: 'creator_name', width: 18 },
+    { header: '人员类型', key: 'worker_type_label', width: 12 },
+    { header: '个人月度出错率', key: 'monthly_error_rate', width: 18, style: { numFmt: '0.00%' } },
+    { header: '出错及格线平均水平', key: 'worker_type_average_error_rate', width: 20, style: { numFmt: '0.00%' } },
+    { header: '月度综合系数', key: 'monthly_coefficient', width: 18 },
+    { header: '月度贡献率', key: 'monthly_contribution_rate', width: 16, style: { numFmt: '0.00%' } },
+  ]
+  const byPayee = new Map(report.rows.map(row => [row.payee_user_id, row]))
+  for (const row of byPayee.values()) {
+    sheet.addRow({ ...row, worker_type_label: workerTypeLabel(row.worker_type) })
+  }
+  sheet.addRow({ creator_name: '全员合计', monthly_coefficient: report.totals.monthly_coefficient, monthly_contribution_rate: report.totals.monthly_contribution_rate })
   formatSheet(sheet)
 }
 
@@ -332,34 +382,42 @@ function appendReportSheet(workbook: import('exceljs').Workbook, report: Settlem
   const sheet = workbook.addWorksheet(safeWorksheetName(name))
   const difficultyColumns = report.difficulty_classes.flatMap((difficulty) => [
     { header: `${difficultyLabel(difficulty)}单数`, key: difficultyKey(difficulty, 'item_count'), width: 12 },
+    { header: `${difficultyLabel(difficulty)}小计系数`, key: difficultyKey(difficulty, 'coefficient_subtotal'), width: 18 },
     { header: `${difficultyLabel(difficulty)}金额`, key: difficultyKey(difficulty, 'gross_amount'), width: 12 },
     { header: `${difficultyLabel(difficulty)}出错`, key: difficultyKey(difficulty, 'error_count'), width: 12 },
     { header: `${difficultyLabel(difficulty)}质检扣款`, key: difficultyKey(difficulty, 'deduction_amount'), width: 12 },
-    { header: `${difficultyLabel(difficulty)}占比%`, key: difficultyKey(difficulty, 'page_count_share'), width: 14 },
-    { header: `${difficultyLabel(difficulty)}全月占比%`, key: difficultyKey(difficulty, 'month_page_count_share'), width: 14 },
+    { header: `${difficultyLabel(difficulty)}占比%`, key: difficultyKey(difficulty, 'page_count_share'), width: 14, style: { numFmt: '0.00%' } },
+    { header: `${difficultyLabel(difficulty)}全月占比%`, key: difficultyKey(difficulty, 'month_page_count_share'), width: 14, style: { numFmt: '0.00%' } },
   ])
   sheet.columns = [
     { header: '报表类型', key: 'row_type_label', width: 16 },
-    { header: '人员编号', key: 'payee_user_id', width: 12 },
+    { header: '人员编号', key: 'personnel_no', width: 16 },
     { header: '创建人', key: 'creator_name', width: 16 },
+    { header: '人员类型', key: 'worker_type_label', width: 12 },
     { header: '岗级', key: 'job_grade', width: 10 },
     { header: '首次上传/补录日期', key: 'created_date', width: 18 },
     { header: '最近上传/补录日期', key: 'created_date_end', width: 18 },
-    { header: '订单数', key: 'order_count', width: 10 },
+    { header: '去重订单数', key: 'order_count', width: 10 },
     { header: '单数', key: 'item_count', width: 10 },
     { header: '毛额', key: 'gross_amount', width: 12 },
     { header: '出错数', key: 'error_count', width: 10 },
-    { header: '质检扣款', key: 'deduction_amount', width: 12 },
+    { header: '出错率', key: 'error_rate', width: 12, style: { numFmt: '0.00%' } },
+    { header: '出错及格线平均水平', key: 'worker_type_average_error_rate', width: 20, style: { numFmt: '0.00%' } },
+    { header: '质检应扣款', key: 'deduction_amount', width: 12 },
+    { header: '质检实际扣款', key: 'quality_actual_deduction_amount', width: 16 },
     { header: '福利', key: 'welfare_amount', width: 12 },
     { header: '补录', key: 'supplement_amount', width: 12 },
-    { header: '净额', key: 'net_amount', width: 12 },
-    { header: '出错率%', key: 'error_rate', width: 12 },
-    { header: '作图量占比%', key: 'page_count_share', width: 14 },
-    { header: '出错数占比%', key: 'error_count_share', width: 14 },
-    { header: '月金额占比%', key: 'month_amount_share', width: 14 },
+    { header: '调整', key: 'adjustment_amount', width: 12 },
+    { header: '应发净额', key: 'net_amount', width: 12 },
+    { header: '实发净额', key: 'actual_net_amount', width: 12 },
+    { header: '作图量占比%', key: 'page_count_share', width: 14, style: { numFmt: '0.00%' } },
+    { header: '出错数占比%', key: 'error_count_share', width: 14, style: { numFmt: '0.00%' } },
+    { header: '月金额占比%', key: 'month_amount_share', width: 14, style: { numFmt: '0.00%' } },
     ...difficultyColumns,
+    { header: '月度综合系数', key: 'monthly_coefficient', width: 16 },
+    { header: '月度贡献率', key: 'monthly_contribution_rate', width: 16, style: { numFmt: '0.00%' } },
   ]
-  sheet.addRows(report.rows.map((row) => buildSettlementReportExportRow(row, report.difficulty_classes)))
+  sheet.addRows(exportPersonMonthMetrics(report.rows, row => buildSettlementReportExportRow(row, report.difficulty_classes)))
   sheet.addRow(buildSettlementReportExportRow({ ...report.totals, payee_user_id: 0, creator_name: '合计' }, report.difficulty_classes))
   formatSheet(sheet)
 }
@@ -368,23 +426,26 @@ function appendReportDifficultySheet(workbook: import('exceljs').Workbook, repor
   const sheet = workbook.addWorksheet(safeWorksheetName(name))
   sheet.columns = [
     { header: '报表类型', key: 'row_type_label', width: 16 },
-    { header: '人员编号', key: 'payee_user_id', width: 12 },
+    { header: '人员编号', key: 'personnel_no', width: 16 },
     { header: '创建人', key: 'creator_name', width: 16 },
     { header: '难度', key: 'difficulty_class', width: 14 },
-    { header: '订单数', key: 'order_count', width: 10 },
+    { header: '去重订单数', key: 'order_count', width: 10 },
     { header: '单数', key: 'item_count', width: 10 },
+    { header: '难度系数', key: 'difficulty_coefficient', width: 12 },
+    { header: '小计系数', key: 'coefficient_subtotal', width: 12 },
     { header: '金额', key: 'gross_amount', width: 12 },
     { header: '出错数', key: 'error_count', width: 10 },
-    { header: '质检扣款', key: 'deduction_amount', width: 12 },
-    { header: '出错率%', key: 'error_rate', width: 12 },
-    { header: '行内作图占比%', key: 'page_count_share', width: 14 },
-    { header: '行内出错占比%', key: 'error_count_share', width: 14 },
-    { header: '全月作图占比%', key: 'month_page_count_share', width: 14 },
+    { header: '出错率', key: 'error_rate', width: 12, style: { numFmt: '0.00%' } },
+    { header: '质检应扣款', key: 'deduction_amount', width: 12 },
+    { header: '行内作图占比%', key: 'page_count_share', width: 14, style: { numFmt: '0.00%' } },
+    { header: '行内出错占比%', key: 'error_count_share', width: 14, style: { numFmt: '0.00%' } },
+    { header: '全月作图占比%', key: 'month_page_count_share', width: 14, style: { numFmt: '0.00%' } },
   ]
   sheet.addRows(report.rows.flatMap((row) => row.difficulty_metrics.map((metric) => flattenDifficultyMetric(row, metric))))
   sheet.addRows(report.totals.difficulty_metrics.map((metric) => flattenDifficultyMetric({ ...report.totals, creator_name: '合计' }, metric)))
   formatSheet(sheet)
 }
+
 
 function appendItemSheet(workbook: import('exceljs').Workbook, rows: SettlementItemRow[]) {
   const sheet = workbook.addWorksheet('批次明细')
@@ -438,15 +499,15 @@ function summaryExportRow(row: SettlementPreviewRow) {
   return output
 }
 
-function percentDisplay(value?: number | null): string {
-  return `${(Number(value ?? 0) * 100).toFixed(2)}%`
-}
-
 export function buildSettlementReportExportRow(row: SettlementReportRow, difficultyClasses: string[]) {
   const metrics = new Map(row.difficulty_metrics.map((metric) => [metric.difficulty_class, metric]))
-  const output: Record<string, string | number> = {
+  const output: Record<string, string | number | undefined> & {
+    monthly_coefficient?: number
+    monthly_contribution_rate?: number
+  } = {
     row_type_label: reportRowLabel(row.row_type),
-    payee_user_id: row.payee_user_id || '',
+    personnel_no: row.personnel_no || row.payee_user_id || '',
+    worker_type_label: row.worker_type ? workerTypeLabel(row.worker_type) : '',
     creator_name: row.creator_name,
     job_grade: row.job_grade,
     created_date: row.created_date,
@@ -455,42 +516,51 @@ export function buildSettlementReportExportRow(row: SettlementReportRow, difficu
     item_count: row.item_count,
     gross_amount: row.gross_amount,
     error_count: row.error_count,
+    quality_actual_deduction_amount: row.quality_actual_deduction_amount ?? 0,
+    adjustment_amount: row.adjustment_amount ?? 0,
+    actual_net_amount: row.actual_net_amount ?? row.net_amount,
+    monthly_coefficient: row.monthly_coefficient ?? 0,
+    monthly_contribution_rate: row.monthly_contribution_rate ?? 0,
+    worker_type_average_error_rate: row.worker_type_average_error_rate,
     deduction_amount: row.deduction_amount,
     welfare_amount: row.welfare_amount,
     supplement_amount: row.supplement_amount,
     net_amount: row.net_amount,
-    error_rate: percentDisplay(row.error_rate),
-    page_count_share: percentDisplay(row.page_count_share),
-    error_count_share: percentDisplay(row.error_count_share),
-    month_amount_share: percentDisplay(row.month_amount_share),
+    error_rate: row.error_rate ?? 0,
+    page_count_share: row.page_count_share ?? 0,
+    error_count_share: row.error_count_share ?? 0,
+    month_amount_share: row.month_amount_share ?? 0,
   }
   for (const difficulty of difficultyClasses) {
     const metric = metrics.get(difficulty)
+    output[difficultyKey(difficulty, 'coefficient_subtotal')] = metric?.coefficient_subtotal ?? 0
     output[difficultyKey(difficulty, 'item_count')] = metric?.item_count ?? 0
     output[difficultyKey(difficulty, 'gross_amount')] = metric?.gross_amount ?? 0
     output[difficultyKey(difficulty, 'error_count')] = metric?.error_count ?? 0
     output[difficultyKey(difficulty, 'deduction_amount')] = metric?.deduction_amount ?? 0
-    output[difficultyKey(difficulty, 'page_count_share')] = percentDisplay(metric?.page_count_share)
-    output[difficultyKey(difficulty, 'month_page_count_share')] = percentDisplay(metric?.month_page_count_share)
+    output[difficultyKey(difficulty, 'page_count_share')] = metric?.page_count_share ?? 0
+    output[difficultyKey(difficulty, 'month_page_count_share')] = metric?.month_page_count_share ?? 0
   }
   return output
 }
 
-function flattenDifficultyMetric(row: Pick<SettlementReportRow, 'payee_user_id' | 'creator_name' | 'row_type'>, metric: SettlementReportDifficultyMetric) {
+function flattenDifficultyMetric(row: Pick<SettlementReportRow, 'payee_user_id' | 'personnel_no' | 'creator_name' | 'row_type'>, metric: SettlementReportDifficultyMetric) {
   return {
     row_type_label: reportRowLabel(row.row_type),
-    payee_user_id: row.payee_user_id || '',
+    personnel_no: row.personnel_no || row.payee_user_id || '',
     creator_name: row.creator_name,
     difficulty_class: difficultyLabel(metric.difficulty_class),
     order_count: metric.order_count,
     item_count: metric.item_count,
+    difficulty_coefficient: metric.difficulty_coefficient,
+    coefficient_subtotal: metric.coefficient_subtotal,
     gross_amount: metric.gross_amount,
     error_count: metric.error_count,
     deduction_amount: metric.deduction_amount,
-    error_rate: percentDisplay(metric.error_rate),
-    page_count_share: percentDisplay(metric.page_count_share),
-    error_count_share: percentDisplay(metric.error_count_share),
-    month_page_count_share: percentDisplay(metric.month_page_count_share),
+    error_rate: metric.error_rate ?? 0,
+    page_count_share: metric.page_count_share ?? 0,
+    error_count_share: metric.error_count_share ?? 0,
+    month_page_count_share: metric.month_page_count_share ?? 0,
   }
 }
 
@@ -500,13 +570,9 @@ function reportRowLabel(rowType: string): string {
   return '日常计件'
 }
 
-function difficultyLabel(value: string): string {
-  return value === 'unclassified' ? '未定级' : value
-}
 
-function difficultyKey(difficulty: string, field: string): string {
-  return `difficulty_${difficulty.replace(/[^a-zA-Z0-9]+/g, '_')}_${field}`
-}
+
+
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)

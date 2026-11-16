@@ -498,10 +498,19 @@ type AssetWorkbenchQualityWorkReference struct {
 	RelativePath string
 }
 
+type AssetWorkbenchReportSources struct {
+	Items            []*domain.AssetWorkbenchSubmissionItem
+	Supplements      []*domain.AssetWorkbenchSettlementSupplement
+	Errors           []*domain.AssetWorkbenchErrorRecord
+	Ledger           []*domain.AssetWorkbenchSettlementItem
+	ActualDeductions []*domain.AssetWorkbenchSettlementAdjustment
+}
+
 type AssetWorkbenchRepo interface {
 	ReadPersonalIncome(ctx context.Context, payeeUserID int64) (*AssetWorkbenchIncomeSources, error)
 	SetSettlementVisibility(ctx context.Context, tx Tx, userID int64, visible bool, actorID int64) error
 	ListReservedSettlementSources(ctx context.Context, tx Tx, businessMonth string) ([]*domain.AssetWorkbenchSettlementItem, error)
+	ReadSettlementReportSources(ctx context.Context, month string) (*AssetWorkbenchReportSources, error)
 	GetProfileByUserID(ctx context.Context, userID int64) (*domain.AssetWorkbenchProfile, error)
 	ListProfiles(ctx context.Context, filter AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error)
 	ListMembers(ctx context.Context, filter AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error)

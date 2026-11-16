@@ -195,7 +195,7 @@ func TestQualityPayrollWithoutAnActualDeductionUsesZero(t *testing.T) {
 	}
 }
 
-func TestDeleteQualityImportClearsActualOnlyForTheLastMatchingPayrollRecord(t *testing.T) {
+func TestDeleteQualityImportClearsActualForAffectedPayrollRows(t *testing.T) {
 	const month = "2026-10"
 	const normal = domain.AssetWorkbenchPayrollRowTypeNormalPiecework
 	const supplement = domain.AssetWorkbenchPayrollRowTypeSupplementPiecework
@@ -211,6 +211,7 @@ func TestDeleteQualityImportClearsActualOnlyForTheLastMatchingPayrollRecord(t *t
 		qualityDeductions: []*domain.AssetWorkbenchSettlementAdjustment{
 			{ID: 1, PayeeUserID: person, BusinessMonth: month, Amount: 25},
 			{ID: 2, PayeeUserID: person, BusinessMonth: month, Amount: 5, Payload: payload},
+			{ID: 3, PayeeUserID: person + 1, BusinessMonth: month, Amount: 7},
 		},
 	}
 	svc := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
@@ -219,8 +220,12 @@ func TestDeleteQualityImportClearsActualOnlyForTheLastMatchingPayrollRecord(t *t
 		t.Fatal(err)
 	}
 	entries, _ := r.ListQualityActualDeductions(context.Background(), nil, month)
-	if len(entries) != 2 || domain.WorkbenchPayrollRowType(entries[0].Payload) != normal || entries[0].Amount != 0 ||
-		domain.WorkbenchPayrollRowType(entries[1].Payload) != supplement || entries[1].Amount != 5 || len(r.events) != 2 {
+	got := map[qualityPayrollKey]float64{}
+	for _, entry := range entries {
+		got[qualityPayrollKey{entry.PayeeUserID, domain.WorkbenchPayrollRowType(entry.Payload)}] = entry.Amount
+	}
+	if len(entries) != 3 || got[qualityPayrollKey{person, normal}] != 0 || got[qualityPayrollKey{person, supplement}] != 0 ||
+		got[qualityPayrollKey{person + 1, normal}] != 7 || len(r.events) != 3 {
 		t.Fatalf("delete affected incorrect payroll rows: adjustments=%+v events=%+v", entries, r.events)
 	}
 }
