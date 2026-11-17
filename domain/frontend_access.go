@@ -41,6 +41,7 @@ const (
 	PermissionActionPasswordReset                = "password_reset"
 	PermissionActionUserUpdated                  = "user_updated"
 	PermissionActionUserStatusChanged            = "user_status_changed"
+	PermissionActionUserDeleted                  = "user_deleted"
 	PermissionActionUserActivated                = "user_activated"
 	PermissionActionUserDeactivated              = "user_deactivated"
 	PermissionActionUserOrgChanged               = "user_org_changed"

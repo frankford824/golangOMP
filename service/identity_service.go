@@ -182,6 +182,7 @@ type IdentityService interface {
 	UpdateUser(ctx context.Context, p UpdateUserParams) (*domain.User, *domain.AppError)
 	ActivateUser(ctx context.Context, userID int64) *domain.AppError
 	DeactivateUser(ctx context.Context, userID int64) *domain.AppError
+	DeleteUser(ctx context.Context, userID int64) *domain.AppError
 	ListPermissionLogs(ctx context.Context, filter PermissionLogFilter) ([]*domain.PermissionLog, domain.PaginationMeta, *domain.AppError)
 	ResolveRequestActor(ctx context.Context, bearerToken string) (*domain.RequestActor, *domain.AppError)
 	RecordRouteAccess(ctx context.Context, entry domain.PermissionLog)
@@ -1360,7 +1361,7 @@ func (s *identityService) GetUser(ctx context.Context, userID int64) (*domain.Us
 	if err != nil {
 		return nil, infraError("get user", err)
 	}
-	if user == nil {
+	if user == nil || user.Status == domain.UserStatusDeleted {
 		return nil, domain.ErrNotFound
 	}
 	if err := s.attachRoles(ctx, user); err != nil {
@@ -1637,7 +1638,7 @@ func (s *identityService) setUserStatusFromEndpoint(ctx context.Context, userID 
 	if err != nil {
 		return infraError("get user for status update", err)
 	}
-	if user == nil {
+	if user == nil || user.Status == domain.UserStatusDeleted {
 		return domain.ErrNotFound
 	}
 	if err := s.attachRoles(ctx, user); err != nil {

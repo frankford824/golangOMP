@@ -153,6 +153,8 @@ func AllValidTeams() []string {
 const (
 	UserStatusActive   UserStatus = "active"
 	UserStatusDisabled UserStatus = "disabled"
+	// UserStatusDeleted is internal. Public status inputs only accept active and disabled.
+	UserStatusDeleted UserStatus = "deleted"
 )
 
 func (s UserStatus) Valid() bool {

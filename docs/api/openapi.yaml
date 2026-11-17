@@ -9570,6 +9570,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete a workflow account
+      description: |
+        Removes the target from account management and revokes its active sessions. Original identity,
+        login identifier and business-history references are retained. A deleted account cannot
+        sign in or be reactivated through user management. Requires `access.manage` covering the
+        target's stable organization. The current login and protected SuperAdmin accounts cannot be deleted.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: explicit_capability_enforced
+        required_permissions: [access.manage]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204':
+          description: Account deleted
+        '400':
+          description: Invalid user ID
+        '401':
+          description: Authentication required
+        '403':
+          description: Outside the caller's scope, current login, or protected account
+        '404':
+          description: User not found or already deleted
+        '409':
+          description: Account changed during deletion
   /v1/users/{id}/password:
     put:
       summary: Reset workflow user password

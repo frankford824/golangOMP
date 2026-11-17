@@ -112,4 +112,7 @@ export const usersApi = {
   /** POST /v1/users/{id}/deactivate */
   deactivate: (id: string, signal?: AbortSignal) =>
     http.post(`/v1/users/${encodeURIComponent(id)}/deactivate`, {}, { signal }),
+
+  remove: (id: string, signal?: AbortSignal) =>
+    http.delete(`/v1/users/${encodeURIComponent(id)}`, { signal }),
 }

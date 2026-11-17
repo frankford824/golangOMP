@@ -20,6 +20,7 @@
       <BaseEmptyState title="无管理权限" description="需要用户、组织或角色管理权限才能访问本页。" />
     </div>
     <template v-else>
+      <p v-if="directoryMessage" class="action-msg mb-3" role="status">{{ directoryMessage }}</p>
       <section class="content-card">
         <div class="management-layout">
           <aside class="org-filter-panel" aria-label="组织列表与筛选">
@@ -208,23 +209,28 @@
       <!-- 用户详情 / 角色管理 弹层 -->
       <UserDetailModal
         v-if="detailUser"
+        :key="detailUser.id"
         :user="detailUser"
         :loading="detailLoading"
+        :unavailable="detailFailed"
         :current-role-names="detailAccessRoleNames"
         :can-edit-basic-info="canEditBasicInfo"
         :can-move-team="canMoveTeam"
-        :can-clear-membership="canClearMembership"
+        :can-clear-membership="canClearMembership && !!detailUser.department && detailUser.department !== '未分配'"
         :can-assign-roles="canAssignAccessRoles"
         :can-reset-password="canResetPassword"
         :can-disable-user="canDisableUser"
+        :can-delete-user="canDeleteUser"
+        :deleting="deletingUser"
         :basic-form="basicForm"
         :membership-form="membershipForm"
         :membership-department-options="membershipDepartmentOptions"
         :membership-team-options="membershipTeamOptions"
         :is-membership-dirty="isMembershipDirty"
+        :is-basic-dirty="isBasicDirty"
+        :is-roles-dirty="isRolesDirty"
         :editable-role-groups="accessRoleGroups"
         :locked-role-options="inheritedAccessRoleOptions"
-        locked-role-title="由部门或小组自动应用"
         :basic-submitting="basicSubmitting"
         :membership-submitting="membershipSubmitting"
         :role-submitting="roleSubmitting"
@@ -233,7 +239,9 @@
         :action-message="detailActionMessage"
         v-model:selected-roles="selectedAccessRoleCodes"
         v-model:new-password="resetPasswordValue"
-        @close="detailUser = null"
+        @close="closeDetail"
+        @clear-message="detailActionMessage = ''"
+        @delete-user="deleteDetailUser"
         @submit-basic="submitBasicInfo"
         @submit-membership="submitMembership"
         @clear-membership="clearMembership"
@@ -441,6 +449,10 @@ const listError = ref('')
 const users = ref<UserRow[]>([])
 const detailUser = ref<UserRow | null>(null)
 const detailLoading = ref(false)
+const detailFailed = ref(false)
+let detailSequence = 0
+const deletingUser = ref(false)
+const directoryMessage = ref('')
 const roleSubmitting = ref(false)
 const statusSubmitting = ref(false)
 const passwordSubmitting = ref(false)
@@ -765,7 +777,21 @@ const orgPolicyRoleGroups = computed<RoleOptionGroup[]>(() => accessRoleGroups.v
       .map((role) => ({ ...role, hint: '本组织' })),
   }))
   .filter((group) => group.roles.length > 0))
-const canAssignAccessRoles = computed(() => canManageAccess.value && accessRoles.value.length > 0)
+const canAssignAccessRoles = computed(() => canManageAccess.value && !!detailEffectiveAccess.value && accessRoles.value.length > 0)
+const canDeleteUser = computed(() =>
+  canManageAccess.value
+  && !!detailUser.value
+  && !detailFailed.value
+  && !!detailEffectiveAccess.value
+  && detailUser.value.id !== permissionsStore.currentUser?.id
+  && !detailEffectiveAccess.value.assignments.some((assignment) => assignment.role_code === 'super_admin'
+    || accessRoleByID.value.get(assignment.role_id)?.code === 'super_admin'),
+)
+const isRolesDirty = computed(() => {
+  const initial = selectedRoleCodes()
+  return initial.length !== selectedAccessRoleCodes.value.length
+    || initial.some((code) => !selectedAccessRoleCodes.value.includes(code))
+})
 const inheritedAccessRoleOptions = computed<RoleOption[]>(() => detailInheritedAssignments.value
   .map((assignment) => accessRoleByID.value.get(assignment.role_id))
   .filter((role): role is AccessRole => !!role && role.code !== 'member' && visibleAssignableRoleCodes.has(role.code))
@@ -1030,11 +1056,15 @@ const membershipTeamOptions = computed(() =>
 const isMembershipDirty = computed(() => {
   const current = detailUser.value
   if (!current) return false
-  return (
-    membershipForm.value.department !== (current.department ?? '') ||
-    membershipForm.value.team !== (current.team ?? '')
+  const { department, team } = membershipForm.value
+  return !!department && (membershipTeamOptions.value.length === 0 || !!team) && (
+    department !== (current.department ?? '') || team !== (current.team ?? '')
   )
 })
+const isBasicDirty = computed(() => !!detailUser.value && (
+  basicForm.value.display_name !== (detailUser.value.display_name ?? '')
+  || basicForm.value.employee_no !== (detailUser.value.employee_no == null ? '' : String(detailUser.value.employee_no))
+))
 
 function mapRawUser(raw: Record<string, unknown>): UserRow {
   const rawEmployeeNo = raw.employee_no ?? raw.employeeNo
@@ -1408,7 +1438,7 @@ async function loadUsers() {
   }
 }
 
-function hydrateDetailAccess(effective: EffectiveAccess) {
+function hydrateDetailAccess(effective: EffectiveAccess, keepDraft = false) {
   detailEffectiveAccess.value = effective
   accessPolicyRevision.value = effective.policy_revision
   detailDirectAssignments.value = effective.assignments
@@ -1417,15 +1447,28 @@ function hydrateDetailAccess(effective: EffectiveAccess) {
   detailInheritedAssignments.value = effective.assignments
     .filter((assignment) => assignment.source_type === 'org_policy')
     .map((assignment) => ({ ...assignment, subjects: assignment.subjects.map((subject) => ({ ...subject })) }))
-  const selected = detailDirectAssignments.value
+  if (!keepDraft) selectedAccessRoleCodes.value = selectedRoleCodes()
+}
+
+function selectedRoleCodes() {
+  const selected = [...new Set(detailDirectAssignments.value
     .map((assignment) => accessRoleByID.value.get(assignment.role_id)?.code || '')
-    .filter(Boolean)
+    .filter(Boolean))]
   if (accessRoleByCode.value.has('member') && !selected.includes('member')) selected.unshift('member')
-  selectedAccessRoleCodes.value = selected
+  return selected
+}
+
+async function readUserDetail(id: string) {
+  const { data } = await usersApi.getById(id)
+  const body = data?.data ?? data
+  if (!body || typeof body !== 'object' || String(body.id) !== id) throw new Error('用户详情数据异常')
+  return mapRawUser(body)
 }
 
 async function openDetail(u: UserRow) {
-  detailUser.value = null
+  const sequence = ++detailSequence
+  detailUser.value = u
+  detailFailed.value = false
   detailActionMessage.value = ''
   resetPasswordValue.value = ''
   selectedAccessRoleCodes.value = []
@@ -1434,12 +1477,9 @@ async function openDetail(u: UserRow) {
   detailInheritedAssignments.value = []
   detailLoading.value = true
   try {
-    const res = await usersApi.getById(u.id)
-    const data = res?.data
-    const body = data?.data ?? data
-    const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : null
-    if (!raw) throw new Error('用户详情数据异常')
-    detailUser.value = mapRawUser(raw)
+    const user = await readUserDetail(u.id)
+    if (sequence !== detailSequence) return
+    detailUser.value = user
     basicForm.value = {
       display_name: detailUser.value.display_name ?? '',
       employee_no: detailUser.value.employee_no == null ? '' : String(detailUser.value.employee_no),
@@ -1451,24 +1491,64 @@ async function openDetail(u: UserRow) {
     if (canViewAccess.value) {
       try {
         if (!accessRoles.value.length) await loadAccessRoles()
-        hydrateDetailAccess(await accessPolicyApi.effective(Number(detailUser.value.id)))
+        const effective = await accessPolicyApi.effective(Number(u.id))
+        if (sequence === detailSequence) hydrateDetailAccess(effective)
       } catch (cause) {
-        detailActionMessage.value = cause instanceof Error ? cause.message : '角色权限读取失败'
+        if (sequence === detailSequence) detailActionMessage.value = cause instanceof Error ? cause.message : '角色权限读取失败'
       }
     }
   } catch (e) {
-    detailActionMessage.value = e instanceof Error ? e.message : '加载用户详情失败'
+    if (sequence === detailSequence) {
+      detailFailed.value = true
+      detailActionMessage.value = e instanceof Error ? e.message : '加载用户详情失败'
+    }
   } finally {
-    detailLoading.value = false
+    if (sequence === detailSequence) detailLoading.value = false
   }
 }
 
-async function refreshDetailAndList(userId?: string) {
-  if (userId) {
-    const listHit = users.value.find((u) => u.id === userId)
-    if (listHit) await openDetail(listHit)
+function closeDetail() {
+  detailSequence += 1
+  detailUser.value = null
+}
+
+async function refreshDetailAndList(userId: string, section: 'basic' | 'membership' | 'status') {
+  const user = await readUserDetail(userId)
+  if (detailUser.value?.id === userId) {
+    detailUser.value = user
+    if (section === 'basic') {
+      basicForm.value = { display_name: user.display_name ?? '', employee_no: user.employee_no == null ? '' : String(user.employee_no) }
+    }
+    if (section === 'membership') {
+      membershipForm.value = { department: user.department ?? '', team: user.team ?? '' }
+      if (detailEffectiveAccess.value) {
+        const effective = await accessPolicyApi.effective(Number(userId))
+        hydrateDetailAccess(effective, isRolesDirty.value && effective.policy_revision === detailEffectiveAccess.value.policy_revision)
+      }
+    }
   }
   await loadUsers()
+}
+
+async function deleteDetailUser() {
+  const target = detailUser.value
+  if (!target || !canDeleteUser.value || deletingUser.value) return
+  deletingUser.value = true
+  detailActionMessage.value = ''
+  directoryMessage.value = ''
+  try {
+    await usersApi.remove(target.id)
+  } catch (e) {
+    detailActionMessage.value = e instanceof Error ? e.message : '删除账号失败'
+    deletingUser.value = false
+    return
+  }
+  closeDetail()
+  deletingUser.value = false
+  directoryMessage.value = `已删除账号 ${target.username}`
+  if (page.value > 1 && users.value.length === 1) page.value -= 1
+  await loadUsers()
+  void loadOrgOptions()
 }
 
 async function submitRoleReplace() {
@@ -1518,17 +1598,13 @@ async function submitRoleReplace() {
 }
 
 async function submitBasicInfo() {
-  if (!detailUser.value) return
-  const employeeNoError = validateEmployeeNoInput(basicForm.value.employee_no, true)
+  if (!detailUser.value || !isBasicDirty.value) return
+  const employeeNoError = validateEmployeeNoInput(basicForm.value.employee_no, detailUser.value.employee_no != null)
   if (employeeNoError) {
     detailActionMessage.value = employeeNoError
     return
   }
   const employeeNo = parseEmployeeNoInput(basicForm.value.employee_no)
-  if (employeeNo == null) {
-    detailActionMessage.value = '工号必须是 0 到 9999 之间的纯数字。'
-    return
-  }
   const displayName = basicForm.value.display_name.trim()
   if (!displayName) {
     detailActionMessage.value = '姓名必填。'
@@ -1539,9 +1615,9 @@ async function submitBasicInfo() {
   try {
     await usersApi.patch(detailUser.value.id, {
       display_name: displayName,
-      employee_no: employeeNo,
+      ...(employeeNo == null ? {} : { employee_no: employeeNo }),
     })
-    await refreshDetailAndList(detailUser.value.id)
+    await refreshDetailAndList(detailUser.value.id, 'basic')
     detailActionMessage.value = '基本信息已保存'
   } catch (e) {
     detailActionMessage.value = e instanceof Error ? e.message : '基本信息保存失败'
@@ -1560,7 +1636,7 @@ async function setUserStatus(next: 'active' | 'disabled') {
     } else {
       await usersApi.activate(detailUser.value.id)
     }
-    await refreshDetailAndList(detailUser.value.id)
+    await refreshDetailAndList(detailUser.value.id, 'status')
     detailActionMessage.value = next === 'disabled' ? '用户已禁用' : '用户已启用'
   } catch (e) {
     detailActionMessage.value = e instanceof Error ? e.message : '更新用户状态失败'
@@ -1580,7 +1656,7 @@ async function submitMembership() {
       membershipForm.value.department,
       membershipForm.value.team,
     )
-    await refreshDetailAndList(detailUser.value.id)
+    await refreshDetailAndList(detailUser.value.id, 'membership')
     // 归属变化会改变组织人数,同步刷新树上的人数徽标。
     void loadOrgOptions()
     detailActionMessage.value = '归属已更新'
@@ -1601,10 +1677,9 @@ async function clearMembership() {
     // "department is required"）。统一走 `team:'ungrouped'` 别名，由后端把
     // department 覆盖为 DepartmentUnassigned 并解析未分配池 team。
     await clearUserMembership(detailUser.value.id)
-    membershipForm.value = { department: '', team: '' }
-    await refreshDetailAndList(detailUser.value.id)
+    await refreshDetailAndList(detailUser.value.id, 'membership')
     void loadOrgOptions()
-    detailActionMessage.value = '已移出到未分组'
+    detailActionMessage.value = '已移到未分配池'
   } catch (e) {
     detailActionMessage.value = e instanceof Error ? e.message : '移除归属失败'
   } finally {

@@ -560,6 +560,10 @@ func (s *userAdminServiceStub) DeactivateUser(context.Context, int64) *domain.Ap
 	return nil
 }
 
+func (s *userAdminServiceStub) DeleteUser(context.Context, int64) *domain.AppError {
+	return nil
+}
+
 func (s *userAdminServiceStub) ListPermissionLogs(context.Context, service.PermissionLogFilter) ([]*domain.PermissionLog, domain.PaginationMeta, *domain.AppError) {
 	return nil, domain.PaginationMeta{}, nil
 }

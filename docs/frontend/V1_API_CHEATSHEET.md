@@ -22,7 +22,7 @@
 | GET | `/v1/me/org` | Get my org profile | GET:已登录 / scope-aware | [V1_API_ME.md](V1_API_ME.md) |
 | GET, POST | `/v1/users` | List workflow users；Create workflow user | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET | `/v1/users/designers` | List task assignment candidates | GET:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
-| GET, PATCH | `/v1/users/{id}` | Get workflow user；Update workflow user | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
+| GET, PATCH, DELETE | `/v1/users/{id}` | Get workflow user；Update workflow user；Delete a workflow account | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | PUT | `/v1/users/{id}/password` | Reset workflow user password | PUT:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST | `/v1/users/{id}/activate` | Activate a workflow user | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST | `/v1/users/{id}/deactivate` | Deactivate a workflow user | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |

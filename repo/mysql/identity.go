@@ -116,7 +116,7 @@ func (r *userRepo) GetByJstUID(ctx context.Context, jstUID int64) (*domain.User,
 
 func (r *userRepo) List(ctx context.Context, filter repo.UserListFilter) ([]*domain.User, int64, error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	where := []string{"1=1"}
+	where := []string{"users.status <> 'deleted'"}
 	args := make([]interface{}, 0, 7)
 	if filter.Role != nil && string(*filter.Role) != "" {
 		where = append(where, "EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role = ?)")
@@ -198,7 +198,7 @@ func (r *userRepo) Update(ctx context.Context, tx repo.Tx, user *domain.User) er
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE users
 		SET employee_no = ?, display_name = ?, department = ?, department_id = ?, team = ?, team_id = ?, managed_departments_json = ?, managed_teams_json = ?, mobile = ?, email = ?, avatar_url = ?, status = ?, employment_type = ?, is_config_super_admin = ?, updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND status <> 'deleted'`,
 		toNullInt(user.EmployeeNo),
 		user.DisplayName,
 		user.Department,
@@ -233,13 +233,37 @@ func (r *userRepo) UpdateJstFields(ctx context.Context, tx repo.Tx, userID int64
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE users
 		SET display_name = ?, status = ?, department = ?, team = ?, managed_departments_json = ?, managed_teams_json = ?, jst_u_id = ?, jst_raw_snapshot_json = ?, last_login_at = ?, updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND status <> 'deleted'`,
 		displayName, status, department, team, marshalStringSlice(managedDepartments), marshalStringSlice(managedTeams), toNullInt64(jstUID), nullString(jstRawSnapshot), toNullTime(lastLoginAt), time.Now().UTC(), userID,
 	)
 	if err != nil {
 		return fmt.Errorf("update user jst fields: %w", err)
 	}
 	return nil
+}
+
+// MarkAccountDeleted retains the identity referenced by business records. Match
+// the observed organization so a concurrent move cannot bypass scoped access.
+func (r *userRepo) MarkAccountDeleted(ctx context.Context, tx repo.Tx, user *domain.User, at time.Time) (bool, error) {
+	result, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE users
+		SET status = ?, department_id = NULL, team_id = NULL, updated_at = ?
+		WHERE id = ? AND status <> 'deleted' AND is_config_super_admin = 0
+		  AND department_id <=> ? AND team_id <=> ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role = 'SuperAdmin'
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM auth_user_role_assignments a
+		    JOIN auth_roles r ON r.id = a.role_id AND r.code = 'super_admin' AND r.archived_at IS NULL
+		    WHERE a.user_id = users.id
+		  )`,
+		domain.UserStatusDeleted, at, user.ID, toNullInt64(user.DepartmentID), toNullInt64(user.TeamID))
+	if err != nil {
+		return false, fmt.Errorf("mark account deleted: %w", err)
+	}
+	count, err := result.RowsAffected()
+	return count == 1, err
 }
 
 func nullString(s string) interface{} {

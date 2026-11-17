@@ -20,6 +20,7 @@ func registerV1AdminRoutes(
 	v1.GET("/users/designers", capabilityAccess(v1, http.MethodGet, "/users/designers", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate, domain.PermissionTaskAssign, domain.PermissionTaskReassign, domain.PermissionTaskAuditHandover), userAdminH.ListDesigners)
 	v1.GET("/users/:id", capabilityAccess(v1, http.MethodGet, "/users/:id", domain.APIReadinessReadyForFrontend, domain.PermissionAccessView, domain.PermissionAccessManage), userAdminH.GetUser)
 	v1.PATCH("/users/:id", capabilityAccess(v1, http.MethodPatch, "/users/:id", domain.APIReadinessReadyForFrontend, domain.PermissionAccessManage), userAdminH.PatchUser)
+	v1.DELETE("/users/:id", capabilityAccess(v1, http.MethodDelete, "/users/:id", domain.APIReadinessReadyForFrontend, domain.PermissionAccessManage), userAdminH.DeleteUser)
 	v1.POST("/users/:id/activate", capabilityAccess(v1, http.MethodPost, "/users/:id/activate", domain.APIReadinessReadyForFrontend, domain.PermissionAccessManage), userAdminH.Activate)
 	v1.POST("/users/:id/deactivate", capabilityAccess(v1, http.MethodPost, "/users/:id/deactivate", domain.APIReadinessReadyForFrontend, domain.PermissionAccessManage), userAdminH.Deactivate)
 	v1.PUT("/users/:id/password", capabilityAccess(v1, http.MethodPut, "/users/:id/password", domain.APIReadinessReadyForFrontend, domain.PermissionAccessManage), userAdminH.ResetPassword)

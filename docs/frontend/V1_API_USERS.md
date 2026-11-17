@@ -218,15 +218,17 @@ curl -X GET https://api.example.com/v1/users/designers \
 ## GET /v1/users/{id}
 
 ### 简介
-支持方法: GET, PATCH。
+支持方法: GET, PATCH, DELETE。
 
 - `GET`: User detail read endpoint governed by `access.view` or `access.manage` and the same stable-ID scope model as the list endpoint.
 - `PATCH`: Partial update for user profile and org affiliation. `employee_no` can be maintained by company-level user managers. It must be a pure numeric value in range 0-9999 and globally unique. Org-field contract: - `department` + `team` are the canonical write fields. - To remove a user from a formal group, use the unassigned-pool semantic: - set `department` to the unassigned department from `/v1/org/options` - set `team` to its unassigned pool team, or use the explicit `team = "ungrouped"` command supported by the current management UI. Requires `access.manage`. Both the current user organization and the requested new stable department/team IDs must be inside the caller's effective scope.
+- `DELETE`: Removes the target from account management and revokes its active sessions. Original identity, login identifier and business-history references are retained. A deleted account cannot sign in or be reactivated through user management. Requires `access.manage` covering the target's stable organization. The current login and protected SuperAdmin accounts cannot be deleted.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
 - `GET` 允许角色: 已登录 / scope-aware。
 - `PATCH` 允许角色: 已登录 / scope-aware。
+- `DELETE` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -323,6 +325,37 @@ curl -X PATCH https://api.example.com/v1/users/<id> \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'
+```
+
+#### DELETE 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `204`
+
+无 JSON 响应体或响应体由文件流承载。
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid user ID |
+| 401 | 见 `error.code` | 见 `deny_code` | Authentication required |
+| 403 | 见 `error.code` | 见 `deny_code` | Outside the caller's scope, current login, or protected account |
+| 404 | 见 `error.code` | 见 `deny_code` | User not found or already deleted |
+| 409 | 见 `error.code` | 见 `deny_code` | Account changed during deletion |
+
+##### curl 示例
+```bash
+curl -X DELETE https://api.example.com/v1/users/<id> \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践

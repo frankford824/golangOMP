@@ -44,6 +44,7 @@ vi.mock('@/services/api/usersApi', () => ({
   usersApi: {
     list: vi.fn(),
     getById: vi.fn(),
+    remove: vi.fn(),
     patch: vi.fn(),
     create: vi.fn(),
     deactivate: vi.fn(),
@@ -249,6 +250,8 @@ describe('UserManagementView role governance', () => {
 
     const modal = document.body.querySelector('.um-modal')
     expect(modal).not.toBeNull()
+    document.body.querySelector<HTMLButtonElement>('#user-detail-tab-roles')?.click()
+    await flushPromises()
     const checkboxes = Array.from(
       document.body.querySelectorAll<HTMLInputElement>('.um-modal input[type="checkbox"]'),
     )
@@ -288,6 +291,42 @@ describe('UserManagementView role governance', () => {
       ] },
       { role_id: 4, scope_mode: 'global', subjects: [] },
     ], 7, '在用户详情中更新工作角色')
+    wrapper.unmount()
+  })
+
+  it('confirms the selected account, supports cancel and retry, then reloads the list', async () => {
+    vi.mocked(usersApi.remove)
+      .mockRejectedValueOnce(new Error('请求失败，请重试'))
+      .mockResolvedValueOnce({ status: 204 } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    await (wrapper.vm as unknown as { openDetail: (row: unknown) => Promise<void> }).openDetail({
+      id: '2',
+      username: 'target',
+    })
+    await flushPromises()
+    const click = async (label: string) => {
+      const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.user-detail button'))
+        .find((item) => item.textContent?.trim() === label)
+      expect(button, label).toBeDefined()
+      button?.click()
+      await flushPromises()
+    }
+    await click('账号安全')
+    await click('删除账号')
+    expect(document.body.querySelector('.detail-confirm')?.textContent).toContain('目标用户（target）')
+    await click('取消')
+    expect(usersApi.remove).not.toHaveBeenCalled()
+    await click('删除账号')
+    await click('确认删除')
+    expect(document.body.querySelector('.detail-feedback')?.textContent).toContain('请求失败，请重试')
+    await click('确认删除')
+    expect(usersApi.remove).toHaveBeenCalledTimes(2)
+    expect(usersApi.remove).toHaveBeenLastCalledWith('2')
+    expect(document.body.querySelector('.user-detail')).toBeNull()
+    expect(wrapper.text()).toContain('已删除账号 target')
+    expect(usersApi.list).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
   })
 
   it('grants designers a global task scope by default', async () => {

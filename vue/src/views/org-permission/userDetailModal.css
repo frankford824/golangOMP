@@ -1,0 +1,137 @@
+.user-detail {
+  width: min(780px, 100%);
+  min-width: 0;
+  max-height: min(89dvh, 850px);
+}
+
+.user-detail .modal-header {
+  padding: 1.4rem 1.65rem 0.95rem;
+  border-bottom: 0;
+}
+
+.user-detail .section-title {
+  font-size: 1.4rem;
+  overflow-wrap: anywhere;
+}
+
+.detail-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  margin-top: 0.45rem;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.detail-status {
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  background: rgb(var(--yb-surface-soft));
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.detail-status--active { color: rgb(var(--yb-success-deep)); background: rgb(var(--yb-success-soft-strong)); }
+
+.detail-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.35rem;
+  margin-inline: 1.65rem;
+  border-bottom: 1px solid rgb(var(--yb-border));
+}
+
+.detail-tabs button {
+  min-height: 2.6rem;
+  padding: 0.55rem 0.8rem;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.detail-tabs [aria-selected='true'] {
+  border-bottom-color: currentColor;
+  color: rgb(var(--yb-brand));
+  font-weight: 650;
+}
+
+.user-detail .modal-body { padding: 0 1.65rem; }
+
+.user-detail .detail-section {
+  padding: 1.35rem 0;
+  border: 0;
+  border-radius: 0;
+  gap: 0.75rem;
+}
+
+.user-detail .detail-section + .detail-section { border-top: 1px solid rgb(var(--yb-border)); }
+.user-detail .detail-section h4 { margin: 0; font-weight: 700; font-size: 1rem; }
+.user-detail .detail-grid { gap: 0.9rem 1.2rem; }
+.user-detail .input { min-height: 2.65rem; border-radius: 0.48rem; }
+.user-detail .um-btn { min-height: 2.35rem; border-radius: 0.48rem; }
+.user-detail .um-btn--sm { padding-inline: 0.85rem; }
+.user-detail .role-groups { background: transparent; border: 0; padding: 0; }
+.user-detail .role-check:has(input:checked) { border-color: rgb(var(--yb-brand-border-strong)); background: rgb(var(--yb-surface-soft)); }
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.95rem;
+}
+
+.detail-text-button {
+  margin-inline-end: auto;
+  color: rgb(var(--yb-brand));
+  font-size: 0.8125rem;
+  background: transparent;
+  border: 0;
+}
+
+.detail-text-button:disabled { opacity: 0.5; }
+
+.detail-note { margin: 0; color: rgb(var(--yb-text-muted)); font-size: 0.8125rem; line-height: 1.55; }
+
+.detail-password {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.user-detail .detail-operation { flex-direction: row; justify-content: space-between; align-items: center; }
+.detail-operation .detail-note { margin-top: 0.25rem; }
+.user-detail .detail-confirm { padding-block: 1.6rem; }
+.detail-confirm p { margin: 0; overflow-wrap: anywhere; }
+.detail-danger-outline { background: rgb(var(--yb-surface)); color: rgb(var(--yb-danger-text)); border-color: rgb(var(--yb-danger-border)); }
+.detail-danger-outline:hover:not(:disabled) { background: rgb(var(--yb-danger-wash)); }
+.detail-danger-solid { background: rgb(var(--yb-danger-action)); color: rgb(var(--yb-surface)); }
+.detail-danger-solid:hover:not(:disabled) { background: rgb(var(--yb-danger-deep)); }
+
+.detail-feedback {
+  flex-shrink: 0;
+  margin: 0;
+  border-top: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface-soft));
+  padding: 0.75rem 1.65rem;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 560px) {
+  .modal-mask.detail-mask { align-items: center; padding: 0.6rem; }
+  .user-detail { align-self: center; max-height: calc(100dvh - 1.2rem); }
+  .user-detail .modal-header { padding: 1rem 0.95rem 0.75rem; }
+  .detail-tabs { margin-inline: 0.95rem; gap: 0; }
+  .detail-tabs button { flex: 1; padding-inline: 0.38rem; }
+  .user-detail .modal-body { padding-inline: 0.95rem; }
+  .detail-feedback { padding-inline: 0.95rem; }
+  .user-detail .detail-section { padding-block: 1rem; }
+  .user-detail .detail-grid { grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+}

@@ -223,6 +223,19 @@ func (h *UserAdminHandler) GetUser(c *gin.Context) {
 	respondOK(c, user)
 }
 
+func (h *UserAdminHandler) DeleteUser(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil || id <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user id", nil))
+		return
+	}
+	if appErr := h.svc.DeleteUser(c.Request.Context(), id); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *UserAdminHandler) CreateUser(c *gin.Context) {
 	var req createUserReq
 	if err := c.ShouldBindJSON(&req); err != nil {
