@@ -1,44 +1,70 @@
 <template>
   <main class="cost-manager-page">
-    <header class="yb-page-surface yb-page-header-row">
+    <header class="cost-titlebar" @keydown.esc="calculatorOpen=false">
       <div class="yb-page-heading-copy">
         <h1 class="yb-page-title">成本规则</h1>
-        <p class="yb-page-subtitle">核对已完成编码的成本，维护价格、规格与款式。</p>
       </div>
       <div v-if="entryTab==='schemes'" class="header-actions">
         <button class="secondary" :disabled="loading" @click="loadAll"><RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? '刷新中…' : '刷新数据' }}</button>
+        <button v-if="workspaceTab==='计价方案'" type="button" class="secondary calculator-toggle" :aria-expanded="calculatorOpen" :aria-controls="calculatorOpen ? 'cost-calculator' : undefined" @click="calculatorOpen=!calculatorOpen"><Calculator :size="16" :stroke-width="1.75" aria-hidden="true" />{{ calculatorOpen ? '收起试算' : '试算' }}</button>
         <button class="primary" @click="openRuleEditor()"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />新增方案</button>
       </div>
     </header>
 
-    <nav class="workspace-tabs" aria-label="成本维护入口"><button :class="{active:entryTab==='costs'}" @click="entryTab='costs'"><ListChecks :size="16" :stroke-width="1.75" aria-hidden="true" />编码成本</button><button :class="{active:entryTab==='schemes'}" @click="openSchemes"><Layers3 :size="16" :stroke-width="1.75" aria-hidden="true" />方案与绑定</button></nav>
+    <nav class="workspace-tabs cost-primary-nav" aria-label="成本维护入口">
+      <button type="button" :class="{active:entryTab==='costs'}" :aria-pressed="entryTab==='costs'" @click="entryTab='costs'; calculatorOpen=false">
+        <ListChecks :size="16" :stroke-width="1.75" aria-hidden="true" />编码成本
+      </button>
+      <button
+        v-for="tab in workspaceTabs"
+        :key="tab.key"
+        type="button"
+        :class="{active:entryTab==='schemes' && workspaceTab===tab.key}"
+        :aria-pressed="entryTab==='schemes' && workspaceTab===tab.key"
+        @click="openSchemes(tab.key)"
+      >
+        <component :is="tab.icon" :size="16" :stroke-width="1.75" aria-hidden="true" />{{tab.label}}
+      </button>
+    </nav>
     <CostMaintenanceList v-if="entryTab==='costs'" />
-    <div v-show="entryTab==='schemes'">
+    <div v-show="entryTab==='schemes'" class="cost-module">
 
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
     <div v-if="notice" class="message notice" role="status">{{ notice }}</div>
     <div v-if="auxiliaryError" class="message auxiliary-warning" role="status">{{auxiliaryError}}<button :disabled="loading" @click="loadAll">重试读取</button></div>
 
-    <nav class="workspace-tabs" aria-label="成本工作区"><button v-for="tab in ['方案与绑定','绑定检查','成本同步','更新记录']" :key="tab" :class="{active:workspaceTab===tab}" @click="workspaceTab=tab"><component :is="workspaceIcons[tab]" :size="16" :stroke-width="1.75" aria-hidden="true" />{{tab}}</button></nav>
-    <CostSyncPanel v-if="workspaceTab==='成本同步'" />
-    <section v-show="workspaceTab==='方案与绑定'" class="cost-layout">
+    <CostSyncPanel v-if="entryTab==='schemes' && workspaceTab==='成本同步'" />
+    <section v-show="workspaceTab==='计价方案'" class="cost-layout">
       <aside class="rule-groups" aria-label="成本规则分组">
-        <label class="group-search">搜索方案 / 款式编码<input v-model.trim="groupSearch" placeholder="输入方案名称或款式编码" /></label>
-        <label class="group-search">显示范围<select v-model="groupScope"><option value="bound">已绑定款式的方案</option><option value="all">全部方案（含未绑定）</option></select></label>
-        <label class="group-search">大类<select v-model="familyFilter" aria-label="筛选方案大类"><option value="all">全部大类</option><option v-for="family in schemeFamilies" :key="family.code" :value="family.code">{{family.name}}</option></select></label>
-        <header><span>计价方案</span><b>{{ filteredGroups.length }}</b></header>
+        <div class="scheme-rail-tools">
+          <header><h2>计价方案 <small>{{ filteredGroups.length }}</small></h2></header>
+          <div class="scheme-query">
+            <input v-model.trim="groupSearch" aria-label="搜索方案或款式编码" placeholder="搜索方案 / 款式" />
+            <button type="button" :aria-expanded="schemeFiltersOpen" aria-controls="cost-scheme-filters" @click="schemeFiltersOpen = !schemeFiltersOpen">
+              筛选<span v-if="familyFilter !== 'all' || groupScope === 'bound'" class="scheme-filter-dot" aria-label="已应用筛选"></span>
+            </button>
+          </div>
+          <div v-show="schemeFiltersOpen" id="cost-scheme-filters" class="scheme-filters">
+            <label>显示范围<select v-model="groupScope"><option value="bound">已绑定款式的方案</option><option value="all">全部方案（含未绑定）</option></select></label>
+            <label>大类<select v-model="familyFilter" aria-label="筛选方案大类"><option value="all">全部大类</option><option v-for="family in schemeFamilies" :key="family.code" :value="family.code">{{family.name}}</option></select></label>
+          </div>
+        </div>
+        <div class="scheme-rail-list desktop-region-scroll" role="region" aria-label="计价方案列表" tabindex="0">
         <template v-for="family in groupedSchemes" :key="family.code">
         <h3 class="scheme-family-heading">{{family.name}}<span>{{family.groups.length}}</span></h3>
         <button
           v-for="group in family.groups"
           :key="group.code"
+          type="button"
           :class="{ active: selectedGroupCode === group.code }"
+          :aria-pressed="selectedGroupCode === group.code"
           @click="selectedGroupCode = group.code"
         >
-          <span><strong>{{ group.name }}</strong><small>{{ activeBindingCount(group.code) }} 个款式</small></span>
+          <span><strong :title="group.name">{{ group.name }}</strong><small>{{ activeBindingCount(group.code) }} 个款式</small></span>
         </button>
         </template>
         <div v-if="!loading && !filteredGroups.length" class="empty-small">没有匹配的方案。可切换“全部方案”查看未绑定项。</div>
+        </div>
       </aside>
 
       <section class="rule-workspace">
@@ -47,8 +73,15 @@
             <h2>{{ selectedGroup?.name || '成本计算规则' }}</h2>
             <p>{{ selectedGroup ? `${selectedBindings.length} 个款式已绑定此方案` : '从左侧选择方案查看。' }}</p>
           </div>
-          <button v-if="selectedGroup && !selectedModel" class="secondary" @click="openRuleEditor(undefined, selectedGroup.code)"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />添加收费项</button>
+          <button v-if="selectedGroup && !selectedModel && schemeDetail==='pricing'" class="secondary" @click="openRuleEditor(undefined, selectedGroup.code)"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />添加收费项</button>
+          <button v-if="selectedGroup && schemeDetail==='bindings'" class="secondary" @click="bindingDialogOpen = true"><Link2 :size="16" :stroke-width="1.75" aria-hidden="true" />绑定新款式</button>
         </header>
+        <nav v-if="selectedGroup" class="scheme-detail-nav" aria-label="方案详情">
+          <button type="button" :aria-pressed="schemeDetail==='pricing'" @click="schemeDetail='pricing'">计价</button>
+          <button type="button" :aria-pressed="schemeDetail==='bindings'" @click="schemeDetail='bindings'">绑定款式</button>
+        </nav>
+        <div class="scheme-detail-body desktop-region-scroll" role="region" aria-label="方案详情内容" tabindex="0">
+        <div v-show="schemeDetail==='pricing'" class="scheme-pricing-pane">
         <div v-if="selectedGroup && groupFamily(selectedGroup)==='uv'" class="uv-scheme-context"><span>UV · 各材质独立计价</span><button class="text-button" @click="openMaterialScheme('uv')"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />新增材质方案</button></div>
         <p v-if="selectedGroup?.code==='ACRYLIC' && /UV/i.test(selectedGroup.name)" class="legacy-uv-note">这是原有共用方案，现有价格与绑定保留。可新建各材质方案，核价后自行改绑。</p>
 
@@ -69,25 +102,28 @@
               <table v-if="variantRows(rule).length" class="variant-price-summary"><thead><tr><th>厚度（mm）</th><th>普通（元/{{variantUnit(rule)}}）</th><th>异形（元/{{variantUnit(rule)}}）</th></tr></thead><tbody><tr v-for="(row,i) in variantRows(rule)" :key="i"><td>{{row.thickness_mm || '不分厚度'}}</td><td>{{row.normal_price==null?'待核价':`¥${row.normal_price}`}}</td><td>{{row.irregular_price==null?'待核价':`¥${row.irregular_price}`}}</td></tr></tbody></table>
               <small>{{pricingWindowLabel(rule)}}</small>
             </div>
-            <div class="price-actions"><button class="text-button" @click="openRuleEditor(rule)">编辑名称 / 价格 / 时间</button><button class="text-button" :disabled="savingRule" @click="retireRule(rule)">{{retiringRule===rule.rule_id?'确认停用（保留历史）':'停用此计价'}}</button></div>
+            <div class="price-actions"><button class="text-button" @click="openRuleEditor(rule)">编辑</button><button class="text-button" :disabled="savingRule" @click="retireRule(rule)">{{retiringRule===rule.rule_id?'确认停用（保留历史）':'停用此计价'}}</button></div>
           </article>
           <div v-if="!currentRules.length" class="empty-large">此方案暂无启用的价格。</div>
           <section v-if="scheduledRules.length" class="scheduled-prices"><h3>即将生效</h3><article v-for="rule in scheduledRules" :key="rule.rule_id"><strong>{{rule.rule_name}}</strong><p>{{ruleSummary(rule)}}</p><small>{{pricingWindowLabel(rule)}}</small><button class="text-button" @click="openRuleEditor(rule)">调整计划</button></article></section>
           <details v-if="shadowedRules.length" class="legacy-scheme-items"><summary><ChevronDown :size="16" :stroke-width="1.75" aria-hidden="true" />旧收费项（当前统一方案不使用，{{shadowedRules.length}} 项）</summary><p>保留原配置供核对；当前计算按上方统一方案执行。</p><article v-for="rule in shadowedRules" :key="rule.rule_id"><strong>{{rule.rule_name}}</strong><p>{{ruleSummary(rule)}}</p><button class="text-button" @click="openRuleEditor(rule)">查看 / 调整</button></article></details>
-          <details v-if="historicalRules.length"><summary>已停用、到期或历史价格（{{historicalRules.length}}）</summary><article v-for="rule in historicalRules" :key="rule.rule_id"><p>{{rule.rule_name}}：{{ruleSummary(rule)}}</p><small>{{pricingWindowLabel(rule)}}</small><button class="text-button" @click="openRuleEditor(rule)">查看 / 调整</button></article></details>
+          <details v-if="historicalRules.length" class="scheme-history"><summary>历史价格（{{historicalRules.length}}）</summary><article v-for="rule in historicalRules" :key="rule.rule_id"><p>{{rule.rule_name}}：{{ruleSummary(rule)}}</p><small>{{pricingWindowLabel(rule)}}</small><button class="text-button" @click="openRuleEditor(rule)">查看 / 调整</button></article></details>
+        </div>
         </div>
 
-        <section v-if="selectedGroup" class="binding-panel">
-          <header>
-            <div><h3>绑定款式</h3><p>绑定后，新计价使用本方案；已有金额不会自动改变。</p></div>
-            <button class="secondary" @click="bindingDialogOpen = true"><Link2 :size="16" :stroke-width="1.75" aria-hidden="true" />绑定新款式</button>
-          </header>
+        <section v-if="selectedGroup" v-show="schemeDetail==='bindings'" class="binding-panel">
+          <p>绑定只用于后续计价。已有金额保持原值。</p>
           <label class="binding-search">查找已绑定款式<input v-model.trim="bindingSearch" placeholder="款式编码或名称" /></label>
           <div class="binding-chips">
-            <span v-for="binding in filteredBindings" :key="binding.id"><b>{{ binding.i_id_raw || binding.normalized_i_id }}</b><small>{{ binding.display_name || '已绑定' }}</small><button class="text-button" :disabled="savingBinding" @click="unbind(binding)">{{unbindID===binding.id?'确认解除':'解除绑定'}}</button></span>
+            <span v-for="binding in filteredBindings" :key="binding.id">
+              <div><b>{{ binding.i_id_raw || binding.normalized_i_id }}</b><small v-if="binding.display_name && binding.display_name !== (binding.i_id_raw || binding.normalized_i_id)">{{ binding.display_name }}</small></div>
+              <button class="text-button" :disabled="savingBinding" @click="unbind(binding)">{{unbindID===binding.id?'确认解除':'解除绑定'}}</button>
+            </span>
             <span v-if="!selectedBindings.length" class="empty-inline">还没有款式绑定到此组。</span>
+            <span v-else-if="!filteredBindings.length" class="empty-inline">没有匹配的款式。</span>
           </div>
         </section>
+        </div>
       </section>
 
       <CostBoundSKUList :group="selectedGroupCode" :revision="dataRevision" />
@@ -168,7 +204,6 @@
       </div>
     </section>
 
-    <button class="calculator-toggle" :aria-expanded="calculatorOpen" :aria-controls="calculatorOpen ? 'cost-calculator' : undefined" @click="calculatorOpen=!calculatorOpen"><Calculator :size="18" :stroke-width="1.75" aria-hidden="true" />{{calculatorOpen?'收起':'试算'}}</button>
     </div>
     <Teleport to="body">
       <div v-if="ruleDialogOpen" class="modal-layer" @keydown.esc="closeRuleEditor">
@@ -351,9 +386,24 @@ const calculator = reactive({ rule_group: '', width: 1, height: 1, area: null as
 const props=defineProps<{initialTab?:'costs'|'schemes'}>()
 const entryTab=ref(props.initialTab||'costs')
 let schemesLoaded=false
-async function openSchemes(){entryTab.value='schemes';if(!schemesLoaded){await loadAll();schemesLoaded=true}}
-const workspaceTab=ref('方案与绑定')
-const workspaceIcons:Record<string,typeof Layers3>={'方案与绑定':Layers3,'绑定检查':Link2,'成本同步':CheckCheck,'更新记录':History}
+const workspaceTabs = [
+  { key: '计价方案', label: '计价方案', icon: Layers3 },
+  { key: '绑定检查', label: '绑定检查', icon: Link2 },
+  { key: '成本同步', label: '成本同步', icon: CheckCheck },
+  { key: '更新记录', label: '更新记录', icon: History },
+] as const
+const workspaceTab = ref<typeof workspaceTabs[number]['key']>('计价方案')
+const schemeDetail = ref<'pricing' | 'bindings'>('pricing')
+const schemeFiltersOpen = ref(false)
+async function openSchemes(tab: typeof workspaceTab.value) {
+  if (tab !== '计价方案') calculatorOpen.value = false
+  workspaceTab.value = tab
+  entryTab.value = 'schemes'
+  if (!schemesLoaded && !loading.value) {
+    schemesLoaded = true
+    await loadAll()
+  }
+}
 const groupSearch=ref('')
 const schemeFamilies=[{code:'uv',name:'UV'},{code:'board',name:'板材'},{code:'cloth',name:'布料'},{code:'paper',name:'纸张印刷'},{code:'other',name:'其他'}]
 const familyFilter=ref('all')

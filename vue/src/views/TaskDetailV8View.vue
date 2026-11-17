@@ -57,6 +57,25 @@
         @open-workflow="openWorkspace('workflow')"
         @refresh-references="refreshReferencePreviews"
       />
+
+      <section class="command-strip" :class="{ 'is-complete': isTerminal }" aria-label="当前阶段操作">
+        <div class="stage-summary">
+          <span class="stage-orb" :class="{ 'is-complete': isTerminal }" aria-hidden="true"><CheckCircle2 v-if="isTerminal" :size="20" /><PanelTopOpen v-else :size="19" /></span>
+          <div class="stage-copy"><p class="stage-label">当前节点</p><h2>{{ currentStageTitle }}</h2><p>{{ currentStageDescription }}</p></div>
+          <dl class="stage-context" aria-label="当前协作信息">
+            <div><dt>当前指派</dt><dd>{{ currentOwner }}</dd></div>
+            <div><dt>最近动态</dt><dd>{{ latestEventTitle }}</dd></div>
+          </dl>
+        </div>
+        <div class="command-actions">
+          <button v-if="isPlanning && bundle" class="secondary-button" @click="openWorkspace('resources')">查看 SKU 资源</button>
+          <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
+          <button v-if="canEditTaskBusinessInfo" class="primary-button" @click="openTaskEditor"><PencilLine :size="16" aria-hidden="true" />编辑任务信息</button>
+          <button v-if="canTerminateTask" class="secondary-button danger-button" :disabled="cancelLoading" @click="openTerminateDialog"><Ban :size="16" aria-hidden="true" />{{ cancelLoading ? '正在终止…' : '终止任务' }}</button>
+          <button class="secondary-button" @click="openWorkspace('details')"><FileText :size="16" aria-hidden="true" />完整任务信息</button>
+        </div>
+      </section>
+
       <section v-if="isRetouch && retouchMaterialRows.length" class="retouch-materials" aria-label="待修素材">
         <header>
           <div><p class="eyebrow">待修素材</p><h2>设计人员可直接查看和下载</h2></div>
@@ -68,7 +87,7 @@
           </div>
         </header>
         <p v-if="retouchBatchStatus" class="retouch-batch-status" role="status">{{ retouchBatchStatus }}</p>
-        <div class="retouch-material-grid">
+        <div class="retouch-material-grid desktop-region-scroll" role="region" aria-label="待修文件列表" tabindex="0">
           <article v-for="row in retouchMaterialRows" :key="row.key">
             <img v-if="row.file.imagePreviewUrl" :src="row.file.imagePreviewUrl" :alt="row.file.fileName">
             <span v-else class="retouch-file-mark">{{ row.file.fileName.split('.').pop()?.toUpperCase() || 'FILE' }}</span>
@@ -123,24 +142,6 @@
         </div>
       </section>
 
-      <section class="command-strip" :class="{ 'is-complete': isTerminal }" aria-label="当前阶段操作">
-        <div class="stage-summary">
-          <span class="stage-orb" :class="{ 'is-complete': isTerminal }" aria-hidden="true"><CheckCircle2 v-if="isTerminal" :size="20" /><PanelTopOpen v-else :size="19" /></span>
-          <div class="stage-copy"><p class="stage-label">当前节点</p><h2>{{ currentStageTitle }}</h2><p>{{ currentStageDescription }}</p></div>
-          <dl class="stage-context" aria-label="当前协作信息">
-            <div><dt>当前指派</dt><dd>{{ currentOwner }}</dd></div>
-            <div><dt>最近动态</dt><dd>{{ latestEventTitle }}</dd></div>
-          </dl>
-        </div>
-        <div class="command-actions">
-          <button v-if="isPlanning && bundle" class="secondary-button" @click="openWorkspace('resources')">查看 SKU 资源</button>
-          <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
-          <button v-if="canEditTaskBusinessInfo" class="primary-button" @click="openTaskEditor"><PencilLine :size="16" aria-hidden="true" />编辑任务信息</button>
-          <button v-if="canTerminateTask" class="secondary-button danger-button" :disabled="cancelLoading" @click="openTerminateDialog"><Ban :size="16" aria-hidden="true" />{{ cancelLoading ? '正在终止…' : '终止任务' }}</button>
-          <button class="secondary-button" @click="openWorkspace('details')"><FileText :size="16" aria-hidden="true" />完整任务信息</button>
-        </div>
-      </section>
-
       <section v-if="isPlanning" class="planning-results" aria-label="策划 SKU 明细">
         <header>
           <div>
@@ -150,7 +151,7 @@
           </div>
           <strong>{{ planningItems.length }} 个 SKU</strong>
         </header>
-        <div v-if="planningItems.length" class="planning-result-grid">
+        <div v-if="planningItems.length" class="planning-result-grid desktop-region-scroll" role="region" aria-label="策划结果列表" tabindex="0">
           <article v-for="item in planningItems" :key="item.task_sku_item_id">
             <div class="planning-image">
               <img
@@ -1377,4 +1378,12 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .hero-actions .default-style-entry:hover { background: rgb(var(--yb-text-inverse)/.23); }
 .workspace-dialog.default-style-dialog { width: min(690px, 100%); height: auto; max-height: calc(100dvh - 40px); }
 .default-style-dialog .workspace-body { min-height: 0; }
+@media (min-width: 901px) {
+  .retouch-material-grid,
+  .planning-result-grid {
+    max-block-size: min(40dvh, 24rem);
+    align-content: start;
+    padding: 0.1rem;
+  }
+}
 </style>

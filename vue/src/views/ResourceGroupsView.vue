@@ -35,6 +35,7 @@
       </nav>
     </section>
 
+    <div ref="resultsViewport" class="asset-results-region desktop-region-scroll" role="region" aria-label="资产检索结果" tabindex="0">
     <div v-if="error" class="error" role="alert"><span>{{ error }}</span><button @click="load">重试</button></div>
     <div v-if="loading && !result.items.length && !result.flat_items.length && !externalItems.length" class="empty loading-state" role="status">
       <span class="loading-spinner" aria-hidden="true" />正在检索 SKU 与资源…
@@ -137,6 +138,7 @@
       </section>
     </template>
     </template>
+    </div>
 
     <Teleport to="body">
       <div v-if="filterDrawerOpen" class="drawer-layer">
@@ -174,6 +176,7 @@ type FilterKey = 'resource_role' | 'file_format' | 'created_from' | 'created_to'
 
 const router = useRouter()
 const loading = ref(false)
+const resultsViewport = ref<HTMLElement | null>(null)
 const error = ref('')
 const filterDrawerOpen = ref(false)
 const filterDrawerPanel = ref<HTMLElement | null>(null)
@@ -299,8 +302,12 @@ async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number)
     }
   }))
 }
-function search() { result.page = 1; void load() }
-function goPage(page: number) { result.page = Math.max(1, Math.min(totalPages.value, page)); void load() }
+function goPage(page: number) {
+  result.page = Math.max(1, Math.min(totalPages.value, page))
+  if (resultsViewport.value) resultsViewport.value.scrollTop = 0
+  void load()
+}
+function search() { goPage(1) }
 onMounted(load)
 </script>
 
@@ -321,6 +328,25 @@ onMounted(load)
     display: inline-flex;
     align-items: center;
     justify-content: center;
+  }
+}
+@media (min-width: 901px) {
+  .groups-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    block-size: calc(100dvh - 6rem);
+    min-block-size: 23rem;
+    padding-block: 0;
+  }
+  .page-heading,
+  .search-workbench { flex: 0 0 auto; }
+  .asset-results-region {
+    display: grid;
+    align-content: start;
+    flex: 1 1 auto;
+    padding: 0.2rem;
+    gap: 0.65rem;
   }
 }
 </style>

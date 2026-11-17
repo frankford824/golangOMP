@@ -12,7 +12,8 @@
     </div>
     <template v-else-if="hasBusinessAccess">
       <div
-        class="board dashboard-workbench w-full min-w-0 space-y-4 pb-8 sm:space-y-5 md:space-y-6"
+        class="board dashboard-workbench w-full min-w-0 space-y-4 pb-8 sm:space-y-5 md:space-y-6 min-[901px]:space-y-3"
+        :data-desktop-section="desktopSection"
       >
         <!-- 顶栏 -->
         <header
@@ -37,9 +38,8 @@
             >
               设计部看板
             </BaseButton>
-            <span>30 秒自动刷新</span>
-            <strong>{{ summary.todayPendingCount }}</strong>
-            <small>设计待办</small>
+            <span class="board-header-cadence">30 秒自动刷新</span>
+            <div class="board-header-pending"><small>设计待办</small><strong>{{ summary.todayPendingCount }}</strong></div>
             <small class="board-header-updated">更新于 {{ lastUpdatedLabel }}</small>
             <BaseButton
               type="button"
@@ -93,6 +93,14 @@
             查看未指派任务
           </BaseButton>
         </div>
+
+        <nav class="dashboard-section-nav" aria-label="看板内容">
+          <button type="button" :aria-pressed="desktopSection==='overview'" @click="desktopSection='overview'">趋势与状态</button>
+          <button type="button" :aria-pressed="desktopSection==='activity'" @click="desktopSection='activity'">任务与动态</button>
+          <button type="button" :aria-pressed="desktopSection==='risks'" @click="desktopSection='risks'">
+            风险提醒 <span v-if="risks.length">{{ risks.length }}</span>
+          </button>
+        </nav>
 
         <!-- 任务经营指标与任务看板共用 task.view 权限。 -->
         <section
@@ -344,6 +352,8 @@ import DashboardTaskSnapshotTable from '@/components/dashboard/DashboardTaskSnap
 import RecentEventStream from '@/components/dashboard/RecentEventStream.vue'
 import RiskListCard from '@/components/dashboard/RiskListCard.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
+
+const desktopSection = ref<'overview' | 'activity' | 'risks'>('overview')
 import { usePermission } from '@/composables/usePermission'
 import { formatDateBeijing } from '@/utils/date'
 import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
@@ -1588,5 +1598,56 @@ onBeforeUnmount(stopRefreshLoop)
   .board-header h1 {
     max-width: 100%;
   }
+}
+.board-header-pending { display: grid; justify-items: center; }
+.dashboard-section-nav { display: none; }
+
+@media (min-width: 901px) {
+  .dashboard-shell { min-height: 0; }
+  .board-header { min-height: 0; padding: 0.75rem 1rem; align-items: center; }
+  .board-header-aside {
+    display: flex;
+    flex-wrap: wrap;
+    align-self: center;
+    justify-content: end;
+    min-width: 0;
+    gap: 0.5rem 0.75rem;
+    padding: 0.3rem 0.45rem;
+    border: 0;
+    background: transparent;
+  }
+  .board-header-aside .board-header-cadence { display: none; }
+  .board-header-pending { display: inline-flex; align-items: baseline; gap: 0.35rem; }
+  .board-header-pending strong { font-size: 1.375rem; }
+  .dashboard-health-strip { min-height: 0; padding: 0.45rem 0.55rem; }
+
+  .dashboard-section-nav {
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+    border-bottom: 1px solid rgb(var(--yb-border));
+  }
+  .dashboard-section-nav button {
+    min-height: 2.25rem;
+    padding: 0 0.75rem;
+    border-bottom: 2px solid transparent;
+    color: rgb(var(--yb-text-muted));
+    font-size: 0.8125rem;
+  }
+  .dashboard-section-nav button[aria-pressed='true'] {
+    border-bottom-color: rgb(var(--yb-brand));
+    color: rgb(var(--yb-brand));
+    font-weight: 700;
+  }
+  .dashboard-section-nav span {
+    margin-inline-start: 0.25rem;
+    color: rgb(var(--yb-warning-text));
+    font-variant-numeric: tabular-nums;
+  }
+  .dashboard-workbench:not([data-desktop-section='overview']) .dashboard-analysis-grid,
+  .dashboard-workbench:not([data-desktop-section='overview']) .kpi--quality,
+  .dashboard-workbench:not([data-desktop-section='activity']) .dashboard-bottom-grid,
+  .dashboard-workbench:not([data-desktop-section='activity']) .kpi--queues,
+  .dashboard-workbench:not([data-desktop-section='risks']) .dashboard-risk-zone { display: none; }
 }
 </style>

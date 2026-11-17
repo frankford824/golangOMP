@@ -35,7 +35,7 @@
           </BaseButton>
         </div>
       </div>
-      <TaskCostSpecificationPanel v-if="can('task.create')" />
+      <TaskCostSpecificationPanel v-if="can('task.create')" compact />
       <div class="task-tabs" aria-label="任务中心列表范围">
         <BaseButton
           v-for="tab in taskTabs"

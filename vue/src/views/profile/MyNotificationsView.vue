@@ -2,12 +2,8 @@
   <section class="notif-page">
     <header class="notif-hero">
       <div>
-        <div class="notif-eyebrow">
-          <Bell class="h-4 w-4" />
-          通知中心
-        </div>
-        <h1>系统消息与运营广播</h1>
-        <p>共 {{ items.length }} 条，未读 {{ unreadCount }} 条。未点击过的通知会在下次登录后继续保留。</p>
+        <h1>通知中心</h1>
+        <p>共 {{ items.length }} 条 · {{ unreadCount }} 条未读</p>
       </div>
       <div class="notif-hero-actions">
         <div class="notif-segment">
@@ -33,159 +29,15 @@
       </div>
     </header>
 
-    <section class="notif-webpush">
-      <div class="notif-section-head">
-        <div>
-          <div class="notif-eyebrow">
-            <BellRing class="h-4 w-4" />
-            系统通知
-          </div>
-          <h2>Web Push 提醒</h2>
-        </div>
-        <p>{{ webPushStatusText }}</p>
-      </div>
-      <div class="notif-webpush-actions">
-        <button
-          v-if="!webPushActive"
-          type="button"
-          class="notif-btn notif-btn--primary"
-          :disabled="webPushLoading || !webPushCanEnable"
-          @click="enableWebPush"
-        >
-          <BellRing class="h-4 w-4" />
-          开启系统通知
-        </button>
-        <button
-          v-else
-          type="button"
-          class="notif-btn notif-btn--ghost"
-          :disabled="webPushLoading"
-          @click="disableWebPush"
-        >
-          关闭系统通知
-        </button>
-        <button
-          type="button"
-          class="notif-btn notif-btn--ghost"
-          :disabled="webPushLoading || !webPushActive"
-          @click="sendWebPushTest"
-        >
-          <Send class="h-4 w-4" />
-          发送测试
-        </button>
-      </div>
-      <p v-if="webPushMessage" class="notif-webpush-message" :class="{ 'is-error': webPushMessageType === 'error' }">
-        {{ webPushMessage }}
-      </p>
-    </section>
-
-    <section v-if="canBroadcast" class="notif-broadcast">
-      <div class="notif-section-head">
-        <div>
-          <div class="notif-eyebrow">
-            <Megaphone class="h-4 w-4" />
-            统一广播
-          </div>
-          <h2>发送通知到通知中心</h2>
-        </div>
-        <p>可选择全系统用户，或指定一个/多个用户。发送后写入对方通知中心，离线后下次登录仍可见。</p>
-      </div>
-
-      <div class="notif-broadcast-grid">
-        <label class="notif-field">
-          <span>标题</span>
-          <input v-model.trim="broadcastTitle" maxlength="80" placeholder="例如：临时排班调整" />
-        </label>
-
-        <div class="notif-field">
-          <span>接收范围</span>
-          <div class="notif-choice">
-            <button
-              v-if="canBroadcastAll"
-              type="button"
-              :class="{ 'is-active': broadcastAudience === 'all' }"
-              @click="broadcastAudience = 'all'"
-            >
-              <Users class="h-4 w-4" />
-              全部用户
-            </button>
-            <button
-              type="button"
-              :class="{ 'is-active': broadcastAudience === 'users' }"
-              @click="broadcastAudience = 'users'"
-            >
-              <UserPlus class="h-4 w-4" />
-              指定用户
-            </button>
-          </div>
-        </div>
-
-        <label class="notif-field notif-field--wide">
-          <span>通知详情</span>
-          <textarea
-            v-model.trim="broadcastContent"
-            maxlength="1000"
-            rows="4"
-            placeholder="输入对方需要看到的完整通知内容"
-          />
-        </label>
-
-        <div v-if="broadcastAudience === 'users'" class="notif-recipient-panel">
-          <div class="notif-recipient-search">
-            <Search class="h-4 w-4" />
-            <input
-              v-model.trim="userKeyword"
-              placeholder="搜索姓名、账号、部门"
-              @keyup.enter="searchUsers"
-            />
-            <button type="button" class="notif-btn notif-btn--ghost" :disabled="usersLoading" @click="searchUsers">
-              搜索
-            </button>
-          </div>
-
-          <div v-if="selectedUsers.length" class="notif-selected-users">
-            <button v-for="user in selectedUsers" :key="user.id" type="button" @click="removeUser(user.id)">
-              {{ displayUserName(user) }}
-              <span>×</span>
-            </button>
-          </div>
-
-          <div class="notif-user-options">
-            <label v-for="user in userOptions" :key="user.id" class="notif-user-option">
-              <input
-                type="checkbox"
-                :checked="selectedUserIds.includes(normalizeUserID(user.id))"
-                @change="toggleUser(user)"
-              />
-              <span>
-                <strong>{{ displayUserName(user) }}</strong>
-                <small>{{ displayUserMeta(user) }}</small>
-              </span>
-            </label>
-            <p v-if="!userOptions.length" class="notif-empty-inline">输入关键词搜索用户</p>
-          </div>
-        </div>
-      </div>
-
-      <footer class="notif-broadcast-footer">
-        <p :class="{ 'is-error': broadcastMessageType === 'error' }">{{ broadcastMessage }}</p>
-        <button type="button" class="notif-btn notif-btn--primary" :disabled="sendingBroadcast" @click="sendBroadcast">
-          <Send class="h-4 w-4" />
-          发送广播
-        </button>
-      </footer>
-    </section>
-
     <div class="notif-layout">
       <section class="notif-list-panel">
         <div class="notif-section-head">
           <div>
             <h2>通知记录</h2>
-            <p>按最新时间排序，点击通知可标记为已读；任务类通知会打开对应任务。</p>
           </div>
         </div>
 
-        <div v-if="visibleItems.length" class="notif-list">
+        <div v-if="visibleItems.length" class="notif-list desktop-region-scroll" role="region" aria-label="通知记录" tabindex="0">
           <article
             v-for="item in visibleItems"
             :key="item.id"
@@ -222,19 +74,153 @@
         </div>
       </section>
 
-      <aside class="notif-summary">
-        <div>
-          <span>未读</span>
-          <strong>{{ unreadCount }}</strong>
-        </div>
-        <div>
-          <span>全部</span>
-          <strong>{{ items.length }}</strong>
-        </div>
-        <div>
-          <span>当前筛选</span>
-          <strong>{{ visibleItems.length }}</strong>
-        </div>
+      <aside class="notification-tools desktop-region-scroll" aria-label="通知设置与广播" tabindex="0">
+        <nav v-if="canBroadcast" class="notification-tool-nav" aria-label="通知工具">
+          <button type="button" :aria-pressed="toolPane==='settings'" @click="toolPane='settings'">通知设置</button>
+          <button type="button" :aria-pressed="toolPane==='broadcast'" @click="toolPane='broadcast'">发广播</button>
+        </nav>
+        <section v-show="toolPane==='settings' || !canBroadcast" class="notif-webpush">
+          <div class="notif-section-head">
+            <div>
+              <div class="notif-eyebrow">
+                <BellRing class="h-4 w-4" />
+                系统通知
+              </div>
+              <h2>Web Push 提醒</h2>
+            </div>
+            <p>{{ webPushStatusText }}</p>
+          </div>
+          <div class="notif-webpush-actions">
+            <button
+              v-if="!webPushActive"
+              type="button"
+              class="notif-btn notif-btn--primary"
+              :disabled="webPushLoading || !webPushCanEnable"
+              @click="enableWebPush"
+            >
+              <BellRing class="h-4 w-4" />
+              开启系统通知
+            </button>
+            <button
+              v-else
+              type="button"
+              class="notif-btn notif-btn--ghost"
+              :disabled="webPushLoading"
+              @click="disableWebPush"
+            >
+              关闭系统通知
+            </button>
+            <button
+              type="button"
+              class="notif-btn notif-btn--ghost"
+              :disabled="webPushLoading || !webPushActive"
+              @click="sendWebPushTest"
+            >
+              <Send class="h-4 w-4" />
+              发送测试
+            </button>
+          </div>
+          <p v-if="webPushMessage" class="notif-webpush-message" :class="{ 'is-error': webPushMessageType === 'error' }">
+            {{ webPushMessage }}
+          </p>
+        </section>
+
+        <section v-if="canBroadcast" v-show="toolPane==='broadcast'" class="notif-broadcast">
+          <div class="notif-section-head">
+            <div>
+              <div class="notif-eyebrow">
+                <Megaphone class="h-4 w-4" />
+                统一广播
+              </div>
+              <h2>发送通知到通知中心</h2>
+            </div>
+            <p>可选择全系统用户，或指定一个/多个用户。发送后写入对方通知中心，离线后下次登录仍可见。</p>
+          </div>
+
+          <div class="notif-broadcast-grid">
+            <label class="notif-field">
+              <span>标题</span>
+              <input v-model.trim="broadcastTitle" maxlength="80" placeholder="例如：临时排班调整" />
+            </label>
+
+            <div class="notif-field">
+              <span>接收范围</span>
+              <div class="notif-choice">
+                <button
+                  v-if="canBroadcastAll"
+                  type="button"
+                  :class="{ 'is-active': broadcastAudience === 'all' }"
+                  @click="broadcastAudience = 'all'"
+                >
+                  <Users class="h-4 w-4" />
+                  全部用户
+                </button>
+                <button
+                  type="button"
+                  :class="{ 'is-active': broadcastAudience === 'users' }"
+                  @click="broadcastAudience = 'users'"
+                >
+                  <UserPlus class="h-4 w-4" />
+                  指定用户
+                </button>
+              </div>
+            </div>
+
+            <label class="notif-field notif-field--wide">
+              <span>通知详情</span>
+              <textarea
+                v-model.trim="broadcastContent"
+                maxlength="1000"
+                rows="4"
+                placeholder="输入对方需要看到的完整通知内容"
+              />
+            </label>
+
+            <div v-if="broadcastAudience === 'users'" class="notif-recipient-panel">
+              <div class="notif-recipient-search">
+                <Search class="h-4 w-4" />
+                <input
+                  v-model.trim="userKeyword"
+                  placeholder="搜索姓名、账号、部门"
+                  @keyup.enter="searchUsers"
+                />
+                <button type="button" class="notif-btn notif-btn--ghost" :disabled="usersLoading" @click="searchUsers">
+                  搜索
+                </button>
+              </div>
+
+              <div v-if="selectedUsers.length" class="notif-selected-users">
+                <button v-for="user in selectedUsers" :key="user.id" type="button" @click="removeUser(user.id)">
+                  {{ displayUserName(user) }}
+                  <span>×</span>
+                </button>
+              </div>
+
+              <div class="notif-user-options">
+                <label v-for="user in userOptions" :key="user.id" class="notif-user-option">
+                  <input
+                    type="checkbox"
+                    :checked="selectedUserIds.includes(normalizeUserID(user.id))"
+                    @change="toggleUser(user)"
+                  />
+                  <span>
+                    <strong>{{ displayUserName(user) }}</strong>
+                    <small>{{ displayUserMeta(user) }}</small>
+                  </span>
+                </label>
+                <p v-if="!userOptions.length" class="notif-empty-inline">输入关键词搜索用户</p>
+              </div>
+            </div>
+          </div>
+
+          <footer class="notif-broadcast-footer">
+            <p :class="{ 'is-error': broadcastMessageType === 'error' }">{{ broadcastMessage }}</p>
+            <button type="button" class="notif-btn notif-btn--primary" :disabled="sendingBroadcast" @click="sendBroadcast">
+              <Send class="h-4 w-4" />
+              发送广播
+            </button>
+          </footer>
+        </section>
       </aside>
     </div>
   </section>
@@ -244,7 +230,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  Bell,
   BellRing,
   CheckCircle2,
   Circle,
@@ -284,6 +269,7 @@ const webPushStore = useWebPushStore()
 
 const items = computed(() => notificationsStore.items)
 const filter = ref<FilterMode>('all')
+const toolPane = ref<'settings' | 'broadcast'>('settings')
 const broadcastAudience = ref<AudienceMode>('users')
 const broadcastTitle = ref('')
 const broadcastContent = ref('')
@@ -1245,5 +1231,68 @@ onMounted(() => {
     transition: none;
     transform: none;
   }
+}
+.notification-tools {
+  min-width: 0;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-surface));
+}
+
+.notification-tool-nav {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem 0;
+  border-bottom: 1px solid rgb(var(--yb-border));
+}
+
+.notification-tool-nav button {
+  min-height: 2rem;
+  padding: 0 0.55rem;
+  border-bottom: 2px solid transparent;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.8125rem;
+}
+
+.notification-tool-nav button[aria-pressed='true'] {
+  border-bottom-color: rgb(var(--yb-brand));
+  color: rgb(var(--yb-brand));
+  font-weight: 700;
+}
+
+.notification-tools :is(.notif-webpush,.notif-broadcast) {
+  padding: 0.85rem;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.notification-tools .notif-broadcast-grid { grid-template-columns: minmax(0,1fr); }
+.notification-tools .notif-section-head { align-items: start; flex-direction: column; gap: 0.45rem; }
+.notification-tools .notif-section-head > p { text-align: left; }
+.notification-tools :is(.notif-webpush-actions,.notif-broadcast-footer,.notif-recipient-search) { flex-wrap: wrap; }
+.notification-tools .notif-recipient-search input { min-width: 0; }
+
+@media (min-width: 901px) {
+  .notif-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    block-size: calc(100dvh - 6rem);
+    min-block-size: 23rem;
+  }
+  .notif-hero { flex: 0 0 auto; padding: 0.85rem 1rem; }
+  .notif-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: minmax(0,1fr) minmax(17rem,23rem);
+    align-items: stretch;
+    gap: 0.7rem;
+  }
+  .notif-list-panel { display: flex; flex-direction: column; min-height: 0; }
+  .notif-list-panel:not(:has(.notif-list)) { align-self: start; }
+  .notif-list { flex: 1 1 auto; align-content: start; }
+  .notif-empty { min-height: 7rem; align-content: center; }
+  .notification-tools { align-self: start; max-block-size: 100%; }
 }
 </style>

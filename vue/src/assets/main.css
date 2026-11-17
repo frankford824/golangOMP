@@ -750,6 +750,20 @@ body {
   }
 }
 
+@media (min-width: 901px) {
+  #app :where(.desktop-region-scroll) {
+    min-block-size: 0;
+    min-inline-size: 0;
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+
+  #app :where(.desktop-region-scroll):focus-visible {
+    outline: 2px solid rgb(var(--yb-brand));
+    outline-offset: -2px;
+  }
+}
+
 #app :where(.detail-top-chip--primary, .detail-v3-edit-base-btn, .detail-v3-upload-ref-btn, .detail-v3-dark-btn) {
   background: rgb(var(--yb-brand));
   border-color: rgb(var(--yb-brand));

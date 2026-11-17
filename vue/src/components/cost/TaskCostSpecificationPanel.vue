@@ -1,19 +1,21 @@
 <template>
-  <section class="task-cost-specification" aria-label="计价资料待办">
+  <section class="task-cost-specification" :class="{ 'specification--compact': compact }" aria-label="计价资料待办">
     <button type="button" class="spec-heading" :aria-expanded="expanded" @click="expanded=!expanded">
       <span><Ruler :size="16" :stroke-width="1.75" aria-hidden="true" /><strong>{{taskId?'计价资料':'我的待补计价资料'}}</strong><b v-if="taskId?missingCount>0:total>0">{{taskId?`本页 ${missingCount}`:total}}</b></span>
-      <span>{{loading?'读取中…':taskId?missingCount?'缺面积 · 结单后仍可补录':'查看 / 补录':total?'图已完成，仍有资料待补':'暂无待补面积'}}<ChevronDown :size="16" :stroke-width="1.75" aria-hidden="true" /></span>
+      <span>{{loading?'读取中…':error?'读取失败':taskId?missingCount?'缺面积 · 结单后仍可补录':'查看 / 补录':total?'待补面积':'暂无待补面积'}}<ChevronDown :size="16" :stroke-width="1.75" aria-hidden="true" /></span>
     </button>
-    <p v-if="error" class="spec-error" role="alert">{{error}}<button type="button" @click="load">重试读取</button></p>
+    <p v-if="error && (!compact || expanded)" class="spec-error" role="alert">{{error}}<button type="button" @click="load">重试读取</button></p>
     <p v-if="notice" class="spec-notice" role="status">{{notice}}</p>
     <div v-if="expanded" class="spec-content">
       <p>按面积计价的编码缺面积时，会持续留在待办；通知已读或任务结单都不会清除。</p>
+      <div class="spec-records desktop-region-scroll" role="region" aria-label="待补资料列表" tabindex="0">
       <div v-if="!loading&&!rows.length" class="spec-empty">{{taskId?'暂无计价资料。':'当前没有需要补录面积的编码。'}}</div>
       <article v-for="row in rows" :key="`${row.task_id}:${row.sku_item_id}`" class="spec-row">
         <div><strong>{{row.sku_code||row.task_no}}</strong><small>{{row.product_name}}</small><small>{{row.task_no}} · {{row.task_status==='Completed'?'已结单':row.task_status==='PendingAudit'?'图已完成 · 待审核':'处理中'}} · {{row.missing_area?'待补面积':row.requires_area?'面积已填写':'当前计价无需面积'}}<template v-if="row.cost_review_required"> · 成本待核对</template></small></div>
         <button v-if="row.can_edit" type="button" @click="edit(row)">{{row.missing_area?'补录面积':'调整计价资料'}}</button>
         <span v-else class="spec-readonly">只读</span>
       </article>
+      </div>
       <footer v-if="total>20"><button type="button" :disabled="loading||page<=1" @click="page--;load()">上一页</button><span>{{page}} / {{Math.ceil(total/20)}}</span><button type="button" :disabled="loading||page*20>=total" @click="page++;load()">下一页</button></footer>
     </div>
     <Teleport to="body">
@@ -41,7 +43,7 @@ import CostInputFields from './CostInputFields.vue'
 import {emptyCostInput} from '@/domain/cost-model'
 import {taskCostSpecificationsApi,type TaskCostSpecification} from '@/services/api/taskCostSpecificationsApi'
 import {retryCostRead} from '@/utils/cost-read-retry'
-const props=defineProps<{taskId?:number}>()
+const props=defineProps<{taskId?:number;compact?:boolean}>()
 const emit=defineEmits<{'saved':[]}>()
 const expanded=ref(false),loading=ref(false),saving=ref(false),error=ref(''),notice=ref(''),editError=ref(''),rows=ref<TaskCostSpecification[]>([]),total=ref(0),page=ref(1)
 const selected=ref<TaskCostSpecification|null>(null),input=ref(emptyCostInput()),reason=ref(''),form=ref<HTMLFormElement>()
@@ -61,4 +63,10 @@ onBeforeUnmount(()=>{request++;if(timer)clearInterval(timer);if(selected.value)d
 </style>
 <style scoped>
 .spec-editor :deep(.cost-inputs label){font:500 13px/20px var(--yb-font-text)}.spec-editor :deep(.cost-inputs input),.spec-editor :deep(.cost-inputs select){font:400 14px/20px var(--yb-font-text);min-height:38px}
+
+@media (min-width: 901px) {
+  .specification--compact .spec-heading { padding-block: 0.5rem; }
+  .specification--compact .spec-records { max-block-size: min(24dvh, 13rem); }
+  .specification--compact .spec-row { padding-block: 0.45rem; }
+}
 </style>

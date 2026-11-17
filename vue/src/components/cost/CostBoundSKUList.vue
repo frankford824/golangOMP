@@ -1,28 +1,187 @@
 <template>
   <aside class="bound-skus" aria-label="方案关联SKU">
-    <header><h2>关联 SKU <small>{{ total }} 个</small></h2><p>当前绑定款式下的 SKU。成本为已记录金额，不随方案编辑即时变化。</p></header>
-    <form @submit.prevent="search"><label>搜索 SKU / 产品 / 款式<input v-model.trim="keyword" placeholder="输入编码或产品名称" /></label><button :disabled="loading || !group">搜索</button></form>
-    <p v-if="error" role="alert">{{error}} <button @click="load">重试</button></p>
-    <p v-else-if="loading" role="status">正在读取关联 SKU…</p>
-    <p v-else-if="!items.length" class="empty">{{group?'没有匹配的 SKU；请检查已绑定款式或搜索条件。':'先从左侧选择方案。'}}</p>
-    <div v-else class="sku-table"><table><thead><tr><th>SKU / 产品</th><th>款式编码</th><th>当前成本</th></tr></thead><tbody><tr v-for="item in items" :key="item.id"><td><strong>{{item.sku_code}}</strong><span>{{item.product_name || '未填写产品名称'}}</span></td><td>{{item.style_code}}</td><td>{{item.cost_price==null?'待确认':`¥${item.cost_price.toFixed(3).replace(/0+$/,'').replace(/\.$/,'')}`}}</td></tr></tbody></table></div>
-    <footer><button :disabled="page<=1 || loading" @click="page--;load()">上一页</button><span>{{page}} / {{Math.max(1,Math.ceil(total/20))}}</span><button :disabled="page*20>=total || loading" @click="page++;load()">下一页</button></footer>
+    <header>
+      <h2>关联 SKU <small>{{ total }}</small></h2>
+      <span class="current-cost-note" title="列表显示已记录的金额，方案调整不会即时改变这些金额。">已记录成本</span>
+    </header>
+    <form @submit.prevent="search">
+      <input v-model.trim="keyword" aria-label="搜索 SKU、产品或款式" placeholder="搜索 SKU / 产品 / 款式" />
+      <button type="submit" :disabled="loading || !group">搜索</button>
+    </form>
+    <div ref="listViewport" class="sku-table desktop-region-scroll" role="region" aria-label="关联 SKU 列表" tabindex="0" :aria-busy="loading">
+      <p v-if="error" role="alert" class="sku-state">{{ error }} <button type="button" @click="load">重试</button></p>
+      <p v-else-if="loading && !items.length" class="sku-state" role="status">正在读取…</p>
+      <p v-else-if="!items.length" class="sku-state">{{ group ? '没有匹配的 SKU。' : '请选择方案。' }}</p>
+      <table v-else>
+        <colgroup><col /><col class="style-column" /><col class="cost-column" /></colgroup>
+        <thead><tr><th scope="col">SKU / 产品</th><th scope="col">款式</th><th scope="col">成本</th></tr></thead>
+        <tbody>
+          <tr v-for="item in items" :key="item.id">
+            <td>
+              <strong :title="item.sku_code">{{ item.sku_code }}</strong>
+              <span :title="item.product_name || '未填写产品名称'">{{ item.product_name || '未填写产品名称' }}</span>
+            </td>
+            <td :title="item.style_code">{{ item.style_code || '—' }}</td>
+            <td :title="formatCost(item.cost_price)">{{ formatCost(item.cost_price) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <footer>
+      <button type="button" :disabled="page <= 1 || loading" @click="goToPage(page - 1)">上一页</button>
+      <span>第 {{ page }} / {{ totalPages }} 页</span>
+      <button type="button" :disabled="page >= totalPages || loading" @click="goToPage(page + 1)">下一页</button>
+    </footer>
   </aside>
 </template>
+
 <script setup lang="ts">
-import {ref,watch} from 'vue'
-import {costManagementApi} from '@/services/api/costManagementApi'
-const props=defineProps<{group:string;revision:number}>()
-const keyword=ref(''),query=ref(''),page=ref(1),total=ref(0),loading=ref(false),error=ref('')
-const items=ref<Awaited<ReturnType<typeof costManagementApi.listBoundSKUs>>['data']>([])
-let request=0
-async function load(){const ticket=++request;items.value=[];error.value='';if(!props.group){total.value=0;loading.value=false;return}loading.value=true
- try{const data=await costManagementApi.listBoundSKUs({rule_group:props.group,keyword:query.value,page:page.value,page_size:20});if(ticket!==request)return;items.value=data.data||[];total.value=data.pagination?.total||0}
- catch(e){if(ticket===request){error.value=e instanceof Error?e.message:'读取失败';total.value=0}}
- finally{if(ticket===request)loading.value=false}}
-function search(){query.value=keyword.value;page.value=1;load()}
-watch(()=>[props.group,props.revision],()=>{keyword.value='';query.value='';page.value=1;total.value=0;load()},{immediate:true})
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { costManagementApi } from '@/services/api/costManagementApi'
+
+const props = defineProps<{ group: string; revision: number }>()
+const pageSize = 20
+const keyword = ref('')
+const query = ref('')
+const page = ref(1)
+const total = ref(0)
+const loading = ref(false)
+const error = ref('')
+const listViewport = ref<HTMLElement | null>(null)
+const items = ref<Awaited<ReturnType<typeof costManagementApi.listBoundSKUs>>['data']>([])
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+let request = 0
+
+function formatCost(cost: number | null | undefined) {
+  return cost == null ? '待确认' : `¥${cost.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
+}
+
+async function load() {
+  const ticket = ++request
+  error.value = ''
+  if (!props.group) {
+    items.value = []
+    total.value = 0
+    loading.value = false
+    return
+  }
+  loading.value = true
+  try {
+    const data = await costManagementApi.listBoundSKUs({
+      rule_group: props.group,
+      keyword: query.value,
+      page: page.value,
+      page_size: pageSize,
+    })
+    if (ticket !== request) return
+    items.value = data.data || []
+    total.value = data.pagination?.total || 0
+    if (listViewport.value) listViewport.value.scrollTop = 0
+  } catch (cause) {
+    if (ticket !== request) return
+    items.value = []
+    total.value = 0
+    error.value = cause instanceof Error ? cause.message : '读取失败'
+  } finally {
+    if (ticket === request) loading.value = false
+  }
+}
+
+function goToPage(next: number) {
+  page.value = next
+  void load()
+}
+
+function search() {
+  query.value = keyword.value
+  goToPage(1)
+}
+
+watch(() => [props.group, props.revision], () => {
+  keyword.value = ''
+  query.value = ''
+  page.value = 1
+  total.value = 0
+  items.value = []
+  void load()
+}, { immediate: true })
+
+onBeforeUnmount(() => { request += 1 })
 </script>
+
 <style scoped>
-.bound-skus{display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface));min-width:0;min-height:0;overflow:auto}.bound-skus h2{font-size:16px;margin:0}.bound-skus small,.bound-skus p{font-size:12px;color:rgb(var(--yb-text-muted));font-weight:400}.bound-skus form{display:flex;gap:8px;align-items:end}.bound-skus label{display:grid;gap:6px;font-size:12px;flex:1;min-width:0}.bound-skus input{width:100%;min-width:0;box-sizing:border-box;border:1px solid rgb(var(--yb-border));border-radius:8px;padding:9px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.bound-skus button{border:1px solid rgb(var(--yb-border));border-radius:8px;padding:8px 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand));cursor:pointer;white-space:nowrap}.bound-skus button:disabled{opacity:.4;cursor:default}.sku-table{overflow:auto;flex:1;min-height:0}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;color:rgb(var(--yb-text-muted));font-weight:500}th,td{padding:11px 6px;border-bottom:1px solid rgb(var(--yb-border));vertical-align:top}td strong{display:block;font-size:12px;color:rgb(var(--yb-brand))}td span{display:block;color:rgb(var(--yb-text-muted));margin-top:5px;overflow-wrap:anywhere;max-width:240px}td:last-child{white-space:nowrap}footer{display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-top:auto}.empty{padding:30px 0}
+.bound-skus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-surface));
+  overflow: auto;
+}
+.bound-skus header,
+.bound-skus form,
+.bound-skus footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+.bound-skus h2 { margin: 0; font-size: 0.9375rem; }
+.bound-skus h2 small,
+.current-cost-note,
+.bound-skus footer {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.bound-skus h2 small { margin-inline-start: 0.3rem; font-variant-numeric: tabular-nums; }
+.bound-skus input,
+.bound-skus button {
+  min-height: 2.1rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-surface));
+  font-size: 0.8125rem;
+}
+.bound-skus input {
+  flex: 1;
+  min-width: 0;
+  padding-inline: 0.55rem;
+  color: rgb(var(--yb-text));
+}
+.bound-skus button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0.15rem 0.6rem;
+  color: rgb(var(--yb-brand));
+  white-space: nowrap;
+}
+.bound-skus button:disabled { opacity: 0.48; cursor: default; }
+.bound-skus footer { padding-top: 0.5rem; border-top: 1px solid rgb(var(--yb-border)); }
+.sku-table { flex: 1; min-height: 0; overflow: auto; }
+.sku-table table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 0.8125rem; }
+.style-column { width: 25%; }
+.cost-column { width: 22%; }
+.sku-table th { position: sticky; top: 0; z-index: 1; background: rgb(var(--yb-surface-soft)); color: rgb(var(--yb-text-muted)); font-weight: 600; }
+.sku-table :is(th, td) {
+  overflow: hidden;
+  padding: 0.4rem 0.45rem;
+  border-bottom: 1px solid rgb(var(--yb-border));
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sku-table :is(th, td):last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.sku-table td strong,
+.sku-table td span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.sku-table td strong { color: rgb(var(--yb-brand)); }
+.sku-table td span { margin-top: 0.12rem; color: rgb(var(--yb-text-muted)); font-size: 0.75rem; }
+.sku-state { margin: 0.45rem; color: rgb(var(--yb-text-muted)); font-size: 0.8125rem; }
 </style>
