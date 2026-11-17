@@ -391,7 +391,7 @@ onBeforeUnmount(() => {
     <div class="aw-console-hero">
       <div class="aw-console-hero__head">
         <div>
-          <p class="aw-eyebrow">我的收入</p>
+          <p class="aw-eyebrow">{{ result?.current_month && !accessClosed ? '结算月 · ' + formatMonthLabel(result.current_month) : '我的收入' }}</p>
           <h1 class="aw-console-hero__title">本月预计收入</h1>
         </div>
         <button class="aw-console-button" type="button" :disabled="loading" @click="load">

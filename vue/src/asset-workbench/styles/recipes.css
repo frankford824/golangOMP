@@ -383,42 +383,23 @@
   background: var(--aw-stage-surface);
 }
 
-.aw-nav-item--active {
-  color: var(--aw-on-console);
-  background: var(--aw-stage-surface);
+.aw-nav-item--settings {
+  margin-block-start: var(--aw-space-2);
 }
 
-.aw-nav-item--active::before {
-  content: '';
-  position: absolute;
-  left: calc(var(--aw-space-2) * -1);
-  top: 50%;
-  width: 3px;
-  height: 18px;
-  transform: translateY(-50%);
-  border-radius: 999px;
-  background: var(--aw-accent-glow);
-  box-shadow: var(--aw-glow-accent);
+.aw-shell__nav .aw-nav-item--active {
+  color: var(--aw-surface);
+  background: var(--aw-accent-hover);
+  font-weight: var(--aw-weight-strong);
 }
 
 .aw-nav-item--active svg {
-  color: var(--aw-accent-glow);
   opacity: 1;
 }
 
-.aw-nav-item__stack {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.aw-nav-item__stack small {
-  font-size: var(--aw-font-size-xs);
-  color: var(--aw-on-console-muted);
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.aw-shell__nav .aw-nav-item:focus-visible {
+  outline-color: var(--aw-accent-glow);
+  outline-offset: -2px;
 }
 
 .aw-hub-tabs {
@@ -591,8 +572,7 @@
 
 .aw-simple-brand,
 .aw-simple-nav,
-.aw-simple-nav__item,
-.aw-simple-user {
+.aw-simple-nav__item {
   display: flex;
   align-items: center;
 }
@@ -619,48 +599,21 @@
   text-decoration: none;
 }
 
-.aw-simple-nav__item--active,
 .aw-simple-nav__item:hover {
   border-color: var(--aw-hairline);
   background: var(--aw-surface);
   color: var(--aw-ink);
 }
 
+.aw-simple-nav .aw-simple-nav__item[aria-current='page'] {
+  border-color: var(--aw-accent-hover);
+  background: var(--aw-accent-hover);
+  color: var(--aw-surface);
+  font-weight: var(--aw-weight-strong);
+}
+
 .aw-simple-account-actions {
-  display: flex;
-  align-items: center;
   justify-self: end;
-  gap: var(--aw-space-3);
-}
-
-.aw-simple-messages[aria-current="page"] {
-  border-color: var(--aw-accent);
-  color: var(--aw-accent);
-}
-
-.aw-simple-user {
-  gap: var(--aw-space-2);
-  color: var(--aw-ink-2);
-  text-decoration: none;
-}
-
-.aw-simple-user span {
-  display: grid;
-  gap: var(--aw-space-1);
-}
-
-.aw-simple-user b,
-.aw-simple-user small {
-  line-height: var(--aw-leading-control);
-}
-
-.aw-simple-user b {
-  color: var(--aw-ink);
-}
-
-.aw-simple-user small {
-  color: var(--aw-ink-muted);
-  font-size: var(--aw-font-size-xs);
 }
 
 .aw-simple {
@@ -1496,8 +1449,7 @@
 }
 
 .aw-topbar__actions,
-.aw-topbar__utilities,
-.aw-topbar__account {
+.aw-header-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1510,9 +1462,124 @@
   column-gap: var(--aw-space-3);
 }
 
-.aw-topbar__account .aw-icon-action {
-  width: var(--aw-row-md);
-  height: var(--aw-row-md);
+.aw-header-actions__trigger {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.aw-header-actions__trigger[data-current],
+.aw-header-actions__trigger[aria-expanded='true'] {
+  border-color: var(--aw-accent);
+  background: var(--aw-chip-success-bg);
+  color: var(--aw-accent-pressed);
+}
+
+.aw-header-actions__trigger svg,
+.aw-header-popover__action svg {
+  flex: none;
+}
+
+.aw-header-actions__name {
+  max-width: 11em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aw-header-actions__badge {
+  border-radius: var(--aw-radius-full, 999px);
+  background: var(--aw-chip-warn-bg);
+  color: var(--aw-money);
+  padding: 0 var(--aw-space-1);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-header-popover {
+  z-index: 20;
+  display: grid;
+  gap: var(--aw-space-1);
+  width: min(292px, calc(100vw - 24px));
+  max-height: var(--reka-popover-content-available-height, 65vh);
+  overflow-y: auto;
+  padding: var(--aw-space-2);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  color: var(--aw-ink);
+  box-shadow: var(--aw-shadow-panel);
+}
+
+.aw-header-popover__action {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-height: var(--aw-row-md);
+  width: 100%;
+  padding: var(--aw-space-2);
+  border: 0;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  color: var(--aw-ink);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.aw-header-popover__action:hover,
+.aw-header-popover__action[aria-current='page'] {
+  background: var(--aw-surface-muted);
+}
+
+.aw-header-popover__action--signout {
+  color: var(--aw-danger);
+}
+
+.aw-header-popover__meta {
+  margin-inline-start: auto;
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-header-popover__identity,
+.aw-header-popover__connection,
+.aw-header-popover__context {
+  display: grid;
+  gap: var(--aw-space-1);
+  padding: var(--aw-space-2);
+  overflow-wrap: anywhere;
+}
+
+.aw-header-popover__connection {
+  padding-inline: 0;
+  border-top: 1px solid var(--aw-hairline);
+}
+
+.aw-header-popover__connection p {
+  margin-inline: var(--aw-space-2);
+}
+
+.aw-header-popover__identity {
+  border-bottom: 1px solid var(--aw-hairline);
+}
+
+.aw-header-popover__identity small {
+  color: var(--aw-ink-2);
+}
+
+.aw-header-popover__context p,
+.aw-header-popover__connection p {
+  margin-block: 0;
+}
+
+.aw-header-popover__context textarea {
+  width: 100%;
+  padding: var(--aw-space-2);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  color: var(--aw-ink);
+  font: inherit;
+  resize: vertical;
 }
 
 .aw-topbar h1,
@@ -1849,44 +1916,6 @@
   max-width: 100%;
   margin-inline: auto;
   overflow-x: hidden;
-}
-
-/* --- Status line: quiet context, not a debug log --- */
-.aw-statusline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--aw-space-3);
-  margin-bottom: var(--aw-space-6);
-  color: var(--aw-ink-2);
-  font-size: var(--aw-font-size-sm);
-}
-
-.aw-statusline__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--aw-ink-muted);
-}
-
-.aw-statusline__dot[data-state='active'] {
-  background: var(--aw-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aw-accent) 18%, transparent);
-}
-
-.aw-statusline__dot[data-state='pending'] {
-  background: var(--aw-warn);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aw-warn) 18%, transparent);
-}
-
-.aw-statusline b {
-  color: var(--aw-ink);
-  font-family: var(--aw-font-mono);
-  font-weight: 500;
-}
-
-.aw-statusline__sep {
-  color: var(--aw-hairline-strong);
 }
 
 .aw-inline-alert {
@@ -5818,15 +5847,6 @@ body.aw-submission-dialog-locked {
     font-size: var(--aw-font-size-sm);
   }
 
-  .aw-nav-item--active::before {
-    left: 50%;
-    top: auto;
-    bottom: -3px;
-    width: 20px;
-    height: 3px;
-    transform: translateX(-50%);
-  }
-
   .aw-ledger {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -6031,11 +6051,6 @@ body.aw-submission-dialog-locked {
   .aw-simple-nav,
   .aw-simple-account-actions {
     justify-self: stretch;
-  }
-
-  .aw-simple-messages {
-    margin-inline-start: auto;
-    order: 1;
   }
 
   .aw-simple-nav {
@@ -11253,28 +11268,13 @@ a.aw-submission-tasks__row:hover {
     gap: var(--aw-space-3);
   }
 
-  .aw-topbar__heading > .aw-eyebrow {
-    display: none;
-  }
-
   .aw-topbar__actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    justify-content: stretch;
+    justify-content: flex-start;
     width: 100%;
   }
 
-  .aw-topbar__utilities {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .aw-topbar__utilities .aw-command-button kbd {
+  .aw-topbar__actions .aw-command-button kbd {
     display: none;
-  }
-
-  .aw-topbar__account > a[href="/account"] {
-    flex: 1 1 auto;
   }
 
   .aw-page-bar__actions:has(> .aw-month-control) {
@@ -11302,9 +11302,8 @@ a.aw-submission-tasks__row:hover {
     font-size: var(--aw-font-size-xs);
   }
 
-  .aw-shell__nav .aw-nav-item--active::before,
-  .aw-shell__nav .aw-nav-item__stack small {
-    display: none;
+  .aw-shell__nav .aw-nav-item--settings {
+    margin-block-start: 0;
   }
 
   .aw-hub-tabs {
@@ -11327,15 +11326,6 @@ a.aw-submission-tasks__row:hover {
   }
 
   .aw-settings-tabs__group-label {
-    display: none;
-  }
-
-  .aw-statusline {
-    gap: var(--aw-space-2);
-    margin-bottom: var(--aw-space-4);
-  }
-
-  .aw-statusline__sep {
     display: none;
   }
 

@@ -2,6 +2,7 @@
 import { shallowMount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import SimpleShell from './SimpleShell.vue'
+import WorkbenchHeaderActions from './WorkbenchHeaderActions.vue'
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ path: '/upload-overview' }),
@@ -14,7 +15,8 @@ describe('SimpleShell personal upload ledger entry', () => {
     const wrapper = shallowMount(SimpleShell, { props: { bootstrap: { profile: { settlement_visible: false }, capabilities: ['asset.workbench.submit'] } as never }, global: { stubs: { RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } } } })
     expect(wrapper.find('a[href="/my-settlement"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/upload"]').exists()).toBe(true)
-    expect(wrapper.get('a[href="/notifications"]').text()).toBe('消息')
+    expect(wrapper.findComponent(WorkbenchHeaderActions).exists()).toBe(true)
+    expect(wrapper.get('a[href="/upload-overview"]').attributes('aria-current')).toBe('page')
     wrapper.unmount()
   })
   it.each([true, false])('shows upload ledger only for submitters: %s', (submitter) => {

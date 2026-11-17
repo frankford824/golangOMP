@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { Bell, HandCoins, HardDrive, ImagePlus, Table2, UserRound } from 'lucide-vue-next'
+import { HandCoins, HardDrive, ImagePlus, LayoutDashboard, Table2 } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
 import { canAccessPath } from '@aw/app/access'
@@ -9,6 +9,7 @@ import { workbenchProfileStatusMeta } from '@aw/shared/format/status'
 import GlobalDownloadCenter from '../shared/download/GlobalDownloadCenter.vue'
 import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
+import WorkbenchHeaderActions from './WorkbenchHeaderActions.vue'
 
 const props = defineProps<{
   bootstrap: AssetWorkbenchBootstrap | null
@@ -20,6 +21,7 @@ const displayName = computed(() => props.bootstrap?.profile?.real_name || props.
 const profileHint = computed(() => workbenchProfileStatusMeta(props.bootstrap?.profile).label)
 
 const navItems = [
+  { to: '/', label: '今日待办', icon: LayoutDashboard },
   {
     to: '/drive',
     label: '我的网盘',
@@ -43,37 +45,19 @@ const visibleNavItems = computed(() => {
         <span class="aw-shell__mark">AW</span>
         <span>作品工作台</span>
       </RouterLink>
-      <nav class="aw-simple-nav" aria-label="常用入口">
+      <nav class="aw-simple-nav" aria-label="工作模块">
         <RouterLink
           v-for="item in visibleNavItems"
           :key="item.to"
           :to="item.to"
           class="aw-simple-nav__item"
-          :class="{ 'aw-simple-nav__item--active': route.path === item.to }"
+          :aria-current="route.path === item.to ? 'page' : undefined"
         >
           <component :is="item.icon" :size="18" aria-hidden="true" />
           <span>{{ item.label }}</span>
         </RouterLink>
       </nav>
-      <div class="aw-simple-account-actions">
-        <RouterLink
-          class="aw-secondary-button aw-simple-messages"
-          to="/notifications"
-          aria-label="消息"
-          :aria-current="route.path === '/notifications' ? 'page' : undefined"
-          title="消息"
-        >
-          <Bell :size="18" aria-hidden="true" />
-          <span>消息</span>
-        </RouterLink>
-        <RouterLink class="aw-simple-user" to="/account" aria-label="我的资料">
-          <UserRound :size="18" aria-hidden="true" />
-          <span>
-            <b>{{ displayName }}</b>
-            <small>{{ profileHint }}</small>
-          </span>
-        </RouterLink>
-      </div>
+      <WorkbenchHeaderActions class="aw-simple-account-actions" :display-name="displayName" :profile-hint="profileHint" />
     </header>
 
     <main class="aw-simple">
