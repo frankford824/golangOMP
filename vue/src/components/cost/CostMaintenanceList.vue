@@ -35,7 +35,7 @@
       {{ error }} <button @click="load()">重新读取</button>
     </p>
     <p v-if="notice" role="status" class="maintenance-notice">{{ notice }}</p>
-    <div class="maintenance-table" :aria-busy="loading">
+    <div class="maintenance-table" role="region" aria-label="编码成本列表" tabindex="0" :aria-busy="loading">
       <table>
         <thead>
           <tr>
@@ -117,9 +117,7 @@
     <footer class="maintenance-footer">
       <span
         >{{ updatedLabel }}
-        <small>{{
-          selected ? "编辑期间暂停刷新" : "每15秒更新当前页"
-        }}</small></span
+        <small v-if="selected">编辑期间暂停刷新</small></span
       >
       <div>
         <label

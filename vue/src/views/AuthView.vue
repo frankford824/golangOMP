@@ -191,7 +191,7 @@
         href="https://beian.miit.gov.cn/"
         target="_blank"
         rel="noopener noreferrer"
-        class="text-[rgb(var(--yb-text-faint))] underline-offset-2 hover:text-[rgb(var(--yb-text-secondary))] hover:underline"
+        class="inline-flex min-h-8 items-center text-[rgb(var(--yb-text-faint))] underline-offset-2 hover:text-[rgb(var(--yb-text-secondary))] hover:underline"
       >
         苏ICP备2026007026号-1
       </a>

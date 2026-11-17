@@ -701,6 +701,13 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   overflow-x: hidden;
 }
 
+@media (min-width: 120rem) {
+  .content {
+    inline-size: min(100%, 120rem);
+    margin-inline: auto;
+  }
+}
+
 .mobile-menu-button,
 .mobile-close-button {
   display: inline-flex;

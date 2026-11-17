@@ -3,7 +3,6 @@
     <header class="page-heading yb-page-surface yb-page-header-row" data-page-header="asset-center">
       <div class="yb-page-heading-copy">
         <h1 class="yb-page-title">SKU 资产中心</h1>
-        <p class="yb-page-subtitle">SKU 生成后立即可检索；图片、来源任务、规格、组合关系与系统计算成本在同一张卡片持续补齐。</p>
       </div>
       <div class="page-actions">
         <button class="quiet-button" :disabled="loading" @click="load">
@@ -29,6 +28,11 @@
         </button>
         <button type="button" class="clear-filters" @click="clearAllFilters">清除全部</button>
       </div>
+      <nav v-if="result.total > result.page_size" class="pager" aria-label="资源分页">
+        <button :disabled="loading || result.page <= 1" @click="goPage(result.page - 1)">上一页</button>
+        <span>第 {{ result.page }} / {{ totalPages }} 页 · 共 {{ result.total }} {{ isFlatMode ? '项资源' : '个 SKU' }}</span>
+        <button :disabled="loading || result.page >= totalPages" @click="goPage(result.page + 1)">下一页</button>
+      </nav>
     </section>
 
     <div v-if="error" class="error" role="alert"><span>{{ error }}</span><button @click="load">重试</button></div>
@@ -134,17 +138,11 @@
     </template>
     </template>
 
-    <nav v-if="result.total > result.page_size" class="pager" aria-label="资源分页">
-      <button :disabled="loading || result.page <= 1" @click="goPage(result.page - 1)">上一页</button>
-      <span>第 {{ result.page }} / {{ totalPages }} 页 · 共 {{ result.total }} {{ isFlatMode ? '项资源' : '个 SKU' }}</span>
-      <button :disabled="loading || result.page >= totalPages" @click="goPage(result.page + 1)">下一页</button>
-    </nav>
-
     <Teleport to="body">
-      <div v-if="filterDrawerOpen" class="drawer-layer" @keydown.esc="filterDrawerOpen = false">
-        <button class="drawer-backdrop" aria-label="关闭筛选" @click="filterDrawerOpen = false" />
-        <aside class="filter-drawer" role="dialog" aria-modal="true" aria-labelledby="asset-filter-title">
-          <header><div><p class="eyebrow">缩小结果范围</p><h2 id="asset-filter-title">资产筛选</h2></div><button class="icon-button" aria-label="关闭" @click="filterDrawerOpen = false">×</button></header>
+      <div v-if="filterDrawerOpen" class="drawer-layer">
+        <button class="drawer-backdrop" tabindex="-1" aria-label="关闭筛选" @click="filterDrawerOpen = false" />
+        <aside ref="filterDrawerPanel" class="filter-drawer" role="dialog" aria-modal="true" aria-labelledby="asset-filter-title">
+          <header><h2 id="asset-filter-title">资产筛选</h2><button class="icon-button" aria-label="关闭" @click="filterDrawerOpen = false">×</button></header>
           <form @submit.prevent="searchFromDrawer">
             <section class="filter-section">
               <h3>资源属性</h3>
@@ -167,6 +165,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
+import { useModalA11y } from '@/composables/useModalA11y'
 import type { BackendAsset } from '@/services/apiTypes'
 import { assetsApi, type AssetBatchSearchManifest } from '@/services/api/assetsApi'
 import { resourceGroupsApi, type FlatResourceItem, type ProductCostReconciliation, type ResourceGroup, type ResourceRevision } from '@/services/api/resourceGroupsApi'
@@ -177,6 +176,8 @@ const router = useRouter()
 const loading = ref(false)
 const error = ref('')
 const filterDrawerOpen = ref(false)
+const filterDrawerPanel = ref<HTMLElement | null>(null)
+useModalA11y(filterDrawerOpen, filterDrawerPanel, { onEsc: () => { filterDrawerOpen.value = false } })
 const brokenImages = ref(new Set<number>())
 const brokenFlat = ref(new Set<number>())
 const liveCosts = ref(new Map<number, ProductCostReconciliation>())
@@ -305,6 +306,23 @@ onMounted(load)
 
 <style scoped>
 .groups-page{max-width:1320px;margin:0 auto;padding:28px;display:grid;gap:20px}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.page-actions{display:flex;gap:10px;flex-wrap:wrap}.page-heading h1{margin:4px 0;font-size:31px}.page-heading p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{margin:0;font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.quiet-button,.primary-button,.filter-button,.pager button,.error button,.icon-button{min-height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 14px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));cursor:pointer}.primary-button{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.search-workbench{display:grid;gap:10px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface))}.search-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.search-field{position:relative}.search-field input{width:100%;min-height:42px;border:1px solid rgb(var(--yb-border));border-radius:11px;padding:0 16px 0 40px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text))}.search-icon{position:absolute;left:14px;top:9px;color:rgb(var(--yb-text-muted));font-size:20px}.filter-button.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.active-filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.active-filters button{border:0;border-radius:999px;padding:6px 10px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));cursor:pointer}.active-filters .clear-filters{background:transparent;color:rgb(var(--yb-text-muted))}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}.resource-card{min-width:0;padding:0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));text-align:left;cursor:pointer;transition:transform .18s,border-color .18s,box-shadow .18s}.resource-card:hover,.resource-card:focus-visible{transform:translateY(-3px);border-color:rgb(var(--yb-brand-border));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.1);outline:2px solid rgb(var(--yb-brand-soft));outline-offset:2px}.cover{position:relative;display:block;aspect-ratio:16/11;background:rgb(var(--yb-surface-muted))}.cover img,.preview-fallback{width:100%;height:100%;object-fit:cover}.preview-fallback{display:grid;place-items:center;align-content:center;gap:6px;color:rgb(var(--yb-text-muted))}.file-mark{font-size:18px;font-weight:900}.preview-fallback small{font-size:11px}.mode-badge,.item-count{position:absolute;top:10px;padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface)/.94);font-size:11px;font-weight:800}.mode-badge{left:10px;color:rgb(var(--yb-brand))}.item-count{right:10px;color:rgb(var(--yb-text))}.card-body{display:grid;gap:7px;padding:14px}.sku-code{font-size:13px;color:rgb(var(--yb-brand))}.product-name{min-height:22px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.card-meta{display:flex;gap:8px;font-size:12px;color:rgb(var(--yb-text-muted))}.card-meta span+span::before{content:'·';margin-right:8px}.provenance{font-size:11px;color:rgb(var(--yb-text-faint))}.warn{font-size:12px;color:rgb(var(--yb-warning-text))}.pager{display:flex;align-items:center;justify-content:center;gap:14px}.empty,.error{padding:38px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:16px;color:rgb(var(--yb-text-muted))}.error{display:flex;align-items:center;justify-content:center;gap:12px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.drawer-layer{position:fixed;inset:0;z-index:90;display:flex;justify-content:flex-end}.drawer-backdrop{position:absolute;inset:0;border:0;background:rgb(var(--yb-overlay-night)/.42)}.filter-drawer{position:relative;width:min(390px,100vw);height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));box-shadow:-18px 0 48px rgb(var(--yb-shadow)/.18)}.filter-drawer>header{display:flex;align-items:center;justify-content:space-between;padding:22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-drawer h2{margin:3px 0 0}.icon-button{width:40px;padding:0;font-size:24px}.filter-drawer form{min-height:0;display:grid;grid-template-rows:1fr auto;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr;gap:14px;padding:22px}.filter-section h3{margin:0;font-size:14px}.filter-section label{display:grid;gap:6px;font-size:12px;color:rgb(var(--yb-text-muted))}.filter-section input,.filter-section select{box-sizing:border-box;width:100%;height:42px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 11px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-drawer footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}@media(max-width:700px){.groups-page{padding:16px}.page-heading{align-items:stretch;flex-direction:column}.search-row{grid-template-columns:1fr auto}.search-row .primary-button{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card-body{padding:11px}.product-name{font-size:13px}}@media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.mode-badge,.item-count{top:7px}.mode-badge{left:7px}.item-count{right:7px}.provenance,.card-meta{font-size:10px}}
+@media (min-width: 769px) {
+  .search-workbench .pager {
+    justify-content: flex-end;
+    gap: 0.65rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid rgb(var(--yb-border));
+    color: rgb(var(--yb-text-secondary));
+    font-size: 0.8125rem;
+  }
+  .search-row button,
+  .search-workbench .pager button,
+  .filter-drawer footer button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
 </style>
 <style scoped>
 .results-refreshing{position:sticky;top:.5rem;z-index:4;display:flex;align-items:center;justify-content:center;gap:.55rem;width:max-content;max-width:calc(100% - 2rem);margin:-.25rem auto;padding:.55rem .85rem;border:1px solid rgb(var(--yb-brand-border));border-radius:999px;background:rgb(var(--yb-surface)/.94);color:rgb(var(--yb-brand));font-size:.76rem;font-weight:750;box-shadow:0 .5rem 1.4rem rgb(var(--yb-shadow)/.1);backdrop-filter:blur(12px)}.loading-state{display:flex;align-items:center;justify-content:center;gap:.65rem}.loading-spinner{width:1rem;height:1rem;border:2px solid rgb(var(--yb-brand-border));border-top-color:rgb(var(--yb-brand));border-radius:50%;animation:asset-search-spin .75s linear infinite}@keyframes asset-search-spin{to{transform:rotate(360deg)}}

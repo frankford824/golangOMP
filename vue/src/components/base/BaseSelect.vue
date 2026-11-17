@@ -13,7 +13,7 @@
       >
         <button
           type="button"
-          class="base-select-trigger-button flex min-w-0 flex-1 items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-[rgb(var(--yb-text-faint))]"
+          class="base-select-trigger-button flex min-w-0 flex-1 self-stretch items-center gap-2 rounded-lg py-0 pl-1 pr-0 text-left outline-none disabled:cursor-not-allowed disabled:text-[rgb(var(--yb-text-faint))]"
           :class="{ 'base-select-trigger-button-open': open }"
           :disabled="disabled"
           aria-haspopup="listbox"

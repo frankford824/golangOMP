@@ -23,6 +23,39 @@
 @media(max-width:900px){#app .cost-manager-page .cost-layout{grid-template-columns:180px minmax(0,1fr);height:auto;min-height:0}#app .cost-manager-page .rule-groups{grid-row:span 2;max-height:70vh;position:sticky;top:12px}#app .cost-manager-page .bound-skus{grid-column:2;max-height:520px}#app .cost-manager-page .rule-workspace{max-height:none}}
 @media(max-width:600px){#app .cost-manager-page .cost-layout{display:flex;flex-direction:column}#app .cost-manager-page .rule-groups{position:static;max-height:220px}#app .cost-manager-page .bound-skus{max-height:520px}#app .cost-manager-page .calculator-toggle{right:16px;bottom:16px}#app .cost-manager-page .calculator.floating-calculator{right:16px;bottom:84px}#app .cost-manager-page .rule-groups>button{width:100%}}
 
+@media (min-width: 901px) {
+  #app .cost-manager-page .cost-layout {
+    height: clamp(16rem, calc(100dvh - 18rem), 56rem);
+    min-height: 0;
+  }
+
+  #app .cost-manager-page .cost-layout > :is(.rule-groups, .rule-workspace, .bound-skus) {
+    min-block-size: 0;
+    max-block-size: 100%;
+  }
+
+  #app .cost-manager-page .rule-workspace { container-type: inline-size; }
+}
+
+@container (max-width: 30rem) {
+  #app .cost-manager-page .rule-card { grid-template-columns: minmax(0, 1fr); }
+
+  #app .cost-manager-page .price-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  #app .cost-manager-page .binding-panel > header {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  #app .cost-manager-page .binding-panel > header > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
 .binding-dialog .bulk-binding,.binding-dialog .binding-pagination{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0;font-size:12px}
 .binding-dialog .bulk-binding small{flex-basis:100%;color:rgb(var(--yb-warning-text))}
 #app .cost-manager-page .scheme-family-heading{display:flex;align-items:center;justify-content:space-between;margin:12px 14px 4px;padding:4px 0;font-size:12px;line-height:20px;font-weight:600;color:rgb(var(--yb-text-secondary))}

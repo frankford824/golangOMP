@@ -396,3 +396,23 @@
 .maintenance-drawer button.maintenance-close{width:36px;height:36px;min-height:36px;padding:0;flex:0 0 auto}
 .maintenance .maintenance-tools>div{display:flex;gap:10px;align-items:center}
 .maintenance .maintenance-footer>div{flex-wrap:wrap;gap:8px;justify-content:flex-end}
+
+.maintenance-table:focus-visible {
+  outline: 2px solid rgb(var(--yb-brand));
+  outline-offset: 2px;
+}
+
+@media (min-width: 769px) {
+  .maintenance .maintenance-tools :is(input, select, button) {
+    block-size: 2.625rem;
+    min-height: 2.625rem;
+    padding-block: 0;
+  }
+
+  .maintenance-table {
+    max-block-size: clamp(13rem, calc(100dvh - 24rem), 38rem);
+    scrollbar-gutter: stable;
+  }
+
+  .maintenance td { padding-block: 0.6rem; }
+}

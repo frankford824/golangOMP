@@ -575,4 +575,15 @@ const emit = defineEmits<{
   color: rgb(var(--yb-brand-strong));
   outline: none;
 }
+
+@media (min-width: 769px) {
+  .tc-check {
+    inline-size: 1.5rem;
+    block-size: 1.5rem;
+    justify-content: center;
+    cursor: pointer;
+  }
+
+  .tc-copy-toolbar button { min-block-size: 1.75rem; }
+}
 </style>

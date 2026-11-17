@@ -2814,6 +2814,15 @@ onBeforeUnmount(() => {
   text-decoration-color: currentColor;
 }
 
+@media (min-width: 769px) {
+  .directory-table :deep(.org-link-btn) {
+    display: inline-flex;
+    min-block-size: 1.75rem;
+    align-items: center;
+    text-align: start;
+  }
+}
+
 /* 批量清理弹窗内的组织清单 */
 .um-modal .purge-list {
   margin: 0.5rem 0 0;

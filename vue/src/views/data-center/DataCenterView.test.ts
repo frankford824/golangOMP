@@ -63,7 +63,7 @@ describe('DataCenterView', () => {
   it('creates a conversation, streams an answer, and opens server-issued evidence', async () => {
     const wrapper = mount(DataCenterView, { attachTo: document.body })
     await flushPromises()
-    expect(wrapper.text()).toContain('从业务问题开始，而不是从报表开始')
+    expect(wrapper.text()).toContain('你想查什么？')
 
     await wrapper.get('#ai-chat-question').setValue('过去一周哪个环节影响交付？')
     await wrapper.get('.chat-composer').trigger('submit')

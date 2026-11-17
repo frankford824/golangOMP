@@ -741,6 +741,15 @@ body {
   color: var(--yb-music-muted);
 }
 
+@media (min-width: 769px) {
+  #app :where(.apm-retry, .detail-page .breadcrumb button) {
+    display: inline-flex;
+    min-block-size: 1.75rem;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 #app :where(.detail-top-chip--primary, .detail-v3-edit-base-btn, .detail-v3-upload-ref-btn, .detail-v3-dark-btn) {
   background: rgb(var(--yb-brand));
   border-color: rgb(var(--yb-brand));

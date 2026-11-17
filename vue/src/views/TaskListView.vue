@@ -26,6 +26,7 @@
           </BaseButton>
           <BaseButton
             v-if="can('task.create')"
+            size="sm"
             variant="primary"
             class="task-list-action-button task-list-action-button--primary"
             @click="goCreate"
@@ -169,6 +170,67 @@
     <p v-if="listActionError" class="list-action-error">{{ listActionError }}</p>
     <p v-if="listActionSuccess" class="list-action-success">{{ listActionSuccess }}</p>
 
+    <div v-if="filteredList.length > 0" class="footer-card">
+      <span class="text-xs text-[rgb(var(--yb-text-muted))]">共 {{ tasksStore.listTotal }} 条</span>
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-1 text-xs text-[rgb(var(--yb-text-muted))]">
+          每页
+          <BaseSelect
+            v-model="pageSize"
+            class="task-page-size-select"
+            :options="pageSizeOptions"
+          />
+          条
+        </label>
+        <div class="pagination flex items-center gap-2">
+          <BaseButton
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="pager-btn"
+            :disabled="page <= 1 || refreshingList"
+            @click="goToPage(page - 1)"
+          >
+            上一页
+          </BaseButton>
+          <span class="pager-info text-xs text-[rgb(var(--yb-text-muted))]">
+            第 {{ page }} / {{ totalPages }} 页
+          </span>
+          <label class="page-jump text-xs text-[rgb(var(--yb-text-muted))]">
+            跳至
+            <BaseInput
+              v-model="jumpPage"
+              type="number"
+              class="page-jump-input"
+              :disabled="refreshingList"
+              @keyup.enter="jumpToPage"
+            />
+            页
+          </label>
+          <BaseButton
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="pager-btn"
+            :disabled="refreshingList"
+            @click="jumpToPage"
+          >
+            跳转
+          </BaseButton>
+          <BaseButton
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="pager-btn"
+            :disabled="page >= totalPages || refreshingList"
+            @click="goToPage(page + 1)"
+          >
+            下一页
+          </BaseButton>
+        </div>
+      </div>
+    </div>
+
     <!-- 主内容区（三态统一包裹） -->
     <AsyncStateWrapper
       :loading="tasksStore.loading"
@@ -191,7 +253,7 @@
       </template>
 
       <!-- 统一卡片视图 -->
-      <div class="task-cards">
+      <div ref="taskCardsViewport" class="task-cards" role="region" aria-label="任务列表" tabindex="0">
         <TaskCard
           v-for="task in pagedList"
           :key="task.id"
@@ -233,68 +295,6 @@
         />
       </div>
     </AsyncStateWrapper>
-
-    <!-- 分页页脚：翻页按钮，每页固定展示，不追加 -->
-    <div v-if="filteredList.length > 0" class="footer-card">
-      <span class="text-xs text-[rgb(var(--yb-text-muted))]">共 {{ tasksStore.listTotal }} 条</span>
-      <div class="flex items-center gap-3">
-        <label class="flex items-center gap-1 text-xs text-[rgb(var(--yb-text-muted))]">
-          每页
-          <BaseSelect
-            v-model="pageSize"
-            class="task-page-size-select"
-            :options="pageSizeOptions"
-          />
-          条
-        </label>
-        <div class="pagination flex items-center gap-2">
-          <BaseButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            class="pager-btn"
-            :disabled="page <= 1 || refreshingList"
-            @click="goToPage(page - 1)"
-          >
-            上一页
-          </BaseButton>
-          <span class="pager-info text-xs text-[rgb(var(--yb-text-muted))]">
-            第 {{ page }} / {{ totalPages }} 页，已显示 {{ visibleCount }} / {{ tasksStore.listTotal }}
-          </span>
-          <label class="page-jump text-xs text-[rgb(var(--yb-text-muted))]">
-            跳至
-            <BaseInput
-              v-model="jumpPage"
-              type="number"
-              class="page-jump-input"
-              :disabled="refreshingList"
-              @keyup.enter="jumpToPage"
-            />
-            页
-          </label>
-          <BaseButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            class="pager-btn"
-            :disabled="refreshingList"
-            @click="jumpToPage"
-          >
-            跳转
-          </BaseButton>
-          <BaseButton
-            type="button"
-            variant="ghost"
-            size="sm"
-            class="pager-btn"
-            :disabled="page >= totalPages || refreshingList"
-            @click="goToPage(page + 1)"
-          >
-            下一页
-          </BaseButton>
-        </div>
-      </div>
-    </div>
 
     <!-- v0.6 批量指派弹窗 -->
     <DesignerSelectDialog
@@ -725,6 +725,7 @@ type TaskSortKey = 'taskNo' | 'updatedAt' | 'createdAt' | 'dueAt'
 const sortKey = ref<TaskSortKey>('updatedAt')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 const page = ref(1)
+const taskCardsViewport = ref<HTMLElement | null>(null)
 const pageSize = ref(20)
 const showBatchAssign = ref(false)
 const showBatchAuditHandover = ref(false)
@@ -1188,10 +1189,6 @@ function onFilterReset(nextFilters: TaskListFilters, nextKeyword: string) {
 
 /** 翻页模式：每页固定展示，不追加；total 来自 listTotal */
 const totalPages = computed(() => Math.max(1, Math.ceil(tasksStore.listTotal / pageSize.value)))
-const visibleCount = computed(() => {
-  const loadedThroughCurrentPage = (page.value - 1) * pageSize.value + filteredList.value.length
-  return Math.min(tasksStore.listTotal, loadedThroughCurrentPage)
-})
 
 const pagedList = computed(() => filteredList.value)
 
@@ -1828,6 +1825,9 @@ watch([searchKeyword, activeTab, sortKey, sortOrder, page], saveState)
 watch(page, (value) => {
   jumpPage.value = value
 })
+watch([page, pageSize, searchKeyword, activeTab, sortKey, sortOrder], () => {
+  if (taskCardsViewport.value) taskCardsViewport.value.scrollTop = 0
+}, { flush: 'post' })
 watch([sortKey, sortOrder], () => {
   refreshList(true)
 })
@@ -3210,5 +3210,20 @@ watch(totalPages, (value) => {
   .advanced-filter-toggle {
     flex: 1 1 auto;
   }
+}
+@media (min-width: 769px) {
+  .quick-apply { min-block-size: 2.75rem; }
+
+  .task-cards {
+    max-block-size: clamp(15rem, calc(100dvh - 23rem), 47rem);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding-inline-end: 0.35rem;
+  }
+}
+
+.task-cards:focus-visible {
+  outline: 2px solid rgb(var(--yb-brand));
+  outline-offset: 2px;
 }
 </style>

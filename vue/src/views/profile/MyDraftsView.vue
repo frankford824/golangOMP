@@ -11,14 +11,14 @@
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="rounded border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] px-3 py-1 text-xs text-[var(--v1-text-secondary)]"
+            class="inline-flex min-h-9 items-center justify-center rounded border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] px-3 text-xs text-[var(--v1-text-secondary)]"
             :disabled="loading"
             @click="loadDrafts"
           >
             {{ loading ? '刷新中...' : '刷新' }}
           </button>
           <router-link
-            class="rounded bg-[var(--v1-bg-primary)] px-3 py-1 text-xs text-[rgb(var(--yb-text-inverse))]"
+            class="inline-flex min-h-9 items-center justify-center rounded bg-[var(--v1-bg-primary)] px-3 text-xs text-[rgb(var(--yb-text-inverse))]"
             to="/tasks/create?create=1"
           >
             创建任务
@@ -58,14 +58,14 @@
             </div>
             <div class="flex shrink-0 items-center gap-2">
               <router-link
-                class="rounded border border-[var(--v1-border)] px-2 py-1 text-xs text-[var(--v1-text-secondary)]"
+                class="inline-flex min-h-8 items-center justify-center rounded border border-[var(--v1-border)] px-2 text-xs text-[var(--v1-text-secondary)]"
                 :to="`/tasks/create?create=1&draft_id=${encodeURIComponent(draft.id)}`"
               >
-                前往创建
+                继续编辑
               </router-link>
               <button
                 type="button"
-                class="rounded border border-[rgb(var(--yb-danger-border))] px-2 py-1 text-xs text-[rgb(var(--yb-danger))]"
+                class="inline-flex min-h-8 items-center justify-center rounded border border-[rgb(var(--yb-danger-border))] px-2 text-xs text-[rgb(var(--yb-danger))]"
                 :disabled="deletingId === draft.id"
                 @click="removeDraft(draft.id)"
               >

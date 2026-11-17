@@ -2,9 +2,7 @@
   <main class="compose-page" :data-row-count="rows.length" :data-compose-intent="intent">
     <header class="compose-hero">
       <div class="hero-copy">
-        <p class="eyebrow">任务中心</p>
         <h1>创建任务</h1>
-        <p>先选好要做什么，再像填 Excel 一样把内容填进表格，最后一次提交就完成。</p>
       </div>
       <div class="hero-actions">
         <button class="secondary-button" type="button" :disabled="savingDraft" @click="saveDraft">
@@ -1123,4 +1121,39 @@ function startAnother() { resetComposeState() }
 @media(max-width:1180px){.intent-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.note-field{flex-basis:100%}.workspace-layout.has-drawer{grid-template-columns:minmax(0,1fr) 19rem}.validation-dock{grid-template-columns:1fr auto}.validation-items{grid-column:1/-1;grid-row:2}.dock-actions{grid-column:2;grid-row:1}}
 @media(max-width:760px){.compose-page{padding:.75rem}.compose-hero,.workspace-toolbar,.result-heading{align-items:flex-start;flex-direction:column}.hero-actions,.toolbar-actions,.result-actions{width:100%;justify-content:flex-start}.intent-grid{grid-template-columns:1fr}.intent-card{min-height:6.5rem}.common-ribbon{flex-direction:column;align-items:stretch}.common-ribbon input[type=datetime-local],.common-ribbon select{width:100%}.sku-rule-notice{grid-template-columns:auto 1fr}.sku-rule-notice>code{grid-column:1/-1;width:max-content}.generated-sku-banner{align-items:flex-start;flex-direction:column}.generated-sku-preview{justify-content:flex-start}.workspace-layout.has-drawer{grid-template-columns:1fr}.grid-column{padding:.65rem}.row-drawer{border-left:0;border-top:1px solid rgb(var(--yb-border-context))}.mobile-row-list{display:grid;gap:.65rem}.mobile-row-card{display:grid;gap:.65rem;padding:.8rem;border:1px solid rgb(var(--yb-border-context));border-radius:.8rem;background:rgb(var(--yb-surface))}.mobile-row-card.selected{border-color:rgb(var(--yb-brand))}.mobile-row-card header{display:grid;grid-template-columns:auto 1fr auto;gap:.55rem;align-items:center}.mobile-row-card header span{font-size:.7rem;color:rgb(var(--yb-text-secondary))}.mobile-fields{display:grid;gap:.55rem}.mobile-fields label{display:grid;gap:.3rem;font-size:.72rem;font-weight:700;color:rgb(var(--yb-text-secondary))}.mobile-fields input,.mobile-fields textarea{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid rgb(var(--yb-border-context));border-radius:.6rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.mobile-fields .mobile-switch{grid-template-columns:1fr auto}.mobile-switch input{width:2.4rem}.validation-dock{position:static;grid-template-columns:1fr}.validation-items,.dock-actions{grid-column:auto;grid-row:auto}.dock-actions{display:grid}.dock-actions .primary-button{width:100%}.task-result-grid,.sku-result-grid{grid-template-columns:1fr}}
 .compose-cost-fields{grid-column:1/-1}.spec-section{grid-template-columns:1fr 1fr}.spec-section h4,.spec-section p{grid-column:1/-1}.spec-section label{display:grid;gap:.35rem;font-size:.74rem;font-weight:760;color:rgb(var(--yb-text-secondary))}.spec-section select{min-height:2.45rem;padding:0 .65rem;border:1px solid rgb(var(--yb-border-context));border-radius:.65rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.mobile-fields select{width:100%;box-sizing:border-box;padding:.6rem;border:1px solid rgb(var(--yb-border-context));border-radius:.6rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}
+@media (min-width: 769px) {
+  .compose-page { container-type: inline-size; }
+  .intent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .compose-hero h1 {
+    font-size: clamp(1.75rem, 2.4vw, 2.4rem);
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+  }
+
+  .row-drawer > header button {
+    display: inline-grid;
+    inline-size: 2rem;
+    block-size: 2rem;
+    place-items: center;
+    border-radius: 0.5rem;
+  }
+
+  .row-drawer > header button:hover {
+    background: rgb(var(--yb-surface-muted));
+    color: rgb(var(--yb-text));
+  }
+}
+
+@container (min-width: 58rem) {
+  .intent-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .intent-card {
+    min-height: 6.5rem;
+    gap: 0.6rem;
+    padding: 0.85rem;
+  }
+  .intent-icon { width: 2.2rem; height: 2.2rem; }
+  .intent-copy strong { font-size: 0.95rem; }
+  .intent-copy small { font-size: 0.8125rem; }
+}
 </style>
