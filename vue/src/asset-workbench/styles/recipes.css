@@ -669,6 +669,10 @@
   padding: var(--aw-space-8);
 }
 
+.aw-simple:has(.aw-upload-ledger) {
+  width: min(100%, 1360px);
+}
+
 .aw-simple-home,
 .aw-simple-income {
   display: grid;
@@ -6480,6 +6484,63 @@ body.aw-submission-dialog-locked {
   background: var(--aw-stage);
 }
 
+.aw-submission-tasks :is(h2, p) {
+  margin: 0;
+}
+
+.aw-submission-tasks h2 {
+  font-size: var(--aw-font-size-h2);
+}
+
+.aw-submission-tasks__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+}
+
+.aw-submission-tasks__list li + li {
+  border-top: 1px solid var(--aw-hairline);
+}
+
+.aw-submission-tasks__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--aw-space-2) var(--aw-space-3);
+  min-width: 0;
+  padding: var(--aw-space-3);
+  text-decoration: none;
+  color: var(--aw-ink);
+}
+
+a.aw-submission-tasks__row:hover {
+  background: var(--aw-surface-muted);
+}
+
+.aw-submission-tasks__row strong {
+  font-family: var(--aw-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.aw-submission-tasks__owner {
+  flex: 1 1 120px;
+}
+
+.aw-submission-tasks__action {
+  margin-inline-start: auto;
+  color: var(--aw-accent-pressed);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-submission-tasks__empty {
+  padding: var(--aw-space-3);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-muted);
+}
+
 .aw-upload-ledger {
   min-height: 100%;
   display: flex;
@@ -6512,22 +6573,71 @@ body.aw-submission-dialog-locked {
   font-size: var(--aw-font-size-sm);
 }
 
-.aw-upload-ledger__summary {
-  display: flex;
-  align-items: stretch;
-  margin: 0;
+.aw-upload-ledger__results {
+  display: grid;
+  min-width: 0;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-3);
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
-  background: var(--aw-paper);
-  overflow: hidden;
+  background: var(--aw-surface);
+}
+
+.aw-upload-ledger__result-bar,
+.aw-upload-ledger__applied {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--aw-space-2) var(--aw-space-3);
+}
+
+.aw-upload-ledger__result-bar {
+  justify-content: space-between;
+}
+
+.aw-upload-ledger__applied {
+  min-width: 0;
+  padding: var(--aw-space-2) 0;
+}
+
+.aw-upload-ledger__applied > strong {
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-upload-ledger__applied > .aw-chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.aw-upload-ledger__views [aria-pressed='true'] {
+  border-color: var(--aw-accent);
+  background: var(--aw-surface-muted);
+  color: var(--aw-accent-pressed);
+  font-weight: var(--aw-weight-strong);
+}
+
+.aw-upload-ledger__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin: 0;
+}
+
+.aw-upload-ledger__summary > div:first-child dd {
+  font-size: var(--aw-font-size-h2);
+}
+
+.aw-upload-ledger__summary [data-attention] dd {
+  color: var(--aw-money);
 }
 
 .aw-upload-ledger__summary > div {
   display: grid;
   align-content: center;
   gap: 3px;
-  min-width: 124px;
-  padding: var(--aw-space-3) var(--aw-space-4);
+  min-width: 104px;
+  padding: var(--aw-space-2) var(--aw-space-3);
 }
 
 .aw-upload-ledger__summary > div + div {
@@ -7080,7 +7190,7 @@ body.aw-submission-dialog-locked {
 .aw-upload-ledger__col-format { width: 72px; }
 .aw-upload-ledger__col-count { width: 52px; }
 .aw-upload-ledger__col-amount { width: 86px; }
-.aw-upload-ledger__col-status { width: 90px; }
+.aw-upload-ledger__col-status { width: 102px; }
 .aw-upload-ledger__col-size { width: 64px; }
 .aw-upload-ledger__col-actions { width: 76px; }
 
@@ -7159,6 +7269,24 @@ body.aw-submission-dialog-locked {
 .aw-upload-ledger__table tbody tr.is-piecework-child:hover,
 .aw-upload-ledger__table tbody tr.is-piecework-child.is-selected {
   background: color-mix(in srgb, var(--aw-accent) 8%, var(--aw-paper));
+}
+
+.aw-upload-ledger__table tbody tr.needs-attention {
+  background: color-mix(in srgb, var(--aw-warn) 12%, var(--aw-surface));
+}
+
+.aw-upload-ledger__table tbody tr.needs-attention > td:first-child {
+  box-shadow: inset 3px 0 var(--aw-warn);
+}
+
+.aw-upload-ledger__table tbody tr.needs-attention:is(:hover, .is-selected) {
+  background: color-mix(in srgb, var(--aw-warn) 20%, var(--aw-surface));
+}
+
+.aw-upload-ledger__row-status {
+  display: grid;
+  justify-items: start;
+  gap: var(--aw-space-1);
 }
 
 .aw-upload-ledger__table td > strong,

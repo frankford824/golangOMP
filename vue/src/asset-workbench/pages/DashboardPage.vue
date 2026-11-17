@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
+import { canAccessPath } from '@aw/app/access'
+import UploadPendingList from '@aw/features/upload/UploadPendingList.vue'
 import { useSetupChecklist } from '@aw/app/useSetupChecklist'
-import { assetWorkbenchApi, type SettlementPreview, type SubmissionRow } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type SubmissionRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
@@ -14,12 +16,7 @@ import { submissionStatusMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
-interface DashboardData {
-  submissions: SubmissionRow[]
-  settlement: SettlementPreview | null
-}
-
-const month = ref(currentBusinessMonth())
+const month = currentBusinessMonth()
 const { bootstrap } = useAssetWorkbenchBootstrap()
 const {
   steps: setupSteps,
@@ -29,44 +26,21 @@ const {
   refresh: refreshSetup,
   toggleCollapsed: toggleSetupCollapsed,
 } = useSetupChecklist(() => bootstrap.value)
-const dashboardRequest = usePageRequest<DashboardData>(
-  async () => {
-    const [submissionResult, settlementResult] = await Promise.allSettled([
-      assetWorkbenchApi.listSubmissions({ page: 1, page_size: 20 }),
-      assetWorkbenchApi.previewSettlement(month.value),
-    ])
-    if (submissionResult.status === 'rejected' && settlementResult.status === 'rejected') {
-      throw settlementResult.reason
-    }
-    return {
-      submissions: submissionResult.status === 'fulfilled' ? submissionResult.value.items : [],
-      settlement: settlementResult.status === 'fulfilled' ? settlementResult.value : null,
-    }
-  },
-  { submissions: [], settlement: null },
-  '今日待办数据加载失败',
-)
-const dashboardData = computed(() => dashboardRequest.data.value ?? { submissions: [], settlement: null })
-const submissions = computed(() => dashboardData.value.submissions)
-const settlement = computed(() => dashboardData.value.settlement)
-const loading = dashboardRequest.loading
-const error = dashboardRequest.error
-
-const submittedCount = computed(() => settlement.value?.totals?.item_count ?? 0)
-const pendingSubmissionCount = computed(() => submissions.value.filter((item) => item.status !== 'checked').length)
-const netAmount = computed(() => settlement.value?.totals?.net_amount ?? 0)
-const pagesCount = computed(() => settlement.value?.totals?.page_count ?? 0)
-const recentSubmissions = computed(() => submissions.value.slice(0, 8))
 const capabilities = computed(() => new Set(bootstrap.value?.capabilities ?? []))
-const canViewUploadOverview = computed(() => capabilities.value.has('asset.workbench.manage') || capabilities.value.has('asset.workbench.settlement'))
+const canReview = computed(() => capabilities.value.has('asset.workbench.manage') || capabilities.value.has('asset.workbench.settlement'))
+const canViewSettlement = computed(() => capabilities.value.has('asset.workbench.settlement'))
+const canOpenLedger = computed(() => canAccessPath(bootstrap.value, '/upload-overview'))
+const canUpload = computed(() => canAccessPath(bootstrap.value, '/upload'))
+const recentRequest = usePageRequest(signal => assetWorkbenchApi.listSubmissions({ page: 1, page_size: 6 }, signal))
+const settlementRequest = usePageRequest(signal => assetWorkbenchApi.previewSettlement(month, signal))
+const recentSubmissions = computed(() => recentRequest.data.value?.items ?? [])
+const settlement = settlementRequest.data
 const ledgerSegments = computed(() => [
-  { key: 'submitted', label: '成品单数', value: formatInt(submittedCount.value), hint: '本月已提交计件单', expandable: true },
-  { key: 'pending', label: '待质检提交', value: formatInt(pendingSubmissionCount.value), hint: '素材工作台提交 · 点击查看', expandable: true },
-  { key: 'pages', label: '页数合计', value: formatInt(pagesCount.value), hint: '计价以页为单位', expandable: true },
-  { key: 'net', label: '本月预估净额', value: formatMoney(netAmount.value), hint: '日常计件与补录分开结算', money: true, expandable: true },
+  { key: 'submitted', label: '成品单数', value: formatInt(settlement.value?.totals.item_count), hint: '本月已提交计件单', expandable: true },
+  { key: 'pages', label: '页数合计', value: formatInt(settlement.value?.totals.page_count), hint: '计价以页为单位', expandable: true },
+  { key: 'net', label: '本月预估净额', value: formatMoney(settlement.value?.totals.net_amount), hint: '日常计件与补录分开结算', money: true, expandable: true },
 ])
 
-const pendingSubmissions = computed(() => submissions.value.filter((item) => item.status !== 'checked'))
 const payrollGridRows = computed(
   () =>
     (settlement.value?.payroll_rows ?? []).map((row) => ({
@@ -99,118 +73,76 @@ function gridValue(key: string, value: unknown) {
 
 function submissionDriveTarget(submission: SubmissionRow) {
   return {
-    path: canViewUploadOverview.value ? '/upload-overview' : '/drive',
+    path: canOpenLedger.value ? '/upload-overview' : '/drive',
     query: {
-      ...(canViewUploadOverview.value ? {} : { scope: 'orders' }),
+      ...(canOpenLedger.value ? {} : { scope: 'orders' }),
       q: submission.submission_no,
     },
   }
 }
 
-const loadDashboard = dashboardRequest.run
-
 onMounted(() => {
-  void loadDashboard()
+  void recentRequest.run()
+  if (canViewSettlement.value) void settlementRequest.run()
   void refreshSetup()
 })
 </script>
 
 <template>
   <section class="aw-page-stack aw-dashboard-page">
-    <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日素材工作台事项" :segments="ledgerSegments">
-      <template #actions>
-        <button class="aw-console-button" type="button" :disabled="loading" @click="loadDashboard">刷新</button>
-      </template>
-      <template #detail="{ segment }">
-        <div v-if="segment.key === 'pending'" class="aw-sheet-detail">
-          <div v-if="pendingSubmissions.length" class="aw-contact-sheet">
-            <RouterLink
-              v-for="submission in pendingSubmissions"
-              :key="submission.id"
-              class="aw-contact-tile"
-              :to="submissionDriveTarget(submission)"
-            >
-              <strong :title="submission.submission_no">{{ formatShanghaiDateTime(submission.submitted_at) }}</strong>
-              <small :title="submission.submission_no">单号尾号 {{ submission.submission_no.slice(-8) }}</small>
-              <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
-            </RouterLink>
-          </div>
-          <div v-else class="aw-empty-state">
-            <h3>没有待处理批次</h3>
-            <p>当前提交都已质检通过，暂时不需要你介入。</p>
-          </div>
-        </div>
-        <div v-else class="aw-sheet-detail">
-          <WorkbenchDataGrid
-            v-if="payrollGridRows.length"
-            :columns="payrollColumns"
-            :rows="payrollGridRows"
-            row-key="grid_id"
-            storage-key="dashboard-ledger-payroll"
-            group-by="payee_user_id"
-            :height="440"
-            :row-height="34"
-          >
-            <template #cell="{ column, value }">
-              <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-              <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-              <span v-else>{{ gridValue(column.key, value) }}</span>
-            </template>
-          </WorkbenchDataGrid>
-          <div v-else class="aw-empty-state">
-            <h3>还没有可结算明细</h3>
-            <p>本月暂无计件工资行，去“结算”生成预览后，这里会按人员分组显示工资条。</p>
-          </div>
-        </div>
-      </template>
-    </LedgerReadout>
-
+    <UploadPendingList :can-review="canReview" :can-open-ledger="canOpenLedger" :can-upload="canUpload" />
     <AsyncBoundary
-      :loading="loading"
-      :error="error"
-      loading-label="正在加载今日待办"
-      @retry="loadDashboard"
+      v-if="canViewSettlement"
+      :loading="settlementRequest.loading.value"
+      :error="settlementRequest.error.value"
+      loading-label="正在读取月度指标"
+      @retry="settlementRequest.run"
     >
-      <div class="aw-two-column">
-        <section class="aw-panel">
-          <div class="aw-panel__head"><h3>常用入口</h3></div>
-          <div class="aw-inline-actions">
-            <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
-            <RouterLink class="aw-secondary-button" to="/drive">素材网盘</RouterLink>
-            <RouterLink class="aw-secondary-button" to="/settlement">本月结算</RouterLink>
-          </div>
-        </section>
-        <section class="aw-panel">
-          <div class="aw-panel__head">
-            <h3>最近提交</h3>
-            <RouterLink
-              v-if="recentSubmissions.length"
-              class="aw-link-button"
-              :to="canViewUploadOverview ? '/upload-overview' : { path: '/drive', query: { scope: 'orders' } }"
+      <LedgerReadout v-if="settlement" :eyebrow="month" title="月度指标" :segments="ledgerSegments">
+        <template #detail>
+          <div class="aw-sheet-detail">
+            <WorkbenchDataGrid
+              v-if="payrollGridRows.length"
+              :columns="payrollColumns"
+              :rows="payrollGridRows"
+              row-key="grid_id"
+              storage-key="dashboard-ledger-payroll"
+              group-by="payee_user_id"
+              :height="440"
+              :row-height="34"
             >
-              查看全部
-            </RouterLink>
+              <template #cell="{ column, value }">
+                <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                <span v-else>{{ gridValue(column.key, value) }}</span>
+              </template>
+            </WorkbenchDataGrid>
+            <div v-else class="aw-empty-state">
+              <h3>还没有可结算明细</h3>
+              <p>本月暂无计件工资行，去“结算”生成预览后，这里会按人员分组显示工资条。</p>
+            </div>
           </div>
-          <div v-if="recentSubmissions.length" class="aw-contact-sheet">
-            <RouterLink
-              v-for="submission in recentSubmissions"
-              :key="submission.id"
-              class="aw-contact-tile"
-              :to="submissionDriveTarget(submission)"
-            >
-              <strong :title="submission.submission_no">{{ formatShanghaiDateTime(submission.submitted_at) }}</strong>
-              <small :title="submission.submission_no">单号尾号 {{ submission.submission_no.slice(-8) }}</small>
-              <small>{{ submissionStatusMeta(submission.status).label }} · {{ formatInt(submission.item_count) }} 单</small>
-            </RouterLink>
-          </div>
-          <div v-else class="aw-empty-state">
-            <h3>还没有提交</h3>
-            <p>上传第一批成品后，这里会按提交时间显示需要质检的批次。</p>
-            <RouterLink class="aw-primary-button" to="/upload">上传成品</RouterLink>
-          </div>
-        </section>
-      </div>
+        </template>
+      </LedgerReadout>
     </AsyncBoundary>
+    <section class="aw-panel">
+      <div class="aw-panel__head">
+        <h3>最近提交</h3>
+        <RouterLink v-if="canOpenLedger" class="aw-link-button" to="/upload-overview">查看上传台账</RouterLink>
+      </div>
+      <AsyncBoundary :loading="recentRequest.loading.value" :error="recentRequest.error.value" loading-label="正在读取最近提交" @retry="recentRequest.run">
+        <ul v-if="recentSubmissions.length" class="aw-submission-tasks__list">
+          <li v-for="submission in recentSubmissions" :key="submission.id">
+            <RouterLink class="aw-submission-tasks__row" :to="submissionDriveTarget(submission)">
+              <strong>{{ submission.submission_no }}</strong>
+              <span class="aw-copy">{{ formatShanghaiDateTime(submission.submitted_at) }} · {{ formatInt(submission.item_count) }} 件</span>
+              <span class="aw-submission-tasks__action">{{ submissionStatusMeta(submission.status).label }}</span>
+            </RouterLink>
+          </li>
+        </ul>
+        <p v-else class="aw-copy">还没有提交记录。</p>
+      </AsyncBoundary>
+    </section>
     <section v-if="setupSteps.length" class="aw-panel aw-setup-checklist">
       <div class="aw-panel__head">
         <div>
@@ -218,7 +150,7 @@ onMounted(() => {
           <p class="aw-copy">检查工作台配置和启用进度。</p>
         </div>
         <div class="aw-inline-actions">
-          <span class="aw-chip aw-chip--neutral">{{ setupCompletedCount }}/{{ setupSteps.length }} 已完成</span>
+          <span class="aw-chip aw-chip--neutral">{{ setupSteps.length - setupCompletedCount }} 项待完成</span>
           <button class="aw-secondary-button" type="button" :disabled="setupLoading" @click="refreshSetup()">刷新进度</button>
           <button class="aw-secondary-button" type="button" @click="toggleSetupCollapsed()">
             {{ setupCollapsed ? '展开清单' : '折叠清单' }}

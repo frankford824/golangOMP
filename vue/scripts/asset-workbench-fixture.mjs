@@ -725,7 +725,10 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
       })
     }
     if (/\/upload-sessions\/[^/]+\/(complete|cancel)$/.test(path)) return json(route, {})
-    if (path.endsWith('/submissions')) return paginated(route, submissions)
+    if (path.endsWith('/submissions')) {
+      const status = url.searchParams.get('status')
+      return paginated(route, status ? submissions.filter(row => row.status === status) : submissions)
+    }
     if (path.endsWith('/settlement/preview')) return json(route, settlementPreview)
     if (path.endsWith('/settlement/quality-actual-deductions')) {
       return json(route, { business_month: url.searchParams.get('business_month'), locked: false, deductions: [] })

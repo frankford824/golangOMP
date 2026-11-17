@@ -1,19 +1,18 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
 import { Boxes, HandCoins, ImagePlus } from 'lucide-vue-next'
-withDefaults(defineProps<{ incomeVisible?: boolean }>(), { incomeVisible: true })
+import UploadPendingList from '@aw/features/upload/UploadPendingList.vue'
+
+withDefaults(defineProps<{ incomeVisible?: boolean; canUpload?: boolean }>(), { incomeVisible: true, canUpload: true })
 </script>
 
 <template>
   <section class="aw-simple-home">
-    <div class="aw-simple-hero">
-      <p class="aw-eyebrow">今天要做什么</p>
-      <h1>选一个入口就能开始</h1>
-      <p>{{ incomeVisible ? '交作品会自动套用你能选择的类型；看收入只显示你自己的金额。' : '交作品会自动套用你能选择的类型；可在上传台账查看和管理自己的文件。' }}</p>
-    </div>
+    <UploadPendingList v-if="canUpload" :can-review="false" :can-open-ledger="canUpload" :can-upload="canUpload" />
+    <p class="aw-copy">常用入口{{ incomeVisible ? ' · 收入仅显示你自己的金额' : '' }}</p>
 
     <div class="aw-simple-card-grid">
-      <RouterLink class="aw-simple-card aw-simple-card--primary" to="/upload">
+      <RouterLink v-if="canUpload" class="aw-simple-card aw-simple-card--primary" to="/upload">
         <span class="aw-simple-card__icon">
           <ImagePlus :size="32" aria-hidden="true" />
         </span>

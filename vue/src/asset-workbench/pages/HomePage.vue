@@ -27,6 +27,6 @@ onMounted(() => {
     @retry="bootstrapRequest.run"
   >
     <DashboardPage v-if="bootstrap?.is_admin" />
-    <SimpleHomePage v-else-if="bootstrap && !bootstrap.is_admin" :income-visible="bootstrap.profile?.settlement_visible !== false" />
+    <SimpleHomePage v-else-if="bootstrap && !bootstrap.is_admin" :income-visible="bootstrap.profile?.settlement_visible !== false" :can-upload="bootstrap.capabilities.includes('asset.workbench.submit')" />
   </AsyncBoundary>
 </template>

@@ -14,8 +14,8 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import UploadLedgerDateField from '@aw/features/upload/UploadLedgerDateField.vue'
-import { chipClass, pricingStatusMeta } from '@aw/shared/format/status'
-import { formatMoney } from '@aw/shared/format/number'
+import { chipClass, pricingStatusMeta, qcStatusMeta } from '@aw/shared/format/status'
+import { formatInt, formatMoney } from '@aw/shared/format/number'
 import { useGlobalDownload } from '@aw/shared/download/useGlobalDownload'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
 import { batchMutationFailureMessage, hasSupplementRecordFailure } from '@aw/shared/drive/batchMutationFeedback'
@@ -65,6 +65,7 @@ const loading = ref(false)
 const actionLoading = ref(false)
 const exporting = ref(false)
 const error = ref('')
+const listError = ref('')
 const supplementDeleteGuidance = ref(false)
 const notice = ref('')
 const page = ref(1)
@@ -79,6 +80,7 @@ const operationSource = ref<OperationSourceFilter>('all')
 const sortBy = ref<SortBy>('created_at')
 const sortDir = ref<SortDir>('desc')
 const appliedFilters = ref<LedgerFilters>({})
+const prioritizeAttention = ref(true)
 const moveTargetDirectoryId = ref(0)
 const actionReason = ref('')
 const editingFileId = ref<number | null>(null)
@@ -123,14 +125,49 @@ function closePreviewDialog() {
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const allPageSelected = computed(() => files.value.length > 0 && files.value.every((file) => selectedIds.value.has(file.id)))
-const filteredDirectoryLabel = computed(() => {
-  if (directory.value === 'all') return '全部分类'
-  if (directory.value === 'unassigned') return '未分类'
-  const item = directories.value.find((dir) => String(dir.directory_id || '') === directory.value)
-  return item?.name || '指定分类'
+const sourceLabels: Record<Exclude<OperationSourceFilter, 'all'>, string> = {
+  normal_upload: '正常上传', supplement: '补录（全部）', client_supplement: '客户端补录', admin_supplement: '管理员补录',
+}
+const appliedFilterLabels = computed(() => {
+  const filters = appliedFilters.value
+  const labels: Array<{ key: string; label: string }> = []
+  if (filters.q) labels.push({ key: 'q', label: `关键词：${filters.q}` })
+  if (filters.owner && canViewAllUploads.value) labels.push({ key: 'owner', label: `创建人：${filters.owner}` })
+  if (filters.unassigned || filters.dir_id) {
+    const directoryName = filters.unassigned ? '未分类' :
+      directories.value.find(dir => dir.directory_id === filters.dir_id)?.name || '指定分类'
+    labels.push({ key: 'directory', label: `分类：${directoryName}` })
+  }
+  if (filters.operation_source) labels.push({ key: 'source', label: `来源：${sourceLabels[filters.operation_source]}` })
+  if (filters.created_from || filters.created_to) {
+    const from = filters.created_from
+    const to = filters.created_to
+    const dateLabel = from === to ? from : (from && to ? `${from} 至 ${to}` : from ? `${from} 起` : `截至 ${to}`)
+    labels.push({ key: 'date', label: `上传日期：${dateLabel}` })
+  }
+  return labels
+})
+
+const fileAttention = computed(() => new Map(files.value.map(file => {
+  const labels: string[] = []
+  if (file.qc_status === 'needs_fix') labels.push(qcStatusMeta(file.qc_status).label)
+  if (file.preview_status === 'failed') labels.push('预览失败')
+  if (file.pricing_status === 'pending_grade' || file.pricing_status === 'unpriced') labels.push(pricingStatusMeta(file.pricing_status).label)
+  return [file.id, labels] as const
+})))
+const attentionCount = computed(() => files.value.filter(file => fileAttention.value.get(file.id)?.length).length)
+const visibleFiles = computed(() => {
+  if (!prioritizeAttention.value) return files.value
+  const priority: DriveFileRow[] = []
+  const normal: DriveFileRow[] = []
+  for (const file of files.value) {
+    if (fileAttention.value.get(file.id)?.length) priority.push(file)
+    else normal.push(file)
+  }
+  return [...priority, ...normal]
 })
 const pieceworkRows = computed(() => uniqueSubmissionItemRows(files.value))
-const pieceworkDisplayByFileID = computed(() => buildPieceworkDisplayByFileID(files.value))
+const pieceworkDisplayByFileID = computed(() => buildPieceworkDisplayByFileID(visibleFiles.value))
 const totalAmount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.gross_amount || 0), 0))
 const totalCount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.page_count || 0), 0))
 const activeFilterCount = computed(() =>
@@ -432,8 +469,10 @@ const deletionDateRangeMissing = computed(() => personalLedger.value && (!applie
 async function loadFiles(nextPage = page.value, filters = currentFileFilters()) {
   const requestID = ++requestSeq
   listAbortController?.abort()
-  listAbortController = new AbortController()
+  const controller = new AbortController()
+  listAbortController = controller
   loading.value = true
+  listError.value = ''
   error.value = ''
   try {
     const result = await assetWorkbenchApi.driveFiles(
@@ -442,12 +481,12 @@ async function loadFiles(nextPage = page.value, filters = currentFileFilters()) 
         page: nextPage,
         page_size: pageSize,
       },
-      listAbortController.signal,
+      controller.signal,
     )
     if (requestID !== requestSeq) return
-    files.value = result.items
-    await hydrateSupplementSources(result.items, listAbortController.signal)
+    await hydrateSupplementSources(result.items, controller.signal)
     if (requestID !== requestSeq) return
+    files.value = result.items
     total.value = result.total
     appliedFilters.value = { ...filters }
     page.value = nextPage
@@ -456,22 +495,21 @@ async function loadFiles(nextPage = page.value, filters = currentFileFilters()) 
     }
     // Keep selections from other pages; only changing filters clears the scope.
   } catch (err) {
-    if ((err as DOMException)?.name === 'AbortError') return
+    if (controller.signal.aborted || requestID !== requestSeq) return
     files.value = []
     total.value = 0
-    error.value = err instanceof Error ? err.message : '上传记录加载失败'
+    listError.value = '上传记录加载失败，请重试。'
   } finally {
     if (requestID === requestSeq) loading.value = false
   }
 }
 
 async function applyFilters() {
-  page.value = 1
-  clearSelection()
   if (createdFrom.value && createdTo.value && createdFrom.value > createdTo.value) {
     error.value = '开始日期不能晚于结束日期，请调整后查询。'
     return
   }
+  clearSelection()
   await loadFiles(1)
 }
 
@@ -497,7 +535,18 @@ async function setSort(nextSort: SortBy) {
     sortBy.value = nextSort
     sortDir.value = nextSort === 'created_at' ? 'desc' : 'asc'
   }
-  await applyFilters()
+  prioritizeAttention.value = false
+  clearSelection()
+  await loadFiles(1, { ...appliedFilters.value, sort_by: sortBy.value, sort_dir: sortDir.value })
+}
+
+function showChronological() {
+  if (sortBy.value !== 'created_at') return setSort('created_at')
+  prioritizeAttention.value = false
+}
+
+function refreshResults() {
+  return loadFiles(page.value, appliedFilters.value)
 }
 
 function sortIcon(field: SortBy) {
@@ -786,7 +835,7 @@ async function moveSelectedFiles() {
     const failureMessage = batchMutationFailureMessage('移动', result.failures)
     notice.value = movedCount ? `已移动 ${movedCount} 个文件` : ''
     selectedIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
-    await loadFiles()
+    await refreshResults()
     error.value = failureMessage
   } catch (err) {
     error.value = err instanceof Error ? err.message : '移动失败'
@@ -853,7 +902,7 @@ async function confirmDeleteSelectedFiles() {
     notice.value = deletedCount ? `已删除 ${deletedCount} 个文件` : ''
     selectedIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
     pendingDeletion.value = null
-    await loadFiles()
+    await refreshResults()
     error.value = failureMessage
     supplementDeleteGuidance.value = hasSupplementRecordFailure(result.failures)
   } catch (err) {
@@ -874,14 +923,7 @@ async function exportCurrentFilter() {
     let nextPage = 1
     for (;;) {
       const result = await assetWorkbenchApi.driveFiles({
-        ...directoryParams(),
-        q: query.value.trim() || undefined,
-        owner: owner.value.trim() || undefined,
-        operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
-        created_from: createdFrom.value || undefined,
-        created_to: createdTo.value || undefined,
-        sort_by: sortBy.value,
-        sort_dir: sortDir.value,
+        ...appliedFilters.value,
         page: nextPage,
         page_size: 200,
       })
@@ -912,7 +954,11 @@ async function exportCurrentFilter() {
 }
 
 onMounted(async () => {
-  if (typeof route.query.q === 'string') query.value = route.query.q
+  if (typeof route.query.q === 'string' && route.query.q.trim()) {
+    query.value = route.query.q.trim()
+    createdFrom.value = ''
+    createdTo.value = ''
+  }
   await Promise.all([loadDirectories(), loadFiles(1)])
 })
 
@@ -927,26 +973,10 @@ onBeforeUnmount(() => {
   <section class="aw-upload-ledger aw-token-scope" :class="{ 'aw-upload-ledger--self': personalLedger }">
     <header class="aw-upload-ledger__hero">
       <div class="aw-upload-ledger__hero-copy">
-        <p class="aw-eyebrow">{{ personalLedger ? '我的上传' : '上传总览' }}</p>
         <h2>{{ personalLedger ? '我的上传台账' : '全站上传台账' }}</h2>
-        <span>{{ personalLedger ? '仅显示自己的上传。默认查询今天，可按上传日期、分类、名称和来源筛选。' : '按创建人、创建日期、分类、作品名称、格式和操作来源跟踪已上传作品。' }}</span>
+        <span v-if="personalLedger">仅显示自己的上传。未指定关键词时默认查看今天。</span>
       </div>
-      <dl class="aw-upload-ledger__summary" aria-label="当前筛选汇总">
-        <div>
-          <dt>匹配文件</dt>
-          <dd>{{ total }}</dd>
-        </div>
-        <div>
-          <dt>本页计价数量</dt>
-          <dd>{{ totalCount }}</dd>
-        </div>
-        <div v-if="canViewAmounts">
-          <dt>本页计价金额</dt>
-          <dd>{{ formatMoney(totalAmount) }}</dd>
-        </div>
-      </dl>
     </header>
-    <p v-if="personalLedger" class="aw-copy">上传日期按北京时间计算。批量删除前，请先查询明确的开始、结束日期；切换筛选会清空旧选择。</p>
 
     <section class="aw-upload-ledger__toolbar" aria-label="上传记录筛选">
       <form class="aw-upload-ledger__filters" @submit.prevent="applyFilters">
@@ -986,264 +1016,302 @@ onBeforeUnmount(() => {
             <button v-if="personalLedger || activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">{{ personalLedger ? '恢复今天' : '重置筛选' }}</button>
           </div>
           <div class="aw-upload-ledger__tools">
-            <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadFiles()">
+            <button class="aw-secondary-button" type="button" :disabled="loading" @click="refreshResults">
               <RefreshCw :size="15" aria-hidden="true" />
               刷新
             </button>
             <button class="aw-secondary-button" type="button" :disabled="exporting || loading" @click="exportCurrentFilter">
               <FileDown :size="15" aria-hidden="true" />
-              {{ exporting ? '导出中…' : '导出' }}
+              {{ exporting ? '导出中…' : '导出结果' }}
             </button>
           </div>
         </div>
       </form>
     </section>
 
-    <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <div v-if="supplementDeleteGuidance" class="aw-inline-alert aw-inline-alert--error">
-      <span>{{ error }}</span>
-      <RouterLink class="aw-grid-button" :to="supplementRecordPath">
-        {{ supplementRecordPath === '/supplements' ? '进入补录查询' : '进入我的补录' }}
-      </RouterLink>
-    </div>
-    <p v-else-if="error" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
+    <section class="aw-upload-ledger__results" aria-label="上传查询结果">
+      <div class="aw-upload-ledger__result-bar">
+        <dl class="aw-upload-ledger__summary" aria-label="当前筛选汇总">
+          <div><dt>匹配文件</dt><dd>{{ loading || listError ? '—' : formatInt(total) }}</dd></div>
+          <div :data-attention="attentionCount > 0 || undefined">
+            <dt>本页异常文件</dt><dd>{{ loading || listError ? '—' : formatInt(attentionCount) }}</dd>
+          </div>
+          <div><dt>本页计价数量</dt><dd>{{ loading || listError ? '—' : formatInt(totalCount) }}</dd></div>
+          <div v-if="canViewAmounts"><dt>本页计价金额</dt><dd>{{ loading || listError ? '—' : formatMoney(totalAmount) }}</dd></div>
+        </dl>
+        <div class="aw-inline-actions aw-upload-ledger__views" role="group" aria-label="浏览顺序">
+          <button class="aw-secondary-button" type="button" :aria-pressed="prioritizeAttention" @click="prioritizeAttention = true">
+            本页异常优先
+          </button>
+          <button class="aw-secondary-button" type="button" :disabled="loading" :aria-pressed="!prioritizeAttention && sortBy === 'created_at'" @click="showChronological">
+            按时间浏览
+          </button>
+        </div>
+      </div>
+      <div class="aw-upload-ledger__applied" aria-label="已应用筛选" role="group">
+        <strong>已应用筛选</strong>
+        <span v-for="filter in appliedFilterLabels" :key="filter.key" class="aw-chip aw-chip--neutral">{{ filter.label }}</span>
+        <span v-if="!appliedFilterLabels.length" class="aw-copy">无</span>
+        <span v-if="filterChangesPending && !loading" class="aw-copy" role="status">筛选已修改，点击「查询」生效</span>
+      </div>
+      <p v-if="notice" class="aw-inline-alert" role="status">{{ notice }}</p>
+      <div v-if="supplementDeleteGuidance" class="aw-inline-alert aw-inline-alert--error">
+        <span>{{ error }}</span>
+        <RouterLink class="aw-grid-button" :to="supplementRecordPath">
+          {{ supplementRecordPath === '/supplements' ? '进入补录查询' : '进入我的补录' }}
+        </RouterLink>
+      </div>
+      <p v-else-if="error" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
 
-    <section v-if="selectedIds.size" class="aw-upload-ledger__batch" aria-label="批量操作">
-      <strong>已选择 {{ selectedIds.size }} 个文件</strong>
-      <span class="aw-copy">选择跨页保留；删除前会补齐整件作品并确认文件数，包括子文件夹。</span>
-      <button v-if="total > files.length" class="aw-grid-button" type="button" :disabled="loading || selectionLoading || actionLoading || filterChangesPending" :title="filterChangesPending ? '筛选条件已更改，请先点击查询' : '选择已查询的全部文件，包含其他页'" @click="selectAllFilteredFiles">{{ selectionLoading ? '正在读取全部文件…' : `全选筛选结果（${total}个）` }}</button>
-      <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadSelectedFiles">
-        <Download :size="15" aria-hidden="true" />
-        下载
-      </button>
-      <template v-if="canManageDrive">
-        <select v-model.number="moveTargetDirectoryId" aria-label="移动目标分类">
-          <option :value="0">移动到分类…</option>
-          <option v-for="dir in directoryOptions" :key="dir.directory_id ?? dir.name" :value="Number(dir.directory_id)">{{ dir.name }}</option>
-        </select>
-        <button class="aw-secondary-button" type="button" :disabled="actionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
-      </template>
-      <template v-if="canDeleteFiles">
-        <input v-model.trim="actionReason" :placeholder="canManageDrive ? '删除原因或移动备注' : '删除原因'" aria-label="操作原因" />
-        <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || selectionLoading || !actionReason.trim() || filterChangesPending || deletionDateRangeMissing" :title="filterChangesPending ? '筛选条件已改变，请先查询再选择' : deletionDateRangeMissing ? '请先查询明确的开始、结束日期范围' : '核对整件作品后再确认删除'" @click="deleteSelectedFiles">
-          <Trash2 :size="15" aria-hidden="true" />
-          删除
+      <section v-if="selectedIds.size" class="aw-upload-ledger__batch" aria-label="批量操作">
+        <strong>已选择 {{ selectedIds.size }} 个文件</strong>
+        <span class="aw-copy">选择跨页保留；删除前会补齐整件作品并确认文件数，包括子文件夹。</span>
+        <button v-if="total > files.length" class="aw-grid-button" type="button" :disabled="loading || selectionLoading || actionLoading || filterChangesPending" :title="filterChangesPending ? '筛选条件已更改，请先点击查询' : '选择已查询的全部文件，包含其他页'" @click="selectAllFilteredFiles">{{ selectionLoading ? '正在读取全部文件…' : `全选筛选结果（${total}个）` }}</button>
+        <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadSelectedFiles">
+          <Download :size="15" aria-hidden="true" />
+          下载
         </button>
-      </template>
-      <button class="aw-grid-button" type="button" @click="clearSelection">取消选择</button>
-    </section>
+        <template v-if="canManageDrive">
+          <select v-model.number="moveTargetDirectoryId" aria-label="移动目标分类">
+            <option :value="0">移动到分类…</option>
+            <option v-for="dir in directoryOptions" :key="dir.directory_id ?? dir.name" :value="Number(dir.directory_id)">{{ dir.name }}</option>
+          </select>
+          <button class="aw-secondary-button" type="button" :disabled="actionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
+        </template>
+        <template v-if="canDeleteFiles">
+          <input v-model.trim="actionReason" :placeholder="canManageDrive ? '删除原因或移动备注' : '删除原因'" aria-label="操作原因" />
+          <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || selectionLoading || !actionReason.trim() || filterChangesPending || deletionDateRangeMissing" :title="filterChangesPending ? '筛选条件已改变，请先查询再选择' : deletionDateRangeMissing ? '请先查询明确的开始、结束日期范围' : '核对整件作品后再确认删除'" @click="deleteSelectedFiles">
+            <Trash2 :size="15" aria-hidden="true" />
+            删除
+          </button>
+        </template>
+        <button class="aw-grid-button" type="button" @click="clearSelection">取消选择</button>
+      </section>
 
-    <section class="aw-upload-ledger__content" :class="{ 'has-detail': Boolean(selectedFile) }">
-      <div class="aw-upload-ledger__table-wrap">
-        <table class="aw-upload-ledger__table">
-          <colgroup>
-            <col class="aw-upload-ledger__col-check" />
-            <col class="aw-upload-ledger__col-thumb" />
-            <col class="aw-upload-ledger__col-owner" />
-            <col class="aw-upload-ledger__col-source" />
-            <col class="aw-upload-ledger__col-date" />
-            <col class="aw-upload-ledger__col-dir" />
-            <col class="aw-upload-ledger__col-name" />
-            <col class="aw-upload-ledger__col-format" />
-            <col class="aw-upload-ledger__col-count" />
-            <col v-if="canViewAmounts" class="aw-upload-ledger__col-amount" />
-            <col class="aw-upload-ledger__col-status" />
-            <col class="aw-upload-ledger__col-size" />
-            <col class="aw-upload-ledger__col-actions" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th class="aw-upload-ledger__check">
-                <input type="checkbox" :checked="allPageSelected" :disabled="loading || selectionLoading || actionLoading" aria-label="选择当前页" @change="togglePageSelection(($event.target as HTMLInputElement).checked)" />
-              </th>
-              <th>预览</th>
-              <th>
-                <button type="button" @click="setSort('owner')">
-                  创建人
-                  <component :is="sortIcon('owner')" v-if="sortIcon('owner')" :size="13" />
-                </button>
-              </th>
-              <th>操作来源</th>
-              <th>
-                <button type="button" @click="setSort('created_at')">
-                  创建时间
-                  <component :is="sortIcon('created_at')" v-if="sortIcon('created_at')" :size="13" />
-                </button>
-              </th>
-              <th>
-                <button type="button" @click="setSort('directory')">
-                  分类
-                  <component :is="sortIcon('directory')" v-if="sortIcon('directory')" :size="13" />
-                </button>
-              </th>
-              <th>
-                <button type="button" @click="setSort('name')">
-                  作品名称
-                  <component :is="sortIcon('name')" v-if="sortIcon('name')" :size="13" />
-                </button>
-              </th>
-              <th>
-                <button type="button" @click="setSort('format')">
-                  格式
-                  <component :is="sortIcon('format')" v-if="sortIcon('format')" :size="13" />
-                </button>
-              </th>
-              <th class="aw-upload-ledger__num">数量</th>
-              <th v-if="canViewAmounts" class="aw-upload-ledger__num">金额</th>
-              <th>状态</th>
-              <th class="aw-upload-ledger__num">大小</th>
-              <th class="aw-upload-ledger__center">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-if="loading">
-              <tr v-for="i in skeletonRowCount" :key="`skeleton-${i}`" class="aw-upload-ledger__row-skeleton" aria-hidden="true">
-                <td class="aw-upload-ledger__check"><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--dot" /></td>
-                <td><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--thumb" /></td>
-                <td :colspan="canViewAmounts ? 11 : 10"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
+      <section class="aw-upload-ledger__content" :class="{ 'has-detail': Boolean(selectedFile) }">
+        <div class="aw-upload-ledger__table-wrap">
+          <table class="aw-upload-ledger__table">
+            <colgroup>
+              <col class="aw-upload-ledger__col-check" />
+              <col class="aw-upload-ledger__col-thumb" />
+              <col class="aw-upload-ledger__col-owner" />
+              <col class="aw-upload-ledger__col-source" />
+              <col class="aw-upload-ledger__col-date" />
+              <col class="aw-upload-ledger__col-dir" />
+              <col class="aw-upload-ledger__col-name" />
+              <col class="aw-upload-ledger__col-status" />
+              <col class="aw-upload-ledger__col-format" />
+              <col class="aw-upload-ledger__col-count" />
+              <col v-if="canViewAmounts" class="aw-upload-ledger__col-amount" />
+              <col class="aw-upload-ledger__col-size" />
+              <col class="aw-upload-ledger__col-actions" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th class="aw-upload-ledger__check">
+                  <input type="checkbox" :checked="allPageSelected" :disabled="loading || selectionLoading || actionLoading" aria-label="选择当前页" @change="togglePageSelection(($event.target as HTMLInputElement).checked)" />
+                </th>
+                <th>预览</th>
+                <th>
+                  <button type="button" :disabled="loading" @click="setSort('owner')">
+                    创建人
+                    <component :is="sortIcon('owner')" v-if="sortIcon('owner')" :size="13" />
+                  </button>
+                </th>
+                <th>操作来源</th>
+                <th :aria-sort="!prioritizeAttention && sortBy === 'created_at' ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined">
+                  <button type="button" :disabled="loading" @click="setSort('created_at')">
+                    创建时间
+                    <component :is="sortIcon('created_at')" v-if="sortIcon('created_at')" :size="13" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" :disabled="loading" @click="setSort('directory')">
+                    分类
+                    <component :is="sortIcon('directory')" v-if="sortIcon('directory')" :size="13" />
+                  </button>
+                </th>
+                <th>
+                  <button type="button" :disabled="loading" @click="setSort('name')">
+                    作品名称
+                    <component :is="sortIcon('name')" v-if="sortIcon('name')" :size="13" />
+                  </button>
+                </th>
+                <th>状态</th>
+                <th>
+                  <button type="button" :disabled="loading" @click="setSort('format')">
+                    格式
+                    <component :is="sortIcon('format')" v-if="sortIcon('format')" :size="13" />
+                  </button>
+                </th>
+                <th class="aw-upload-ledger__num">数量</th>
+                <th v-if="canViewAmounts" class="aw-upload-ledger__num">金额</th>
+                <th class="aw-upload-ledger__num">大小</th>
+                <th class="aw-upload-ledger__center">操作</th>
               </tr>
-            </template>
-            <tr v-else-if="files.length === 0">
-              <td :colspan="canViewAmounts ? 13 : 12">
-                <div class="aw-upload-ledger__empty">
-                  <Inbox :size="30" aria-hidden="true" />
-                  <strong>没有匹配的上传记录</strong>
-                  <p>试试调整关键词、创建人、分类或日期范围。</p>
-                  <button v-if="activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">清除全部筛选</button>
-                </div>
-              </td>
-            </tr>
-            <template v-else>
-              <tr
-                v-for="file in files"
-                :key="file.id"
-                :class="{ 'is-selected': selectedFile?.id === file.id, 'is-piecework-child': filePieceworkRepeated(file) }"
-                @click="selectFile(file)"
-                @dblclick="openFilePreview(file)"
-              >
-                <td class="aw-upload-ledger__check">
-                  <input
-                    type="checkbox"
-                    :checked="selectedIds.has(file.id)"
-                    :disabled="selectionLoading || actionLoading"
-                    :aria-label="`选择 ${fileDisplayName(file)}`"
-                    @click.stop
-                    @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
-                  />
-                </td>
-                <td>
-                  <button class="aw-upload-ledger__thumb" type="button" :aria-label="`预览 ${fileDisplayName(file)}`" @click.stop="openFilePreview(file)">
-                    <FileArchive v-if="canOpenArchive(file)" :size="22" aria-hidden="true" />
-                    <DriveThumb v-else :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" size="sm" />
-                  </button>
-                </td>
-                <td class="aw-upload-ledger__owner">
-                  <strong :title="fileOwnerLabel(file)">{{ fileOwnerLabel(file) }}</strong>
-                  <small v-if="fileOwnerSecondary(file)" :title="fileOwnerSecondary(file)">{{ fileOwnerSecondary(file) }}</small>
-                </td>
-                <td class="aw-upload-ledger__source-cell">
-                  <span class="aw-chip aw-upload-ledger__source" :class="fileOperationLabel(file) === '正常上传' ? 'aw-chip--neutral' : 'aw-chip--info'" :title="fileOperationLabel(file)">
-                    {{ fileOperationLabel(file) }}
-                  </span>
-                </td>
-                <td class="aw-upload-ledger__date">{{ formatDateTime(file.created_at) }}</td>
-                <td>
-                  <span class="aw-chip aw-chip--neutral" :title="file.upload_directory_name || '未分类'">{{ file.upload_directory_name || '未分类' }}</span>
-                </td>
-                <td class="aw-upload-ledger__name">
-                  <form v-if="editingFileId === file.id" @submit.prevent="saveDisplayName(file)" @click.stop>
-                    <input v-model.trim="editingName" aria-label="作品名称" />
-                    <button type="submit" :disabled="actionLoading" aria-label="保存作品名称">
-                      <Save :size="14" aria-hidden="true" />
-                    </button>
-                    <button type="button" aria-label="取消编辑" @click="cancelEditName">
-                      <X :size="14" aria-hidden="true" />
-                    </button>
-                  </form>
-                  <button v-else type="button" @click.stop="canMaintainFiles ? startEditName(file) : selectFile(file)">
-                    <span>
-                      <strong :title="fileDisplayName(file)">{{ fileDisplayName(file) }}</strong>
-                      <small v-if="secondaryFilename(file)" :title="secondaryFilename(file)">{{ secondaryFilename(file) }}</small>
-                      <small v-if="filePieceworkInlineNote(file)" class="aw-upload-ledger__piecework-note" :title="filePieceworkNote(file)">
-                        {{ filePieceworkInlineNote(file) }}
-                      </small>
-                    </span>
-                    <Pencil v-if="canMaintainFiles" :size="14" aria-hidden="true" />
-                  </button>
-                </td>
-                <td class="aw-upload-ledger__format">
-                  <strong :title="fileFormatLabel(file)">{{ fileExtLabel(file) }}</strong>
-                  <small v-if="fileFormatSecondary(file)" :title="file.mime_type || fileFormatSecondary(file)">{{ fileFormatSecondary(file) }}</small>
-                </td>
-                <td class="aw-upload-ledger__num">
-                  <strong>{{ fileQuantityLabel(file) }}</strong>
-                </td>
-                <td v-if="canViewAmounts" class="aw-upload-ledger__num">
-                  <strong>{{ fileAmountLabel(file) }}</strong>
-                </td>
-                <td>
-                  <span :class="chipClass(pricingStatusMeta(file.pricing_status).tone)">{{ pricingStatusMeta(file.pricing_status).label }}</span>
-                </td>
-                <td class="aw-upload-ledger__num">{{ formatSize(file.file_size) }}</td>
-                <td>
-                  <div class="aw-upload-ledger__row-actions">
-                    <button type="button" aria-label="预览" @click.stop="openFilePreview(file)">
-                      <Eye :size="15" aria-hidden="true" />
-                    </button>
-                    <button type="button" aria-label="下载" @click.stop="downloadFile(file)">
-                      <Download :size="15" aria-hidden="true" />
-                    </button>
+            </thead>
+            <tbody>
+              <template v-if="loading">
+                <tr v-for="i in skeletonRowCount" :key="`skeleton-${i}`" class="aw-upload-ledger__row-skeleton" aria-hidden="true">
+                  <td class="aw-upload-ledger__check"><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--dot" /></td>
+                  <td><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--thumb" /></td>
+                  <td :colspan="canViewAmounts ? 11 : 10"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
+                </tr>
+              </template>
+              <tr v-else-if="listError">
+                <td :colspan="canViewAmounts ? 13 : 12">
+                  <div class="aw-upload-ledger__empty" role="alert">
+                    <strong>{{ listError }}</strong>
+                    <button class="aw-secondary-button" type="button" @click="refreshResults">重试</button>
                   </div>
                 </td>
               </tr>
+              <tr v-else-if="files.length === 0">
+                <td :colspan="canViewAmounts ? 13 : 12">
+                  <div class="aw-upload-ledger__empty">
+                    <Inbox :size="30" aria-hidden="true" />
+                    <strong>没有匹配的上传记录</strong>
+                    <p>试试调整关键词、创建人、分类或日期范围。</p>
+                    <button v-if="activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">清除全部筛选</button>
+                  </div>
+                </td>
+              </tr>
+              <template v-else>
+                <tr
+                  v-for="file in visibleFiles"
+                  :key="file.id"
+                  :class="{ 'is-selected': selectedFile?.id === file.id, 'is-piecework-child': filePieceworkRepeated(file), 'needs-attention': fileAttention.get(file.id)?.length }"
+                  @click="selectFile(file)"
+                  @dblclick="openFilePreview(file)"
+                >
+                  <td class="aw-upload-ledger__check">
+                    <input
+                      type="checkbox"
+                      :checked="selectedIds.has(file.id)"
+                      :disabled="selectionLoading || actionLoading"
+                      :aria-label="`选择 ${fileDisplayName(file)}`"
+                      @click.stop
+                      @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
+                    />
+                  </td>
+                  <td>
+                    <button class="aw-upload-ledger__thumb" type="button" :aria-label="`预览 ${fileDisplayName(file)}`" @click.stop="openFilePreview(file)">
+                      <FileArchive v-if="canOpenArchive(file)" :size="22" aria-hidden="true" />
+                      <DriveThumb v-else :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" size="sm" />
+                    </button>
+                  </td>
+                  <td class="aw-upload-ledger__owner">
+                    <strong :title="fileOwnerLabel(file)">{{ fileOwnerLabel(file) }}</strong>
+                    <small v-if="fileOwnerSecondary(file)" :title="fileOwnerSecondary(file)">{{ fileOwnerSecondary(file) }}</small>
+                  </td>
+                  <td class="aw-upload-ledger__source-cell">
+                    <span class="aw-chip aw-upload-ledger__source" :class="fileOperationLabel(file) === '正常上传' ? 'aw-chip--neutral' : 'aw-chip--info'" :title="fileOperationLabel(file)">
+                      {{ fileOperationLabel(file) }}
+                    </span>
+                  </td>
+                  <td class="aw-upload-ledger__date">{{ formatDateTime(file.created_at) }}</td>
+                  <td>
+                    <span class="aw-chip aw-chip--neutral" :title="file.upload_directory_name || '未分类'">{{ file.upload_directory_name || '未分类' }}</span>
+                  </td>
+                  <td class="aw-upload-ledger__name">
+                    <form v-if="editingFileId === file.id" @submit.prevent="saveDisplayName(file)" @click.stop>
+                      <input v-model.trim="editingName" aria-label="作品名称" />
+                      <button type="submit" :disabled="actionLoading" aria-label="保存作品名称">
+                        <Save :size="14" aria-hidden="true" />
+                      </button>
+                      <button type="button" aria-label="取消编辑" @click="cancelEditName">
+                        <X :size="14" aria-hidden="true" />
+                      </button>
+                    </form>
+                    <button v-else type="button" @click.stop="canMaintainFiles ? startEditName(file) : selectFile(file)">
+                      <span>
+                        <strong :title="fileDisplayName(file)">{{ fileDisplayName(file) }}</strong>
+                        <small v-if="secondaryFilename(file)" :title="secondaryFilename(file)">{{ secondaryFilename(file) }}</small>
+                        <small v-if="filePieceworkInlineNote(file)" class="aw-upload-ledger__piecework-note" :title="filePieceworkNote(file)">
+                          {{ filePieceworkInlineNote(file) }}
+                        </small>
+                      </span>
+                      <Pencil v-if="canMaintainFiles" :size="14" aria-hidden="true" />
+                    </button>
+                  </td>
+                  <td>
+                    <div class="aw-upload-ledger__row-status">
+                      <span v-for="label in fileAttention.get(file.id)" :key="label" class="aw-chip aw-chip--warn">{{ label }}</span>
+                      <span v-if="!fileAttention.get(file.id)?.length" :class="chipClass(pricingStatusMeta(file.pricing_status).tone)">{{ pricingStatusMeta(file.pricing_status).label }}</span>
+                    </div>
+                  </td>
+                  <td class="aw-upload-ledger__format">
+                    <strong :title="fileFormatLabel(file)">{{ fileExtLabel(file) }}</strong>
+                    <small v-if="fileFormatSecondary(file)" :title="file.mime_type || fileFormatSecondary(file)">{{ fileFormatSecondary(file) }}</small>
+                  </td>
+                  <td class="aw-upload-ledger__num">
+                    <strong>{{ fileQuantityLabel(file) }}</strong>
+                  </td>
+                  <td v-if="canViewAmounts" class="aw-upload-ledger__num">
+                    <strong>{{ fileAmountLabel(file) }}</strong>
+                  </td>
+                  <td class="aw-upload-ledger__num">{{ formatSize(file.file_size) }}</td>
+                  <td>
+                    <div class="aw-upload-ledger__row-actions">
+                      <button type="button" aria-label="预览" @click.stop="openFilePreview(file)">
+                        <Eye :size="15" aria-hidden="true" />
+                      </button>
+                      <button type="button" aria-label="下载" @click.stop="downloadFile(file)">
+                        <Download :size="15" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <aside v-if="selectedFile" class="aw-upload-ledger__detail" aria-label="当前作品详情">
+          <div class="aw-upload-ledger__detail-head">
+            <h3 :title="fileDisplayName(selectedFile)">{{ fileDisplayName(selectedFile) }}</h3>
+            <button type="button" class="aw-upload-ledger__detail-close" aria-label="关闭详情" @click="closeDetail">
+              <X :size="15" aria-hidden="true" />
+            </button>
+          </div>
+          <div class="aw-upload-ledger__detail-thumb">
+            <button
+              v-if="canOpenArchive(selectedFile)"
+              class="aw-upload-ledger__archive-preview"
+              type="button"
+              @click="openArchiveFile(selectedFile)"
+            >
+              <FileArchive :size="42" aria-hidden="true" />
+              <strong>压缩包</strong>
+              <span>点击查看里面的文件</span>
+            </button>
+            <DriveThumb v-else :file-id="selectedFile.id" :filename="fileDisplayName(selectedFile)" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
+          </div>
+          <dl>
+            <template v-for="[label, value] in filePreviewRows(selectedFile)" :key="label">
+              <dt>{{ label }}</dt>
+              <dd :title="value">{{ value }}</dd>
             </template>
-          </tbody>
-        </table>
-      </div>
+          </dl>
+          <div class="aw-upload-ledger__detail-actions">
+            <button class="aw-primary-button" type="button" @click="openFilePreview(selectedFile)">{{ canOpenArchive(selectedFile) ? '查看内容' : '打开预览' }}</button>
+            <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadFile(selectedFile)">
+              <Download :size="15" aria-hidden="true" />
+              下载
+            </button>
+          </div>
+        </aside>
+      </section>
 
-      <aside v-if="selectedFile" class="aw-upload-ledger__detail" aria-label="当前作品详情">
-        <div class="aw-upload-ledger__detail-head">
-          <h3 :title="fileDisplayName(selectedFile)">{{ fileDisplayName(selectedFile) }}</h3>
-          <button type="button" class="aw-upload-ledger__detail-close" aria-label="关闭详情" @click="closeDetail">
-            <X :size="15" aria-hidden="true" />
-          </button>
+      <footer class="aw-upload-ledger__pager">
+        <span>第 {{ page }} / {{ totalPages }} 页</span>
+        <div>
+          <button class="aw-grid-button" type="button" :disabled="page <= 1 || loading" @click="changePage(-1)">上一页</button>
+          <button class="aw-grid-button" type="button" :disabled="page >= totalPages || loading" @click="changePage(1)">下一页</button>
         </div>
-        <div class="aw-upload-ledger__detail-thumb">
-          <button
-            v-if="canOpenArchive(selectedFile)"
-            class="aw-upload-ledger__archive-preview"
-            type="button"
-            @click="openArchiveFile(selectedFile)"
-          >
-            <FileArchive :size="42" aria-hidden="true" />
-            <strong>压缩包</strong>
-            <span>点击查看里面的文件</span>
-          </button>
-          <DriveThumb v-else :file-id="selectedFile.id" :filename="fileDisplayName(selectedFile)" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
-        </div>
-        <dl>
-          <template v-for="[label, value] in filePreviewRows(selectedFile)" :key="label">
-            <dt>{{ label }}</dt>
-            <dd :title="value">{{ value }}</dd>
-          </template>
-        </dl>
-        <div class="aw-upload-ledger__detail-actions">
-          <button class="aw-primary-button" type="button" @click="openFilePreview(selectedFile)">{{ canOpenArchive(selectedFile) ? '查看内容' : '打开预览' }}</button>
-          <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadFile(selectedFile)">
-            <Download :size="15" aria-hidden="true" />
-            下载
-          </button>
-        </div>
-      </aside>
+      </footer>
+
     </section>
-
-    <footer class="aw-upload-ledger__pager">
-      <span>{{ filteredDirectoryLabel }} · 共 {{ total }} 条 · 第 {{ page }} / {{ totalPages }} 页</span>
-      <div>
-        <button class="aw-grid-button" type="button" :disabled="page <= 1 || loading" @click="changePage(-1)">上一页</button>
-        <button class="aw-grid-button" type="button" :disabled="page >= totalPages || loading" @click="changePage(1)">下一页</button>
-      </div>
-    </footer>
 
     <WorkbenchPreviewDialog
       :key="previewIdentity || previewTitle"
