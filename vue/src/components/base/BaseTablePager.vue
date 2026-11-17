@@ -1,5 +1,5 @@
 <template>
-  <div class="base-table-pager">
+  <div class="base-table-pager" :class="{ 'base-table-pager--compact': compact }">
     <span class="base-table-pager__total">
       共 {{ total }} 条
       <template v-if="total > 0"> · {{ rangeLabel }}</template>
@@ -16,6 +16,7 @@
         />
       </label>
       <BaseButton
+        v-if="!compact"
         variant="ghost"
         size="sm"
         :disabled="loading || page <= 1"
@@ -41,6 +42,7 @@
         下一页
       </BaseButton>
       <BaseButton
+        v-if="!compact"
         variant="ghost"
         size="sm"
         :disabled="loading || page >= totalPages"
@@ -64,11 +66,13 @@ const props = withDefaults(
     total: number
     loading?: boolean
     showPageSize?: boolean
+    compact?: boolean
     pageSizeOptions?: number[]
   }>(),
   {
     loading: false,
     showPageSize: false,
+    compact: false,
     pageSizeOptions: () => [20, 50, 100],
   },
 )
@@ -132,6 +136,15 @@ function updatePageSize(value: string | number) {
 
 .base-table-pager__select {
   min-width: 4.75rem;
+}
+
+.base-table-pager--compact {
+  gap: 0.4rem;
+  padding-top: 0.55rem;
+}
+
+.base-table-pager--compact .base-table-pager__actions {
+  gap: 0.35rem;
 }
 
 @media (max-width: 640px) {

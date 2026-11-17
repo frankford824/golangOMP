@@ -67,42 +67,31 @@
     </aside>
 
     <main class="app-main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
-      <!-- TopNavBar: Light solid bar -->
-      <header class="flex justify-between items-center px-8 py-4 bg-[rgb(var(--yb-surface))] border-b border-[rgb(var(--yb-border))] z-10">
-        <div class="flex min-w-0 items-center gap-3 md:gap-12">
+      <header class="app-topbar">
+        <div class="app-topbar__brand">
           <button
             type="button"
             class="mobile-menu-button md:hidden"
             aria-label="打开导航"
             @click="mobileSidebarOpen = true"
           >
-            <span class="material-symbols-outlined">menu</span>
+            <Menu :size="18" aria-hidden="true" />
           </button>
-          <span class="min-w-0 truncate text-lg font-headline font-extrabold tracking-tighter text-[rgb(var(--yb-text))] uppercase">永箔运营管理系统</span>
+          <span class="app-topbar__title" title="永箔运营管理系统">
+            <span class="app-topbar__full-name">永箔运营管理系统</span>
+            <span class="app-topbar__short-name">永箔运营</span>
+          </span>
         </div>
-        <div class="flex min-w-0 items-center gap-3 sm:gap-6">
-          <div class="relative hidden sm:block">
-            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[rgb(var(--yb-text-faint))] text-lg pointer-events-none">search</span>
-            <input
-              type="text"
-              readonly
-              placeholder="Ctrl+K 搜索任务、SKU、产品"
-              class="bg-[rgb(var(--yb-surface-soft))] border border-[rgb(var(--yb-border))] rounded-full pl-10 pr-4 py-1.5 text-xs w-64 text-[rgb(var(--yb-text))] focus:ring-1 focus:ring-[rgb(var(--yb-brand))] focus:border-[rgb(var(--yb-brand))] transition-all placeholder:text-[rgb(var(--yb-text-faint))]"
-              @focus="openSearch"
-              @click="openSearch"
-            />
-          </div>
-          <div class="flex items-center gap-4">
-            <MediaPreparationPanel />
-            <button type="button" :disabled="lanMediaBusy" :aria-pressed="lanMediaEnabled" :title="lanMediaNotice" @click="toggleLANMedia">
-              {{ lanMediaBusy ? '连接中…' : lanMediaEnabled ? '内网加速已启用' : '启用公司内网加速' }}
-            </button>
-            <NotificationBadge @open="notificationOpen = true" />
-            <AvatarDropdown />
-          </div>
+        <div class="app-topbar__actions">
+          <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
+            <Search :size="18" aria-hidden="true" />
+            <span class="topbar-search__label">搜索任务、SKU、产品</span>
+          </button>
+          <MediaPreparationPanel />
+          <NotificationBadge @open="notificationOpen = true" />
+          <AvatarDropdown />
         </div>
       </header>
-      <p v-if="lanMediaNotice" class="text-xs px-4 py-1" role="status">{{ lanMediaNotice }}</p>
 
       <div ref="contentScroller" class="flex-1 overflow-auto custom-scrollbar isolate">
         <main class="content">
@@ -168,11 +157,11 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { Menu, Search } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
-import { lanMediaEnabled, lanMediaBusy, lanMediaNotice, toggleLANMedia } from '@/services/mediaDelivery'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
 
@@ -615,12 +604,17 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   color: rgb(var(--yb-text-muted));
 }
 
-main > header {
+.app-topbar {
+  --topbar-control-size: 2.5rem;
   position: relative;
   z-index: 120;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   margin: 0.75rem 0.75rem 0;
-  min-height: 3.85rem;
-  padding-block: 0.65rem;
+  padding: 0.6rem 1rem;
   border: 1px solid rgb(var(--yb-border));
   border-radius: 1rem;
   background: rgb(var(--yb-surface));
@@ -631,26 +625,73 @@ main > header {
   contain: none;
 }
 
-main > header span {
-  color: rgb(var(--yb-text));
+.app-topbar__brand,
+.app-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-main > header > div:first-child > span {
+.app-topbar__brand { min-width: 0; }
+.app-topbar__actions { flex: 0 0 auto; }
+
+.app-topbar__title {
+  overflow: hidden;
   color: rgb(var(--yb-text));
-  font-size: 1rem;
+  font-size: clamp(0.875rem, 0.82rem + 0.2vw, 1rem);
   font-weight: 800;
-  letter-spacing: 0;
-  text-shadow: none;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-main > header input {
-  background: rgb(var(--yb-surface-soft));
-  border-color: rgb(var(--yb-border));
-  color: rgb(var(--yb-text));
+.app-topbar :deep(.topbar-icon) {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--topbar-control-size);
+  block-size: var(--topbar-control-size);
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-body));
+  cursor: pointer;
 }
 
-main > header input::placeholder {
-  color: rgb(var(--yb-text-faint));
+.app-topbar :deep(.topbar-icon:hover) {
+  border-color: rgb(var(--yb-brand-border));
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand-strong));
+}
+
+.app-topbar :deep(.topbar-icon:focus-visible),
+.app-topbar .mobile-menu-button:focus-visible {
+  outline: 2px solid rgb(var(--yb-brand));
+  outline-offset: 2px;
+}
+
+.topbar-search__label { display: none; }
+.app-topbar__short-name { display: none; }
+
+@media (min-width: 1024px) {
+  .app-topbar .topbar-search {
+    inline-size: auto;
+    gap: 0.5rem;
+    padding-inline: 0.7rem 0.9rem;
+  }
+
+  .topbar-search__label {
+    display: inline;
+    font-size: 0.8125rem;
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-topbar .mobile-menu-button { display: none; }
 }
 
 .content {
@@ -831,15 +872,16 @@ main > header input::placeholder {
     height: 100%;
   }
 
-  main > header {
+  .app-topbar {
+    --topbar-control-size: 2.75rem;
     margin: 0.5rem 0.5rem 0;
-    min-height: 3.25rem;
-    padding: 0.5rem 0.65rem;
+    padding: 0.4rem 0.5rem;
     border-radius: 0.85rem;
   }
 
-  main > header > div:first-child > span {
-    font-size: 0.92rem;
+  .app-topbar .mobile-menu-button {
+    inline-size: var(--topbar-control-size);
+    block-size: var(--topbar-control-size);
   }
 
   .content {
@@ -848,13 +890,13 @@ main > header input::placeholder {
 }
 
 @media (max-width: 420px) {
-  main > header {
-    gap: 0.4rem;
+  .app-topbar,
+  .app-topbar__brand,
+  .app-topbar__actions {
+    gap: 0.35rem;
   }
 
-  .mobile-menu-button {
-    width: 2.2rem;
-    height: 2.2rem;
-  }
+  .app-topbar__full-name { display: none; }
+  .app-topbar__short-name { display: inline; }
 }
 </style>

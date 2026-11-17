@@ -3,17 +3,18 @@
     <button
       type="button"
       class="avatar-trigger"
+      :aria-label="`${userName}，账户菜单`"
       :aria-expanded="open"
       aria-haspopup="menu"
       :aria-controls="open ? userMenuId : undefined"
       @click="open = !open"
     >
-      <span class="avatar-trigger__photo">
-        <img v-if="userAvatar" :src="userAvatar" alt="头像" />
+      <span class="avatar-trigger__photo" aria-hidden="true">
+        <img v-if="userAvatar" :src="userAvatar" alt="" />
         <span v-else>{{ userInitial }}</span>
       </span>
       <span class="avatar-trigger__name">{{ userName }}</span>
-      <ChevronDown :size="15" aria-hidden="true" />
+      <ChevronDown class="avatar-trigger__chevron" :size="15" aria-hidden="true" />
     </button>
 
     <div v-show="open" :id="userMenuId" role="menu" class="avatar-dropdown-menu">
@@ -199,7 +200,7 @@ function logout(): void {
 .avatar-trigger {
   display: inline-flex;
   max-width: 220px;
-  height: 38px;
+  height: var(--topbar-control-size, 2.5rem);
   align-items: center;
   gap: 8px;
   border: 1px solid rgb(var(--yb-border-subtle));
@@ -261,6 +262,18 @@ function logout(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .avatar-trigger {
+    width: var(--topbar-control-size, 2.75rem);
+    justify-content: center;
+    padding: 0;
+    border-radius: 0.75rem;
+  }
+
+  .avatar-trigger__name,
+  .avatar-trigger__chevron { display: none; }
 }
 
 .avatar-dropdown-menu {

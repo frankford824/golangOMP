@@ -51,7 +51,7 @@ const props = withDefaults(
     remote?: boolean
     virtualScroll?: boolean
     scrollX?: number
-    maxHeight?: number
+    maxHeight?: number | string
     density?: 'compact' | 'comfortable'
     ariaLabel?: string
     emptyTitle?: string

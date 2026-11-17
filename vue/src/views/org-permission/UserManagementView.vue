@@ -1,15 +1,15 @@
 <template>
-  <div class="user-management-view min-h-[100dvh] bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]">
-    <div class="um-shell w-full pb-10">
-      <header class="page-header yb-page-surface yb-page-header-row" data-page-header="user-management">
+  <div class="user-management-view bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]">
+    <div class="um-shell w-full pb-4">
+      <header class="directory-header yb-page-surface" data-page-header="user-management">
         <div class="yb-page-heading-copy">
-          <h2 class="page-title yb-page-title">用户与角色管理</h2>
-          <p class="page-sub yb-page-subtitle">维护账号、组织归属与工作角色</p>
+          <h2 class="directory-title">用户与角色管理</h2>
         </div>
-        <div class="page-header-actions">
+        <div class="directory-header-action">
           <BaseButton
             v-if="canCreateUser"
             type="button"
+            size="sm"
             @click="showCreateModal = true"
           >
             新增用户
@@ -23,7 +23,18 @@
       <p v-if="directoryMessage" class="action-msg mb-3" role="status">{{ directoryMessage }}</p>
       <section class="content-card">
         <div class="management-layout">
-          <aside class="org-filter-panel" aria-label="组织列表与筛选">
+          <aside class="org-filter-panel" :class="{ 'org-filter-panel--open': orgFiltersOpen }" aria-label="组织列表与筛选">
+            <button
+              type="button"
+              class="org-filters-trigger"
+              :aria-expanded="orgFiltersOpen"
+              aria-controls="directory-org-filters"
+              @click="orgFiltersOpen = !orgFiltersOpen"
+            >
+              组织筛选
+              <ChevronDown :size="16" aria-hidden="true" />
+            </button>
+            <div id="directory-org-filters" class="org-filter-content">
             <div class="org-filter-header">
               <span>组织</span>
               <button
@@ -143,8 +154,9 @@
             >
               一键清理停用组织（{{ removableDisabledOrgCount }} 项）
             </button>
+            </div>
           </aside>
-          <div class="user-list-panel">
+          <div ref="userListPanel" class="user-list-panel" :class="{ 'user-list-panel--batch': batchSelectMode }">
             <div class="list-heading">
               <div class="list-heading-scope">
                 <h3 class="section-title">{{ orgFilterBreadcrumb || '全部用户' }}</h3>
@@ -158,7 +170,6 @@
                 </button>
               </div>
               <div class="directory-actions">
-                <span class="directory-count">共 {{ pagination.total }} 人</span>
                 <BaseButton
                   v-if="canManageAccess && !batchSelectMode"
                   variant="secondary"
@@ -183,9 +194,9 @@
             <div class="toolbar">
               <BaseInput
                 v-model="keyword"
-                class="toolbar-field"
+                class="toolbar-field toolbar-keyword"
                 placeholder="搜索姓名 / 工号 / 登录账号"
-                @keyup.enter="onSearch"
+                @keydown.enter="onSearchEnter"
               />
               <BaseSelect
                 v-model="statusFilter"
@@ -200,23 +211,26 @@
             <template v-else>
               <BaseDataTable
                 aria-label="用户列表"
+                class="directory-table"
                 :columns="userTableColumns"
                 :data="users"
                 :loading="listLoading"
                 :row-key="userRowKey"
                 :row-class-name="userRowClassName"
-                :scroll-x="batchSelectMode ? 1028 : 980"
+                :scroll-x="directoryScrollWidth"
+                max-height="var(--directory-table-height)"
                 density="compact"
                 empty-title="暂无用户"
                 empty-description="未获取到用户列表。"
               />
               <BaseTablePager
-                class="mt-4"
+                class="mt-3"
                 :page="page"
                 :page-size="pageSize"
                 :total="pagination.total"
                 :loading="listLoading"
                 show-page-size
+                :compact="compactDirectory"
                 :page-size-options="[20, 50, 100]"
                 @update:page="goPage"
                 @update:page-size="pageSize = $event"
@@ -422,6 +436,7 @@
 
 <script setup lang="ts">
 import { ref, computed, h, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ChevronDown } from 'lucide-vue-next'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { usersApi } from '@/services/api/usersApi'
 import {
@@ -515,7 +530,14 @@ interface BatchDeleteResult {
 const listLoading = ref(false)
 const listError = ref('')
 const users = ref<UserRow[]>([])
+const userListPanel = ref<HTMLElement | null>(null)
+const compactDirectory = ref(false)
+const orgFiltersOpen = ref(false)
+let directoryResize: ResizeObserver | undefined
 const batchSelectMode = ref(false)
+const directoryScrollWidth = computed(() =>
+  (compactDirectory.value ? 240 : 744) + (batchSelectMode.value ? 42 : 0),
+)
 const batchSelectedIDs = ref<string[]>([])
 const eligibleBatchUsers = computed(() => users.value.filter(canSelectForDeletion))
 const selectedBatchUsers = computed(() => {
@@ -1029,7 +1051,7 @@ const orgActionConfirmText = computed(() => {
 const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
   const selectionColumn: DataTableColumns<UserRow> = batchSelectMode.value ? [{
     key: 'batch-selection',
-    width: 48,
+    width: 42,
     fixed: 'left',
     align: 'center',
     title: () => h('input', {
@@ -1057,36 +1079,38 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
       },
     }),
   }] : []
-  return [...selectionColumn,
-  {
-    title: '姓名',
+  const identityColumn: DataTableColumns<UserRow>[number] = {
+    title: compactDirectory.value ? '账号' : '姓名',
     key: 'display_name',
-    minWidth: 170,
-    render: (row) =>
-      h('div', { class: 'user-name-cell' }, [
-        h('span', { class: 'user-name-text' }, row.display_name || '-'),
-        renderUserStatusPill(row.status, 'status-pill--inline'),
-      ]),
-  },
+    minWidth: compactDirectory.value ? 104 : 128,
+    render: (row) => h('div', { class: 'user-name-cell' }, [
+      h('span', { class: 'user-name-text' }, row.display_name || row.username || '—'),
+      compactDirectory.value && row.username && row.username !== row.display_name
+        ? h('span', { class: 'user-row-meta', title: row.username }, row.username)
+        : null,
+    ]),
+  }
+  const accountColumns: DataTableColumns<UserRow> = !compactDirectory.value ? [
   {
     title: '工号',
     key: 'employee_no',
-    width: 120,
+    width: 70,
     render: (row) =>
       row.employee_no == null
-        ? h('span', { class: 'employee-missing' }, '待维护工号')
+        ? h('span', { class: 'employee-missing', 'aria-label': '工号未填写', title: '工号未填写' }, '—')
         : h('span', { class: 'td-mono' }, String(row.employee_no)),
   },
   {
     title: '登录账号',
     key: 'username',
-    width: 150,
-    render: (row) => h('span', { class: 'td-mono' }, row.username || '-'),
+    width: 136,
+    ellipsis: { tooltip: true },
+    render: (row) => h('span', { class: 'td-mono' }, row.username || '—'),
   },
   {
     title: '部门',
     key: 'department',
-    minWidth: 140,
+    minWidth: 108,
     // 列表 → 树的反向联动:点部门名即选中左侧树对应部门并过滤列表。
     render: (row) => {
       const department = row.department ?? ''
@@ -1105,9 +1129,9 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
     },
   },
   {
-    title: '组',
+    title: '小组',
     key: 'team',
-    minWidth: 140,
+    minWidth: 128,
     render: (row) => {
       const team = row.team ?? ''
       const department = row.department ?? ''
@@ -1125,16 +1149,19 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
       )
     },
   },
-  {
-    title: '账号状态',
+  ] : []
+  return [...selectionColumn, identityColumn, ...accountColumns, {
+    title: '状态',
     key: 'status',
-    width: 116,
+    align: 'center',
+    width: compactDirectory.value ? 70 : 88,
     render: (row) => renderUserStatusPill(row.status),
   },
   {
     title: '操作',
     key: 'actions',
-    width: 112,
+    width: compactDirectory.value ? 64 : 76,
+    align: 'center',
     fixed: 'right',
     render: (row) =>
       h(
@@ -1403,15 +1430,14 @@ function userRowClassName(row: UserRow): string {
   return row.status === 'disabled' ? 'user-row--disabled' : ''
 }
 
-function renderUserStatusPill(status: string | undefined, extraClass = '') {
+function renderUserStatusPill(status: string | undefined) {
   return h(
     'span',
     {
       class: [
         'status-pill',
         status === 'active' ? 'status-pill--on' : 'status-pill--off',
-        extraClass,
-      ].filter(Boolean),
+      ],
     },
     formatUserStatusForDisplay(status),
   )
@@ -2149,6 +2175,12 @@ function onSearch() {
   void loadUsers()
 }
 
+function onSearchEnter(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  onSearch()
+}
+
 // 清空输入框即恢复全量:不必再点一次"查询"才能取消关键词过滤。
 watch(keyword, () => {
   if (keyword.value.trim() === '' && appliedKeyword.value !== '') {
@@ -2226,6 +2258,12 @@ watch(
 
 onMounted(() => {
   if (!canManage.value) return
+  if (userListPanel.value && typeof ResizeObserver === 'function') {
+    directoryResize = new ResizeObserver(([entry]) => {
+      if (entry) compactDirectory.value = entry.contentRect.width < 786
+    })
+    directoryResize.observe(userListPanel.value)
+  }
   const startup = [loadOrgOptions()]
   if (canViewAccess.value) startup.push(loadAccessRoles().catch(() => undefined))
   void Promise.all(startup).then(() => {
@@ -2238,6 +2276,7 @@ onBeforeUnmount(() => {
   listAbort?.abort()
   listAbort = null
   batchDeleteAbort?.abort()
+  directoryResize?.disconnect()
 })
 </script>
 
@@ -2264,7 +2303,7 @@ onBeforeUnmount(() => {
   font-size: 0.8125rem;
 }
 
-.batch-checkbox {
+.directory-table :deep(.batch-checkbox) {
   width: 1rem;
   height: 1rem;
   accent-color: rgb(var(--yb-brand));
@@ -2303,42 +2342,35 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
-.page-header {
-  margin-bottom: 1rem;
+.directory-header {
+  margin-bottom: 0.75rem;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.55rem;
 }
 
-.page-header-actions {
+.directory-header-action {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+  flex: 0 0 auto;
 }
 
-.page-title {
+.directory-title {
   margin: 0;
-  font-size: clamp(1.75rem, 1.8vw, 2.25rem);
-  font-weight: 900;
+  font-size: clamp(1.25rem, 1rem + 0.8vw, 1.85rem);
+  font-weight: 800;
   letter-spacing: 0;
   color: rgb(var(--yb-text));
-  line-height: 1.04;
+  line-height: 1.25;
 }
 
-.page-sub {
-  margin: 0.5rem 0 0;
-  font-size: 0.8125rem;
-  color: rgb(var(--yb-text-muted));
-  font-weight: 500;
-  line-height: 1.55;
-}
-
-/* 与工具栏行高对齐的查询按钮，不全宽 */
 .toolbar-query {
-  align-self: end;
+  min-height: 2.75rem;
+  white-space: nowrap;
 }
 
 .content-card {
@@ -2348,7 +2380,7 @@ onBeforeUnmount(() => {
   box-shadow:
     0 1px 2px rgb(var(--yb-shadow) / 0.05),
     0 0 0 1px rgb(var(--yb-shadow) / 0.03);
-  padding: 1.25rem 1.5rem;
+  padding: clamp(0.75rem, 1.4vw, 1.25rem);
 }
 
 .list-heading {
@@ -2392,22 +2424,14 @@ onBeforeUnmount(() => {
   background: rgb(var(--yb-surface-row-even));
 }
 
-.directory-count {
-  font-size: 0.75rem;
-  color: rgb(var(--yb-text-zinc-soft));
-  font-variant-numeric: tabular-nums;
-}
-
-.employee-missing {
-  color: rgb(var(--yb-warning-dark));
-  font-size: 0.75rem;
-  font-weight: 600;
+.directory-table :deep(.employee-missing) {
+  color: rgb(var(--yb-text-muted));
 }
 
 .management-layout {
   display: grid;
-  grid-template-columns: minmax(16.5rem, clamp(18rem, 23vw, 21.5rem)) minmax(0, 1fr);
-  gap: 1.25rem;
+  grid-template-columns: minmax(14rem, clamp(15rem, 21vw, 19rem)) minmax(0, 1fr);
+  gap: 1rem;
   align-items: start;
 }
 
@@ -2418,11 +2442,19 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: calc(100dvh - 1.5rem);
+  max-height: clamp(14rem, calc(100dvh - 10rem), 39rem);
   overflow: auto;
   padding-right: 0.9rem;
   border-right: 1px solid rgb(var(--yb-border-zinc));
 }
+
+.org-filter-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.org-filters-trigger { display: none; }
 
 .org-filter-header {
   display: flex;
@@ -2569,14 +2601,16 @@ onBeforeUnmount(() => {
 }
 
 .user-list-panel {
+  --directory-table-height: clamp(12rem, calc(100dvh - 26rem), 34rem);
   min-width: 0;
+  container-type: inline-size;
 }
 
-@media (min-width: 640px) {
-  .content-card {
-    padding: 1.5rem;
-  }
+.user-list-panel--batch {
+  --directory-table-height: clamp(12rem, calc(100dvh - 29rem), 32rem);
 }
+
+.directory-table :deep(.n-data-table-td) { vertical-align: middle; }
 
 @media (max-width: 960px) {
   .management-layout {
@@ -2588,7 +2622,6 @@ onBeforeUnmount(() => {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    max-height: none;
     overflow: visible;
     padding-right: 0;
     padding-bottom: 0.75rem;
@@ -2596,21 +2629,43 @@ onBeforeUnmount(() => {
     border-bottom: 1px solid rgb(var(--yb-border-zinc));
   }
 
-  .org-filter-header {
-    grid-column: auto;
+  .org-filter-content {
+    max-block-size: min(46dvh, 22rem);
+    overflow-y: auto;
   }
 
-  .org-selected-actions {
-    grid-column: auto;
+  .org-filter-panel:not(.org-filter-panel--open) .org-filter-content { display: none; }
+
+  .org-filters-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    padding-inline: 0.75rem;
+    border: 1px solid rgb(var(--yb-border));
+    border-radius: 0.65rem;
+    color: rgb(var(--yb-text));
+    font-size: 0.875rem;
+    font-weight: 650;
+    background: rgb(var(--yb-surface-soft));
   }
+
+  .org-filters-trigger[aria-expanded='true'] :deep(svg) { transform: rotate(180deg); }
+  .user-list-panel { --directory-table-height: clamp(10rem, calc(100dvh - 34rem), 26rem); }
+  .user-list-panel--batch { --directory-table-height: clamp(10rem, calc(100dvh - 37rem), 24rem); }
+}
+
+@media (max-width: 360px) {
+  .user-list-panel { --directory-table-height: clamp(7rem, calc(100dvh - 35rem), 24rem); }
 }
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
-  gap: 0.75rem;
-  margin-bottom: 0.6rem;
-  align-items: end;
+  grid-template-columns: minmax(0, 2fr) minmax(7rem, 1fr) auto;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+  align-items: center;
 }
 
 .toolbar-field {
@@ -2649,54 +2704,57 @@ onBeforeUnmount(() => {
   font-size: 0.75rem;
 }
 
-.td-mono {
+.directory-table :deep(.td-mono) {
   font-variant-numeric: tabular-nums;
   font-family: var(--yb-font-data);
   font-size: 0.8125rem;
   color: rgb(var(--yb-text-zinc-deep));
 }
 
-.user-name-cell {
+.directory-table :deep(.user-name-cell) {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
+  flex-direction: column;
+  gap: 0.15rem;
+  line-height: 1.4;
 }
 
-.user-name-text {
+.directory-table :deep(.user-name-text) {
   min-width: 0;
   overflow-wrap: anywhere;
   color: rgb(var(--yb-text-zinc-strong));
   font-weight: 650;
 }
 
-.status-pill {
+.directory-table :deep(.user-row-meta) {
+  overflow: hidden;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-table :deep(.status-pill) {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  min-width: 3.2rem;
-  padding: 0.12rem 0.5rem;
+  padding: 0.15rem 0.45rem;
   border: 1px solid transparent;
   border-radius: 9999px;
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   font-weight: 750;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
-.status-pill--inline {
-  min-width: 0;
-  padding-inline: 0.42rem;
-}
-
-.status-pill--on {
+.directory-table :deep(.status-pill--on) {
   background: rgb(var(--yb-success-soft));
   border-color: rgb(var(--yb-success-border));
   color: rgb(var(--yb-success-deep));
 }
 
-.status-pill--off {
+.directory-table :deep(.status-pill--off) {
   background: rgb(var(--yb-danger) / 0.14);
   border-color: rgb(var(--yb-danger-border-soft));
   color: rgb(var(--yb-danger));
@@ -2706,8 +2764,13 @@ onBeforeUnmount(() => {
   background: rgb(var(--yb-danger) / 0.025);
 }
 
-.link-btn {
-  padding: 0.15rem 0.35rem;
+.directory-table :deep(.link-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.7rem;
+  min-height: 2rem;
+  padding: 0 0.4rem;
   font-size: 0.8125rem;
   font-weight: 500;
   color: rgb(var(--yb-success-emerald));
@@ -2720,13 +2783,20 @@ onBeforeUnmount(() => {
   transition: color 0.12s ease, background-color 0.12s ease;
 }
 
-.link-btn:hover {
+.org-filters-trigger:focus-visible,
+.directory-table :deep(.batch-checkbox:focus-visible),
+.directory-table :deep(.link-btn:focus-visible) {
+  outline: 2px solid rgb(var(--yb-brand));
+  outline-offset: 2px;
+}
+
+.directory-table :deep(.link-btn:hover) {
   color: rgb(var(--yb-success-teal));
   background: rgb(var(--yb-success-soft));
 }
 
 /* 表格内部门/组名:可点击反向联动左侧组织树 */
-.org-link-btn {
+.directory-table :deep(.org-link-btn) {
   padding: 0;
   border: none;
   background: none;
@@ -2739,7 +2809,7 @@ onBeforeUnmount(() => {
   transition: color 0.12s ease, text-decoration-color 0.12s ease;
 }
 
-.org-link-btn:hover {
+.directory-table :deep(.org-link-btn:hover) {
   color: rgb(var(--yb-success-emerald));
   text-decoration-color: currentColor;
 }
@@ -2767,15 +2837,8 @@ onBeforeUnmount(() => {
   justify-content: space-between;
 }
 
-@media (max-width: 1024px) {
-  .toolbar {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (max-width: 640px) {
-  .toolbar {
-    grid-template-columns: 1fr;
-  }
+@container (max-width: 31rem) {
+  .toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .toolbar-keyword { grid-column: 1 / -1; }
 }
 </style>

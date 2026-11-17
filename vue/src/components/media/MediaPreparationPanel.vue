@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { Download } from 'lucide-vue-next'
 import http from '@/services/http'
-import { resolveMediaAccess, mediaMessage, type MediaAccess } from '@/services/mediaDelivery'
+import BaseButton from '@/components/base/BaseButton.vue'
+import { resolveMediaAccess, mediaMessage, lanMediaBusy, lanMediaEnabled, lanMediaNotice, toggleLANMedia, type MediaAccess } from '@/services/mediaDelivery'
 
 interface Preparation {
   request_id: string
@@ -13,10 +15,29 @@ const rows = ref<Preparation[]>([])
 const notice = ref('')
 const busy = ref(false)
 const handedOff = ref(new Set<string>())
+const disclosure = ref<HTMLDetailsElement | null>(null)
+const trigger = ref<HTMLElement | null>(null)
 let session = 0
 const clearSession = () => { session += 1; rows.value = []; notice.value = ''; handedOff.value.clear() }
-window.addEventListener('asset-media-session-reset', clearSession)
-onBeforeUnmount(() => window.removeEventListener('asset-media-session-reset', clearSession))
+
+function closePanel(restoreFocus = false) {
+  if (!disclosure.value?.open) return
+  disclosure.value.open = false
+  if (restoreFocus) trigger.value?.focus()
+}
+
+function onOutsidePointer(event: PointerEvent) {
+  if (event.target instanceof Node && !disclosure.value?.contains(event.target)) closePanel()
+}
+
+onMounted(() => {
+  window.addEventListener('asset-media-session-reset', clearSession)
+  document.addEventListener('pointerdown', onOutsidePointer)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('asset-media-session-reset', clearSession)
+  document.removeEventListener('pointerdown', onOutsidePointer)
+})
 
 async function refresh() {
   if (busy.value) return
@@ -66,23 +87,35 @@ async function change(row: Preparation, action: 'cancel' | 'retry') {
 </script>
 
 <template>
-  <details class="media-preparation" @toggle="($event.target as HTMLDetailsElement).open && refresh()">
-    <summary>下载准备</summary>
-    <div class="media-preparation__panel" role="region" aria-label="下载准备记录">
-      <h2>下载准备记录</h2>
-      <p>最近24小时及未完成任务。关闭页面不取消后台任务。</p>
-      <button type="button" :disabled="busy" @click="refresh">刷新状态</button>
-      <p v-if="notice" role="status">{{ notice }}</p>
-      <p v-if="busy" role="status">正在查询准备记录…</p>
-      <p v-else-if="!rows.length && !notice">暂无准备记录</p>
-      <ul>
+  <details ref="disclosure" class="media-preparation" @toggle="disclosure?.open && refresh()" @keydown.esc.stop.prevent="closePanel(true)">
+    <summary ref="trigger" class="topbar-icon" aria-label="下载" title="下载">
+      <Download :size="18" aria-hidden="true" />
+    </summary>
+    <div class="media-preparation__panel" role="region" aria-label="下载">
+      <div class="media-preparation__header">
+        <h2>下载</h2>
+        <BaseButton size="sm" variant="secondary" :disabled="busy" @click="refresh">刷新状态</BaseButton>
+      </div>
+      <div class="media-preparation__mode">
+        <span>下载方式 · {{ lanMediaEnabled ? '内网' : '云端' }}</span>
+        <BaseButton size="sm" variant="secondary" :loading="lanMediaBusy" @click="toggleLANMedia">
+          {{ lanMediaBusy ? '连接中…' : lanMediaEnabled ? '切换云端' : '切换内网' }}
+        </BaseButton>
+      </div>
+      <p v-if="lanMediaNotice" class="media-preparation__note" role="status">{{ lanMediaNotice }}</p>
+      <p v-if="notice" class="media-preparation__note" role="status">{{ notice }}</p>
+      <p v-if="busy" class="media-preparation__note" role="status">正在查询下载记录…</p>
+      <p v-else-if="!rows.length && !notice" class="media-preparation__note">暂无下载记录</p>
+      <ul v-if="rows.length" class="media-preparation__jobs">
         <li v-for="row in rows" :key="row.request_id">
           <strong>{{ row.job.filename || row.job.resource_id }}</strong>
           <p>{{ stateLabel(row) }}</p>
           <p v-if="row.job.state === 'processing' && row.job.total_bytes > 0">{{ row.job.phase }}：{{ row.job.processed_bytes }} / {{ row.job.total_bytes }} 字节</p>
-          <button v-if="row.job.state === 'succeeded'" type="button" :disabled="busy" @click="download(row)">获取链接并下载</button>
-          <button v-if="row.job.state === 'failed' && row.job.retryable" type="button" :disabled="busy" @click="change(row, 'retry')">重试准备</button>
-          <button type="button" :disabled="busy" @click="change(row, 'cancel')">取消我的等待</button>
+          <div class="media-preparation__actions">
+            <BaseButton v-if="row.job.state === 'succeeded'" size="sm" :disabled="busy" @click="download(row)">获取链接并下载</BaseButton>
+            <BaseButton v-if="row.job.state === 'failed' && row.job.retryable" size="sm" variant="secondary" :disabled="busy" @click="change(row, 'retry')">重试准备</BaseButton>
+            <BaseButton size="sm" variant="ghost" :disabled="busy" @click="change(row, 'cancel')">取消等待</BaseButton>
+          </div>
         </li>
       </ul>
     </div>
@@ -90,9 +123,53 @@ async function change(row: Preparation, action: 'cancel' | 'retry') {
 </template>
 
 <style scoped>
-.media-preparation { position: relative; font-size: .75rem; }
-.media-preparation summary { cursor: pointer; }
-.media-preparation__panel { position: absolute; right: 0; top: 2rem; z-index: 80; width: min(28rem, 85vw); max-height: 70vh; overflow: auto; padding: 1rem; border: 1px solid rgb(var(--yb-border)); border-radius: .75rem; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); }
-.media-preparation__panel li { padding: .75rem 0; border-bottom: 1px solid rgb(var(--yb-border)); }
-.media-preparation__panel button { margin: .25rem .5rem .25rem 0; text-decoration: underline; }
+.media-preparation { position: relative; flex: 0 0 auto; }
+.media-preparation summary { list-style: none; }
+.media-preparation summary::-webkit-details-marker { display: none; }
+.media-preparation__panel {
+  position: absolute;
+  z-index: 80;
+  inset-block-start: calc(100% + 0.6rem);
+  inset-inline-end: 0;
+  inline-size: min(24rem, calc(100dvw - 1.5rem));
+  max-block-size: min(70dvh, 36rem);
+  overflow: auto;
+  padding: 0.9rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.85rem;
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 10px 28px rgb(var(--yb-shadow) / 0.14);
+  color: rgb(var(--yb-text));
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.media-preparation__header,
+.media-preparation__mode,
+.media-preparation__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.media-preparation__header { margin-block-end: 0.6rem; }
+.media-preparation__header h2 { font-size: 0.9375rem; font-weight: 700; }
+.media-preparation__mode {
+  padding: 0.45rem 0.55rem 0.45rem 0.75rem;
+  border-radius: 0.6rem;
+  background: rgb(var(--yb-surface-soft));
+}
+.media-preparation__note { margin: 0.6rem 0 0; color: rgb(var(--yb-text-muted)); }
+.media-preparation__jobs { margin: 0.45rem 0 0; padding: 0; list-style: none; }
+.media-preparation__jobs li { padding-block: 0.65rem; border-block-end: 1px solid rgb(var(--yb-border)); overflow-wrap: anywhere; }
+.media-preparation__jobs li:last-child { border-block-end: 0; }
+.media-preparation__actions { margin-block-start: 0.35rem; justify-content: flex-start; flex-wrap: wrap; }
+
+@media (max-width: 640px) {
+  .media-preparation__panel {
+    position: fixed;
+    inset-block-start: 4.4rem;
+    inset-inline: 0.75rem;
+    inline-size: auto;
+  }
+}
 </style>
