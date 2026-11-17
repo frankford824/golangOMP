@@ -131,9 +131,9 @@ func (s *identityService) UpdateDepartment(ctx context.Context, p UpdateOrgDepar
 	if !nextEnabled && current.Name == string(domain.DepartmentUnassigned) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配是系统归属，不能停用。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 	}
-	var unassignedTeam string
+	var unassignedTeam *domain.OrgTeam
 	if !nextEnabled {
-		unassigned, appErr := s.defaultUnassignedPoolTeam()
+		unassigned, appErr := s.unassignedPoolForOrgWrite(ctx)
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -264,14 +264,14 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 			})
 		}
 	}
-	var unassignedTeam string
+	var unassignedTeam *domain.OrgTeam
 	if !nextEnabled {
-		unassigned, appErr := s.defaultUnassignedPoolTeam()
+		unassigned, appErr := s.unassignedPoolForOrgWrite(ctx)
 		if appErr != nil {
 			return nil, appErr
 		}
 		unassignedTeam = unassigned
-		if current.Department == string(domain.DepartmentUnassigned) && current.Name == unassignedTeam {
+		if current.ID == unassignedTeam.ID {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配池是系统归属，不能停用。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 		}
 	}
@@ -288,7 +288,7 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 			}
 		}
 		if !current.Enabled {
-			if err := s.moveTeamUsersToUnassigned(ctx, tx, current.Department, originalName, unassignedTeam); err != nil {
+			if err := s.moveTeamUsersToUnassigned(ctx, tx, current, unassignedTeam); err != nil {
 				return err
 			}
 		}
@@ -331,7 +331,7 @@ func (s *identityService) MergeDepartment(ctx context.Context, p MergeOrgDepartm
 	if !target.Enabled {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "目标部门已停用，请先恢复目标部门再合并。", map[string]interface{}{"deny_code": "org_merge_target_disabled", "department": target.Name})
 	}
-	sourceTeams, err := s.teamNamesForDepartment(ctx, source.ID)
+	sourceTeams, err := s.teamsForDepartment(ctx, source.ID)
 	if err != nil {
 		return nil, infraError("list source department teams for merge", err)
 	}
@@ -350,8 +350,9 @@ func (s *identityService) MergeDepartment(ctx context.Context, p MergeOrgDepartm
 	}
 	// Source-only teams disappear with the merge; drop them from managed scopes.
 	removedTeams := map[string]struct{}{}
-	for name := range sourceTeams {
-		if _, ok := targetEnabledTeams[name]; !ok {
+	for _, team := range sourceTeams {
+		name := strings.TrimSpace(team.Name)
+		if _, ok := targetEnabledTeams[name]; name != "" && !ok {
 			removedTeams[name] = struct{}{}
 		}
 	}
@@ -480,7 +481,7 @@ func (s *identityService) DeleteDepartment(ctx context.Context, id int64) *domai
 	if current.Name == string(domain.DepartmentUnassigned) {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 	}
-	unassignedTeam, appErr := s.defaultUnassignedPoolTeam()
+	unassignedTeam, appErr := s.unassignedPoolForOrgWrite(ctx)
 	if appErr != nil {
 		return appErr
 	}
@@ -519,12 +520,12 @@ func (s *identityService) DeleteTeam(ctx context.Context, id int64) *domain.AppE
 	if current.Department == string(domain.DepartmentUnassigned) {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配池是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 	}
-	unassignedTeam, appErr := s.defaultUnassignedPoolTeam()
+	unassignedTeam, appErr := s.unassignedPoolForOrgWrite(ctx)
 	if appErr != nil {
 		return appErr
 	}
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.moveTeamUsersToUnassigned(ctx, tx, current.Department, current.Name, unassignedTeam); err != nil {
+		if err := s.moveTeamUsersToUnassigned(ctx, tx, current, unassignedTeam); err != nil {
 			return err
 		}
 		return s.orgRepo.DeleteTeam(ctx, tx, current.ID)
@@ -594,18 +595,40 @@ func (s *identityService) rewriteUsersForTeamRename(ctx context.Context, tx repo
 	})
 }
 
-func (s *identityService) moveDepartmentUsersToUnassigned(ctx context.Context, tx repo.Tx, departmentID int64, departmentName, unassignedTeam string) error {
-	teamNames, err := s.teamNamesForDepartment(ctx, departmentID)
+func (s *identityService) unassignedPoolForOrgWrite(ctx context.Context) (*domain.OrgTeam, *domain.AppError) {
+	pool, appErr := s.findUnassignedPoolTeam(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if pool == nil {
+		return nil, unassignedPoolMissing()
+	}
+	return pool, nil
+}
+
+func (s *identityService) moveDepartmentUsersToUnassigned(ctx context.Context, tx repo.Tx, departmentID int64, departmentName string, unassignedTeam *domain.OrgTeam) error {
+	teams, err := s.teamsForDepartment(ctx, departmentID)
 	if err != nil {
 		return err
 	}
+	teamNames := make(map[string]struct{}, len(teams))
+	teamIDs := make(map[int64]struct{}, len(teams))
+	for _, team := range teams {
+		teamIDs[team.ID] = struct{}{}
+		if name := strings.TrimSpace(team.Name); name != "" {
+			teamNames[name] = struct{}{}
+		}
+	}
 	return s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
-		changed := false
-		sourceDepartmentScoped := userReferencesDepartmentName(user, departmentName)
-		if strings.TrimSpace(string(user.Department)) == departmentName {
-			user.Department = domain.DepartmentUnassigned
-			user.Team = unassignedTeam
-			changed = true
+		member := userIsInDepartment(user, departmentID, departmentName)
+		if user.TeamID != nil {
+			_, childTeam := teamIDs[*user.TeamID]
+			member = member || childTeam
+		}
+		sourceDepartmentScoped := member || userReferencesDepartmentName(user, departmentName)
+		changed := member
+		if member {
+			moveUserToUnassignedPool(user, unassignedTeam)
 		}
 		if next := removeStringValue(user.ManagedDepartments, departmentName); !stringSlicesEqual(next, user.ManagedDepartments) {
 			user.ManagedDepartments = next
@@ -623,17 +646,20 @@ func (s *identityService) moveDepartmentUsersToUnassigned(ctx context.Context, t
 	})
 }
 
-func (s *identityService) moveTeamUsersToUnassigned(ctx context.Context, tx repo.Tx, department, team, unassignedTeam string) error {
+func (s *identityService) moveTeamUsersToUnassigned(ctx context.Context, tx repo.Tx, team, unassignedTeam *domain.OrgTeam) error {
 	return s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
-		changed := false
-		sourceDepartmentScoped := userReferencesDepartmentName(user, department)
-		if strings.TrimSpace(string(user.Department)) == department && strings.TrimSpace(user.Team) == team {
-			user.Department = domain.DepartmentUnassigned
-			user.Team = unassignedTeam
-			changed = true
+		inDepartment := userIsInDepartment(user, team.DepartmentID, team.Department)
+		member := inDepartment && strings.TrimSpace(user.Team) == team.Name
+		if user.TeamID != nil {
+			member = *user.TeamID == team.ID
+		}
+		sourceDepartmentScoped := member || inDepartment || userReferencesDepartmentName(user, team.Department)
+		changed := member
+		if member {
+			moveUserToUnassignedPool(user, unassignedTeam)
 		}
 		if sourceDepartmentScoped {
-			next := removeStringValue(user.ManagedTeams, team)
+			next := removeStringValue(user.ManagedTeams, team.Name)
 			if stringSlicesEqual(next, user.ManagedTeams) {
 				return changed
 			}
@@ -642,6 +668,22 @@ func (s *identityService) moveTeamUsersToUnassigned(ctx context.Context, tx repo
 		}
 		return changed
 	})
+}
+
+// Older accounts may only have a display name. A stored ID takes precedence.
+func userIsInDepartment(user *domain.User, departmentID int64, departmentName string) bool {
+	if user.DepartmentID != nil {
+		return *user.DepartmentID == departmentID
+	}
+	return strings.TrimSpace(string(user.Department)) == departmentName
+}
+
+func moveUserToUnassignedPool(user *domain.User, pool *domain.OrgTeam) {
+	departmentID, teamID := pool.DepartmentID, pool.ID
+	user.Department = domain.DepartmentUnassigned
+	user.DepartmentID = &departmentID
+	user.Team = strings.TrimSpace(pool.Name)
+	user.TeamID = &teamID
 }
 
 func (s *identityService) disableTeamsForDepartment(ctx context.Context, tx repo.Tx, departmentID int64) error {
@@ -661,18 +703,15 @@ func (s *identityService) disableTeamsForDepartment(ctx context.Context, tx repo
 	return nil
 }
 
-func (s *identityService) teamNamesForDepartment(ctx context.Context, departmentID int64) (map[string]struct{}, error) {
+func (s *identityService) teamsForDepartment(ctx context.Context, departmentID int64) ([]*domain.OrgTeam, error) {
 	teams, err := s.orgRepo.ListTeams(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("list org teams for department users: %w", err)
 	}
-	out := make(map[string]struct{})
+	var out []*domain.OrgTeam
 	for _, team := range teams {
-		if team == nil || team.DepartmentID != departmentID {
-			continue
-		}
-		if name := strings.TrimSpace(team.Name); name != "" {
-			out[name] = struct{}{}
+		if team != nil && team.DepartmentID == departmentID {
+			out = append(out, team)
 		}
 	}
 	return out, nil

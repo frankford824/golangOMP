@@ -2350,20 +2350,12 @@ func (s *identityService) validateTeam(department domain.Department, team string
 }
 
 func (s *identityService) defaultUnassignedPoolTeam() (string, *domain.AppError) {
-	if s.orgRepo != nil {
-		teams, err := s.orgRepo.ListTeams(context.Background(), false)
-		if err != nil {
-			return "", infraError("list org teams for unassigned pool", err)
-		}
-		for _, team := range teams {
-			if team == nil || team.Department != string(domain.DepartmentUnassigned) || !team.Enabled {
-				continue
-			}
-			trimmed := strings.TrimSpace(team.Name)
-			if trimmed != "" {
-				return trimmed, nil
-			}
-		}
+	pool, appErr := s.findUnassignedPoolTeam(context.Background())
+	if appErr != nil {
+		return "", appErr
+	}
+	if pool != nil {
+		return strings.TrimSpace(pool.Name), nil
 	}
 	teams := s.authSettings.DepartmentTeams[string(domain.DepartmentUnassigned)]
 	for _, team := range teams {
@@ -2372,7 +2364,27 @@ func (s *identityService) defaultUnassignedPoolTeam() (string, *domain.AppError)
 			return trimmed, nil
 		}
 	}
-	return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "unassigned pool team is not configured", map[string]interface{}{
+	return "", unassignedPoolMissing()
+}
+
+func (s *identityService) findUnassignedPoolTeam(ctx context.Context) (*domain.OrgTeam, *domain.AppError) {
+	if s.orgRepo == nil {
+		return nil, nil
+	}
+	teams, err := s.orgRepo.ListTeams(ctx, false)
+	if err != nil {
+		return nil, infraError("list org teams for unassigned pool", err)
+	}
+	for _, team := range teams {
+		if team != nil && team.Department == string(domain.DepartmentUnassigned) && team.Enabled && strings.TrimSpace(team.Name) != "" {
+			return team, nil
+		}
+	}
+	return nil, nil
+}
+
+func unassignedPoolMissing() *domain.AppError {
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, "unassigned pool team is not configured", map[string]interface{}{
 		"department": domain.DepartmentUnassigned,
 	})
 }

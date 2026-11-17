@@ -600,15 +600,25 @@ func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) 
 	}
 	department, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "待清理部门"})
 	team, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "待清理小组"})
+	poolDepartment, err := orgRepo.GetDepartmentByName(context.Background(), string(domain.DepartmentUnassigned))
+	if err != nil || poolDepartment == nil {
+		t.Fatalf("unassigned department = %+v, err = %v", poolDepartment, err)
+	}
+	poolTeam, err := orgRepo.GetTeamByDepartmentAndName(context.Background(), poolDepartment.ID, "未分配池")
+	if err != nil || poolTeam == nil {
+		t.Fatalf("unassigned team = %+v, err = %v", poolTeam, err)
+	}
 	adminCtx := identityGlobalAccessManageContext(1)
 	teamMember, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
-		Username:    "cleanup_team_member",
-		EmployeeNo:  intPtr(2210),
-		DisplayName: "Cleanup Team Member",
-		Department:  domain.Department("待清理部门"),
-		Team:        "待清理小组",
-		Mobile:      "13800002210",
-		Password:    "Init12345",
+		Username:     "cleanup_team_member",
+		EmployeeNo:   intPtr(2210),
+		DisplayName:  "Cleanup Team Member",
+		Department:   domain.Department("待清理部门"),
+		Team:         "待清理小组",
+		DepartmentID: &department.ID,
+		TeamID:       &team.ID,
+		Mobile:       "13800002210",
+		Password:     "Init12345",
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(team member) unexpected error: %+v", appErr)
@@ -626,6 +636,9 @@ func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) 
 	}
 	if movedTeamMember.Department != domain.DepartmentUnassigned || movedTeamMember.Team != "未分配池" {
 		t.Fatalf("DeleteTeam moved user = %+v, want unassigned pool", movedTeamMember)
+	}
+	if !equalOptionalInt64(movedTeamMember.DepartmentID, &poolDepartment.ID) || !equalOptionalInt64(movedTeamMember.TeamID, &poolTeam.ID) {
+		t.Fatal("DeleteTeam did not move the user's stable organization IDs to the unassigned pool")
 	}
 	if containsString(movedTeamMember.ManagedTeams, "待清理小组") {
 		t.Fatalf("DeleteTeam managed teams = %+v, want removed 待清理小组", movedTeamMember.ManagedTeams)
@@ -647,6 +660,12 @@ func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) 
 	}
 	userRepo.users[departmentMember.ID].ManagedDepartments = []string{"待清理部门二", "其他部门"}
 	userRepo.users[departmentMember.ID].ManagedTeams = []string{"待级联小组", "其他小组"}
+	// An earlier stop operation could change the display names and leave both
+	// stable references pointing at the disabled organization.
+	userRepo.users[departmentMember.ID].Department = domain.DepartmentUnassigned
+	userRepo.users[departmentMember.ID].Team = poolTeam.Name
+	userRepo.users[departmentMember.ID].DepartmentID = &departmentWithChildren.ID
+	userRepo.users[departmentMember.ID].TeamID = &childTeam.ID
 	if appErr := svc.DeleteDepartment(context.Background(), departmentWithChildren.ID); appErr != nil {
 		t.Fatalf("DeleteDepartment(enabled with members) unexpected error: %+v", appErr)
 	}
@@ -662,6 +681,9 @@ func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) 
 	}
 	if movedDepartmentMember.Department != domain.DepartmentUnassigned || movedDepartmentMember.Team != "未分配池" {
 		t.Fatalf("DeleteDepartment moved user = %+v, want unassigned pool", movedDepartmentMember)
+	}
+	if !equalOptionalInt64(movedDepartmentMember.DepartmentID, &poolDepartment.ID) || !equalOptionalInt64(movedDepartmentMember.TeamID, &poolTeam.ID) {
+		t.Fatal("DeleteDepartment did not repair the user's stale stable organization IDs")
 	}
 	if containsString(movedDepartmentMember.ManagedDepartments, "待清理部门二") {
 		t.Fatalf("DeleteDepartment managed departments = %+v, want removed 待清理部门二", movedDepartmentMember.ManagedDepartments)
