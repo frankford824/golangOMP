@@ -157,7 +157,28 @@
                   清除组织筛选
                 </button>
               </div>
-              <span class="directory-count">共 {{ pagination.total }} 人</span>
+              <div class="directory-actions">
+                <span class="directory-count">共 {{ pagination.total }} 人</span>
+                <BaseButton
+                  v-if="canManageAccess && !batchSelectMode"
+                  variant="secondary"
+                  size="sm"
+                  :disabled="listLoading || !eligibleBatchUsers.length"
+                  @click="batchSelectMode = true"
+                >批量删除</BaseButton>
+              </div>
+            </div>
+            <div v-if="batchSelectMode" class="batch-selection-bar">
+              <span>已选本页 {{ selectedBatchUsers.length }} 个账号</span>
+              <div class="directory-actions">
+                <BaseButton variant="ghost" size="sm" @click="exitBatchSelect">取消选择</BaseButton>
+                <BaseButton
+                  variant="danger"
+                  size="sm"
+                  :disabled="listLoading || !selectedBatchUsers.length"
+                  @click="openBatchDelete"
+                >删除所选</BaseButton>
+              </div>
             </div>
             <div class="toolbar">
               <BaseInput
@@ -184,7 +205,7 @@
                 :loading="listLoading"
                 :row-key="userRowKey"
                 :row-class-name="userRowClassName"
-                :scroll-x="980"
+                :scroll-x="batchSelectMode ? 1028 : 980"
                 density="compact"
                 empty-title="暂无用户"
                 empty-description="未获取到用户列表。"
@@ -206,6 +227,47 @@
       </section>
 
       <Teleport to="body">
+      <BaseModal
+        :model-value="batchDeleteTargets.length > 0"
+        :title="batchDeleteResult ? '批量删除结果' : '确认批量删除账号'"
+        panel-max-width="min(480px, calc(100vw - 1.5rem))"
+        @update:model-value="closeBatchDelete"
+      >
+        <template v-if="batchDeleteResult">
+          <p role="status">已删除 {{ batchDeleteResult.deleted }} 个账号，失败 {{ batchDeleteResult.failures.length }} 个。</p>
+          <ul v-if="batchDeleteResult.failures.length" class="batch-target-list" aria-label="删除失败的账号">
+            <li v-for="failure in batchDeleteResult.failures" :key="failure.target.id">
+              <strong>{{ failure.target.display_name || failure.target.username }}</strong>
+              <span>（{{ failure.target.username }}）</span>
+              <div class="batch-error">{{ failure.message }}</div>
+            </li>
+          </ul>
+        </template>
+        <template v-else>
+          <p>将删除以下 {{ batchDeleteTargets.length }} 个账号，并结束它们的登录会话。历史业务记录会保留，账号无法重新启用。</p>
+          <ul class="batch-target-list" aria-label="待删除账号">
+            <li v-for="target in batchDeleteTargets" :key="target.id">
+              <strong>{{ target.display_name || target.username }}</strong>
+              <span>（{{ target.username }}）</span>
+            </li>
+          </ul>
+          <p v-if="batchDeleteRunning" role="status">正在处理 {{ batchDeleteProcessed }} / {{ batchDeleteTargets.length }}</p>
+        </template>
+        <template #footer>
+          <footer class="batch-delete-footer">
+            <BaseButton variant="secondary" size="sm" :disabled="batchDeleteRunning" @click="closeBatchDelete">
+              {{ batchDeleteResult ? '关闭' : '取消' }}
+            </BaseButton>
+            <BaseButton
+              v-if="!batchDeleteResult"
+              variant="danger"
+              size="sm"
+              :loading="batchDeleteRunning"
+              @click="submitBatchDelete"
+            >确认批量删除</BaseButton>
+          </footer>
+        </template>
+      </BaseModal>
       <!-- 用户详情 / 角色管理 弹层 -->
       <UserDetailModal
         v-if="detailUser"
@@ -401,6 +463,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
 import { patchUserMembership, clearUserMembership } from '@/composables/useOrgPermissionData'
 import BaseButton from '@/components/base/BaseButton.vue'
+import BaseModal from '@/components/base/BaseModal.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
@@ -444,9 +507,26 @@ interface OrgActionState {
   team?: OrgTreeTeam
 }
 
+interface BatchDeleteResult {
+  deleted: number
+  failures: { target: UserRow; message: string }[]
+}
+
 const listLoading = ref(false)
 const listError = ref('')
 const users = ref<UserRow[]>([])
+const batchSelectMode = ref(false)
+const batchSelectedIDs = ref<string[]>([])
+const eligibleBatchUsers = computed(() => users.value.filter(canSelectForDeletion))
+const selectedBatchUsers = computed(() => {
+  const selected = new Set(batchSelectedIDs.value)
+  return eligibleBatchUsers.value.filter((user) => selected.has(user.id))
+})
+const batchDeleteTargets = ref<UserRow[]>([])
+const batchDeleteProcessed = ref(0)
+const batchDeleteRunning = ref(false)
+const batchDeleteResult = ref<BatchDeleteResult | null>(null)
+let batchDeleteAbort: AbortController | null = null
 const detailUser = ref<UserRow | null>(null)
 const detailLoading = ref(false)
 const detailFailed = ref(false)
@@ -946,7 +1026,38 @@ const orgActionConfirmText = computed(() => {
   if (orgAction.value?.mode === 'deleteTeam' && orgAction.value.team?.enabled === false) return '确认恢复'
   return '确认停用'
 })
-const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
+const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
+  const selectionColumn: DataTableColumns<UserRow> = batchSelectMode.value ? [{
+    key: 'batch-selection',
+    width: 48,
+    fixed: 'left',
+    align: 'center',
+    title: () => h('input', {
+      type: 'checkbox',
+      class: 'batch-checkbox',
+      'aria-label': '选择本页可删除账号',
+      disabled: listLoading.value || !eligibleBatchUsers.value.length,
+      checked: !!eligibleBatchUsers.value.length && selectedBatchUsers.value.length === eligibleBatchUsers.value.length,
+      indeterminate: selectedBatchUsers.value.length > 0 && selectedBatchUsers.value.length < eligibleBatchUsers.value.length,
+      onChange: (event: Event) => {
+        batchSelectedIDs.value = (event.target as HTMLInputElement).checked
+          ? eligibleBatchUsers.value.map((user) => user.id) : []
+      },
+    }),
+    render: (row) => h('input', {
+      type: 'checkbox',
+      class: 'batch-checkbox',
+      'aria-label': `选择账号 ${row.username}`,
+      disabled: listLoading.value || !canSelectForDeletion(row),
+      checked: batchSelectedIDs.value.includes(row.id),
+      onChange: (event: Event) => {
+        batchSelectedIDs.value = (event.target as HTMLInputElement).checked
+          ? [...new Set([...batchSelectedIDs.value, row.id])]
+          : batchSelectedIDs.value.filter((id) => id !== row.id)
+      },
+    }),
+  }] : []
+  return [...selectionColumn,
   {
     title: '姓名',
     key: 'display_name',
@@ -1036,7 +1147,8 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
         '管理',
       ),
   },
-])
+  ]
+})
 const createTeamOptions = computed(() =>
   createForm.value.department
     ? teamOptions.value.filter((t) =>
@@ -1072,6 +1184,9 @@ function mapRawUser(raw: Record<string, unknown>): UserRow {
   if (typeof rawEmployeeNo === 'number' && Number.isInteger(rawEmployeeNo)) employeeNo = rawEmployeeNo
   else if (typeof rawEmployeeNo === 'string' && /^\d+$/.test(rawEmployeeNo.trim())) employeeNo = Number(rawEmployeeNo.trim())
   else if (rawEmployeeNo === null) employeeNo = null
+  const access = raw.frontend_access as { is_super_admin?: boolean; roles?: unknown } | undefined
+  const hasSuperAdminRole = (roles: unknown) => Array.isArray(roles)
+    && roles.some((role) => typeof role === 'string' && role.toLowerCase().replace(/_/g, '') === 'superadmin')
   return {
     id: String(raw.id ?? ''),
     username: String(raw.username ?? ''),
@@ -1081,6 +1196,7 @@ function mapRawUser(raw: Record<string, unknown>): UserRow {
     team: typeof raw.team === 'string' ? raw.team : (typeof raw.group === 'string' ? raw.group : undefined),
     status: typeof raw.status === 'string' ? raw.status : undefined,
     frontend_access: raw.frontend_access,
+    protectedAccount: access?.is_super_admin === true || hasSuperAdminRole(access?.roles) || hasSuperAdminRole(raw.roles),
   }
 }
 
@@ -1551,6 +1667,68 @@ async function deleteDetailUser() {
   void loadOrgOptions()
 }
 
+function canSelectForDeletion(user: UserRow) {
+  return canManageAccess.value && !!user.id && !user.protectedAccount
+    && user.id !== permissionsStore.currentUser?.id
+}
+
+function exitBatchSelect() {
+  batchSelectMode.value = false
+  batchSelectedIDs.value = []
+}
+
+function openBatchDelete() {
+  if (listLoading.value || !selectedBatchUsers.value.length) return
+  batchDeleteTargets.value = [...selectedBatchUsers.value]
+  batchDeleteProcessed.value = 0
+  batchDeleteResult.value = null
+}
+
+function closeBatchDelete() {
+  if (batchDeleteRunning.value) return
+  batchDeleteTargets.value = []
+  batchDeleteResult.value = null
+}
+
+async function submitBatchDelete() {
+  if (batchDeleteRunning.value || batchDeleteResult.value || !batchDeleteTargets.value.length || !canManageAccess.value) return
+  const controller = new AbortController()
+  batchDeleteAbort = controller
+  batchDeleteRunning.value = true
+  directoryMessage.value = ''
+  const result: BatchDeleteResult = { deleted: 0, failures: [] }
+  try {
+    for (const target of batchDeleteTargets.value) {
+      try {
+        await usersApi.remove(target.id, controller.signal)
+        result.deleted += 1
+      } catch (cause) {
+        if (controller.signal.aborted) return
+        const message = cause instanceof Error ? cause.message : '删除账号失败'
+        result.failures.push({ target, message })
+      }
+      if (controller.signal.aborted) return
+      batchDeleteProcessed.value += 1
+    }
+    batchSelectedIDs.value = result.failures.map(({ target }) => target.id)
+    if (!result.failures.length) exitBatchSelect()
+    if (result.deleted > 0) {
+      await loadUsers()
+      if (controller.signal.aborted) return
+      if (page.value > totalPages.value) {
+        page.value = totalPages.value
+        await loadUsers()
+      }
+      if (controller.signal.aborted) return
+      void loadOrgOptions()
+    }
+    batchDeleteResult.value = result
+  } finally {
+    batchDeleteRunning.value = false
+    batchDeleteAbort = null
+  }
+}
+
 async function submitRoleReplace() {
   if (!detailUser.value || !canManageAccess.value || !detailEffectiveAccess.value) return
   roleSubmitting.value = true
@@ -2010,6 +2188,10 @@ watch(pageSize, () => {
   void loadUsers()
 })
 
+watch([page, pageSize, appliedKeyword, statusFilter, departmentFilter, teamFilter], () => {
+  batchSelectedIDs.value = []
+})
+
 watch(
   () => createForm.value.department,
   () => {
@@ -2055,6 +2237,7 @@ onBeforeUnmount(() => {
   listSeq += 1
   listAbort?.abort()
   listAbort = null
+  batchDeleteAbort?.abort()
 })
 </script>
 
@@ -2062,6 +2245,59 @@ onBeforeUnmount(() => {
 <style scoped src="./userManagementModal.css"></style>
 
 <style scoped>
+.directory-actions,
+.batch-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.batch-selection-bar {
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.65rem 0.55rem 0.8rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.6rem;
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
+  font-size: 0.8125rem;
+}
+
+.batch-checkbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: rgb(var(--yb-brand));
+  vertical-align: middle;
+}
+
+.batch-target-list {
+  margin-block: 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.batch-target-list li {
+  padding-block: 0.5rem;
+  border-bottom: 1px solid rgb(var(--yb-border));
+  overflow-wrap: anywhere;
+}
+
+.batch-error {
+  margin-top: 0.25rem;
+  color: rgb(var(--yb-danger-text));
+}
+
+.batch-delete-footer {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid rgb(var(--yb-border));
+}
+
 /* 页画布：与看板页一致的浅灰底 */
 .user-management-view {
   padding: 0;

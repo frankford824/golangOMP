@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { mount, flushPromises } from '@vue/test-utils'
+import { defineComponent, h, type PropType, type VNode } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import UserManagementView from './UserManagementView.vue'
@@ -114,9 +115,21 @@ const BaseSelectStub = {
   `,
 }
 
-const BaseDataTableStub = {
-  template: '<div data-test="user-table"></div>',
-}
+type StubTableColumn = { key: string; title: string | (() => VNode); render?: (row: unknown) => VNode }
+const BaseDataTableStub = defineComponent({
+  props: {
+    columns: { type: Array as PropType<StubTableColumn[]>, required: true },
+    data: { type: Array as PropType<unknown[]>, required: true },
+  },
+  setup(props) {
+    return () => {
+      const selection = props.columns.find((column) => column.key === 'batch-selection')
+      return h('div', { 'data-test': 'user-table' }, selection && typeof selection.title === 'function'
+        ? [selection.title(), ...props.data.map((row) => selection.render?.(row))]
+        : [])
+    }
+  },
+})
 
 const EmptyStub = {
   template: '<div><slot /></div>',
@@ -326,6 +339,55 @@ describe('UserManagementView role governance', () => {
     expect(document.body.querySelector('.user-detail')).toBeNull()
     expect(wrapper.text()).toContain('已删除账号 target')
     expect(usersApi.list).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('selects eligible accounts in bulk and preserves only the failed selection', async () => {
+    const rows = [
+      { id: 1, username: 'current', display_name: '当前账号' },
+      { id: 2, username: 'batch-ok', display_name: '批量甲' },
+      { id: 3, username: 'batch-denied', display_name: '批量乙' },
+      { id: 5, username: 'protected', frontend_access: { is_super_admin: true } },
+    ]
+    vi.mocked(usersApi.list).mockImplementation(async () => ({
+      data: { data: rows, pagination: { total: rows.length, page: 1, page_size: 20 } },
+    } as never))
+    vi.mocked(usersApi.remove).mockImplementation(async (id) => {
+      if (id === '3') throw new Error('账号不在管理范围内')
+      rows.splice(rows.findIndex((row) => String(row.id) === id), 1)
+      return { status: 204 } as never
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    const click = async (name: string) => {
+      const button = wrapper.findAll('button').find((item) => item.text() === name)
+      if (button) await button.trigger('click')
+      else {
+        const modalButton = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+          .find((item) => item.textContent?.trim() === name)
+        expect(modalButton, name).toBeDefined()
+        modalButton?.click()
+      }
+      await flushPromises()
+    }
+    await click('批量删除')
+    const checkbox = (label: string) => wrapper.get<HTMLInputElement>(`input[aria-label="${label}"]`)
+    expect(checkbox('选择账号 current').element.disabled).toBe(true)
+    expect(checkbox('选择账号 protected').element.disabled).toBe(true)
+    await checkbox('选择本页可删除账号').setValue(true)
+    expect(wrapper.text()).toContain('已选本页 2 个账号')
+    await click('删除所选')
+    expect(document.body.querySelector('[aria-label="待删除账号"]')?.textContent).toContain('批量甲（batch-ok）')
+    await click('取消')
+    expect(usersApi.remove).not.toHaveBeenCalled()
+    await click('删除所选')
+    await click('确认批量删除')
+    expect(vi.mocked(usersApi.remove).mock.calls.map(([id]) => id)).toEqual(['2', '3'])
+    const result = document.body.querySelector('[role="dialog"]')
+    expect(result?.textContent).toContain('已删除 1 个账号，失败 1 个。')
+    expect(result?.textContent).toContain('账号不在管理范围内')
+    expect(wrapper.find('input[aria-label="选择账号 batch-ok"]').exists()).toBe(false)
+    expect(checkbox('选择账号 batch-denied').element.checked).toBe(true)
     wrapper.unmount()
   })
 

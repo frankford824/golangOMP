@@ -12,6 +12,7 @@ export interface UserRow {
   team?: string
   status?: 'active' | 'disabled' | string
   frontend_access?: unknown
+  protectedAccount?: boolean
 }
 
 export interface RoleOption {
