@@ -116,7 +116,7 @@ const eligibleMonthsLoading = ref(false)
 const entryEligibleMonthsLoading = ref(false)
 const activeSettlementSection = ref<SettlementSectionKey>('preview')
 watch(() => route?.query?.section, (section) => {
-  activeSettlementSection.value = section === 'supplements' ? section : 'preview'
+  activeSettlementSection.value = section === 'batches' || section === 'supplements' || section === 'adjustments' ? section : 'preview'
 }, { immediate: true })
 const confirmedBatches = computed(() => batches.value.filter((batch) => batch.status === 'confirmed' && batch.business_month === month.value))
 async function selectAdjustmentBatch(event: Event) {
@@ -292,46 +292,27 @@ const entryEligibleReady = computed(() =>
 )
 const selectedBatchConfirmed = computed(() => selectedBatch.value?.batch.status === 'confirmed' && selectedBatch.value.batch.business_month === month.value)
 const hasGeneratedBatch = computed(() => batches.value.some((batch) => batch.status === 'generated'))
-const settlementNavGroups = computed(() => [
+const settlementSteps = computed(() => [
   {
-    label: '结算流程',
-    items: [
-      {
-        key: 'preview' as const,
-        title: '预览工资',
-        meta: '先核对本月计件、扣款、补录和净额',
-        count: payrollRows.value.length ? `${formatInt(payrollRows.value.length)} 行` : '待预览',
-      },
-      {
-        key: 'batches' as const,
-        title: '批次确认',
-        meta: '生成批次后锁定本月可结算明细',
-        count: `${formatInt(batches.value.length)} 个`,
-      },
-    ],
+    key: 'preview' as const,
+    title: '预览工资',
+    status: loading.value ? '读取中' : payrollRows.value.length ? `${formatInt(payrollRows.value.length)} 行可核对` : '暂无待结算明细',
   },
   {
-    label: '补充处理',
-    items: [
-      {
-        key: 'supplements' as const,
-        title: '补录管理',
-        meta: '开放补录月份、导入或手动补发',
-        count: `${formatInt(supplements.value.length)} 条`,
-      },
-      {
-        key: 'adjustments' as const,
-        title: '工资调整',
-        meta: '批次确认后，记录需要补发或扣回的金额',
-        count: selectedBatchConfirmed.value ? '可记录' : '待选批次',
-      },
-    ],
+    key: 'batches' as const,
+    title: '批次确认',
+    status: loading.value ? '读取中' : hasGeneratedBatch.value ? '有批次待确认' : confirmedBatches.value.length ? '已有确认批次' : '暂无待确认批次',
   },
 ])
+const settlementUtilities = [
+  { key: 'supplements' as const, title: '补录管理' },
+  { key: 'adjustments' as const, title: '工资调整' },
+]
+const pinnedPayrollColumns = ['payee_name_label', 'personnel_no']
 const payrollGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_name_label', label: '姓名', width: 116 },
+  { key: 'personnel_no', label: '人员编号', width: 116 },
   { key: 'worker_type_label', label: '人员类型', width: 96 },
-  { key: 'personnel_no', label: '人员编号', width: 96 },
   { key: 'row_label', label: '工资条', width: 140 },
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
   { key: 'gross_amount', label: '毛额', width: 100, align: 'right' },
@@ -1290,9 +1271,7 @@ onMounted(async () => {
     <SettlementHubTabs />
     <div class="aw-page-bar">
       <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">本月结算</p>
         <h2>工资结算</h2>
-        <p>按“预览工资 → 批次确认 → 补录处理 → 工资调整”的顺序操作，避免把结算动作混在同一屏。</p>
       </div>
       <div class="aw-page-bar__actions">
         <label class="aw-month-control">
@@ -1306,6 +1285,32 @@ onMounted(async () => {
         </button>
       </div>
     </div>
+    <nav class="aw-settlement-flow" aria-label="结算操作导航">
+      <ol class="aw-settlement-flow__steps" aria-label="结算流程">
+        <li v-for="(step, index) in settlementSteps" :key="step.key">
+          <button
+            class="aw-settlement-flow__step"
+            type="button"
+            :aria-current="activeSettlementSection === step.key ? 'step' : undefined"
+            @click="activeSettlementSection = step.key"
+          >
+            <span class="aw-settlement-flow__index" aria-hidden="true">{{ index + 1 }}</span>
+            <strong>{{ step.title }}</strong>
+            <small>{{ step.status }}</small>
+          </button>
+        </li>
+      </ol>
+      <div class="aw-settlement-flow__utilities" aria-label="补充处理" role="group">
+        <button
+          v-for="item in settlementUtilities"
+          :key="item.key"
+          class="aw-secondary-button"
+          type="button"
+          :aria-current="activeSettlementSection === item.key ? 'page' : undefined"
+          @click="activeSettlementSection = item.key"
+        >{{ item.title }}</button>
+      </div>
+    </nav>
     <input
       ref="errorInputRef"
       class="aw-visually-hidden"
@@ -1364,32 +1369,7 @@ onMounted(async () => {
       @action="handleSettlementSpreadsheetAction"
     />
 
-    <div class="aw-settlement-workbench">
-      <aside class="aw-settlement-nav" aria-label="结算操作导航">
-        <div class="aw-settlement-nav__head">
-          <strong>{{ month }} 结算</strong>
-          <span>按顺序处理，当前只展示一个工作区</span>
-        </div>
-        <div v-for="group in settlementNavGroups" :key="group.label" class="aw-settlement-nav__group">
-          <p>{{ group.label }}</p>
-          <button
-            v-for="item in group.items"
-            :key="item.key"
-            class="aw-settlement-nav__item"
-            :class="{ 'is-active': activeSettlementSection === item.key }"
-            type="button"
-            :aria-current="activeSettlementSection === item.key ? 'page' : undefined"
-            @click="activeSettlementSection = item.key"
-          >
-            <span>
-              <strong>{{ item.title }}</strong>
-              <small>{{ item.meta }}</small>
-            </span>
-            <em>{{ item.count }}</em>
-          </button>
-        </div>
-      </aside>
-
+    <div class="aw-settlement-workbench aw-settlement-workbench--wide">
       <main class="aw-settlement-workspace">
         <section v-if="activeSettlementSection === 'preview'" class="aw-settlement-section">
           <div class="aw-settlement-section__head">
@@ -1408,36 +1388,6 @@ onMounted(async () => {
               </button>
             </div>
           </div>
-
-          <LedgerReadout payroll :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
-            <template #actions>
-              <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
-            </template>
-            <template #detail>
-              <div class="aw-sheet-detail">
-                <WorkbenchDataGrid
-                  v-if="payrollRows.length"
-                  :columns="payrollGridColumns"
-                  :rows="payrollGridRows"
-                  row-key="grid_id"
-                  storage-key="settlement-ledger-payroll"
-                  group-by="payee_user_id"
-                  :height="440"
-                  :row-height="34"
-                >
-                  <template #cell="{ column, value }">
-                    <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
-                    <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
-                    <span v-else>{{ gridValue(column.key, value) }}</span>
-                  </template>
-                </WorkbenchDataGrid>
-                <div v-else class="aw-empty-state">
-                  <h3>还没有可结算明细</h3>
-                  <p>导入质检扣款表并生成预览后，这里会按人员分组显示每条工资行的计件、质检扣款与净额。</p>
-                </div>
-              </div>
-            </template>
-          </LedgerReadout>
 
           <div class="aw-panel">
             <div class="aw-panel__head">
@@ -1461,6 +1411,7 @@ onMounted(async () => {
                 :rows="payrollGridRows"
                 row-key="grid_id"
                 storage-key="settlement-preview-payroll-v2"
+                :pinned-columns="pinnedPayrollColumns"
                 group-by="payee_user_id"
                 :height="260"
                 :row-height="34"
@@ -1483,6 +1434,37 @@ onMounted(async () => {
               </div>
             </AsyncBoundary>
           </div>
+
+          <LedgerReadout payroll :eyebrow="`结算台账 · ${month}`" title="本月工资预览" :segments="ledgerSegments">
+            <template #actions>
+              <button class="aw-console-button" type="button" @click="() => loadSettlement()">刷新预览</button>
+            </template>
+            <template #detail>
+              <div class="aw-sheet-detail">
+                <WorkbenchDataGrid
+                  v-if="payrollRows.length"
+                  :columns="payrollGridColumns"
+                  :rows="payrollGridRows"
+                  row-key="grid_id"
+                  storage-key="settlement-ledger-payroll"
+                  :pinned-columns="pinnedPayrollColumns"
+                  group-by="payee_user_id"
+                  :height="440"
+                  :row-height="34"
+                >
+                  <template #cell="{ column, value }">
+                    <span v-if="isMoneyColumn(column.key)" class="aw-cell-money">{{ gridValue(column.key, value) }}</span>
+                    <span v-else-if="column.align === 'right'" class="aw-cell-num">{{ gridValue(column.key, value) }}</span>
+                    <span v-else>{{ gridValue(column.key, value) }}</span>
+                  </template>
+                </WorkbenchDataGrid>
+                <div v-else class="aw-empty-state">
+                  <h3>还没有可结算明细</h3>
+                  <p>导入质检扣款表并生成预览后，这里会按人员分组显示每条工资行的计件、质检扣款与净额。</p>
+                </div>
+              </div>
+            </template>
+          </LedgerReadout>
 
           <div class="aw-panel">
             <div class="aw-panel__head">
@@ -1752,6 +1734,7 @@ onMounted(async () => {
               :rows="batchPayrollGridRows"
               row-key="grid_id"
               storage-key="settlement-batch-payroll"
+              :pinned-columns="pinnedPayrollColumns"
               group-by="payee_user_id"
               :height="260"
               :row-height="34"

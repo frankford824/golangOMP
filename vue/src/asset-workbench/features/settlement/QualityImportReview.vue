@@ -92,7 +92,9 @@ async function submit() {
     <div class="aw-quality-import__summary">
       <span>将导入到 <strong>{{ businessMonth }}</strong></span>
     </div>
-    <p v-if="reviewing" class="aw-copy" role="status">正在核对人员和作品归属…</p>
+    <p v-if="reviewing || submitting" class="aw-copy" role="status">
+      {{ reviewing ? '正在核对人员和作品归属…' : '正在导入质检记录…' }}
+    </p>
     <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
     <template v-if="rows.length">
       <div class="aw-quality-import__summary" aria-live="polite">

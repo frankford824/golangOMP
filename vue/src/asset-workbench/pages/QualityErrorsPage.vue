@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { Calculator, CheckCircle2, Download, FileSpreadsheet, RefreshCw, UploadCloud } from 'lucide-vue-next'
+import { Calculator, Download, FileSpreadsheet, RefreshCw, UploadCloud } from 'lucide-vue-next'
 
 import {
   assetWorkbenchApi,
@@ -13,6 +13,8 @@ import {
 import { exportErrorImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { currentBusinessMonth, isImportBusinessMonth } from '@aw/shared/format/businessMonth'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
+import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
+import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import PersonnelPicker from '@aw/shared/ui/PersonnelPicker.vue'
@@ -34,7 +36,18 @@ const month = ref(/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth) && requestedMon
 const session = useAssetWorkbenchSessionStore()
 const preview = ref<SettlementPreview | null>(null)
 const deductionRules = ref<DeductionRuleRow[]>([])
-const lastImportWarningCount = ref(0)
+const importOpen = ref(false)
+const importFeedback = ref('')
+const importWarning = ref(false)
+const importError = ref('')
+const importMonthInput = ref<HTMLInputElement | null>(null)
+const importAction = ref<HTMLButtonElement | null>(null)
+const importReview = ref<HTMLElement | null>(null)
+const historyPage = ref(1)
+const historyPageSize = 10
+const selectedImportID = ref<number | null>(null)
+const historyDetailPage = ref(1)
+const historyDetailPageSize = 25
 const loading = ref(false)
 const dragActive = ref(false)
 const notice = ref('')
@@ -67,6 +80,59 @@ const activeRules = computed(() => deductionRules.value.filter((rule) => ruleApp
 const canPreviewSettlement = computed(() => session.hasAnyCapability(['asset.workbench.settlement']))
 const canViewRules = computed(() => session.hasAnyCapability(['asset.workbench.settlement', 'asset.workbench.cost_center.manage']))
 const canManageRules = computed(() => session.hasAnyCapability(['asset.workbench.cost_center.manage']))
+const historyRequest = usePageRequest(signal =>
+  assetWorkbenchApi.listErrorImports({ business_month: month.value, page: historyPage.value, page_size: historyPageSize }, signal))
+const historyDetailRequest = usePageRequest(signal =>
+  selectedImportID.value === null ? Promise.resolve(null) : assetWorkbenchApi.getErrorImportDetail(selectedImportID.value, signal))
+const history = computed(() => historyRequest.data.value?.items ?? [])
+const historyTotal = computed(() => historyRequest.data.value?.total ?? 0)
+const historyLastPage = computed(() => Math.max(1, Math.ceil(historyTotal.value / historyPageSize)))
+const historyLoading = historyRequest.loading
+const historyError = computed(() => historyRequest.error.value ? '导入记录加载失败，请重试。' : '')
+const historyDetail = historyDetailRequest.data
+const historyDetailRecords = computed(() => historyDetail.value?.records ?? [])
+const historyDetailLastPage = computed(() => Math.max(1, Math.ceil(historyDetailRecords.value.length / historyDetailPageSize)))
+const visibleHistoryDetail = computed(() => {
+  const start = (historyDetailPage.value - 1) * historyDetailPageSize
+  return historyDetailRecords.value.slice(start, start + historyDetailPageSize)
+})
+const historyDetailLoading = historyDetailRequest.loading
+const historyDetailError = computed(() => historyDetailRequest.error.value ? '导入明细加载失败，请重试。' : '')
+
+function closeHistoryDetail() {
+  selectedImportID.value = null
+  historyDetailPage.value = 1
+  historyDetailRequest.reset()
+}
+
+function changeHistoryPage(delta: number) {
+  historyPage.value += delta
+  closeHistoryDetail()
+  void historyRequest.run()
+}
+
+function openHistoryDetail(id: number) {
+  if (selectedImportID.value === id) {
+    closeHistoryDetail()
+    return
+  }
+  closeHistoryDetail()
+  selectedImportID.value = id
+  void historyDetailRequest.run()
+}
+
+function refreshQualityPage() {
+  void loadQualityOverview()
+  if (canPreviewSettlement.value) void historyRequest.run()
+}
+
+function matchStatusLabel(status: string) {
+  if (status === 'matched') return '已匹配'
+  if (status === 'ambiguous') return '多匹配'
+  if (status === 'unmatched') return '未匹配'
+  return status || '—'
+}
+
 const ruleGridRows = computed<DeductionGridRow[]>(() =>
   activeRules.value.map((rule) => ({
     ...rule,
@@ -78,7 +144,6 @@ const ruleGridRows = computed<DeductionGridRow[]>(() =>
 )
 const totalErrors = computed(() => preview.value?.totals.error_count ?? 0)
 const totalDeduction = computed(() => preview.value?.totals.deduction_amount ?? 0)
-const importHasWarnings = computed(() => lastImportWarningCount.value > 0)
 const canEditActualDeduction = computed(() =>
   actualDeductions.value?.business_month === month.value && !actualDeductions.value.locked && !loading.value && !savingDeduction.value,
 )
@@ -173,13 +238,20 @@ async function loadQualityOverview(options: { keepFeedback?: boolean } = {}) {
 }
 
 async function downloadTemplate() {
-  error.value = ''
+  importError.value = ''
   try {
     await exportErrorImportTemplateWorkbook()
-    notice.value = '出错记录模板已生成，请填写前四个必填项后再导入。'
   } catch (err) {
-    error.value = resolveApiUserMessage(err, { fallback: '模板生成失败，请稍后重试' })
+    importError.value = resolveApiUserMessage(err, { fallback: '模板生成失败，请稍后重试' })
   }
+}
+
+async function startQualityImport() {
+  importFeedback.value = ''
+  importError.value = ''
+  importOpen.value = true
+  await nextTick()
+  importMonthInput.value?.focus()
 }
 
 function chooseFile() {
@@ -190,251 +262,277 @@ function handleFileInput(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (file) prepareReview(file)
+  if (file) void prepareReview(file)
 }
 
 function handleDrop(event: DragEvent) {
   dragActive.value = false
+  if (!importMonthReady.value) return
   const file = Array.from(event.dataTransfer?.files ?? []).find((item) => /\.xlsx$/i.test(item.name))
   if (!file) {
-    error.value = '请选择 .xlsx 格式的 Excel 文件'
+    importError.value = '请选择 .xlsx 格式的 Excel 文件'
     return
   }
-  prepareReview(file)
+  void prepareReview(file)
 }
 
-function prepareReview(file: File) {
-  if (!importMonthReady.value) return
-  notice.value = ''
-  error.value = ''
+async function prepareReview(file: File) {
+  if (!importOpen.value || !importMonthReady.value || reviewFile.value) return
+  importError.value = ''
   reviewFile.value = file
+  await nextTick()
+  importReview.value?.focus({ preventScroll: true })
+  importReview.value?.scrollIntoView({ block: 'nearest' })
 }
 
 function closeQualityImport() {
   reviewFile.value = null
+  importOpen.value = false
   importMonth.value = ''
+  dragActive.value = false
+  importError.value = ''
+}
+
+async function cancelQualityImport() {
+  closeQualityImport()
+  await nextTick()
+  importAction.value?.focus()
 }
 
 async function handleQualityImported(result: ErrorImportBatchRow) {
   closeQualityImport()
   const monthChanged = month.value !== result.business_month
   month.value = result.business_month
-  lastImportWarningCount.value = result.unmatched_rows + result.ambiguous_rows
-  notice.value = `已导入 ${formatInt(result.total_rows)} 行，${formatInt(result.matched_rows)} 行计入扣款，${formatInt(lastImportWarningCount.value)} 行未计入扣款。`
-  if (!monthChanged) await loadQualityOverview({ keepFeedback: true })
+  const notCounted = result.unmatched_rows + result.ambiguous_rows
+  importWarning.value = notCounted > 0
+  importFeedback.value = `${result.business_month} 已导入 ${formatInt(result.total_rows)} 行，${formatInt(result.matched_rows)} 行计入扣款${notCounted ? `，${formatInt(notCounted)} 行未匹配或重名，未计入扣款` : ''}。`
+  if (!monthChanged) {
+    historyPage.value = 1
+    closeHistoryDetail()
+    if (canPreviewSettlement.value) void historyRequest.run()
+    void loadQualityOverview({ keepFeedback: true })
+  }
+  await nextTick()
+  importAction.value?.focus()
 }
 
 watch(month, () => {
   closeQualityImport()
-  lastImportWarningCount.value = 0
-  void loadQualityOverview()
+  importFeedback.value = ''
+  importWarning.value = false
+  historyPage.value = 1
+  closeHistoryDetail()
+  historyRequest.reset()
+  refreshQualityPage()
 }, { flush: 'sync' })
 
-onMounted(() => void loadQualityOverview())
+onMounted(refreshQualityPage)
 </script>
 
 <template>
   <section class="aw-page-stack aw-quality-errors-page">
-    <div class="aw-page-bar">
-      <div class="aw-page-bar__copy">
-        <p class="aw-eyebrow">出错记录</p>
-        <h2>导入出错表，自动计算扣款</h2>
-        <p>这里只处理脱机 Excel，不连接生产质检审批。系统按出错日期、人员、分类和张数自动换算扣款，表格中不需要填写金额。</p>
-      </div>
-      <div class="aw-page-bar__actions">
-        <label class="aw-month-control">
-          <span>扣款月份</span>
-          <input v-model="month" type="month" lang="zh-CN" aria-label="出错记录月份" :disabled="savingDeduction || !!reviewFile" />
-        </label>
-        <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadQualityOverview()">
-          <RefreshCw :size="16" aria-hidden="true" />
-          刷新
-        </button>
-      </div>
-    </div>
-
-    <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
-    <p v-if="importHasWarnings" class="aw-inline-alert aw-inline-alert--warning">
-      上次导入有未匹配或重名记录，这些行不会参与扣款。请修正姓名或出错分类后重新导入。
-    </p>
-
-    <div class="aw-metric-grid aw-quality-errors__metrics">
-      <article class="aw-metric-card">
-        <span>{{ month }} 出错张数</span>
-        <strong>{{ canPreviewSettlement ? formatInt(totalErrors) : '—' }}</strong>
-        <small>{{ canPreviewSettlement ? '已成功匹配并进入本月计算' : '需要结算权限查看本月汇总' }}</small>
-      </article>
-      <article class="aw-metric-card">
-        <span>预计扣款</span>
-        <strong class="aw-money">{{ canPreviewSettlement ? formatMoney(totalDeduction) : '—' }}</strong>
-        <small>{{ canPreviewSettlement ? '刷新后与结算预览保持一致' : '导入权限不代表工资查看权限' }}</small>
-      </article>
-      <article class="aw-metric-card">
-        <span>本月生效规则</span>
-        <strong>{{ canViewRules ? formatInt(activeRules.length) : '—' }}</strong>
-        <small>{{ canViewRules ? '按人员类型、岗级和出错分类匹配' : '由结算或计价管理员维护' }}</small>
-      </article>
-    </div>
-
-    <nav class="aw-inline-actions" aria-label="质检操作">
-      <a class="aw-secondary-button" href="#aw-quality-import">导入出错记录</a>
-      <a v-if="canPreviewSettlement" class="aw-secondary-button" href="#aw-actual-deductions">维护实际扣款</a>
-      <a class="aw-secondary-button" href="#aw-deduction-rules">查看扣款规则</a>
-      <RouterLink v-if="canPreviewSettlement" class="aw-secondary-button" :to="{ path: '/settlement', query: { month }, hash: '#aw-quality-import-history' }">查看本月导入记录</RouterLink>
-    </nav>
-
-    <div class="aw-quality-errors__workbench">
-      <aside class="aw-quality-errors__steps" aria-label="出错记录导入步骤">
-        <div>
-          <span>1</span>
-          <strong>下载模板</strong>
-          <p>使用统一列名，避免姓名、分类或日期无法识别。</p>
+    <section class="aw-data-surface aw-quality-history" aria-labelledby="aw-quality-history-title">
+      <div class="aw-quality-history__toolbar">
+        <div class="aw-quality-history__summary">
+          <h3 id="aw-quality-history-title">质检导入记录</h3>
+          <p v-if="canPreviewSettlement" class="aw-copy">
+            {{ formatInt(historyTotal) }} 份导入
+            <template v-if="preview?.business_month === month"> · 出错 {{ formatInt(totalErrors) }} 张 · 应扣 {{ formatMoney(totalDeduction) }}</template>
+          </p>
         </div>
-        <div>
-          <span>2</span>
-          <strong>填写四项必填</strong>
-          <p>日期、出错人、出错分类、出错张数；其他信息均可选填。</p>
-        </div>
-        <div>
-          <span>3</span>
-          <strong>校对后导入</strong>
-          <p>系统先标出缺失内容，确认后才写入并参与结算。</p>
-        </div>
-      </aside>
-
-      <main class="aw-quality-errors__workspace">
-        <section id="aw-quality-import" class="aw-quality-errors__import">
-          <div class="aw-settlement-section__head">
-            <div>
-              <h3>导入出错记录</h3>
-              <p>同一张图片出现多个错误时，按实际扣款张数填写，不按问题描述条数重复计算。</p>
-            </div>
-            <button class="aw-secondary-button" type="button" @click="downloadTemplate">
-              <Download :size="16" aria-hidden="true" />
-              下载模板
-            </button>
-          </div>
-
-          <label v-if="!reviewFile" class="aw-month-control">
-            <span>导入结算年月</span>
-            <input v-model="importMonth" type="month" lang="zh-CN" :max="latestImportMonth" required />
+        <div class="aw-inline-actions" id="aw-quality-import">
+          <label class="aw-month-control">
+            <span>结算月</span>
+            <input v-model="month" type="month" lang="zh-CN" aria-label="出错记录月份" :max="latestImportMonth" :disabled="savingDeduction || !!reviewFile" />
           </label>
-          <input
-            ref="fileInputRef"
-            class="aw-visually-hidden"
-            type="file"
-            accept=".xlsx"
-            aria-label="选择出错记录 Excel"
-            :disabled="!importMonthReady || !!reviewFile"
-            @change="handleFileInput"
-          />
-          <QualityImportReview
-            v-if="reviewFile"
-            :file="reviewFile"
-            :business-month="importMonth"
-            @close="closeQualityImport"
-            @imported="handleQualityImported"
-          />
-          <button
-            v-else
-            class="aw-quality-errors__dropzone"
-            :class="{ 'is-active': dragActive }"
-            type="button"
-            :disabled="!importMonthReady"
-            @click="chooseFile"
-            @dragenter.prevent="dragActive = true"
-            @dragover.prevent="dragActive = true"
-            @dragleave.prevent="dragActive = false"
-            @drop.prevent="handleDrop"
-          >
-            <UploadCloud :size="30" aria-hidden="true" />
-            <strong>{{ importMonthReady ? '选择或拖入出错记录 Excel' : '请先选择导入结算年月' }}</strong>
-            <span>填写订单号或文件名可自动识别日常与补录作品。</span>
+          <a v-if="canPreviewSettlement" class="aw-secondary-button" href="#aw-actual-deductions">维护实际扣款</a>
+          <a v-if="canViewRules" class="aw-secondary-button" href="#aw-deduction-rules">查看扣款规则</a>
+          <button class="aw-secondary-button" type="button" :disabled="loading || historyLoading" @click="refreshQualityPage">
+            <RefreshCw :size="16" aria-hidden="true" /> 刷新
           </button>
+          <button
+            ref="importAction"
+            class="aw-primary-button"
+            type="button"
+            :aria-expanded="importOpen"
+            :disabled="importOpen"
+            @click="startQualityImport"
+          >
+            <UploadCloud :size="16" aria-hidden="true" /> 导入 Excel
+          </button>
+        </div>
+      </div>
+      <div v-if="importOpen && !reviewFile" class="aw-quality-history__import-tools" aria-label="选择导入文件" role="group">
+        <label class="aw-month-control">
+          <span>导入结算年月</span>
+          <input ref="importMonthInput" v-model="importMonth" type="month" lang="zh-CN" :max="latestImportMonth" required />
+        </label>
+        <button
+          class="aw-secondary-button"
+          :class="{ 'is-active': dragActive }"
+          type="button"
+          :disabled="!importMonthReady"
+          @click="chooseFile"
+          @dragenter.prevent="dragActive = importMonthReady"
+          @dragover.prevent
+          @dragleave.prevent="dragActive = false"
+          @drop.prevent="handleDrop"
+        >选择或拖入 Excel</button>
+        <button class="aw-secondary-button" type="button" @click="downloadTemplate">
+          <Download :size="16" aria-hidden="true" /> 下载模板
+        </button>
+        <button class="aw-secondary-button" type="button" @click="cancelQualityImport">取消</button>
+      </div>
+      <input ref="fileInputRef" type="file" accept=".xlsx" aria-label="选择出错记录 Excel" hidden
+        :disabled="!importOpen || !importMonthReady || !!reviewFile" @change="handleFileInput" />
+      <div role="status" class="aw-quality-history__feedback">
+        <p v-if="importFeedback" class="aw-inline-alert" :class="{ 'aw-inline-alert--warning': importWarning }">{{ importFeedback }}</p>
+        <p v-else-if="importOpen && !importMonthReady && !reviewFile" class="aw-copy">先选择结算年月，再选择 Excel。</p>
+      </div>
+      <p v-if="importError" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ importError }}</p>
 
-          <div class="aw-quality-errors__required" aria-label="Excel 必填列">
-            <span><CheckCircle2 :size="15" aria-hidden="true" />日期</span>
-            <span><CheckCircle2 :size="15" aria-hidden="true" />出错人</span>
-            <span><CheckCircle2 :size="15" aria-hidden="true" />出错分类</span>
-            <span><CheckCircle2 :size="15" aria-hidden="true" />出错张数</span>
-          </div>
-        </section>
-
-        <section v-if="canPreviewSettlement" class="aw-quality-errors__rules aw-data-surface">
-          <div class="aw-settlement-section__head">
-            <div>
-              <h3 id="aw-actual-deductions">质检实际扣款</h3>
-              <p>{{ month }} · 按人员和工资条类型录入，以最新金额为准。实发按实际扣款计算，未录入或填 0 时不扣。</p>
-            </div>
-          </div>
-          <p v-if="actualDeductions?.locked" class="aw-inline-alert">该月已有生成或确认的批次，实扣金额已锁定。</p>
-          <form class="aw-form-grid" @submit.prevent="saveActualDeduction">
-            <PersonnelPicker v-model="deductionPayeeID" label="扣款人员" clearable @selected="fillSavedDeduction" @cleared="fillSavedDeduction" />
-            <label>
-              工资条类型
-              <select v-model="deductionRowType" aria-label="工资条类型" :disabled="savingDeduction" @change="fillSavedDeduction">
-                <option value="normal_piecework">日常计件工资</option>
-                <option value="supplement_piecework">补录计件工资</option>
-              </select>
-            </label>
-            <label>
-              质检实际扣款（元）
-              <input v-model="deductionInput" type="number" min="0" max="9999999999.99" step="0.01" required :disabled="!canMaintainActualDeduction" />
-            </label>
-            <p v-if="canEditActualDeduction && deductionPayeeID && !hasMatchedQualityRecords" class="aw-copy aw-form-grid__full">
-              所选人员、月份和工资条类型没有匹配的质检导入记录。请先导入后再维护实际扣款。
-            </p>
-            <div class="aw-inline-actions aw-form-grid__full">
-              <span v-if="selectedPayroll">质检应扣 {{ formatMoney(selectedPayroll.deduction_amount) }}</span>
-              <span v-if="selectedPayroll">应发 {{ formatMoney(selectedPayroll.net_amount) }}</span>
-              <span v-if="draftActualNet !== null" class="aw-cell-money" role="status">保存前实发预览 {{ formatMoney(draftActualNet) }}</span>
-              <span v-else-if="selectedPayroll">实发 {{ formatMoney(selectedPayroll.actual_net_amount ?? selectedPayroll.net_amount) }}</span>
-              <button class="aw-primary-button" type="submit" :disabled="!canMaintainActualDeduction || enteredDeduction === null">
-                {{ savingDeduction ? '保存中…' : '保存实际扣款' }}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section class="aw-quality-errors__rules">
-          <div class="aw-settlement-section__head">
-            <div>
-              <h3 id="aw-deduction-rules">本月扣款规则</h3>
-              <p>导入成功后，系统按下面的“每张扣款”自动计算，不读取 Excel 中的金额。</p>
-            </div>
-            <RouterLink v-if="canManageRules" class="aw-secondary-button" :to="{ path: '/settings/pricing', query: { section: 'deduction' } }">
-              <Calculator :size="16" aria-hidden="true" />
-              维护扣款规则
+      <p v-if="!canPreviewSettlement" class="aw-copy">结算人员可查看已导入记录。你可以在这里导入并查看本次结果。</p>
+      <template v-else>
+        <p v-if="historyLoading" class="aw-copy" role="status">正在读取导入记录…</p>
+        <p v-else-if="historyError" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ historyError }}</p>
+        <div v-if="history.length" class="aw-quality-history__table">
+          <table aria-label="本月质检导入记录">
+            <thead>
+              <tr><th scope="col">文件</th><th scope="col">导入时间</th><th scope="col">匹配行数</th><th scope="col">需复核</th><th scope="col">质检应扣款</th><th scope="col">操作</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="batch in history" :key="batch.id">
+                <th scope="row">{{ batch.original_filename || batch.import_no }}</th>
+                <td>{{ formatShanghaiDateTime(batch.created_at) }}</td>
+                <td>{{ formatInt(batch.matched_rows) }} / {{ formatInt(batch.total_rows) }}</td>
+                <td>{{ formatInt(batch.unmatched_rows + batch.ambiguous_rows) }} 行</td>
+                <td class="aw-quality-history__amount">{{ formatMoney(batch.deduction_amount) }}</td>
+                <td>
+                  <button class="aw-secondary-button" type="button" :aria-expanded="selectedImportID === batch.id"
+                    :aria-label="`${selectedImportID === batch.id ? '收起' : '查看'}明细：${batch.original_filename || batch.import_no}`"
+                    @click="openHistoryDetail(batch.id)">{{ selectedImportID === batch.id ? '收起明细' : '查看明细' }}</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else-if="!historyLoading && !historyError" class="aw-copy">本月还没有质检导入记录。</p>
+        <div v-if="historyLastPage > 1" class="aw-inline-actions aw-quality-history__pagination">
+          <button class="aw-secondary-button" type="button" :disabled="historyLoading || historyPage <= 1" @click="changeHistoryPage(-1)">上一页</button>
+          <span class="aw-copy">{{ historyPage }} / {{ historyLastPage }}</span>
+          <button class="aw-secondary-button" type="button" :disabled="historyLoading || historyPage >= historyLastPage" @click="changeHistoryPage(1)">下一页</button>
+        </div>
+        <section v-if="selectedImportID !== null" class="aw-quality-history__detail" aria-label="导入明细">
+          <div class="aw-quality-history__toolbar">
+            <h4>{{ historyDetail?.original_filename || historyDetail?.import_no || '导入明细' }}</h4>
+            <RouterLink class="aw-link-button" :to="{ path: '/settlement', query: { month }, hash: '#aw-quality-import-history' }">
+              管理导入批次
             </RouterLink>
           </div>
-          <p v-if="!canViewRules" class="aw-inline-alert">
-            当前账号可以导入出错记录，但不能查看工资汇总或扣款规则；导入结果仍会由结算人员复核。
-          </p>
-          <WorkbenchDataGrid
-            v-else-if="ruleGridRows.length"
-            :columns="ruleColumns"
-            :rows="ruleGridRows"
-            row-key="id"
-            storage-key="quality-error-deduction-rules"
-            :height="Math.min(360, 48 + ruleGridRows.length * 40)"
-            :row-height="40"
-            aria-label="本月生效扣款规则"
-          >
-            <template #cell="{ column, value }">
-              <span v-if="column.key === 'worker_type_label'" :class="chipClass('info')">{{ value }}</span>
-              <span v-else-if="column.key === 'enabled_label'" :class="chipClass('success')">{{ value }}</span>
-              <span v-else>{{ value }}</span>
-            </template>
-          </WorkbenchDataGrid>
-          <div v-else class="aw-empty-state">
-            <FileSpreadsheet :size="28" aria-hidden="true" />
-            <h3>本月没有可用扣款规则</h3>
-            <p>可以先导入记录，但没有匹配规则的行不会产生扣款金额。请先到计价设置维护规则。</p>
-            <RouterLink v-if="canManageRules" class="aw-primary-button" to="/settings/pricing">去设置每张扣款</RouterLink>
+          <p v-if="historyDetailLoading" class="aw-copy" role="status">正在读取导入明细…</p>
+          <p v-else-if="historyDetailError" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ historyDetailError }}</p>
+          <div v-else-if="historyDetail?.records?.length" class="aw-quality-history__table">
+            <table aria-label="出错记录明细">
+              <thead><tr><th scope="col">日期</th><th scope="col">出错人</th><th scope="col">难度</th><th scope="col">出错张数</th><th scope="col">应扣款</th><th scope="col">匹配结果</th></tr></thead>
+              <tbody>
+                <tr v-for="record in visibleHistoryDetail" :key="record.id">
+                  <td>{{ record.occurred_date?.slice(0, 10) || '—' }}</td><td>{{ record.payee_name || '—' }}</td>
+                  <td>{{ record.difficulty_class || '—' }}</td><td>{{ formatInt(record.error_count) }}</td>
+                  <td>{{ formatMoney(record.deduction_amount) }}</td><td>{{ matchStatusLabel(record.match_status) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-else class="aw-copy">该文件没有可显示的记录。</p>
+          <div v-if="historyDetailLastPage > 1" class="aw-inline-actions aw-quality-history__pagination">
+            <button class="aw-secondary-button" type="button" :disabled="historyDetailPage <= 1" @click="historyDetailPage--">上一页明细</button>
+            <span class="aw-copy">{{ historyDetailPage }} / {{ historyDetailLastPage }}</span>
+            <button class="aw-secondary-button" type="button" :disabled="historyDetailPage >= historyDetailLastPage" @click="historyDetailPage++">下一页明细</button>
           </div>
         </section>
-      </main>
-    </div>
+      </template>
+      <div v-if="reviewFile" ref="importReview" class="aw-quality-history__review" tabindex="-1">
+        <QualityImportReview :file="reviewFile" :business-month="importMonth"
+          @close="cancelQualityImport" @imported="handleQualityImported" />
+      </div>
+    </section>
+
+    <p v-if="notice" class="aw-inline-alert" role="status">{{ notice }}</p>
+    <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
+    <main class="aw-quality-errors__workspace">
+      <section v-if="canPreviewSettlement" class="aw-quality-errors__rules aw-data-surface">
+        <div class="aw-settlement-section__head">
+          <div>
+            <h3 id="aw-actual-deductions">质检实际扣款</h3>
+            <p>{{ month }} · 按人员和工资条类型录入，以最新金额为准。实发按实际扣款计算，未录入或填 0 时不扣。</p>
+          </div>
+        </div>
+        <p v-if="actualDeductions?.locked" class="aw-inline-alert">该月已有生成或确认的批次，实扣金额已锁定。</p>
+        <form class="aw-form-grid" @submit.prevent="saveActualDeduction">
+          <PersonnelPicker v-model="deductionPayeeID" label="扣款人员" clearable @selected="fillSavedDeduction" @cleared="fillSavedDeduction" />
+          <label>
+            工资条类型
+            <select v-model="deductionRowType" aria-label="工资条类型" :disabled="savingDeduction" @change="fillSavedDeduction">
+              <option value="normal_piecework">日常计件工资</option>
+              <option value="supplement_piecework">补录计件工资</option>
+            </select>
+          </label>
+          <label>
+            质检实际扣款（元）
+            <input v-model="deductionInput" type="number" min="0" max="9999999999.99" step="0.01" required :disabled="!canMaintainActualDeduction" />
+          </label>
+          <p v-if="canEditActualDeduction && deductionPayeeID && !hasMatchedQualityRecords" class="aw-copy aw-form-grid__full">
+            所选人员、月份和工资条类型没有匹配的质检导入记录。请先导入后再维护实际扣款。
+          </p>
+          <div class="aw-inline-actions aw-form-grid__full">
+            <span v-if="selectedPayroll">质检应扣 {{ formatMoney(selectedPayroll.deduction_amount) }}</span>
+            <span v-if="selectedPayroll">应发 {{ formatMoney(selectedPayroll.net_amount) }}</span>
+            <span v-if="draftActualNet !== null" class="aw-cell-money" role="status">保存前实发预览 {{ formatMoney(draftActualNet) }}</span>
+            <span v-else-if="selectedPayroll">实发 {{ formatMoney(selectedPayroll.actual_net_amount ?? selectedPayroll.net_amount) }}</span>
+            <button class="aw-primary-button" type="submit" :disabled="!canMaintainActualDeduction || enteredDeduction === null">
+              {{ savingDeduction ? '保存中…' : '保存实际扣款' }}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="aw-quality-errors__rules">
+        <div class="aw-settlement-section__head">
+          <div>
+            <h3 id="aw-deduction-rules">本月扣款规则</h3>
+            <p>导入成功后，系统按下面的“每张扣款”自动计算，不读取 Excel 中的金额。</p>
+          </div>
+          <RouterLink v-if="canManageRules" class="aw-secondary-button" :to="{ path: '/settings/pricing', query: { section: 'deduction' } }">
+            <Calculator :size="16" aria-hidden="true" />
+            维护扣款规则
+          </RouterLink>
+        </div>
+        <p v-if="!canViewRules" class="aw-inline-alert">
+          当前账号可以导入出错记录，但不能查看工资汇总或扣款规则；导入结果仍会由结算人员复核。
+        </p>
+        <WorkbenchDataGrid
+          v-else-if="ruleGridRows.length"
+          :columns="ruleColumns"
+          :rows="ruleGridRows"
+          row-key="id"
+          storage-key="quality-error-deduction-rules"
+          :height="Math.min(360, 48 + ruleGridRows.length * 40)"
+          :row-height="40"
+          aria-label="本月生效扣款规则"
+        >
+          <template #cell="{ column, value }">
+            <span v-if="column.key === 'worker_type_label'" :class="chipClass('info')">{{ value }}</span>
+            <span v-else-if="column.key === 'enabled_label'" :class="chipClass('success')">{{ value }}</span>
+            <span v-else>{{ value }}</span>
+          </template>
+        </WorkbenchDataGrid>
+        <div v-else class="aw-empty-state">
+          <FileSpreadsheet :size="28" aria-hidden="true" />
+          <h3>本月没有可用扣款规则</h3>
+          <p>可以先导入记录，但没有匹配规则的行不会产生扣款金额。请先到计价设置维护规则。</p>
+          <RouterLink v-if="canManageRules" class="aw-primary-button" to="/settings/pricing">去设置每张扣款</RouterLink>
+        </div>
+      </section>
+    </main>
   </section>
 </template>

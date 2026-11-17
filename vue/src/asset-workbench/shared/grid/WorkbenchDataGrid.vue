@@ -33,6 +33,7 @@ const props = withDefaults(
     selectedRowKey?: string | number | null
     ariaLabel?: string
     columnTools?: boolean
+    pinnedColumns?: string[]
   }>(),
   {
     groupBy: '',
@@ -43,6 +44,7 @@ const props = withDefaults(
     selectedRowKey: null,
     ariaLabel: '资产工作台数据表格',
     columnTools: true,
+    pinnedColumns: () => [],
   },
 )
 
@@ -62,14 +64,39 @@ const orderedColumns = computed(() => {
     .map((key) => byKey.get(key))
     .filter((column): column is WorkbenchDataGridColumn => Boolean(column))
   const missing = props.columns.filter((column) => !columnState.value.order.includes(column.key))
-  return [...ordered, ...missing]
+  const pinned = props.pinnedColumns.flatMap(key => {
+    const column = byKey.get(key)
+    return column ? [column] : []
+  })
+  return [...pinned, ...[...ordered, ...missing].filter(column => !props.pinnedColumns.includes(column.key))]
 })
 const gridTemplateColumns = computed(
   () =>
     `${orderedColumns.value
-      .map((column) => `${Math.max(72, columnState.value.widths[column.key] ?? column.width ?? 120)}px`)
+      .map((column) => `${columnWidth(column)}px`)
       .join(' ')} minmax(0, 1fr)`,
 )
+const pinnedOffsets = computed(() => {
+  const offsets = new Map<string, number>()
+  let offset = 0
+  for (const column of orderedColumns.value) {
+    if (!props.pinnedColumns.includes(column.key)) break
+    offsets.set(column.key, offset)
+    offset += columnWidth(column)
+  }
+  return offsets
+})
+
+function pinnedStyle(key: string) {
+  const offset = pinnedOffsets.value.get(key)
+  return offset === undefined ? undefined : { '--aw-grid-pin-offset': `${offset}px` }
+}
+
+function canMoveColumn(index: number, direction: -1 | 1) {
+  return index >= pinnedOffsets.value.size && index + direction >= pinnedOffsets.value.size &&
+    index + direction < orderedColumns.value.length
+}
+
 const flatItems = computed<FlatItem[]>(() => {
   if (!props.groupBy) {
     return props.rows.map((row) => ({ type: 'row', key: String(row[props.rowKey]), row }))
@@ -129,7 +156,7 @@ function moveColumn(key: string, direction: -1 | 1) {
   const order = orderedColumns.value.map((column) => column.key)
   const index = order.indexOf(key)
   const target = index + direction
-  if (index < 0 || target < 0 || target >= order.length) return
+  if (!canMoveColumn(index, direction)) return
   const next = [...order]
   const [item] = next.splice(index, 1)
   next.splice(target, 0, item)
@@ -191,7 +218,7 @@ watch(
 <template>
   <div
     class="aw-data-grid"
-    :class="{ 'aw-data-grid--no-column-tools': !columnTools }"
+    :class="{ 'aw-data-grid--no-column-tools': !columnTools, 'aw-data-grid--pinned': pinnedOffsets.size > 0 }"
     role="grid"
     :aria-label="ariaLabel"
     :aria-colcount="orderedColumns.length"
@@ -204,6 +231,8 @@ watch(
           v-for="(column, columnIndex) in orderedColumns"
           :key="column.key"
           class="aw-data-grid__th"
+          :style="pinnedStyle(column.key)"
+          :data-pinned="pinnedOffsets.has(column.key) || undefined"
           :data-align="column.align || 'left'"
           role="columnheader"
           aria-sort="none"
@@ -211,10 +240,10 @@ watch(
         >
           <span class="aw-data-grid__label">{{ column.label }}</span>
           <span v-if="showColumnTools(column)" class="aw-data-grid__tools">
-            <button type="button" :aria-label="`左移列：${column.label}`" title="左移列" @click="moveColumn(column.key, -1)">
+            <button type="button" :aria-label="`左移列：${column.label}`" title="左移列" :disabled="!canMoveColumn(columnIndex, -1)" @click="moveColumn(column.key, -1)">
               <ChevronLeft :size="12" aria-hidden="true" />
             </button>
-            <button type="button" :aria-label="`右移列：${column.label}`" title="右移列" @click="moveColumn(column.key, 1)">
+            <button type="button" :aria-label="`右移列：${column.label}`" title="右移列" :disabled="!canMoveColumn(columnIndex, 1)" @click="moveColumn(column.key, 1)">
               <ChevronRight :size="12" aria-hidden="true" />
             </button>
             <button type="button" :aria-label="`缩窄列：${column.label}`" title="缩窄列" @click="resizeColumn(column.key, -16)">
@@ -253,6 +282,9 @@ watch(
             v-for="(column, columnIndex) in orderedColumns"
             :key="column.key"
             class="aw-data-grid__td"
+            :style="pinnedStyle(column.key)"
+            :data-pinned="pinnedOffsets.has(column.key) || undefined"
+            :title="pinnedOffsets.has(column.key) ? String(cellValue(item.row, column) ?? '') : undefined"
             :data-align="column.align || 'left'"
             role="gridcell"
             :aria-colindex="columnIndex + 1"
