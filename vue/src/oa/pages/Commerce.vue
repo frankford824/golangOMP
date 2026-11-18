@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ArrowUpRight } from 'lucide-vue-next'
 import PageHead from '../components/PageHead.vue'
+import FreshnessStatus from '../components/FreshnessStatus.vue'
+import { getToken, type HttpAppError } from '@/services/http'
 import { api, dateInChina, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -50,17 +52,74 @@ const summary = ref<OrderResult>()
 const busy = ref(false)
 const error = ref('')
 const latest = ref(0)
+const locallyStale = ref(false)
+let appliedOverview: { query: string; account: string; token: string } | undefined
+let refreshTimer: number | undefined
 const mayView = computed(() => can('orders.view'))
 const title = computed(() => ({ overview: '我的经营', products: '商品经营', detail: '商品详情与经营反馈', ranking: '经营分析与排名', personal: '我的业绩' }[props.mode]))
 
-function withQuery(endpoint: string, options: Record<string, string> = {}) {
+function queryParams(endpoint: string, options: Record<string, string> = {}) {
   const query = new URLSearchParams({ from: from.value, to: to.value, ...options })
   if (includeBrush.value && options.group !== 'growth' && endpoint !== 'shops') query.set('include_brush', '1')
   if (shop.value.trim()) query.set('shop_id', shop.value.trim())
-  return api<OrderResult>(`/oa-api/orders/${endpoint}?${query}`)
+  return query.toString()
+}
+function withQuery(endpoint: string, options: Record<string, string> = {}) {
+  return api<OrderResult>(`/oa-api/orders/${endpoint}?${queryParams(endpoint, options)}`)
+}
+
+function clearOverview() {
+  data.value = undefined
+  summary.value = undefined
+  locallyStale.value = false
+}
+
+async function loadOverview(refresh = false) {
+  const account = currentProfile.value?.id
+  const token = getToken()
+  if (!mayView.value || !account || !token) return
+  const scope = refresh ? appliedOverview : { account, token, query: queryParams('summary') }
+  if (!scope || scope.account !== account || scope.token !== token) return
+  const sequence = ++latest.value
+  const sameScope = appliedOverview?.query === scope.query && appliedOverview.account === account && appliedOverview.token === token
+  if (!sameScope) clearOverview()
+  appliedOverview = scope
+  busy.value = true
+  productsError.value = ''
+  error.value = ''
+  try {
+    const [head, tail] = await Promise.allSettled(['summary', 'products'].map(endpoint =>
+      api<OrderResult>(`/oa-api/orders/${endpoint}?${scope.query}`).catch((failure: HttpAppError) => {
+        const raw = failure.responseData as { error?: string } | undefined
+        if (sequence === latest.value && (failure.status === 401 || failure.status === 403 || raw?.error === '订单数据源拒绝访问')) {
+          clearOverview()
+          appliedOverview = undefined
+          error.value = errorText(failure)
+        }
+        throw failure
+      }),
+    ))
+    if (sequence !== latest.value) return
+    if (!appliedOverview) return
+    if (scope.account !== currentProfile.value?.id || scope.token !== getToken() || !mayView.value) {
+      clearOverview()
+      appliedOverview = undefined
+      return
+    }
+    locallyStale.value = sameScope && (
+      (head.status === 'rejected' && !!summary.value) || (tail.status === 'rejected' && !!data.value)
+    )
+    if (head.status === 'fulfilled') summary.value = head.value
+    else if (!summary.value) error.value = errorText(head.reason)
+    if (tail.status === 'fulfilled') data.value = tail.value
+    else if (!data.value) productsError.value = errorText(tail.reason)
+  } finally {
+    if (sequence === latest.value) busy.value = false
+  }
 }
 
 async function load(resetPage = true) {
+  if (props.mode === 'overview') return loadOverview()
   if (resetPage) offset.value = 0
   if (!mayView.value) return
   if (props.mode === 'detail' && !selectedSku.value.trim()) return
@@ -74,27 +133,18 @@ async function load(resetPage = true) {
   summary.value = undefined
   error.value = ''
   try {
-    if (props.mode === 'overview') {
-      const [head, tail] = await Promise.allSettled([withQuery('summary'), withQuery('products')])
-      if (sequence !== latest.value) return
-      if (head.status === 'fulfilled') summary.value = head.value
-      else error.value = errorText(head.reason)
-      if (tail.status === 'fulfilled') data.value = tail.value
-      else productsError.value = errorText(tail.reason)
-    } else {
-      const endpoint = { products: 'products', ranking: 'rankings', detail: 'sku', personal: 'personal' }[props.mode]
-      const options: Record<string, string> = {}
-      if (props.mode === 'ranking') options.group = group.value
-      if (props.mode === 'products') options.mine = '1'
-      if (offset.value) options.offset = String(offset.value)
-      if (props.mode === 'detail') options.sku = selectedSku.value.trim()
-      const result = await withQuery(endpoint, options)
-      if (sequence === latest.value) {
-        data.value = result
-        if (props.mode === 'detail') {
-          loadedDetail.value = detailFilters
-          feedback.value.shop_id = detailFilters.shop || result.rows?.[0]?.shop_id || ''
-        }
+    const endpoint = { products: 'products', ranking: 'rankings', detail: 'sku', personal: 'personal' }[props.mode]
+    const options: Record<string, string> = {}
+    if (props.mode === 'ranking') options.group = group.value
+    if (props.mode === 'products') options.mine = '1'
+    if (offset.value) options.offset = String(offset.value)
+    if (props.mode === 'detail') options.sku = selectedSku.value.trim()
+    const result = await withQuery(endpoint, options)
+    if (sequence === latest.value) {
+      data.value = result
+      if (props.mode === 'detail') {
+        loadedDetail.value = detailFilters
+        feedback.value.shop_id = detailFilters.shop || result.rows?.[0]?.shop_id || ''
       }
     }
   } catch (cause) { if (sequence === latest.value) error.value = errorText(cause) }
@@ -130,8 +180,15 @@ const linkedTask = computed(() => {
   const query = new URLSearchParams({ intent: 'retouch', oa_shop: shop_id, oa_sku: filters.sku, oa_from: filters.from, oa_to: filters.to })
   return '/tasks/create?' + query
 })
-const freshness = computed(() => summary.value?.freshness ?? data.value?.freshness)
-const stale = computed(() => summary.value?.stale || data.value?.stale || Number(freshness.value?.lag_seconds) > 600)
+const freshness = computed(() => {
+  const available = [summary.value?.freshness, data.value?.freshness].filter(value => value !== undefined)
+  if (!available.length) return undefined
+  const watermarks = available.flatMap(item => item.source_committed_at ? [item.source_committed_at] : []).sort()
+  const delays = available.flatMap(item => Number.isFinite(Number(item.lag_seconds)) ? [Number(item.lag_seconds)] : [])
+  return { source_committed_at: watermarks[0], lag_seconds: delays.length ? Math.max(...delays) : undefined }
+})
+const cached = computed(() => locallyStale.value || summary.value?.stale || data.value?.stale)
+const stale = computed(() => cached.value || Number(freshness.value?.lag_seconds) > 600)
 const coverage = computed(() => {
   const payable = Number(sum(summaryRows.value, 'item_pay_total'))
   const verified = sum(summaryRows.value, 'item_pay_verified_total')
@@ -206,7 +263,28 @@ async function loadHistory() {
 const costTierLabels: Record<string, string> = { verified: '核实', reference: '参考', none: '未知' }
 const implausibleCost = (value: unknown) => value === true || value === 1 || value === '1'
 const shopName = (id?: string) => shopOptions.value.find(item => item.shop_id === id)?.shop_name || id || '—'
+function resetRefreshTimer() {
+  window.clearInterval(refreshTimer)
+  if (document.visibilityState !== 'visible') return
+  refreshTimer = window.setInterval(() => {
+    if (!busy.value && document.visibilityState === 'visible') void loadOverview(true)
+  }, 30_000)
+}
+
+watch(() => [currentProfile.value?.id, mayView.value], () => {
+  if (props.mode !== 'overview') return
+  latest.value++
+  appliedOverview = undefined
+  busy.value = false
+  clearOverview()
+  void loadOverview()
+})
+
 onMounted(() => {
+  if (props.mode === 'overview') {
+    document.addEventListener('visibilitychange', resetRefreshTimer)
+    resetRefreshTimer()
+  }
   if (mayView.value && props.mode !== 'personal') void loadShops()
   if (props.mode === 'personal') {
     from.value = today.slice(0, 7) + '-01'
@@ -216,6 +294,12 @@ onMounted(() => {
     from.value = start.toISOString().slice(0, 10)
   }
   void load()
+})
+
+onUnmounted(() => {
+  latest.value++
+  document.removeEventListener('visibilitychange', resetRefreshTimer)
+  window.clearInterval(refreshTimer)
 })
 </script>
 
@@ -244,11 +328,9 @@ onMounted(() => {
       <button type="button" :disabled="busy" @click="range(6)">近 7 日</button>
     </form>
     <p v-if="shopError" class="oa-watermark">{{ shopError }}</p>
-    <p v-if="freshness?.source_committed_at" class="oa-watermark" :class="{ 'oa-watermark-warn': stale || Number(freshness.lag_seconds) > 60 }">
-      数据截至 {{ freshness.source_committed_at }} <span v-if="stale"> · 当前数据已停更或为同筛选的上次结果</span><span v-else-if="Number(freshness.lag_seconds) > 60"> · 同步延迟</span>
-    </p>
+    <FreshnessStatus :freshness="freshness" :stale="cached" />
     <p v-if="error" class="oa-error" role="alert">{{ error }} <button @click="load()">重试</button></p>
-    <p v-else-if="busy" class="oa-panel oa-empty" role="status">正在读取经营数据…</p>
+    <p v-else-if="busy && !summary && !data" class="oa-panel oa-empty" role="status">正在读取经营数据…</p>
     <template v-if="mode === 'overview' && summary">
       <section class="oa-kpis" aria-label="经营指标">
         <div v-for="metric in kpis" :key="metric.name" class="oa-kpi"><span>{{ metric.name }}</span><b>{{ metric.value }}</b><small v-if="metric.foot" :class="['oa-pill', { 'oa-pill-warn': parseFloat(metric.foot) < 90 }]">{{ parseFloat(metric.foot) < 90 ? '仅覆盖' : '覆盖' }} {{ metric.foot }}</small></div>

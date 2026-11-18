@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import PageHead from '../components/PageHead.vue'
+import FreshnessStatus from '../components/FreshnessStatus.vue'
 import { api, dateInChina, errorText, money } from '../api'
 import { useOAAccess } from '../access'
 import '../styles.css'
@@ -81,7 +82,7 @@ onMounted(() => {
       <label>结束日期<input v-model="to" type="date" :min="from" :max="today" required /></label>
       <button class="oa-button-primary" :disabled="busy">查询</button>
     </form>
-    <p v-if="data?.freshness?.source_committed_at" class="oa-watermark" :class="{ 'oa-watermark-warn': data.stale || Number(data.freshness.lag_seconds) > 60 }">数据截至 {{ data.freshness.source_committed_at }} <span v-if="data.stale"> · 上次成功快照</span></p>
+    <FreshnessStatus :freshness="data?.freshness" :stale="data?.stale" />
     <p v-if="error" class="oa-error" role="alert">{{ error }} <button @click="load()">重试</button></p>
     <p v-else-if="busy" class="oa-panel oa-empty" role="status">正在读取{{ title }}…</p>
     <section v-else-if="data" class="oa-panel">

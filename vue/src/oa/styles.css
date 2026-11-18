@@ -88,6 +88,7 @@
 .oa-filter label { display: grid; gap: 5px; color: var(--oa-muted); font-size: 12px; }
 .oa-filter input, .oa-filter select { font-size: 14px; max-width: 177px; }
 .oa-watermark { color: var(--oa-muted); font-size: 12px; margin: 6px 0 11px; }
+.oa-watermark-detail + .oa-watermark-detail, .oa-watermark span + .oa-watermark-detail { margin-left: 8px; }
 .oa-watermark-warn { color: rgb(var(--yb-warning-strong)); }
 .oa-chart { display: block; width: 100%; min-height: 120px; max-height: 168px; }
 .oa-person-choice { text-align: left; flex: 1; }
