@@ -55,7 +55,7 @@ func run() error {
 	if err = orders.EnsureSchema(ctx, db); err != nil {
 		return fmt.Errorf("OA order schema: %w", err)
 	}
-	if _, err = db.ExecContext(ctx, `CREATE OR REPLACE SQL SECURITY INVOKER VIEW omp_sku_records AS
+	if _, err = db.ExecContext(ctx, `CREATE OR REPLACE SQL SECURITY INVOKER VIEW oa_current_sku_costs AS
 	SELECT s.sku_code,s.cost_price FROM task_sku_items s JOIN tasks t ON t.id=s.task_id
 	WHERE s.sku_code<>'' AND (t.task_status IN ('Completed','Archived') OR EXISTS
 	(SELECT 1 FROM tasks h WHERE h.sku_code=s.sku_code AND h.task_status IN ('Completed','Archived')))`); err != nil {

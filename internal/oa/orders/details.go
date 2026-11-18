@@ -72,7 +72,7 @@ func (s *server) skuDetails(w http.ResponseWriter, r *http.Request, actor platfo
 	output["cost_context_available"] = false
 	if s.source != nil {
 		var cost sql.NullString
-		err := s.source.QueryRowContext(r.Context(), `SELECT CAST(cost_price AS CHAR) FROM omp_sku_records WHERE sku_code=? AND BINARY sku_code=BINARY ?`, sku, sku).Scan(&cost)
+		err := s.source.QueryRowContext(r.Context(), `SELECT CAST(cost_price AS CHAR) FROM oa_current_sku_costs WHERE sku_code=? AND BINARY sku_code=BINARY ?`, sku, sku).Scan(&cost)
 		output["cost_context_available"] = err == nil || err == sql.ErrNoRows
 		if cost.Valid && err == nil {
 			output["current_cost"] = cost.String

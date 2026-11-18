@@ -12,7 +12,7 @@
 
 `orders.EnsureSchema(ctx, db)` 在 OA 专用 MySQL 初始化 `oa_order_feedback`。主站只读副本所需表和列如下。
 
-- `omp_sku_records`：`sku_code,cost_price`
+- `oa_current_sku_costs`：`sku_code,cost_price`
 - `tasks`：`id,task_no,task_status,sku_code,creator_id,designer_id,current_handler_id`
 - `task_sku_items`：`task_id,sku_code`
 
