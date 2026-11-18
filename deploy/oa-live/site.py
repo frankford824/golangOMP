@@ -4,7 +4,7 @@ import re
 import sys
 from pathlib import Path
 
-def render(text,root):
+def render(text,root,previous=None):
     servers=re.findall(r'^server\s*\{.*?^\}',text,re.M|re.S)
     choices=[s for s in servers if re.search(r'^\s*server_name\s+yongbo\.cloud;',s,re.M) and re.search(r'listen\s+443\s+ssl',s)]
     if len(choices)!=1:raise ValueError('Expected one main HTTPS server block')
@@ -30,6 +30,20 @@ def render(text,root):
     location = /oa-assets.html { return 410; }
     location ^~ /oa-objects/ { return 410; }
 """
+    if previous:
+        if not re.fullmatch(r'/srv/yongbo-oa-live/releases/[A-Za-z0-9-]+/web', previous):
+            raise ValueError('Unexpected OA previous release directory')
+        extra += """
+    location ^~ /assets/ {
+        try_files $uri @oa_previous_asset;
+        expires 1y;
+    }
+    location @oa_previous_asset {
+        root """ + previous + """;
+        try_files $uri =404;
+        expires 1y;
+    }
+"""
     return """server {
     listen 80;
     listen [::]:80;
@@ -39,4 +53,4 @@ def render(text,root):
 }
 """+vhost[:-1]+extra+"}\n"
 if __name__=='__main__':
-    print(render(Path(sys.argv[1]).read_text(),'/srv/yongbo-oa-live/current/web'))
+    print(render(Path(sys.argv[1]).read_text(),'/srv/yongbo-oa-live/current/web',sys.argv[2] if len(sys.argv)>2 else None))

@@ -30,13 +30,13 @@ fi
 prior=$(readlink -f "$base/current")
 [[ "$prior" == "$base/releases/"* ]]
 select_release(){ ln -sfn "$1" "$base/current.next";mv -Tf "$base/current.next" "$base/current"; }
-render_site(){ python3 "$release/site.py" "$main" > "$site.next";chmod 644 "$site.next";mv -Tf "$site.next" "$site"; }
+render_site(){ python3 "$release/site.py" "$main" "$prior/web" > "$site.next";chmod 644 "$site.next";mv -Tf "$site.next" "$site"; }
 restore(){
   code=$?;trap - ERR
   select_release "$prior"
   if [[ -x "$prior/oa-extension" ]]; then systemctl restart yongbo-oa-live || true; else systemctl stop yongbo-oa-live || true; fi
-  render_site
-  if nginx -t;then systemctl reload nginx;else cp "$known_good" "$site"; nginx -t;fi
+  cp "$known_good" "$site"
+  if nginx -t;then systemctl reload nginx;fi
   rm -f "$known_good"
   echo 'OA reverted to its previous formal frontend; original sites were not switched.' >&2; exit "$code"
 }
