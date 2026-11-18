@@ -257,13 +257,13 @@ onMounted(() => {
         <section class="oa-panel">
           <h2>订单应付趋势</h2>
           <svg v-if="points.length" class="oa-chart" viewBox="0 0 600 155" role="img" aria-label="按日汇总的订单应付金额">
-            <defs><linearGradient id="oa-trend-fill" x2="0" y2="1"><stop stop-color="#6fbba3" stop-opacity=".4" /><stop offset="1" stop-color="#dcece4" stop-opacity=".3" /></linearGradient></defs>
-            <line v-for="grid in [29, 61, 93, 125]" :key="grid" x1="45" :y1="grid" x2="580" :y2="grid" stroke="#deebe2" />
+            <defs><linearGradient id="oa-trend-fill" x2="0" y2="1"><stop stop-color="var(--oa-accent)" stop-opacity=".4" /><stop offset="1" stop-color="var(--oa-active)" stop-opacity=".3" /></linearGradient></defs>
+            <line v-for="grid in [29, 61, 93, 125]" :key="grid" x1="45" :y1="grid" x2="580" :y2="grid" stroke="var(--oa-line)" />
             <polygon :points="area" fill="url(#oa-trend-fill)" />
-            <polyline :points="line" fill="none" stroke="#1d8868" stroke-width="2.2" />
+            <polyline :points="line" fill="none" stroke="var(--oa-accent)" stroke-width="2.2" />
             <g v-for="(point, index) in points" :key="point.day">
-              <circle :cx="point.x" :cy="point.y" r="3.2" fill="#fff" stroke="#1d8868"><title>{{ point.day }} {{ money(point.value) }}</title></circle>
-              <text v-if="index === 0 || index === points.length - 1 || points.length <= 7" :x="point.x" y="145" text-anchor="middle" fill="#647a70" font-size="10">{{ point.day.slice(5) }}</text>
+              <circle :cx="point.x" :cy="point.y" r="3.2" fill="var(--oa-surface)" stroke="var(--oa-accent)"><title>{{ point.day }} {{ money(point.value) }}</title></circle>
+              <text v-if="index === 0 || index === points.length - 1 || points.length <= 7" :x="point.x" y="145" text-anchor="middle" fill="var(--oa-muted)" font-size="10">{{ point.day.slice(5) }}</text>
             </g>
           </svg>
           <p v-else class="oa-empty">该期间没有订单趋势数据</p>
