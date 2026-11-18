@@ -20,12 +20,12 @@ func TestApproverLookupForFinancialDelegation(t *testing.T) {
 		want := http.StatusForbidden
 		if admin {
 			want = http.StatusOK
-			mock.ExpectQuery("SELECT id,display_name,employee_no FROM users WHERE status='active'").
+			mock.ExpectQuery("SELECT id,display_name,employee_no,.* FROM users WHERE status='active'").
 				WithArgs(true, int64(9), int64(7), int64(33)).WillReturnRows(
-				sqlmock.NewRows([]string{"id", "display_name", "employee_no"}).AddRow(33, "示例经办人", 26))
-			mock.ExpectQuery("SELECT id,display_name,employee_no FROM users WHERE status='active'").
-				WithArgs(true, int64(9), int64(7), "%33%", "%33%").
-				WillReturnRows(sqlmock.NewRows([]string{"id", "display_name", "employee_no"}))
+				sqlmock.NewRows([]string{"id", "display_name", "employee_no", "department"}).AddRow(33, "示例经办人", 26, "设计部"))
+			mock.ExpectQuery("SELECT id,display_name,employee_no,.* FROM users WHERE status='active'").
+				WithArgs(true, int64(9), int64(7), "%33%", "%33%", "%33%").
+				WillReturnRows(sqlmock.NewRows([]string{"id", "display_name", "employee_no", "department"}))
 		} else {
 			mock.ExpectQuery("SELECT level FROM oa_office_delegates").WithArgs(int64(7)).
 				WillReturnRows(sqlmock.NewRows([]string{"level"}))

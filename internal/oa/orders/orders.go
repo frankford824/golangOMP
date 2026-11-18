@@ -55,7 +55,7 @@ var sharedClient = sync.OnceValue(newClient)
 func Mount(mux *http.ServeMux, db *sql.DB, native http.Handler) {
 	s := &server{ch: sharedClient(), db: db, native: native, cache: make(map[string]cached), active: make(map[string]*flight)}
 	s.ch.keepAlive()
-	for _, name := range []string{"summary", "products", "rankings", "personal", "sku", "shops", "cost-history", "refunds", "ledger", "detail", "compare"} {
+	for _, name := range []string{"hourly", "summary", "products", "rankings", "personal", "sku", "shops", "cost-history", "refunds", "ledger", "detail", "compare"} {
 		mux.HandleFunc("GET /oa-api/orders/"+name, func(w http.ResponseWriter, r *http.Request) { s.read(w, r, name) })
 	}
 	mux.HandleFunc("POST /oa-api/orders/feedback", s.saveFeedback)
@@ -171,6 +171,9 @@ func filters(r *http.Request, name string, now time.Time) (url.Values, error) {
 	if from.Before(firstDay) || to.Before(from) || to.After(today) || to.Sub(from) > 366*24*time.Hour {
 		return nil, errors.New("日期需为 2026-06-01 至今，区间最长 367 天")
 	}
+	if name == "hourly" && to.After(from.AddDate(0, 0, 1)) {
+		return nil, errors.New("分时趋势限连续两日")
+	}
 	params := url.Values{"param_from": {from.Format(time.DateOnly)}, "param_until": {to.AddDate(0, 0, 1).Format(time.DateOnly)}}
 	for _, field := range []string{"shop_id", "platform", "sku", "product"} {
 		value := query.Get(field)
@@ -214,8 +217,16 @@ func (s *server) read(w http.ResponseWriter, r *http.Request, name string) {
 		return
 	}
 	group := r.URL.Query().Get("group")
-	queries := map[string]string{"summary": summarySQL, "products": productsSQL, "personal": personalSQL, "sku": skuSQL, "shops": shopNamesSQL, "cost-history": historySQL, "refunds": refundsSQL, "ledger": ledgerSQL, "detail": orderDetailSQL, "compare": compareSQL}
+	queries := map[string]string{"hourly": hourlySQL, "summary": summarySQL, "products": productsSQL, "personal": personalSQL, "sku": skuSQL, "shops": shopNamesSQL, "cost-history": historySQL, "refunds": refundsSQL, "ledger": ledgerSQL, "detail": orderDetailSQL, "compare": compareSQL}
 	query := queries[name]
+	if number := r.URL.Query().Get("online_order_no"); name == "detail" && number != "" {
+		if len(number) > 128 {
+			platform.Error(w, 400, "平台订单号过长")
+			return
+		}
+		params.Set("param_order_no", number)
+		query = exactOrderDetailSQL
+	}
 	if name == "rankings" {
 		query = map[string]string{"": shopRankingSQL, "shop": shopRankingSQL, "platform": platformRankingSQL, "product": productRankingSQL, "person": personRankingSQL, "growth": growthSQL}[group]
 		if query == "" {
@@ -357,7 +368,7 @@ func (s *server) load(ctx context.Context, key, query string, params url.Values)
 		pending.err = err
 		return result{}, err
 	}
-	pending.result = result{Cache: "miss", Rows: rows, Freshness: freshness[0], HasMore: len(rows) == 101 && (query == productsSQL || query == skuSQL || query == myProductsSQL || query == personRankingSQL || query == productRankingSQL || query == shopRankingSQL || query == platformRankingSQL || query == brushShopRankSQL || query == brushPlatformRankSQL || query == growthSQL || query == ledgerSQL || query == orderDetailSQL)}
+	pending.result = result{Cache: "miss", Rows: rows, Freshness: freshness[0], HasMore: len(rows) == 101 && (query == productsSQL || query == skuSQL || query == myProductsSQL || query == personRankingSQL || query == productRankingSQL || query == shopRankingSQL || query == platformRankingSQL || query == brushShopRankSQL || query == brushPlatformRankSQL || query == growthSQL || query == ledgerSQL || query == orderDetailSQL || query == exactOrderDetailSQL)}
 	if pending.result.HasMore {
 		pending.result.Rows = rows[:100]
 	}

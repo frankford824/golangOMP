@@ -103,7 +103,7 @@ func (app office) approvers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	const scope = `SELECT id,display_name,employee_no FROM users WHERE status='active' AND (? OR department_id=? OR id=?)`
+	const scope = `SELECT id,display_name,employee_no,COALESCE(department,'') FROM users WHERE status='active' AND (? OR department_id=? OR id=?)`
 	args := []any{global, actor.DepartmentID, actor.ID}
 	selected := []approverOption{}
 	if len(ids) > 0 {
@@ -123,7 +123,7 @@ func (app office) approvers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	items, err := app.queryApprovers(r, scope+` AND (display_name LIKE ? OR CAST(employee_no AS CHAR) LIKE ?) ORDER BY display_name,id LIMIT 50`, append(args, q, q))
+	items, err := app.queryApprovers(r, scope+` AND (display_name LIKE ? OR CAST(employee_no AS CHAR) LIKE ? OR department LIKE ?) ORDER BY display_name,id LIMIT 50`, append(args, q, q, q))
 	if err != nil {
 		internal(w)
 		return
@@ -132,6 +132,7 @@ func (app office) approvers(w http.ResponseWriter, r *http.Request) {
 }
 
 type approverOption struct {
+	Department string `json:"department"`
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	EmployeeNo *int   `json:"employee_no"`
@@ -146,7 +147,7 @@ func (app office) queryApprovers(r *http.Request, query string, args []any) ([]a
 	defer rows.Close()
 	for rows.Next() {
 		var item approverOption
-		if err := rows.Scan(&item.ID, &item.Name, &item.EmployeeNo); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.EmployeeNo, &item.Department); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

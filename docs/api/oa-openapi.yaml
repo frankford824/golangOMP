@@ -57,6 +57,89 @@ paths:
           $ref: '#/components/responses/HTTP403'
         '503':
           $ref: '#/components/responses/HTTP503'
+  /oa-api/orders/hourly:
+    get:
+      summary: 按北京时间小时汇总有效订单应付，两天以内，默认剔除刷单
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              day:
+                                type: string
+                                format: date
+                              hour:
+                                type: integer
+                                minimum: 0
+                                maximum: 23
+                              payable_amount:
+                                type: string
+                                description: 小时应付合计，十进制字符串
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
   /oa-api/orders/summary:
     get:
       summary: 经营汇总
@@ -972,6 +1055,12 @@ paths:
       summary: 分页订单明细
       parameters:
       - in: query
+        name: online_order_no
+        schema:
+          type: string
+          maxLength: 128
+        description: 精确匹配平台订单号，保留日期、平台和可见店铺范围
+      - in: query
         name: from
         schema:
           type: string
@@ -1338,11 +1427,11 @@ paths:
   /oa-api/finance/approvers:
     get:
       summary: 列出审批候选
-      description: 模板维护人按现有授权范围查询在职候选；超级管理员也可在委托模板和分配财务权限时核对目标账号。已选回查使用同一范围，独立于搜索结果及其 50 条上限。返回账号 ID、姓名和工号。
+      description: 模板维护人按现有授权范围查询在职候选；超级管理员也可在委托模板和分配财务权限时核对目标账号。已选回查使用同一范围，独立于搜索结果及其 50 条上限。返回账号 ID、姓名、工号和部门。
       parameters:
       - in: query
         name: q
-        description: 按姓名或工号搜索
+        description: 按姓名、部门或工号搜索
         schema:
           type: string
       - in: query
@@ -1371,6 +1460,8 @@ paths:
                               format: int64
                             name:
                               type: string
+                            department:
+                              type: string
                             employee_no:
                               type: integer
                               nullable: true
@@ -1383,6 +1474,8 @@ paths:
                               type: integer
                               format: int64
                             name:
+                              type: string
+                            department:
                               type: string
                             employee_no:
                               type: integer

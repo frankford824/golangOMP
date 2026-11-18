@@ -46,3 +46,19 @@ func TestDateCoverageAndVerifiedZero(t *testing.T) {
 		t.Error("zero and unknown mismatch")
 	}
 }
+
+func TestHourlyFilterUsesAtMostTwoBeijingDates(t *testing.T) {
+	now := time.Date(2026, 11, 18, 10, 0, 0, 0, beijing)
+	for _, test := range []struct {
+		start string
+		valid bool
+	}{
+		{"2026-11-17", true}, {"2026-11-16", false},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/?from="+test.start+"&to=2026-11-18", nil)
+		_, err := filters(request, "hourly", now)
+		if (err == nil) != test.valid {
+			t.Errorf("hourly from=%s: %v", test.start, err)
+		}
+	}
+}
