@@ -78,7 +78,7 @@ describe('TaskResourceRail', () => {
     expect(wrapper.emitted('refreshReferences')).toHaveLength(1)
     await wrapper.setProps({ taskReferences: [{ asset_id: 'uuid-reference', filename: 'picture.jpg', mime_type: 'image/jpeg', thumbnail_url: thumbnail + '-renewed', download_url: 'https://objects.example/original.jpg' }] })
     expect(wrapper.get('.reference-thumbnail').attributes('src')).toBe(thumbnail + '-renewed')
-    await wrapper.get('.media-strip > button').trigger('click')
+    await wrapper.get('.media-strip .rail-media-button').trigger('click')
     expect(wrapper.get('.lightbox-stub').attributes('data-open')).toBe('true')
   })
 

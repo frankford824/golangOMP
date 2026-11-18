@@ -28,7 +28,7 @@
     <article class="attachment-preview">
       <template v-if="selectedFile">
         <header>
-          <div><p>当前文件</p><h3>{{ fileName(selectedFile) }}</h3></div>
+          <div><p>当前文件</p><h3>{{ fileName(selectedFile) }}</h3><OriginalImageDimensions :name="fileName(selectedFile)" :mime-type="selectedFile.mime_type" :download-url="selectedFile.download_url" :thumbnail-url="selectedFile.thumbnail_url" /></div>
           <div class="attachment-actions">
             <button v-if="canReplaceSelected" type="button" :disabled="replacing" @click="$emit('replace', selectedFile)">
               <RefreshCw :size="16" aria-hidden="true" />{{ replacing ? '替换中…' : '替换当前参考图' }}
@@ -67,6 +67,7 @@
 </template>
 
 <script setup lang="ts">
+import OriginalImageDimensions from '@/components/media/OriginalImageDimensions.vue'
 import { computed, ref, watch } from 'vue'
 import { Download, FileText, Maximize2, Paperclip, Plus, RefreshCw } from 'lucide-vue-next'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
@@ -80,6 +81,7 @@ interface AttachmentFile extends Record<string, unknown> {
   filename?: string
   mime_type?: string
   download_url?: string
+  thumbnail_url?: string
   preview_url?: string
   url?: string
 }

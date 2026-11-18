@@ -58,6 +58,7 @@
                   <strong>{{ revision.source_file.file_name }}</strong>
                   <small v-if="isHistoricalUnavailable(revision.source_file)" class="file-unavailable">{{ historicalUnavailableLabel(revision.source_file) }}</small>
                   <small v-else>{{ formatBytes(revision.source_file.file_size) }}</small>
+                  <OriginalImageDimensions :name="revision.source_file.file_name" :mime-type="revision.source_file.mime_type" :download-url="revision.source_file.download_url" :task-asset-id="revision.source_file.task_asset_id" />
                 </div>
                 <nav>
                   <button v-if="revision.source_file.preview_url" type="button" @click="previewAsset(revision.source_file.task_asset_id)">预览</button>
@@ -77,6 +78,7 @@
                     <strong>{{ item.file?.file_name || item.item_name || `成品 ${index + 1}` }}</strong>
                     <small v-if="item.file && isHistoricalUnavailable(item.file)" class="file-unavailable">{{ historicalUnavailableLabel(item.file) }}</small>
                     <small v-else>顺序 {{ index + 1 }}</small>
+                    <OriginalImageDimensions :name="item.file?.file_name" :mime-type="item.file?.mime_type" :download-url="item.file?.download_url" :task-asset-id="item.task_asset_id" />
                   </div>
                   <button v-if="item.file?.download_url" type="button" @click="downloadAsset(item.file.task_asset_id, item.file.file_name)">下载</button>
                 </article>
@@ -91,6 +93,7 @@
                   <span>
                     {{ reference.file_name || reference.ref_id || '参考资料' }}
                     <small v-if="isHistoricalUnavailable(reference)" class="file-unavailable">{{ historicalUnavailableLabel(reference) }}</small>
+                    <OriginalImageDimensions :name="reference.file_name" :mime-type="reference.mime_type" :download-url="reference.download_url" :task-asset-id="reference.formal_task_asset_id" />
                   </span>
                   <nav>
                     <button v-if="reference.preview_url && reference.formal_task_asset_id" type="button" @click="previewAsset(reference.formal_task_asset_id)">预览</button>
@@ -113,6 +116,7 @@
 </template>
 
 <script setup lang="ts">
+import OriginalImageDimensions from '@/components/media/OriginalImageDimensions.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { fetchTaskAssetPreviewMeta } from '@/domain/asset-access'
 import { materializePreviewImageUrl, revokeMaterializedPreviewImage } from '@/domain/asset-preview-image'

@@ -33,7 +33,7 @@
         <header><div><p class="eyebrow">素材信息</p><h2>{{ fileName }}</h2></div><span class="status-pill">{{ availabilityLabel }}</span></header>
         <dl class="detail-grid">
           <div><dt>资源编号</dt><dd class="mono">{{ resourceID }}</dd></div>
-          <div><dt>文件类型</dt><dd>{{ fileTypeLabel }}</dd></div>
+          <div><dt>文件类型</dt><dd>{{ fileTypeLabel }}<OriginalImageDimensions :name="fileName" :mime-type="text(record.mime_type, '')" :download-url="text(downloadMeta?.download_url, '')" /></dd></div>
           <div><dt>产品名称</dt><dd>{{ text(record.product_name ?? record.product_name_snapshot) }}</dd></div>
           <div><dt>来源部门</dt><dd>{{ text(record.source_department) }}</dd></div>
           <div><dt>收录时间</dt><dd>{{ displayTime(record.created_at ?? record.uploaded_at) }}</dd></div>
@@ -45,6 +45,7 @@
 </template>
 
 <script setup lang="ts">
+import OriginalImageDimensions from '@/components/media/OriginalImageDimensions.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BaseButton from '@/components/base/BaseButton.vue'
