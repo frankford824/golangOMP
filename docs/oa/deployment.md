@@ -1,6 +1,6 @@
 # 主站正式迭代的 OA 发布入口
 
-OA 使用现有 main-ops 的 `index.html`、AppShell、路由、登录组件及权限 store。`npm run build:oa` 为该入口打开新版功能并输出独立静态产物。`npm run build:prod` 继续生成当前主站版本。两者调用同一套正式 `/v1/*` 服务；资产工作台继续使用自己的地址、业务线和原发布目录。
+OA 使用现有 main-ops 的 `index.html`、AppShell、路由、登录组件及权限 store。`bash scripts/build-oa.sh` 为该入口打开新版功能并输出独立静态产物。`npm run build:prod` 继续生成当前主站版本。两者调用同一套正式 `/v1/*` 服务；资产工作台继续使用自己的地址、业务线和原发布目录。
 
 ## 数据与权限
 

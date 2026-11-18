@@ -1338,6 +1338,18 @@ paths:
   /oa-api/finance/approvers:
     get:
       summary: 列出审批候选
+      description: 返回在职且位于当前模板维护人候选范围内的人员。已选回查使用同一范围，独立于搜索结果及其 50 条上限。
+      parameters:
+      - in: query
+        name: q
+        description: 按姓名或工号搜索
+        schema:
+          type: string
+      - in: query
+        name: ids
+        description: 最多 16 个逗号分隔的正整数账号 ID，用于回查已选审批人
+        schema:
+          type: string
       responses:
         '200':
           description: 成功
@@ -1350,6 +1362,19 @@ paths:
                     type: object
                     properties:
                       items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              format: int64
+                            name:
+                              type: string
+                            employee_no:
+                              type: integer
+                              nullable: true
+                      selected:
                         type: array
                         items:
                           type: object

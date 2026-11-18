@@ -69,13 +69,24 @@ func (s *server) skuDetails(w http.ResponseWriter, r *http.Request, actor platfo
 		return
 	}
 	output["cost_context_available"] = false
-	if cost, ok := s.currentCost(r, sku); ok {
+	cost, costTask, costOK := s.currentCost(r, sku)
+	if costOK {
 		output["cost_context_available"] = true
 		output["current_cost"] = cost
 	}
+	tasks := []taskLink{}
 	if s.db != nil {
-		output["tasks"] = s.linkedTasks(r, sku, data.Rows)
+		tasks = s.linkedTasks(r, sku, data.Rows)
 	}
+	seen := map[int64]bool{}
+	for _, task := range tasks {
+		seen[task.ID] = true
+	}
+	if costTask.ID > 0 && !seen[costTask.ID] {
+		tasks = append(tasks, costTask)
+		seen[costTask.ID] = true
+	}
+	output["tasks"] = append(tasks, s.historicalTasks(r, sku, seen)...)
 	if s.db != nil {
 		items := []feedback{}
 		shops := map[string]bool{}

@@ -13,7 +13,9 @@ func Native(base string) http.Handler {
 	client := &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		allowed := r.Method == "GET" && (path == "/v1/cost-management/sku-costs" || numericPath(path, "/v1/tasks/") || numericPath(path, "/v1/users/")) ||
+		q := r.URL.Query()
+		taskSearch := path == "/v1/search" && q.Get("scope") == "tasks" && q.Get("mode") == "exact"
+		allowed := r.Method == "GET" && (taskSearch || path == "/v1/cost-management/sku-costs" || numericPath(path, "/v1/tasks/") || numericPath(path, "/v1/users/")) ||
 			r.Method == "PATCH" && numericPath(path, "/v1/users/")
 		if !allowed {
 			http.Error(w, "unsupported native operation", 403)

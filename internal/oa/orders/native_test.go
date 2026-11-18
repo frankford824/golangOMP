@@ -31,7 +31,7 @@ func TestNativeReadsUseCallerAndExactSKU(t *testing.T) {
 			w.WriteHeader(403)
 		}
 	})}
-	if value, ok := app.currentCost(request, "SKU-1"); !ok || value == nil || *value != "0.0000" {
+	if value, _, ok := app.currentCost(request, "SKU-1"); !ok || value == nil || *value != "0.0000" {
 		t.Fatalf("wrong cost %v %v", value, ok)
 	}
 	if task, ok := app.nativeTask(request, 1); !ok || task.Status != "Completed" {
@@ -39,5 +39,32 @@ func TestNativeReadsUseCallerAndExactSKU(t *testing.T) {
 	}
 	if _, ok := app.nativeTask(request, 2); ok {
 		t.Fatal("denied task visible")
+	}
+}
+
+func TestHistoricalTasksRequireExactAuthorizedDetail(t *testing.T) {
+	request := httptest.NewRequest("GET", "/oa-api/orders/sku", nil)
+	app := &server{native: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/search":
+			if r.URL.Query().Get("q") != "SKU-1" || r.URL.Query().Get("mode") != "exact" || r.URL.Query().Get("scope") != "tasks" {
+				t.Fatal("invalid search scope")
+			}
+			_, _ = io.WriteString(w, `{"query":"SKU-1","results":{"tasks":[{"id":1},{"id":2},{"id":3},{"id":3},{"id":4}]},"retrieval":{"mode":"exact"}}`)
+		case "/v1/tasks/1":
+			t.Fatal("already linked task fetched again")
+		case "/v1/tasks/2":
+			w.WriteHeader(403)
+		case "/v1/tasks/3":
+			_, _ = io.WriteString(w, `{"data":{"task":{"id":3,"task_no":"T-3","sku_code":"SKU-OTHER","task_status":"Completed"},"sku_items":[{"sku_code":"SKU-1"}]}}`)
+		case "/v1/tasks/4":
+			_, _ = io.WriteString(w, `{"data":{"task":{"id":4,"task_no":"SKU-1","sku_code":"SKU-10"}}}`)
+		default:
+			t.Fatal("unexpected route")
+		}
+	})}
+	tasks := app.historicalTasks(request, "SKU-1", map[int64]bool{1: true})
+	if len(tasks) != 1 || tasks[0].ID != 3 || tasks[0].Status != "Completed" {
+		t.Fatalf("unexpected historical tasks: %+v", tasks)
 	}
 }

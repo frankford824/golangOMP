@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -14,6 +15,9 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/domain"
+	"workflow/internal/oa/office"
+	"workflow/internal/oa/orders"
+	"workflow/internal/oa/platform"
 	"workflow/transport/handler"
 	transportws "workflow/transport/ws"
 )
@@ -616,4 +620,40 @@ func httpTracePayload(c *gin.Context) json.RawMessage {
 	}
 	raw, _ := json.Marshal(payload)
 	return raw
+}
+
+// NewOAExtensionRouter mounts the additive production routes for the OA frontend.
+// Existing /v1 operations remain owned by NewRouter and retain their contracts.
+func NewOAExtensionRouter(db, source *sql.DB, coreURL string) http.Handler {
+	native := platform.Native(coreURL)
+	api := http.NewServeMux()
+	office.Mount(api, db, source, native, orders.BaselineShops)
+	orders.Mount(api, db, native)
+	api.HandleFunc("GET /oa-api/me", func(w http.ResponseWriter, r *http.Request) { platform.JSON(w, 200, platform.ActorFrom(r)) })
+	public := http.NewServeMux()
+	identity := platform.NewIdentity(coreURL)
+	public.HandleFunc("GET /oa-api/health", func(w http.ResponseWriter, r *http.Request) {
+		check, cancel := context.WithTimeout(r.Context(), time.Second)
+		defer cancel()
+		if db.PingContext(check) != nil {
+			platform.Error(w, 503, "OA 扩展暂不可用")
+			return
+		}
+		platform.JSON(w, 200, map[string]string{"status": "ok", "mode": "live", "identity": "main-ops"})
+	})
+	public.Handle("/oa-api/", identity.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actor, ok := office.ApplyIdentity(r.Context(), db, source, platform.ActorFrom(r))
+		if !ok {
+			platform.Error(w, 503, "无法核实当前账号的 OA 授权")
+			return
+		}
+		actor.Activated = true
+		if actor.SuperAdmin {
+			actor.Actions["finance.admin"] = true
+		}
+		actor.Actions["finance.apply"] = true
+		actor.Actions["finance.approve"] = true
+		api.ServeHTTP(w, platform.WithActor(r, actor))
+	})))
+	return public
 }

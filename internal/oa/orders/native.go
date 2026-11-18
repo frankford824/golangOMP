@@ -28,21 +28,73 @@ func (s *server) nativeRead(r *http.Request, target string, out any) bool {
 	return recorder.Code == 200 && json.Unmarshal(recorder.Body.Bytes(), out) == nil
 }
 
-func (s *server) nativeTask(r *http.Request, id int64) (taskLink, bool) {
-	var payload struct {
-		Data struct {
-			Task struct {
-				ID     int64  `json:"id"`
-				Number string `json:"task_no"`
-				Status string `json:"task_status"`
-			} `json:"task"`
-		} `json:"data"`
-	}
-	returnValue := s.nativeRead(r, fmt.Sprintf("/v1/tasks/%d", id), &payload)
-	return taskLink{ID: payload.Data.Task.ID, Number: payload.Data.Task.Number, Status: payload.Data.Task.Status}, returnValue && payload.Data.Task.ID == id
+type nativeTaskData struct {
+	Task struct {
+		ID         int64  `json:"id"`
+		Number     string `json:"task_no"`
+		Status     string `json:"task_status"`
+		SKU        string `json:"sku_code"`
+		PrimarySKU string `json:"primary_sku_code"`
+	} `json:"task"`
+	SKUItems []struct {
+		SKU string `json:"sku_code"`
+	} `json:"sku_items"`
 }
 
-func (s *server) currentCost(r *http.Request, sku string) (*string, bool) {
+func (d nativeTaskData) link() taskLink {
+	return taskLink{ID: d.Task.ID, Number: d.Task.Number, Status: d.Task.Status}
+}
+
+func (d nativeTaskData) hasSKU(sku string) bool {
+	if sku == d.Task.SKU || sku == d.Task.PrimarySKU {
+		return true
+	}
+	for _, item := range d.SKUItems {
+		if item.SKU == sku {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *server) nativeTaskDetails(r *http.Request, id int64) (nativeTaskData, bool) {
+	var payload struct {
+		Data nativeTaskData `json:"data"`
+	}
+	ok := id > 0 && s.nativeRead(r, fmt.Sprintf("/v1/tasks/%d", id), &payload)
+	return payload.Data, ok && payload.Data.Task.ID == id
+}
+
+func (s *server) nativeTask(r *http.Request, id int64) (taskLink, bool) {
+	data, ok := s.nativeTaskDetails(r, id)
+	return data.link(), ok
+}
+
+func (s *server) historicalTasks(r *http.Request, sku string, seen map[int64]bool) []taskLink {
+	result := []taskLink{}
+	var payload struct {
+		Results struct {
+			Tasks []struct {
+				ID int64 `json:"id"`
+			} `json:"tasks"`
+		} `json:"results"`
+	}
+	params := url.Values{"scope": {"tasks"}, "mode": {"exact"}, "limit": {"50"}, "q": {sku}}
+	if !s.nativeRead(r, "/v1/search?"+params.Encode(), &payload) {
+		return result
+	}
+	for _, candidate := range payload.Results.Tasks {
+		if seen[candidate.ID] {
+			continue
+		}
+		seen[candidate.ID] = true
+		if task, ok := s.nativeTaskDetails(r, candidate.ID); ok && task.hasSKU(sku) {
+			result = append(result, task.link())
+		}
+	}
+	return result
+}
+func (s *server) currentCost(r *http.Request, sku string) (*string, taskLink, bool) {
 	query := url.Values{"keyword": {sku}, "review_state": {"all"}, "page_size": {"100"}}
 	var cursor int64
 	for range 20 {
@@ -55,31 +107,32 @@ func (s *server) currentCost(r *http.Request, sku string) (*string, bool) {
 			Next int64 `json:"next_before_id"`
 		}
 		if !s.nativeRead(r, "/v1/cost-management/sku-costs?"+query.Encode(), &response) {
-			return nil, false
+			return nil, taskLink{}, false
 		}
 		for _, record := range response.Data {
 			if record.SKU != sku {
 				continue
 			}
-			if _, ok := s.nativeTask(r, record.TaskID); !ok {
-				return nil, false
+			task, ok := s.nativeTask(r, record.TaskID)
+			if !ok {
+				return nil, taskLink{}, false
 			}
 			if record.Cost == "" {
-				return nil, true
+				return nil, taskLink{}, true
 			}
 			value := record.Cost.String()
-			return &value, true
+			return &value, task, true
 		}
 		if response.Next == 0 {
-			return nil, true
+			return nil, taskLink{}, true
 		}
 		if response.Next < 0 || cursor != 0 && response.Next >= cursor {
-			return nil, false
+			return nil, taskLink{}, false
 		}
 		cursor = response.Next
 		query.Set("before_id", strconv.FormatInt(cursor, 10))
 	}
-	return nil, false
+	return nil, taskLink{}, false
 }
 func (s *server) linkedTasks(r *http.Request, sku string, data []row) []taskLink {
 	result := []taskLink{}

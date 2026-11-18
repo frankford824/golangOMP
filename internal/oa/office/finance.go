@@ -88,18 +88,67 @@ func (app office) approvers(w http.ResponseWriter, r *http.Request) {
 		deny(w)
 		return
 	}
-	items, err := app.selectPeople(r, actor)
+	// A delegated template maintainer can select active approvers in their
+	// own department without receiving HR access to full personnel files.
+	q := "%" + strings.TrimSpace(r.URL.Query().Get("q")) + "%"
+	global := actor.SuperAdmin || slices.Contains(actor.PeopleDepartments, companyPeopleScope)
+	var ids []string
+	if raw := r.URL.Query().Get("ids"); raw != "" {
+		ids = strings.SplitN(raw, ",", 17)
+		if len(ids) > 16 {
+			bad(w, "最多查询 16 名已选审批人")
+			return
+		}
+	}
+	const scope = `SELECT id,display_name,employee_no FROM users WHERE status='active' AND (? OR department_id=? OR id=?)`
+	args := []any{global, actor.DepartmentID, actor.ID}
+	selected := []approverOption{}
+	if len(ids) > 0 {
+		selectedArgs := slices.Clone(args)
+		for _, value := range ids {
+			id, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || id <= 0 {
+				bad(w, "已选审批人 ID 无效")
+				return
+			}
+			selectedArgs = append(selectedArgs, id)
+		}
+		var err error
+		selected, err = app.queryApprovers(r, scope+" AND id IN ("+strings.Repeat("?,", len(ids)-1)+"?) ORDER BY display_name,id", selectedArgs)
+		if err != nil {
+			internal(w)
+			return
+		}
+	}
+	items, err := app.queryApprovers(r, scope+` AND (display_name LIKE ? OR CAST(employee_no AS CHAR) LIKE ?) ORDER BY display_name,id LIMIT 50`, append(args, q, q))
 	if err != nil {
 		internal(w)
 		return
 	}
-	result := []map[string]any{}
-	for _, item := range items {
-		if item.Status == "active" && len(result) < 50 {
-			result = append(result, map[string]any{"id": item.ID, "name": item.Name, "employee_no": item.EmployeeNo})
-		}
+	platform.JSON(w, 200, map[string]any{"items": items, "selected": selected})
+}
+
+type approverOption struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	EmployeeNo *int   `json:"employee_no"`
+}
+
+func (app office) queryApprovers(r *http.Request, query string, args []any) ([]approverOption, error) {
+	rows, err := app.source.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		return nil, err
 	}
-	platform.JSON(w, 200, map[string]any{"items": result})
+	result := []approverOption{}
+	defer rows.Close()
+	for rows.Next() {
+		var item approverOption
+		if err := rows.Scan(&item.ID, &item.Name, &item.EmployeeNo); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func (app office) saveFinanceActions(w http.ResponseWriter, r *http.Request) {

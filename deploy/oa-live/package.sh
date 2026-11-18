@@ -9,7 +9,7 @@ stage=$(mktemp -d)
 trap 'rm -rf -- "$stage"' EXIT
 mkdir -p "$stage/web"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$stage/oa-extension" ./cmd/oa-extension
-(cd vue && npm run build:oa)
+(cd vue && bash scripts/build-oa.sh)
 cp -a vue/dist-oa/. "$stage/web/"
 test -s "$stage/web/index.html"
 cp deploy/oa-live/{site.py,yongbo-oa-live.service} "$stage/"
