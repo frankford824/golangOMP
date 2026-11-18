@@ -16,8 +16,10 @@ export const oaRoutes: RouteRecordRaw[] = oaEnabled ? [
   { path: 'operations/rankings', component: Commerce, props: { mode: 'ranking' }, meta: ordersMeta },
   { path: 'operations/orders/:mode(detail|refunds|ledger)', component: OrderData, props: true, meta: ordersMeta },
   { path: 'me/performance', component: Commerce, props: { mode: 'personal' }, meta: ordersMeta },
-  { path: 'people', component: People, props: { mode: 'people' }, meta: peopleMeta },
-  { path: 'people/roster', component: People, props: { mode: 'roster' }, meta: peopleMeta },
+  { path: 'users/roster', name: 'PeopleRoster', component: People, props: { mode: 'roster' }, meta: peopleMeta },
+  { path: 'people', redirect: to => ({ name: 'UserManagement', query: to.query, hash: to.hash }) },
+  { path: 'people/roster', redirect: to => ({ name: 'PeopleRoster', query: to.query, hash: to.hash }) },
+  { path: 'people/:id(\\d+)', redirect: to => ({ name: 'UserManagement', query: { ...to.query, user_id: String(to.params.id), tab: 'terms' }, hash: to.hash }) },
   ...Object.entries(feeActions).map(([mode, oaAction]) => ({
     path: 'fees/' + mode, component: Fees, props: { mode }, meta: { requiresAuth: true, oaAction, oaFallback: 'Me' },
   })),

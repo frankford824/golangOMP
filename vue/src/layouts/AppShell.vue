@@ -52,6 +52,7 @@
             v-for="menu in dataMenus"
             :key="menu.key"
             :to="menu.to"
+            :class="{ active: isPersonnelSubpage(menu) }"
             active-class="active"
             class="nav-item flex items-center gap-4 p-2 rounded-xl text-[rgb(var(--yb-text-muted))] hover:text-[rgb(var(--yb-text))] hover:bg-[rgb(var(--yb-surface-muted))] sidebar-item-hover transition-all"
           >
@@ -137,6 +138,7 @@
                   v-for="menu in section.menus"
                   :key="menu.key"
                   :to="resolveMenuTo(menu)"
+                  :class="{ active: isPersonnelSubpage(menu) }"
                   :active-class="menu.exact ? '' : 'active'"
                   :exact-active-class="menu.exact ? 'active' : ''"
                   class="mobile-nav-item"
@@ -197,7 +199,6 @@ interface MenuConfig {
 // 原菜单使用正式 frontend_access.menus；OA 增补菜单使用同会话返回的业务动作。
 const MENU_CONFIG: MenuConfig[] = [
   { key: 'oa_operations', label: '经营首页', to: '/operations', exact: true, section: 'workbench', icon: 'monitoring', oaActions: ['orders.view'] },
-  { key: 'oa_personnel', label: '人员管理', to: '/people', section: 'data', icon: 'groups', oaActions: ['people.manage'] },
   { key: 'oa_expenses', label: '我的费用申请', to: '/fees/mine', section: 'business', icon: 'receipt_long', oaActions: ['finance.apply'] },
   { key: 'oa_approval', label: '审批与付款', to: '/fees/approval', section: 'business', icon: 'payments', oaActions: ['finance.approve', 'finance.pay'] },
   { key: 'oa_finance_templates', label: '费用模板与授权', to: '/fees/templates', section: 'data', icon: 'assignment', oaActions: ['finance.templates', 'finance.admin'] },
@@ -241,7 +242,7 @@ const MENU_CONFIG: MenuConfig[] = [
   },
   {
     key: 'user_admin',
-    label: '用户与角色',
+    label: oaEnabled ? '人员管理' : '用户与角色',
     to: '/users',
     section: 'data',
     icon: 'person',
@@ -255,10 +256,15 @@ const MENU_CONFIG: MenuConfig[] = [
 const visibleMenus = computed(() => {
   if (!permissionsStore.currentUser) return []
   const userMenus = permissionsStore.menus
-  return MENU_CONFIG.filter((menu) =>
-    menu.oaActions ? menu.oaActions.some(can) : userMenus.includes(menu.key),
-  )
+  return MENU_CONFIG.filter((menu) => {
+    if (menu.key === 'user_admin' && can('people.manage')) return true
+    return menu.oaActions ? menu.oaActions.some(can) : userMenus.includes(menu.key)
+  })
 })
+
+function isPersonnelSubpage(menu: MenuConfig) {
+  return menu.key === 'user_admin' && router.currentRoute.value.path === '/users/roster'
+}
 
 const workbenchMenus = computed(() => visibleMenus.value.filter((m) => m.section === 'workbench'))
 const businessMenus = computed(() => visibleMenus.value.filter((m) => m.section === 'business'))
@@ -643,7 +649,7 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .app-topbar__brand { min-width: 0; }
-.oa-formal-badge { flex: none; font-size: 10px; line-height: 1.4; white-space: nowrap; padding: 3px 5px; border-radius: 5px; color: rgb(var(--yb-text-muted)); background: rgb(var(--yb-surface-muted)); }
+.oa-formal-badge { flex: none; font: 400 12px/1.6 var(--oa-font); white-space: nowrap; padding: 4px 8px; border-radius: 4px; color: var(--oa-secondary); background: rgb(var(--yb-surface-muted)); }
 .app-topbar__actions { flex: 0 0 auto; }
 
 .app-topbar__title {

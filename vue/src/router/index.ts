@@ -153,7 +153,7 @@ const routes: RouteRecordRaw[] = [
         path: 'users',
         name: 'UserManagement',
         component: () => import('@/views/org-permission/UserManagementView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'user_admin' },
+        meta: { requiresAuth: true, requiredMenuKey: 'user_admin', oaMenuAlternative: 'people.manage' },
       },
     ],
   },
@@ -205,7 +205,7 @@ router.beforeEach(async (to, _from, next) => {
     if (required.length && !required.some(key => can(String(key)))) {
       const fallback = typeof to.meta.oaFallback === 'string' ? to.meta.oaFallback : 'Dashboard'
       if (fallback === 'UserManagement' && !permissionsStore.hasMenu('user_admin')) next({ name: 'Dashboard', query: { workspace: 'tasks' } })
-      else next({ name: fallback, ...(fallback === 'Dashboard' ? { query: { workspace: 'tasks' } } : {}) })
+      else next({ name: fallback, ...(fallback === 'Dashboard' ? { query: { workspace: 'tasks' } } : fallback === 'UserManagement' ? { query: to.query } : {}) })
       return
     }
     if (to.name === 'Dashboard' && to.query.workspace !== 'tasks' && can('orders.view')) {
@@ -227,7 +227,9 @@ router.beforeEach(async (to, _from, next) => {
 
   const requiredMenuKeys = resolveRequiredMenuKeys(to.meta)
   if (requiredMenuKeys.length > 0) {
+    const oaAlternative = to.meta.oaMenuAlternative
     const hasAnyMenu = requiredMenuKeys.some((key) => permissionsStore.hasMenu(key))
+      || (oaEnabled && typeof oaAlternative === 'string' && useOAAccess().can(oaAlternative))
     if (!hasAnyMenu) {
       if (isDashboardEntryRoute(to)) {
         const fallbackRoute = resolveFirstAccessibleHomeRoute(permissionsStore)
@@ -237,6 +239,10 @@ router.beforeEach(async (to, _from, next) => {
             next(fallbackRoute)
             return
           }
+        }
+        if (oaEnabled && useOAAccess().can('people.manage')) {
+          next({ name: 'UserManagement' })
+          return
         }
       }
       next('/403')

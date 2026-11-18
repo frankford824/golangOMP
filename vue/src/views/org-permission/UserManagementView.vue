@@ -1,11 +1,13 @@
 <template>
-  <div class="user-management-view bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]">
+  <RestrictedPeople v-if="restrictedPeople" mode="people" />
+  <div v-else class="user-management-view bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]" :class="{ 'user-directory-oa': oaEnabled }">
     <div class="um-shell w-full pb-4">
       <header class="directory-header yb-page-surface" data-page-header="user-management">
         <div class="yb-page-heading-copy">
-          <h2 class="directory-title">用户与角色管理</h2>
+          <component :is="oaEnabled ? 'h1' : 'h2'" class="directory-title">{{ oaEnabled ? '人员管理' : '用户与角色管理' }}</component>
         </div>
         <div class="directory-header-action">
+          <RouterLink v-if="canManagePeople" class="um-btn um-btn--ghost" :to="{ name: 'PeopleRoster', query: { q: appliedKeyword || undefined } }">人员花名册</RouterLink>
           <BaseButton
             v-if="canCreateUser"
             type="button"
@@ -159,7 +161,7 @@
           <div ref="userListPanel" class="user-list-panel" :class="{ 'user-list-panel--batch': batchSelectMode }">
             <div class="list-heading">
               <div class="list-heading-scope">
-                <h3 class="section-title">{{ orgFilterBreadcrumb || '全部用户' }}</h3>
+                <component :is="oaEnabled ? 'h2' : 'h3'" class="section-title">{{ orgFilterBreadcrumb || '全部用户' }}</component>
                 <button
                   v-if="orgFilterBreadcrumb"
                   type="button"
@@ -315,6 +317,8 @@
         :password-submitting="passwordSubmitting"
         :status-submitting="statusSubmitting"
         :action-message="detailActionMessage"
+        :can-view-terms="canManagePeople"
+        :initial-tab="oaRoute?.query.tab === 'terms' ? 'terms' : undefined"
         v-model:selected-roles="selectedAccessRoleCodes"
         v-model:new-password="resetPasswordValue"
         @close="closeDetail"
@@ -437,7 +441,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, h, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { usersApi } from '@/services/api/usersApi'
@@ -477,8 +481,8 @@ import {
   type UserRow,
 } from './userManagementTypes'
 import { usePermissionsStore } from '@/stores/permissions'
-import { useRoute } from 'vue-router'
-import { oaEnabled } from '@/oa/access'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { oaEnabled, useOAAccess } from '@/oa/access'
 import { coreUserRoleGroups, planOARoleReplacement } from '@/oa/userRoles'
 import { usePermission } from '@/composables/usePermission'
 import { patchUserMembership, clearUserMembership } from '@/composables/useOrgPermissionData'
@@ -493,6 +497,10 @@ import BaseTablePager from '@/components/base/BaseTablePager.vue'
 
 const permissionsStore = usePermissionsStore()
 const oaRoute = oaEnabled ? useRoute() : undefined
+const oaRouter = oaEnabled ? useRouter() : undefined
+const { can: canOA } = useOAAccess()
+const canManagePeople = computed(() => canOA('people.manage'))
+const RestrictedPeople = defineAsyncComponent(() => import('@/oa/pages/People.vue'))
 const { can } = usePermission()
 
 // v1.8 对齐：用户与角色页面同时向 HRAdmin / SuperAdmin 与 DepartmentAdmin 开放。
@@ -501,6 +509,7 @@ const canManageDirectory = computed(() => can('access.manage') || can('access.vi
 const canViewAccess = computed(() => can('access.manage') || can('access.view'))
 const canManageAccess = computed(() => can('access.manage'))
 const canManage = computed(() => canManageDirectory.value || canViewAccess.value)
+const restrictedPeople = computed(() => canManagePeople.value && (!permissionsStore.hasMenu('user_admin') || !canManage.value))
 const canCreateUser = canManageAccess
 const canMoveTeam = canManageAccess
 const canDisableUser = canManageAccess
@@ -593,8 +602,8 @@ const pagination = ref({ total: 0, page: 1, page_size: defaultPageSize })
 // keyword 是输入框实时值;appliedKeyword 才是列表实际生效的关键词。
 // 分开维护是为了避免"输入到一半、还没点查询,切换组织/翻页时半截关键词
 // 被悄悄带进请求"的联动怪象。
-const keyword = ref('')
-const appliedKeyword = ref('')
+const keyword = ref(typeof oaRoute?.query.q === 'string' ? oaRoute.query.q : '')
+const appliedKeyword = ref(keyword.value)
 const statusFilter = ref('')
 // 单一组织选中态:左侧树的选中即列表筛选,不再维护"树选中"与"下拉筛选"两套状态。
 const departmentFilter = ref('')
@@ -1693,6 +1702,12 @@ async function openDetail(u: UserRow | string) {
 function closeDetail() {
   detailSequence += 1
   detailUser.value = null
+  if (oaRoute?.query.user_id && oaRouter) {
+    const query = { ...oaRoute.query }
+    delete query.user_id
+    delete query.tab
+    void oaRouter.replace({ query })
+  }
 }
 
 async function refreshDetailAndList(userId: string, section: 'basic' | 'membership' | 'status') {
@@ -1877,7 +1892,7 @@ async function submitBasicInfo() {
 }
 
 async function setUserStatus(next: 'active' | 'disabled') {
-  if (!detailUser.value) return
+  if (!detailUser.value || statusSubmitting.value || !canDisableUser.value) return
   statusSubmitting.value = true
   detailActionMessage.value = ''
   try {
@@ -2302,8 +2317,14 @@ watch(
   },
 )
 
+watch(() => oaRoute?.query.user_id, focus => {
+  if (restrictedPeople.value || !canManage.value) return
+  if (typeof focus === 'string' && /^[1-9][0-9]*$/.test(focus) && detailUser.value?.id !== focus) void openDetail(focus)
+  else if (!focus && detailUser.value) closeDetail()
+})
+
 onMounted(() => {
-  if (!canManage.value) return
+  if (!canManage.value || restrictedPeople.value) return
   if (userListPanel.value && typeof ResizeObserver === 'function') {
     directoryResize = new ResizeObserver(([entry]) => {
       if (entry) compactDirectory.value = entry.contentRect.width < 786
@@ -2416,6 +2437,15 @@ onBeforeUnmount(() => {
   color: rgb(var(--yb-text));
   line-height: 1.25;
 }
+
+:global(html.oa-live-ui #app .user-directory-oa .directory-title) { font-size: 20px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+:global(html.oa-live-ui #app .user-directory-oa .list-heading .section-title) { font-size: 16px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.directory-header-action a, .org-filter-item, .org-item-name)) { font-size: 14px; font-weight: 400; line-height: 1.6; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.org-action-btn, .org-icon-btn, .directory-header-action a, .link-btn)) { min-width: 32px; min-height: 32px; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.org-tree-toggle, .org-policy-shortcut)) { width: 32px; min-width: 32px; min-height: 32px; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.org-filter-item, .org-tree-section-toggle)) { min-width: 32px; min-height: 32px; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.org-action-btn, .org-icon-btn)) { border-radius: 6px; font-size: 12px; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.org-action-btn, .org-icon-btn):focus-visible) { outline: 2px solid var(--oa-primary, rgb(var(--yb-brand))); outline-offset: 2px; }
 
 .toolbar-query {
   min-height: 2.75rem;

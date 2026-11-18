@@ -1,9 +1,9 @@
 <template>
   <div class="modal-mask detail-mask" @click.self="close">
-    <div ref="panel" class="modal-panel um-modal user-detail" role="dialog" aria-modal="true" aria-labelledby="user-detail-title">
+    <div ref="panel" class="modal-panel um-modal user-detail" :class="{ 'user-detail-oa': oaEnabled }" role="dialog" aria-modal="true" aria-labelledby="user-detail-title">
       <header class="modal-header">
         <div class="modal-heading">
-          <h3 id="user-detail-title" class="section-title">{{ user.display_name || user.username }}</h3>
+          <component :is="oaEnabled ? 'h2' : 'h3'" id="user-detail-title" class="section-title">{{ user.display_name || user.username }}</component>
           <div class="detail-identity">
             <span>{{ user.username }} · {{ formatEmployeeNo(user.employee_no) }}</span>
             <span class="detail-status" :class="{ 'detail-status--active': user.status === 'active' }">
@@ -17,7 +17,7 @@
       <div v-if="loading" class="modal-body"><BaseSkeleton width="100%" height="10rem" /></div>
       <p v-else-if="unavailable" class="detail-feedback" role="alert">{{ actionMessage }}</p>
       <template v-else>
-        <div class="detail-tabs" role="tablist" aria-label="用户详情" @keydown="navigateTabs">
+        <div class="detail-tabs" :class="{ 'detail-tabs--personnel': canViewTerms }" role="tablist" aria-label="用户详情" @keydown="navigateTabs">
           <button
             v-for="tab in tabs"
             :id="'user-detail-tab-' + tab.id"
@@ -139,14 +139,18 @@
           </section>
         </div>
 
+        <div v-if="canViewTerms && termsVisited" v-show="activeTab === 'terms'" id="user-detail-panel-terms" class="modal-body detail-terms-panel" role="tabpanel" aria-labelledby="user-detail-tab-terms">
+          <PersonnelTerms :key="user.id" :user-id="user.id" />
+        </div>
+
         <div v-if="hasSecurity" v-show="activeTab === 'security'" id="user-detail-panel-security" class="modal-body" role="tabpanel" aria-labelledby="user-detail-tab-security">
-          <template v-if="!confirmDelete">
+          <template v-if="!confirmDelete && !confirmDisable">
             <section v-if="canResetPassword" class="detail-section">
               <h4>重置密码</h4>
               <form class="detail-password" @submit.prevent="emit('reset-password')">
                 <label class="field-label">
-                  <span>新密码</span>
-                  <input v-model="newPassword" class="input" type="password" autocomplete="new-password" :disabled="busy" />
+                  <span>新密码 <span v-if="oaEnabled" class="detail-required" aria-hidden="true">*</span></span>
+                  <input v-model="newPassword" class="input" type="password" autocomplete="new-password" :disabled="busy" :required="oaEnabled" :placeholder="oaEnabled ? '至少 8 位，含字母和数字' : undefined" />
                 </label>
                 <button type="submit" class="um-btn um-btn--ghost" :disabled="busy || !newPassword.trim()">{{ passwordSubmitting ? '重置中…' : '重置密码' }}</button>
               </form>
@@ -156,11 +160,11 @@
                 <h4>账号状态</h4>
                 <p class="detail-note">{{ user.status === 'disabled' ? '启用后，该账号可以重新登录。' : '停用会阻止登录，可以随时重新启用。' }}</p>
               </div>
-              <button type="button" class="um-btn um-btn--ghost" :disabled="busy" @click="emit('set-status', user.status === 'disabled' ? 'active' : 'disabled')">
+              <button v-if="!confirmDisable" ref="statusButton" type="button" class="um-btn um-btn--ghost" :disabled="busy" @click="requestStatusChange">
                 {{ statusSubmitting ? '处理中…' : user.status === 'disabled' ? '启用账号' : '停用账号' }}
               </button>
             </section>
-            <section v-if="canDeleteUser" class="detail-section detail-operation">
+            <section v-if="canDeleteUser && !confirmDisable" class="detail-section detail-operation">
               <div>
                 <h4>删除账号</h4>
                 <p class="detail-note">从用户管理中移除该账号，并结束其登录会话。</p>
@@ -168,7 +172,16 @@
               <button ref="deleteButton" type="button" class="um-btn detail-danger-outline" :disabled="busy" @click="beginDelete">删除账号</button>
             </section>
           </template>
-          <section v-else class="detail-section detail-confirm">
+            <section v-else-if="confirmDisable && canDisableUser" class="detail-section detail-confirm" aria-labelledby="confirm-disable-title">
+              <h4 id="confirm-disable-title">确认停用账号</h4>
+              <p>{{ user.display_name || user.username }}（{{ user.username }}） · {{ formatEmployeeNo(user.employee_no) }}</p>
+              <p class="detail-note">停用后，此人无法登录。管理员可以重新启用该账号。</p>
+              <div class="detail-actions">
+                <button ref="cancelDisableButton" type="button" class="um-btn um-btn--ghost" :disabled="busy" @click="cancelDisable">取消</button>
+                <button type="button" class="um-btn detail-danger-solid" :disabled="busy" @click="disableAccount">确认停用账号</button>
+              </div>
+            </section>
+          <section v-else-if="confirmDelete" class="detail-section detail-confirm">
             <h4>确认删除账号</h4>
             <p>将删除 <strong>{{ user.display_name || user.username }}</strong>（{{ user.username }}）。</p>
             <p class="detail-note">账号将无法登录，管理员无法重新启用。历史业务记录和署名会保留。</p>
@@ -185,7 +198,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
+import { oaEnabled } from '@/oa/access'
 import { useModalA11y } from '@/composables/useModalA11y'
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import {
@@ -197,11 +211,15 @@ import {
   type UserRow,
 } from './userManagementTypes'
 
+const PersonnelTerms = defineAsyncComponent(() => import('@/oa/components/PersonnelTerms.vue'))
+
 const props = defineProps<{
   user: UserRow
   loading: boolean
   unavailable: boolean
   currentRoleNames: string
+  canViewTerms?: boolean
+  initialTab?: 'terms'
   canEditBasicInfo: boolean
   canMoveTeam: boolean
   canClearMembership: boolean
@@ -244,9 +262,13 @@ const emit = defineEmits<{
 const selectedRoles = defineModel<string[]>('selectedRoles', { required: true })
 const newPassword = defineModel<string>('newPassword', { required: true })
 
-type DetailTab = 'profile' | 'roles' | 'security'
-const activeTab = ref<DetailTab>('profile')
+type DetailTab = 'profile' | 'roles' | 'terms' | 'security'
+const activeTab = ref<DetailTab>(props.canViewTerms && props.initialTab === 'terms' ? 'terms' : 'profile')
+const termsVisited = ref(activeTab.value === 'terms')
 const confirmDelete = ref(false)
+const confirmDisable = ref(false)
+const statusButton = ref<HTMLButtonElement | null>(null)
+const cancelDisableButton = ref<HTMLButtonElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
 const deleteButton = ref<HTMLButtonElement | null>(null)
 const cancelButton = ref<HTMLButtonElement | null>(null)
@@ -255,15 +277,20 @@ const hasSecurity = computed(() => props.canResetPassword || props.canDisableUse
 const tabs = computed<{ id: DetailTab; label: string }[]>(() => [
   { id: 'profile', label: '资料与归属' },
   { id: 'roles', label: '角色权限' },
+  ...(props.canViewTerms ? [{ id: 'terms' as const, label: '任职与交接' }] : []),
   ...(hasSecurity.value ? [{ id: 'security' as const, label: '账号安全' }] : []),
 ])
 
 function selectTab(id: DetailTab) {
   if (id === activeTab.value || busy.value) return
   confirmDelete.value = false
+  confirmDisable.value = false
   activeTab.value = id
+  if (id === 'terms') termsVisited.value = true
   emit('clear-message')
 }
+
+watch(() => props.initialTab, tab => { if (tab === 'terms' && props.canViewTerms) selectTab(tab) })
 
 function navigateTabs(event: KeyboardEvent) {
   const index = tabs.value.findIndex((tab) => tab.id === activeTab.value)
@@ -281,6 +308,28 @@ function navigateTabs(event: KeyboardEvent) {
   panel.value?.querySelector<HTMLElement>('#user-detail-tab-' + next.id)?.focus()
 }
 
+async function requestStatusChange() {
+  if (busy.value || !props.canDisableUser) return
+  if (props.user.status === 'disabled' || !oaEnabled) {
+    emit('set-status', props.user.status === 'disabled' ? 'active' : 'disabled')
+    return
+  }
+  emit('clear-message')
+  confirmDisable.value = true
+  await nextTick()
+  cancelDisableButton.value?.focus()
+}
+async function cancelDisable() {
+  if (busy.value) return
+  confirmDisable.value = false
+  await nextTick()
+  statusButton.value?.focus()
+}
+function disableAccount() {
+  if (!confirmDisable.value || busy.value || !props.canDisableUser || props.user.status === 'disabled') return
+  confirmDisable.value = false
+  emit('set-status', 'disabled')
+}
 async function beginDelete() {
   emit('clear-message')
   confirmDelete.value = true
@@ -299,12 +348,33 @@ async function cancelDelete() {
 function close() {
   if (!busy.value) emit('close')
 }
-useModalA11y(ref(true), panel, { onEsc: () => confirmDelete.value ? void cancelDelete() : close() })
+useModalA11y(ref(true), panel, { onEsc: () => confirmDisable.value ? void cancelDisable() : confirmDelete.value ? void cancelDelete() : close() })
 </script>
 
 <style scoped src="./userManagementModal.css"></style>
 <style scoped src="./userDetailModal.css"></style>
 <style scoped>
+@media (max-width: 420px) {
+  .detail-tabs--personnel { flex-wrap: wrap; }
+  .detail-tabs--personnel button { flex-basis: 50%; }
+}
+.detail-terms-panel { padding-block: 12px; }
+:global(html.oa-live-ui body .user-detail-oa) {
+  font-family: inherit;
+  color: var(--oa-text-primary, rgb(var(--yb-text)));
+  font-size: 14px;
+  line-height: 1.6;
+  border-radius: 8px;
+}
+:global(html.oa-live-ui body .user-detail-oa .section-title) { font-size: 16px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+:global(html.oa-live-ui body .user-detail-oa :is(h4, h5)) { font-size: 14px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+:global(html.oa-live-ui body .user-detail-oa :is(.detail-note, .detail-identity, .role-check em)) { color: var(--oa-text-secondary, rgb(var(--yb-text-muted))); font-size: 12px; }
+:global(html.oa-live-ui body .user-detail-oa .role-check > span) { font-size: 14px; font-weight: 400; line-height: 1.6; }
+:global(html.oa-live-ui body .user-detail-oa :is(button, summary, .role-check)) { min-height: 32px; min-width: 32px; }
+:global(html.oa-live-ui body .user-detail-oa :is(button, input:not([type=checkbox]), select)) { border-radius: 6px; }
+:global(html.oa-live-ui body .user-detail-oa .detail-other-authorizations > summary) { display: flex; align-items: center; }
+:global(html.oa-live-ui body .user-detail-oa :is(button, summary):focus-visible) { outline: 2px solid var(--oa-primary, rgb(var(--yb-brand))); outline-offset: 2px; }
+.detail-required { color: var(--oa-danger, rgb(var(--yb-danger-text))); }
 .detail-other-authorizations summary { cursor: pointer; font-weight: 650; }
 .detail-other-authorizations dl { margin: 10px 0; }
 .detail-other-authorizations dl div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }

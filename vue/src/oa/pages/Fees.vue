@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref, watchEffect } from 'vue'
+import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 import PageHead from '../components/PageHead.vue'
 import { api, dateInChina, download, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
+import { feeDateTime, feeStatus as status } from '../feeDisplay'
 import '../styles.css'
 
 const { can, currentProfile } = useOAAccess()
@@ -28,8 +29,39 @@ const error = ref('')
 const notice = ref('')
 const templates = ref<FeeTemplate[]>([])
 const docs = ref<FeeDoc[]>([])
+const page = ref(1)
+const pages = computed(() => Math.max(1, Math.ceil(docs.value.length / 15)))
+const visibleDocs = computed(() => docs.value.slice((page.value - 1) * 15, page.value * 15))
 const detail = ref<FeeDoc>()
 const report = ref<FeeReport>()
+const reportPage = ref(1)
+const reportPages = computed(() => Math.max(1, Math.ceil((report.value?.items?.length ?? 0) / 15)))
+const visibleReport = computed(() => report.value?.items?.slice((reportPage.value - 1) * 15, reportPage.value * 15) ?? [])
+const edited = ref(false)
+const draftEdited = ref(false)
+const fieldErrors = ref<Record<string, string>>({})
+const touched = new Set<string>()
+function validateField(key: string, problem: () => string, touch = false) {
+  if (touch) touched.add(key)
+  if (!touched.has(key)) return
+  const message = problem()
+  if (message) fieldErrors.value[key] = message
+  else delete fieldErrors.value[key]
+}
+function amountProblem() {
+  try { cents(form.value.amount); return '' }
+  catch { return '请输入大于零的金额，最多两位小数' }
+}
+const requiredProblem = (value: string | undefined, message: string) => value?.trim() ? '' : message
+const accountRequired = computed(() => !returned.value || form.value.channel !== detail.value?.channel)
+const fileProblem = () => form.value.files.length ? '' : '请上传至少一份单据凭证'
+const dateProblem = () => !payment.value.date ? '请选择实付日期' : payment.value.date > dateInChina() ? '实付日期不能晚于今天' : ''
+function fieldAttrs(key: string, help?: string) {
+  const invalid = !!fieldErrors.value[key]
+  return { 'aria-invalid': invalid, 'aria-describedby': [help, invalid ? 'fee-error-' + key : undefined].filter(Boolean).join(' ') || undefined }
+}
+const queueLabel = computed(() => queue.value === 'pay' ? '待付款单据' : queue.value === 'todo' ? '待你审批的单据' : '本人申请')
+const showQueue = computed(() => !detail.value && ['mine', 'approval'].includes(props.mode))
 const period = ref(dateInChina().slice(0, 7))
 const selection = ref('')
 const form = ref({ request_id: '', template_id: '', amount: '', reason: '', channel: '', holder: '', account: '', bank: '', extra: {} as Record<string, string>, files: [] as Evidence[], site: route.query.site === 'asset' ? 'asset' : 'main' })
@@ -52,16 +84,61 @@ const approverError = ref('')
 let approverSearch = 0
 const grants = ref({ id: '', pay: false, report: false })
 const delegate = ref({ id: '', level: 'draft' })
+const verified = ref<Record<string, Approver>>({})
+const grantTarget = computed(() => verified.value[grants.value.id])
+const delegateTarget = computed(() => verified.value[delegate.value.id])
+const delegateLevels: Record<string, string> = { none: '撤销模板维护权', draft: '编辑草稿', publish: '编辑并发布' }
+async function verifyAccount(kind: 'grant' | 'delegate') {
+  const target = kind === 'grant' ? grants : delegate
+  const id = target.value.id
+  if (!/^[1-9]\d*$/.test(id)) throw new Error('请输入有效账号 ID')
+  const data = await api<{ selected: Approver[] }>('/oa-api/finance/approvers?ids=' + encodeURIComponent(id))
+  if (target.value.id !== id) return
+  const match = data.selected?.find(item => String(item.id) === id)
+  if (!match) {
+    delete verified.value[id]
+    throw new Error('未找到可授权的在职账号，请核对账号 ID')
+  }
+  verified.value[id] = match
+}
 const files = ref<HTMLInputElement>()
 const receipt = ref<HTMLInputElement>()
 const channels: Record<string, string> = { bank: '对公银行转账', person: '对私银行卡', wallet: '对私收款平台' }
-const states: Record<string, string> = { waiting: '审批中', pending: '审批中', returned: '已退回', approved: '已批未付', paid: '已付款', rejected: '已拒绝' }
 const decisions: Record<string, string> = { approve: '同意', return: '退回修改', reject: '拒绝' }
 const active = computed(() => returnedTemplate.value || templates.value.find(item => item.id === form.value.template_id))
 const own = computed(() => String(detail.value?.applicant_id) === String(currentProfile.value?.id))
 const mayDecide = computed(() => detail.value?.state === 'waiting' && !own.value && String(detail.value.route?.[detail.value.current]) === String(currentProfile.value?.id))
 const major = (cents?: number) => cents == null ? '—' : money(cents / 100)
-const status = (state: string) => states[state] || state
+const approvalButton = computed(() => ({ approve: '同意申请', return: '退回申请', reject: '拒绝申请' }[approval.value.decision]))
+const leaveForm = () => !edited.value || window.confirm('费用申请尚未提交。放弃已填内容并离开？')
+const leaveDraft = () => !draftEdited.value || window.confirm('模板更改尚未保存。放弃更改？')
+onBeforeRouteLeave(() => leaveForm() && leaveDraft())
+watchEffect(onCleanup => {
+  if (!edited.value && !draftEdited.value) return
+  const warnOnUnload = (event: BeforeUnloadEvent) => {
+    event.preventDefault()
+    event.returnValue = ''
+  }
+  window.addEventListener('beforeunload', warnOnUnload)
+  onCleanup(() => window.removeEventListener('beforeunload', warnOnUnload))
+})
+
+function closeReturned() {
+  if (!leaveForm()) return
+  edited.value = false
+  returned.value = undefined
+  returnedTemplate.value = undefined
+}
+
+async function copyDocumentNumber() {
+  if (!detail.value) return
+  try {
+    await navigator.clipboard.writeText(detail.value.id)
+    notice.value = '已复制单号'
+  } catch {
+    error.value = '无法复制，请手动选中单号'
+  }
+}
 const node = (step: FeeDoc['route'][number]) => typeof step === 'object' ? step.name || ('#' + (step.user_id || step.id)) : '#' + step
 function approverLabel(approver: Approver) {
   const number = approver.employee_no == null ? '' : String(approver.employee_no).padStart(4, '0')
@@ -126,6 +203,12 @@ async function run(action: () => Promise<void>) {
 function selectTemplate() {
   form.value.channel = active.value?.channels?.[0] || ''
   form.value.extra = {}
+  for (const key of touched) {
+    if (key.startsWith('extra-')) {
+      touched.delete(key)
+      delete fieldErrors.value[key]
+    }
+  }
 }
 async function loadTemplates() {
   const data = await api<{ items: FeeTemplate[]; level?: string }>('/oa-api/finance/templates' + (props.mode === 'templates' ? '?draft=1' : ''))
@@ -138,11 +221,15 @@ async function loadTemplates() {
 }
 async function loadDocs() {
   detail.value = undefined
+  docs.value = []
   const data = await api<{ items: FeeDoc[] }>('/oa-api/finance/documents?' + new URLSearchParams({ queue: queue.value }))
   docs.value = data.items ?? []
+  page.value = Math.min(page.value, pages.value)
 }
 async function open(id: string) {
   revealed.value = false
+  touched.delete('date')
+  delete fieldErrors.value.date
   detail.value = await api<FeeDoc>('/oa-api/finance/documents/' + encodeURIComponent(id))
   approval.value = { decision: 'approve', comment: '' }
   payment.value = { date: dateInChina(), receipt: '' }
@@ -171,11 +258,17 @@ function uploadReceipt() {
 }
 async function submit() {
   if (!active.value) return
-  if (!form.value.files.length) throw new Error('请上传至少一份单据凭证')
+  fieldErrors.value = {}
+  let amountCents = 0
+  try { amountCents = cents(form.value.amount) } catch { fieldErrors.value.amount = '请输入大于零的金额，最多两位小数' }
+  if (!form.value.reason.trim()) fieldErrors.value.reason = '请输入费用用途'
+  if (!form.value.files.length) fieldErrors.value.files = '请上传至少一份单据凭证'
+  if (Object.keys(fieldErrors.value).length) return
   if (!form.value.request_id) form.value.request_id = crypto.randomUUID()
-  const { amount, files: evidence, ...fields } = form.value
+  const { amount: _amount, files: evidence, ...fields } = form.value
   const path = '/oa-api/finance/documents' + (returned.value ? '/' + encodeURIComponent(returned.value) + '/resubmit' : '')
-  const result = await send<{ id?: string }>(path, { ...fields, amount_cents: cents(amount), files: evidence.map(file => file.id) })
+  const result = await send<{ id?: string }>(path, { ...fields, amount_cents: amountCents, files: evidence.map(file => file.id) })
+  edited.value = false
   if (returned.value && result?.id) {
     returned.value = undefined
     returnedTemplate.value = undefined
@@ -203,6 +296,11 @@ function editReturned() {
 async function act() {
   if (!detail.value) return
   const id = detail.value.id
+  if (approval.value.decision !== 'approve') {
+    const reject = approval.value.decision === 'reject'
+    const subject = `${detail.value.template?.name || '费用申请'}（${id}），金额 ${major(detail.value.amount_cents)}`
+    if (!window.confirm(reject ? `拒绝${subject}？拒绝将结束本次审批。` : `退回${subject}？申请人修改后可重新提交。`)) return
+  }
   await send(`/oa-api/finance/documents/${encodeURIComponent(id)}/decision`, { ...approval.value, current: detail.value.current, version: detail.value.version })
   await open(id)
   notice.value = '审批结果已保存'
@@ -210,14 +308,19 @@ async function act() {
 async function pay() {
   if (!detail.value || !payment.value.receipt) return
   const id = detail.value.id
+  if (!window.confirm(`为申请「${id}」登记实付 ${major(detail.value.amount_cents)}？\n收款对象：${detail.value.holder || '—'}\n实付日期：${payment.value.date}\n此记录将计入支出报表。`)) return
   await send(`/oa-api/finance/documents/${encodeURIComponent(id)}/payment`, { ...payment.value, amount_cents: detail.value.amount_cents })
   await open(id)
   notice.value = '实付记录已保存'
 }
 async function loadReport() {
   report.value = await api<FeeReport>('/oa-api/finance/report?' + new URLSearchParams({ period: period.value.trim() }))
+  reportPage.value = 1
 }
 function beginTemplate(template?: FeeTemplate) {
+  if (!leaveDraft()) return
+  draftEdited.value = false
+  selection.value = template?.id || ''
   draft.value = template ? { ...template } : { id: '', name: '', type: '报销', channels: [], fields: [], required: [], evidence: '', nodes: [], threshold_cents: 0, extra: '', version: 0 }
   editingId.value = template?.id || ''
   draft.value.channels = [...(draft.value.channels || [])]
@@ -241,6 +344,7 @@ async function saveTemplate(publish: boolean) {
     threshold_cents: threshold === 0 ? 0 : cents(templateFields.value.threshold), publish,
   }
   await send('/oa-api/finance/templates/' + encodeURIComponent(draft.value.id), body, 'PUT')
+  draftEdited.value = false
   await loadTemplates()
   draft.value = undefined
   notice.value = publish ? '模板已发布' : '草稿已保存'
@@ -248,10 +352,14 @@ async function saveTemplate(publish: boolean) {
 async function saveFinanceAccess() {
   const { id, pay, report } = grants.value
   if (!/^[1-9]\d*$/.test(id)) throw new Error('请输入有效账号 ID')
+  if (!grantTarget.value) throw new Error('请先核对经办人')
+  if (!window.confirm(`为 ${approverLabel(grantTarget.value)}（账号 #${id}）保存财务授权？付款登记：${pay ? '允许' : '不允许'}；支出统计：${report ? '允许' : '不允许'}。`)) return
   await send('/oa-api/finance/actions/' + encodeURIComponent(id), { pay, report }, 'PUT')
   notice.value = '财务经办权限已保存'
 }
 async function saveDelegate() {
+  if (!delegateTarget.value) throw new Error('请先核对受托人')
+  if (!window.confirm(`为 ${approverLabel(delegateTarget.value)}（账号 #${delegate.value.id}）保存模板委托？${delegateLevels[delegate.value.level]}。`)) return
   await send('/oa-api/finance/delegates/' + encodeURIComponent(delegate.value.id), { level: delegate.value.level }, 'PUT')
   delegates.value = (await api<{ items: { id: number; level: string }[] }>('/oa-api/finance/delegates')).items || []
   notice.value = '模板维护委托已保存'
@@ -268,32 +376,37 @@ onMounted(() => void run(async () => {
 
 <template>
 <div class="oa-page">
-  <PageHead section="个人与公司 / 费用与审批" :title="title">
+  <PageHead :title="title">
     <RouterLink v-if="mode !== 'apply' && can('finance.apply')" class="oa-button" to="/fees/apply">发起申请</RouterLink>
     <RouterLink v-if="mode !== 'mine' && can('finance.apply')" class="oa-button" to="/fees/mine">我的申请</RouterLink>
   </PageHead>
-  <p v-if="error" class="oa-error" role="alert">{{ error }}</p>
+  <p v-if="error && !showQueue" class="oa-error" role="alert">{{ error }}</p>
   <p v-if="notice" class="oa-notice" role="status">{{ notice }}</p>
-  <p v-if="busy" class="oa-muted" role="status">正在处理…</p>
+  <p v-if="busy && !showQueue" class="oa-muted" role="status">{{ detail ? '正在办理单据…' : '正在处理…' }}</p>
 
-  <div v-if="mode === 'apply' || returned" class="oa-split">
+  <div v-if="mode === 'apply' || returned" class="oa-split fee-apply">
     <section class="oa-panel">
       <h2>{{ returned ? '修改退回单据' : '填写申请' }}</h2>
       <p v-if="!templates.length && !returnedTemplate && !busy" class="oa-empty">暂无可用的费用模板</p>
-      <form v-else class="oa-form" @submit.prevent="run(submit)">
+      <form v-else class="oa-form fee-required" @input="edited = true" @change="edited = true" @submit.prevent="run(submit)">
         <div class="oa-form-row">
-          <label>申请模板<select v-model="form.template_id" :disabled="!!returned" required @change="selectTemplate"><option v-for="item in returnedTemplate ? [returnedTemplate] : templates" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-          <label>金额（元）<input v-model="form.amount" inputmode="decimal" placeholder="0.00" required /></label>
-          <label>付款方式<select v-model="form.channel" required><option v-for="item in active?.channels || []" :key="item" :value="item">{{ channels[item] || item }}</option></select></label>
-          <label>{{ form.channel === 'bank' ? '单位开户全称' : '收款人姓名' }}<input v-model="form.holder" required /></label>
-          <label>{{ form.channel === 'wallet' ? '收款平台账号' : form.channel === 'bank' ? '对公银行账号' : '银行卡号' }}<input v-model="form.account" autocomplete="off" :placeholder="returned ? '留空保留原收款账号' : undefined" :required="!returned || form.channel !== detail?.channel" /></label>
-          <label>{{ form.channel === 'wallet' ? '收款平台' : '开户银行' }}<input v-model="form.bank" required /></label>
-          <label v-for="field in active?.fields || []" :key="field">{{ field }}<input v-model="form.extra[field]" :required="active?.required?.includes(field)" /></label>
+          <label><span>申请模板<i aria-hidden="true">*</i></span><select v-model="form.template_id" :disabled="!!returned" required @change="selectTemplate"><option v-for="item in returnedTemplate ? [returnedTemplate] : templates" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+          <label><span>金额（元）<i aria-hidden="true">*</i></span><input v-model="form.amount" inputmode="decimal" placeholder="例如 120.50" required v-bind="fieldAttrs('amount')" @blur="validateField('amount', amountProblem, true)" @input="validateField('amount', amountProblem)" /><small v-if="fieldErrors.amount" id="fee-error-amount" class="fee-error">{{ fieldErrors.amount }}</small></label>
         </div>
-        <label>用途与说明<textarea v-model="form.reason" required /></label>
-        <label>{{ active?.evidence || '凭据附件' }}<input ref="files" type="file" multiple @change="uploadEvidence" /></label>
-        <div v-for="file in form.files" :key="file.id" class="oa-actions"><span>{{ file.name }}</span><button type="button" @click="form.files = form.files.filter(item => item.id !== file.id)">移除</button></div>
-        <div class="oa-actions"><button v-if="returned" type="button" @click="returned = undefined; returnedTemplate = undefined">返回单据</button><button class="oa-button-primary" :disabled="busy || !active">{{ returned ? '重新提交' : '提交申请' }}</button></div>
+        <label><span>用途与说明<i aria-hidden="true">*</i></span><textarea v-model="form.reason" required placeholder="说明本笔支出的用途" v-bind="fieldAttrs('reason')" @blur="validateField('reason', () => requiredProblem(form.reason, '请输入费用用途'), true)" @input="validateField('reason', () => requiredProblem(form.reason, '请输入费用用途'))" /><small v-if="fieldErrors.reason" id="fee-error-reason" class="fee-error">{{ fieldErrors.reason }}</small></label>
+        <fieldset class="oa-fieldset oa-form-row">
+          <legend>收款信息</legend>
+          <label><span>付款方式<i aria-hidden="true">*</i></span><select v-model="form.channel" required @change="delete fieldErrors.account"><option v-for="item in active?.channels || []" :key="item" :value="item">{{ channels[item] || item }}</option></select></label>
+          <label><span>{{ form.channel === 'bank' ? '单位开户全称' : '收款人姓名' }}<i aria-hidden="true">*</i></span><input v-model="form.holder" required placeholder="填写与收款账户一致的名称" v-bind="fieldAttrs('holder')" @blur="validateField('holder', () => requiredProblem(form.holder, '请输入收款账户名称'), true)" @input="validateField('holder', () => requiredProblem(form.holder, '请输入收款账户名称'))" /><small v-if="fieldErrors.holder" id="fee-error-holder" class="fee-error">{{ fieldErrors.holder }}</small></label>
+          <label><span>{{ form.channel === 'wallet' ? '收款平台账号' : form.channel === 'bank' ? '对公银行账号' : '银行卡号' }}<i v-if="accountRequired" aria-hidden="true">*</i></span><input v-model="form.account" autocomplete="off" :placeholder="accountRequired ? '填写实际收款账号' : '留空保留原收款账号'" :required="accountRequired" v-bind="fieldAttrs('account')" @blur="validateField('account', () => accountRequired ? requiredProblem(form.account, '请输入收款账号') : '', true)" @input="validateField('account', () => accountRequired ? requiredProblem(form.account, '请输入收款账号') : '')" /><small v-if="fieldErrors.account" id="fee-error-account" class="fee-error">{{ fieldErrors.account }}</small></label>
+          <label><span>{{ form.channel === 'wallet' ? '收款平台' : '开户银行' }}<i aria-hidden="true">*</i></span><input v-model="form.bank" required :placeholder="form.channel === 'wallet' ? '例如支付宝' : '填写收款账户的开户银行名称'" v-bind="fieldAttrs('bank')" @blur="validateField('bank', () => requiredProblem(form.bank, '请输入开户银行或收款平台'), true)" @input="validateField('bank', () => requiredProblem(form.bank, '请输入开户银行或收款平台'))" /><small v-if="fieldErrors.bank" id="fee-error-bank" class="fee-error">{{ fieldErrors.bank }}</small></label>
+        </fieldset>
+        <div v-if="active?.fields?.length" class="oa-form-row">
+          <label v-for="(field, index) in active?.fields || []" :key="field"><span>{{ field }}<i v-if="active?.required?.includes(field)" aria-hidden="true">*</i></span><input v-model="form.extra[field]" :placeholder="'填写' + field" :required="active?.required?.includes(field)" v-bind="fieldAttrs('extra-' + index)" @blur="validateField('extra-' + index, () => active?.required?.includes(field) ? requiredProblem(form.extra[field], '请输入' + field) : '', true)" @input="validateField('extra-' + index, () => active?.required?.includes(field) ? requiredProblem(form.extra[field], '请输入' + field) : '')" /><small v-if="fieldErrors['extra-' + index]" :id="'fee-error-extra-' + index" class="fee-error">{{ fieldErrors['extra-' + index] }}</small></label>
+        </div>
+        <label><span>{{ active?.evidence || '凭据附件' }}<i aria-hidden="true">*</i></span><input ref="files" type="file" accept=".pdf,.png,.jpg,.jpeg" multiple v-bind="fieldAttrs('files', 'fee-file-help')" @blur="validateField('files', fileProblem, true)" @change="delete fieldErrors.files; uploadEvidence()" /><small id="fee-file-help">PDF、PNG、JPEG，单个文件不超过 10 MB。</small><small v-if="fieldErrors.files" id="fee-error-files" class="fee-error">{{ fieldErrors.files }}</small></label>
+        <div v-for="file in form.files" :key="file.id" class="oa-actions"><span>{{ file.name }}</span><button type="button" @click="edited = true; form.files = form.files.filter(item => item.id !== file.id)">移除</button></div>
+        <div class="oa-actions"><button v-if="returned" type="button" @click="closeReturned">返回单据</button><button class="oa-button-primary" :disabled="busy || !active">{{ returned ? '重新提交' : '提交申请' }}</button></div>
       </form>
     </section>
     <section class="oa-panel">
@@ -309,23 +422,29 @@ onMounted(() => void run(async () => {
 
   <template v-else-if="mode === 'mine' || mode === 'approval' || mode === 'document'">
     <div v-if="mode === 'approval'" class="oa-actions oa-person-tabs">
-      <button v-if="can('finance.approve')" :aria-pressed="queue === 'todo'" :disabled="busy" @click="queue = 'todo'; run(loadDocs)">审批待办</button>
-      <button v-if="canPay" :aria-pressed="queue === 'pay'" :disabled="busy" @click="queue = 'pay'; run(loadDocs)">待付款</button>
+      <button v-if="can('finance.approve')" :aria-pressed="queue === 'todo'" :disabled="busy" @click="queue = 'todo'; page = 1; run(loadDocs)">审批待办</button>
+      <button v-if="canPay" :aria-pressed="queue === 'pay'" :disabled="busy" @click="queue = 'pay'; page = 1; run(loadDocs)">待付款</button>
     </div>
     <section v-if="!detail" class="oa-panel">
-      <h2>{{ queue === 'mine' ? '本人单据' : queue === 'pay' ? '待付款单据' : '待审批单据' }}</h2>
-      <p v-if="!docs.length && !busy && !error" class="oa-empty">{{ mode === 'document' ? '未选中费用单据' : '暂无单据' }}</p>
-      <div v-if="docs.length" class="oa-table-wrap">
-        <table class="oa-table"><thead><tr><th>申请 / 单号</th><th>申请人</th><th>金额</th><th>来源</th><th>状态</th><th>操作</th></tr></thead><tbody>
-          <tr v-for="item in docs" :key="item.id"><td><b>{{ item.template?.name }}</b><br><small class="oa-muted">{{ item.id }}</small></td><td>#{{ item.applicant_id }}</td><td>{{ major(item.amount_cents) }}</td><td>{{ item.site === 'asset' ? '资产办理区' : 'OA' }}</td><td><span class="oa-pill">{{ status(item.state) }}</span></td><td><button :disabled="busy" @click="run(() => open(item.id))">打开单据</button></td></tr>
+      <p v-if="showQueue && busy" class="oa-muted" role="status">正在读取{{ queueLabel }}…</p>
+      <div v-else-if="showQueue && error" class="oa-actions"><p class="oa-error" role="alert">{{ error }}</p><button type="button" @click="run(loadDocs)">重新加载列表</button></div>
+      <p v-else-if="!docs.length && !busy && !error" class="oa-empty">{{ mode === 'document' ? '未选中费用单据' : '暂无' + queueLabel }}</p>
+      <div v-if="!busy && !error && docs.length" class="oa-table-wrap">
+        <table class="oa-table"><thead><tr><th>申请 / 单号</th><th>申请人</th><th class="oa-number">金额</th><th>来源</th><th>状态</th><th class="oa-action-col">操作</th></tr></thead><tbody>
+          <tr v-for="item in visibleDocs" :key="item.id"><td><b class="oa-ellipsis" :title="item.template?.name">{{ item.template?.name }}</b><small class="oa-muted oa-ellipsis" :title="item.id">{{ item.id }}</small></td><td>#{{ item.applicant_id }}</td><td class="oa-number">{{ major(item.amount_cents) }}</td><td>{{ item.site === 'asset' ? '资产办理区' : 'OA' }}</td><td><span :class="['oa-pill', 'oa-state-' + item.state]">{{ status(item.state) }}</span></td><td class="oa-action-col"><button :disabled="busy" @click="run(() => open(item.id))">打开单据</button></td></tr>
         </tbody></table>
       </div>
+      <nav v-if="!busy && !error && pages > 1" class="oa-actions fee-pager" aria-label="费用单据分页">
+        <span>共 {{ docs.length }} 项 · {{ page }} / {{ pages }} 页</span>
+        <button :disabled="page <= 1" @click="page--">上一页</button>
+        <button :disabled="page >= pages" @click="page++">下一页</button>
+      </nav>
     </section>
     <div v-else class="oa-split">
       <section class="oa-panel">
-        <h2>{{ detail.template?.name || '费用单据' }} <span class="oa-pill">{{ status(detail.state) }}</span></h2>
-        <dl class="oa-kv">
-          <div><dt>单号</dt><dd>{{ detail.id }}</dd></div><div><dt>申请人</dt><dd>#{{ detail.applicant_id }}</dd></div>
+        <h2 class="fee-wrap">{{ detail.template?.name || '费用单据' }} <span :class="['oa-pill', 'oa-state-' + detail.state]">{{ status(detail.state) }}</span></h2>
+        <dl class="oa-kv fee-detail">
+          <div><dt>单号</dt><dd>{{ detail.id }} <button type="button" @click="copyDocumentNumber">复制单号</button></dd></div><div><dt>申请人</dt><dd>#{{ detail.applicant_id }}</dd></div>
           <div><dt>申请金额</dt><dd>{{ major(detail.amount_cents) }}</dd></div><div><dt>支付渠道</dt><dd>{{ channels[detail.channel] || detail.channel }}</dd></div>
           <div><dt>收款对象</dt><dd>{{ detail.holder }}</dd></div><div><dt>收款账号</dt><dd>{{ detail.account }} <button v-if="canPay && !own && detail.state === 'approved' && !revealed" :disabled="busy" @click="run(revealAccount)">查看完整账号</button></dd></div><div><dt>银行 / 平台</dt><dd>{{ detail.bank || '—' }}</dd></div>
           <div><dt>用途与说明</dt><dd>{{ detail.reason }}</dd></div><div v-for="(value, key) in detail.extra" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
@@ -338,23 +457,26 @@ onMounted(() => void run(async () => {
       <section class="oa-panel">
         <h2>审批与付款记录</h2>
         <ol v-if="detail.route?.length" class="oa-steps"><li v-for="(item, index) in detail.route" :key="index">{{ node(item) }}<small v-if="detail.current === index"> · 当前节点</small></li></ol>
-        <dl v-if="detail.history?.length" class="oa-kv"><div v-for="(entry, index) in detail.history" :key="index"><dt>{{ historyLabel(entry.action) }} <small>{{ new Date(entry.at).toLocaleString('zh-CN') }}</small></dt><dd>{{ entry.comment || '—' }}</dd></div></dl>
         <form v-if="(queue === 'todo' || mode === 'document') && can('finance.approve') && mayDecide" class="oa-form" @submit.prevent="run(act)">
           <label>审批结果<select v-model="approval.decision"><option v-for="(text, key) in decisions" :key="key" :value="key">{{ text }}</option></select></label>
           <label>审批意见<textarea v-model="approval.comment" :required="approval.decision !== 'approve'" /></label>
-          <button class="oa-button-primary" :disabled="busy">提交审批</button>
+          <button :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy">{{ approvalButton }}</button>
         </form>
         <form v-if="(queue === 'pay' || mode === 'document') && !own && canPay && detail.state === 'approved'" class="oa-form" @submit.prevent="run(pay)">
-          <label>实付日期<input v-model="payment.date" type="date" :max="dateInChina()" required /></label>
+          <label><span>实付日期<i aria-hidden="true">*</i></span><input v-model="payment.date" type="date" :max="dateInChina()" required v-bind="fieldAttrs('date', 'fee-date-help')" @blur="validateField('date', dateProblem, true)" @input="validateField('date', dateProblem)" /><small id="fee-date-help">填写实际付款日，最晚为今天。</small><small v-if="fieldErrors.date" id="fee-error-date" class="fee-error">{{ fieldErrors.date }}</small></label>
           <label>金额<input :value="major(detail.amount_cents)" readonly /></label>
-          <label>付款回单<input ref="receipt" type="file" @change="uploadReceipt" /></label>
+          <label>付款回单 *<input ref="receipt" type="file" accept=".pdf,.png,.jpg,.jpeg" aria-describedby="fee-receipt-help" @change="uploadReceipt" /><small id="fee-receipt-help">PDF、PNG、JPEG，单个文件不超过 10 MB。</small></label>
           <p v-if="payment.receipt" class="oa-muted">回单已上传</p>
-          <button class="oa-button-primary" :disabled="busy || !payment.receipt">登记已付款</button>
+          <button class="oa-button-primary" :disabled="busy || !payment.receipt">确认登记实付</button>
         </form>
         <template v-if="detail.payment">
           <dl class="oa-kv"><div><dt>实付日期</dt><dd>{{ detail.payment.date }}</dd></div><div><dt>实付金额</dt><dd>{{ major(detail.payment.amount_cents) }}</dd></div></dl>
           <button v-if="detail.payment.receipt" @click="run(() => download('/oa-api/finance/files/' + detail?.payment?.receipt, '付款回单'))">下载回单</button>
         </template>
+        <details v-if="detail.history?.length" class="fee-disclosure">
+          <summary>操作记录（{{ detail.history.length }}）</summary>
+          <dl class="oa-kv fee-detail"><div v-for="(entry, index) in detail.history" :key="index"><dt>{{ historyLabel(entry.action) }} <time :datetime="entry.at">{{ feeDateTime(entry.at) }}</time></dt><dd>{{ entry.comment || '—' }}</dd></div></dl>
+        </details>
       </section>
     </div>
   </template>
@@ -363,19 +485,19 @@ onMounted(() => void run(async () => {
     <div class="oa-split oa-sidebar-split">
       <section class="oa-panel">
         <h2>费用模板</h2>
-        <div class="oa-list"><button v-for="item in templates" :key="item.id" @click="selection = item.id; beginTemplate(item)" :aria-current="selection === item.id" :disabled="level !== 'draft' && level !== 'publish'">{{ item.name }} · v{{ item.version }}</button></div>
+        <div class="oa-list"><button v-for="item in templates" :key="item.id" @click="beginTemplate(item)" :aria-current="selection === item.id" :disabled="level !== 'draft' && level !== 'publish'">{{ item.name }} · v{{ item.version }}</button></div>
         <p v-if="!templates.length && !busy" class="oa-empty">暂无费用模板</p>
-        <button v-if="level === 'draft' || level === 'publish'" @click="selection = ''; beginTemplate()">新建模板</button>
+        <button v-if="level === 'draft' || level === 'publish'" @click="beginTemplate()">新建模板</button>
       </section>
       <section v-if="draft && (level === 'draft' || level === 'publish')" class="oa-panel">
         <h2>维护模板</h2>
-        <form ref="templateForm" class="oa-form" @submit.prevent="run(() => saveTemplate(false))">
+        <form ref="templateForm" class="oa-form fee-required" @input="draftEdited = true" @change="draftEdited = true" @submit.prevent="run(() => saveTemplate(false))">
           <div class="oa-form-row">
-            <label>模板 ID<input v-model.trim="draft.id" :readonly="Boolean(editingId)" pattern="[A-Za-z0-9_-]+" required /></label>
-            <label>名称<input v-model.trim="draft.name" required /></label>
-            <label>单据类型<select v-model="draft.type"><option>报销</option><option>付款</option></select></label>
+            <label><span>模板 ID<i aria-hidden="true">*</i></span><input v-model.trim="draft.id" :readonly="Boolean(editingId)" pattern="[A-Za-z0-9_-]+" placeholder="使用字母、数字、连字符或下划线" required /></label>
+            <label><span>名称<i aria-hidden="true">*</i></span><input v-model.trim="draft.name" placeholder="例如差旅报销" required /></label>
+            <label><span>单据类型<i aria-hidden="true">*</i></span><select v-model="draft.type"><option>报销</option><option>付款</option></select></label>
             <label>可填写字段<input v-model="templateFields.fields" placeholder="费用归属，合同编号" /></label>
-            <label>凭证要求<input v-model.trim="draft.evidence" placeholder="例如发票" required /></label>
+            <label><span>凭证要求<i aria-hidden="true">*</i></span><input v-model.trim="draft.evidence" placeholder="例如发票" required /></label>
           </div>
           <fieldset class="oa-fieldset"><legend>支付方式</legend><div class="oa-checks"><label v-for="(label, key) in channels" :key="key"><input v-model="draft.channels" type="checkbox" :value="key" />{{ label }}</label></div></fieldset>
           <fieldset v-if="list(templateFields.fields).length" class="oa-fieldset"><legend>必填字段</legend><div class="oa-checks"><label v-for="field in list(templateFields.fields)" :key="field"><input v-model="draft.required" type="checkbox" :value="field" />{{ field }}</label></div></fieldset>
@@ -387,9 +509,9 @@ onMounted(() => void run(async () => {
               <label>第 {{ index + 1 }} 步<select v-model="draft.nodes[index]" :aria-label="'第 ' + (index + 1) + ' 步'" required><option value="" disabled>选择审批人</option><option v-for="option in approvalChoices(item)" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
               <button type="button" :disabled="index === 0" @click="movingNode(index, -1)">上移</button>
               <button type="button" :disabled="index + 1 === draft.nodes.length" @click="movingNode(index, 1)">下移</button>
-              <button type="button" @click="draft.nodes.splice(index, 1)">移除</button>
+              <button type="button" @click="draftEdited = true; draft.nodes.splice(index, 1)">移除</button>
             </div>
-            <button type="button" @click="draft.nodes.push(draft.nodes.length ? '' : 'manager')">添加审批节点</button>
+            <button type="button" @click="draftEdited = true; draft.nodes.push(draft.nodes.length ? '' : 'manager')">添加审批节点</button>
           </fieldset>
           <div class="oa-form-row">
             <label>金额达到时加签（元）<input v-model.trim="templateFields.threshold" inputmode="decimal" pattern="[0-9]+(\.[0-9]{1,2})?" required /></label>
@@ -399,22 +521,24 @@ onMounted(() => void run(async () => {
         </form>
       </section>
     </div>
-    <section v-if="isAdmin" class="oa-panel">
-      <h2>模板维护委托</h2>
+    <details v-if="isAdmin" class="oa-panel fee-disclosure">
+      <summary>模板维护委托</summary>
       <dl v-if="delegates.length" class="oa-kv"><div v-for="item in delegates" :key="item.id"><dt>账号 #{{ item.id }}</dt><dd>{{ { none: '无模板维护权', draft: '编辑草稿', publish: '编辑并发布' }[item.level] || item.level }}</dd></div></dl>
       <form class="oa-form" @submit.prevent="run(saveDelegate)">
         <div class="oa-form-row"><label>受托人账号 ID<input v-model.trim="delegate.id" pattern="[0-9]+" required /></label><label>维护权限<select v-model="delegate.level"><option value="none">无模板维护权</option><option value="draft">编辑草稿</option><option value="publish">编辑并发布</option></select></label></div>
-        <button class="oa-button-primary" :disabled="busy">保存委托</button>
+        <div class="oa-actions"><button type="button" :disabled="busy || !delegate.id" @click="run(() => verifyAccount('delegate'))">核对受托人</button><button class="oa-button-primary" :disabled="busy || !delegateTarget">保存委托</button></div>
+        <p v-if="delegate.id" role="status">{{ delegateTarget ? approverLabel(delegateTarget) + ' · 账号 #' + delegateTarget.id : '请先核对在职账号' }}。拟授权限：{{ delegateLevels[delegate.level] }}。</p>
       </form>
-    </section>
-    <section v-if="isAdmin" class="oa-panel">
-      <h2>财务经办授权</h2><p class="oa-subtitle">付款登记与支出统计可以分别授权。</p>
+    </details>
+    <details v-if="isAdmin" class="oa-panel fee-disclosure">
+      <summary>财务经办授权</summary><p class="oa-subtitle">付款登记与支出统计可以分别授权。</p>
       <form class="oa-form oa-person-tabs" @submit.prevent="run(saveFinanceAccess)">
         <label>经办账号 ID<input v-model.trim="grants.id" pattern="[1-9][0-9]*" required /></label>
         <div class="oa-checks"><label><input v-model="grants.pay" type="checkbox" />付款登记</label><label><input v-model="grants.report" type="checkbox" />支出统计</label></div>
-        <button class="oa-button-primary" :disabled="busy">保存财务授权</button>
+        <div class="oa-actions"><button type="button" :disabled="busy || !grants.id" @click="run(() => verifyAccount('grant'))">核对经办人</button><button class="oa-button-primary" :disabled="busy || !grantTarget">保存财务授权</button></div>
+        <p v-if="grants.id" role="status">{{ grantTarget ? approverLabel(grantTarget) + ' · 账号 #' + grantTarget.id : '请先核对在职账号' }}。付款登记：{{ grants.pay ? '允许' : '不允许' }}；支出统计：{{ grants.report ? '允许' : '不允许' }}。</p>
       </form>
-    </section>
+    </details>
   </template>
 
   <section v-else-if="mode === 'report'" class="oa-panel">
@@ -422,9 +546,33 @@ onMounted(() => void run(async () => {
     <p v-if="!canReport" class="oa-error" role="alert">当前账号没有财务报表权限。</p>
     <template v-else>
       <form class="oa-actions oa-filter" @submit.prevent="run(loadReport)"><label>期间（年 / 月 / 日）<input v-model.trim="period" pattern="[0-9]{4}(-[0-9]{2}){0,2}" required /></label><button :disabled="busy">查询</button></form>
-      <dl v-if="report" class="oa-kv"><div><dt>期间实付</dt><dd>{{ major(report.amount_cents) }}</dd></div><div><dt>实付张数</dt><dd>{{ report.count }}</dd></div><div v-if="report.unpaid_cents != null"><dt>已批未付</dt><dd>{{ major(report.unpaid_cents) }}</dd></div></dl>
-      <div v-if="report?.items?.length" class="oa-table-wrap"><table class="oa-table"><thead><tr><th>单号</th><th>实付日期</th><th>实付金额</th><th>操作</th></tr></thead><tbody><tr v-for="item in report.items" :key="item.id"><td>{{ item.id }}</td><td>{{ item.payment?.date }}</td><td>{{ major(item.payment?.amount_cents) }}</td><td><RouterLink :to="{ path: '/fees/document', query: { id: item.id } }">打开单据</RouterLink></td></tr></tbody></table></div>
+      <dl v-if="report" class="fee-totals"><div><dt>期间实付</dt><dd>{{ major(report.amount_cents) }}</dd></div><div><dt>实付张数</dt><dd>{{ report.count }}</dd></div><div v-if="report.unpaid_cents != null"><dt>已批未付</dt><dd>{{ major(report.unpaid_cents) }}</dd></div></dl>
+      <div v-if="visibleReport.length" class="oa-table-wrap"><table class="oa-table"><thead><tr><th>单号</th><th class="oa-number">实付日期</th><th class="oa-number">实付金额</th><th class="oa-action-col">操作</th></tr></thead><tbody><tr v-for="item in visibleReport" :key="item.id"><td><span class="oa-ellipsis" :title="item.id">{{ item.id }}</span></td><td class="oa-number">{{ item.payment?.date }}</td><td class="oa-number">{{ major(item.payment?.amount_cents) }}</td><td class="oa-action-col"><RouterLink class="fee-row-action" :to="{ path: '/fees/document', query: { id: item.id } }">打开单据</RouterLink></td></tr></tbody></table></div>
+      <nav v-if="reportPages > 1" class="oa-actions fee-pager" aria-label="费用报表分页">
+        <span>共 {{ report?.items?.length }} 项 · {{ reportPage }} / {{ reportPages }} 页</span>
+        <button :disabled="reportPage <= 1" @click="reportPage--">上一页</button>
+        <button :disabled="reportPage >= reportPages" @click="reportPage++">下一页</button>
+      </nav>
     </template>
   </section>
 </div>
 </template>
+
+<style scoped>
+.fee-pager { justify-content: flex-end; margin-top: 12px; color: var(--oa-muted); }
+.fee-disclosure { margin-top: 12px; }
+.fee-disclosure summary { cursor: pointer; font-weight: 600; min-height: 32px; line-height: 32px; }
+.fee-row-action { display: inline-flex; align-items: center; min-height: 32px; min-width: 32px; }
+.fee-detail > div { display: grid; grid-template-columns: minmax(76px, 23%) minmax(0, 1fr); gap: 8px; }
+.fee-detail dd { text-align: start; max-inline-size: 40em; overflow-wrap: anywhere; }
+.fee-wrap { overflow-wrap: anywhere; }
+.fee-error, .oa-page button.fee-danger { color: var(--oa-danger); }
+.oa-form label i[aria-hidden] { margin-inline-start: 4px; color: var(--oa-danger); font-style: normal; }
+.fee-disclosure[open] > summary { margin-bottom: 12px; }
+.fee-totals { display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 16px 0; padding-block: 12px; border-block: 1px solid var(--oa-line); }
+.fee-totals dt { color: var(--oa-muted); font-size: 12px; }
+.fee-totals dd { margin: 4px 0 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (min-width: 960px) {
+  .fee-apply { grid-template-columns: minmax(0, 1fr) minmax(230px, 31%); align-items: start; }
+}
+</style>

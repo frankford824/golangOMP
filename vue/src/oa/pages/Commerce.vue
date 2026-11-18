@@ -33,6 +33,9 @@ const to = ref(today)
 const shop = ref('')
 const selectedSku = ref(props.productId ?? '')
 const group = ref('shop')
+const overviewSection = ref<'products' | 'trend'>('products')
+const appliedGroup = ref('shop')
+let appliedQuery = ''
 const includeBrush = ref(false)
 const loadedDetail = ref<{ shop: string; sku: string; from: string; to: string }>()
 const shopOptions = ref<DataRow[]>([])
@@ -43,6 +46,12 @@ const historyError = ref('')
 const historyOpen = ref(false)
 const feedback = ref({ shop_id: '', adjusted_on: today, note: '', task_id: undefined as number | undefined })
 const saved = ref('')
+const feedbackError = ref('')
+const copyStatus = ref('')
+async function copySKU(sku: string) {
+  try { await navigator.clipboard.writeText(sku); copyStatus.value = '已复制 SKU' }
+  catch { copyStatus.value = '无法复制 SKU，请手动复制' }
+}
 const comparison = ref<(DataRow & { phase?: string })[]>()
 const comparisonError = ref('')
 const comparisonBusy = ref(false)
@@ -125,7 +134,7 @@ async function load(resetPage = true) {
   if (!mayView.value) return
   if (props.mode === 'detail' && !selectedSku.value.trim()) return
   const sequence = ++latest.value
-  const detailFilters = { shop: shop.value, sku: selectedSku.value.trim(), from: from.value, to: to.value }
+  const detailFilters = !resetPage && loadedDetail.value ? loadedDetail.value : { shop: shop.value, sku: selectedSku.value.trim(), from: from.value, to: to.value }
   busy.value = true
   loadedDetail.value = undefined
   historyOpen.value = false
@@ -140,7 +149,13 @@ async function load(resetPage = true) {
     if (props.mode === 'products') options.mine = '1'
     if (offset.value) options.offset = String(offset.value)
     if (props.mode === 'detail') options.sku = selectedSku.value.trim()
-    const result = await withQuery(endpoint, options)
+    if (resetPage || !appliedQuery) {
+      appliedGroup.value = group.value
+      appliedQuery = queryParams(endpoint, options)
+    }
+    const applied = new URLSearchParams(appliedQuery)
+    applied.set('offset', String(offset.value))
+    const result = await api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`)
     if (sequence === latest.value) {
       data.value = result
       if (props.mode === 'detail') {
@@ -227,14 +242,14 @@ async function saveFeedback() {
   const filters = loadedDetail.value
   if (!filters) return
   busy.value = true
-  error.value = ''
+  feedbackError.value = ''
   saved.value = ''
   try {
     await send('/oa-api/orders/feedback', { ...form, sku: filters.sku })
     await load()
     saved.value = '上线记录已保存'
     form.note = ''
-  } catch (cause) { error.value = errorText(cause) }
+  } catch (cause) { feedbackError.value = errorText(cause) }
   finally { busy.value = false }
 }
 async function compare(event: Feedback) {
@@ -313,8 +328,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-<div class="oa-page">
-  <PageHead section="工作台 / 经营" :title="title" subtitle="按北京时间下单日" >
+<div class="oa-page commerce-workspace">
+  <PageHead :title="title" subtitle="按北京时间下单日" >
+    <RouterLink v-if="mode === 'overview'" class="oa-button" to="/operations/products">我归属的商品</RouterLink>
+    <RouterLink v-if="mode === 'overview'" class="oa-button" to="/operations/rankings">经营分析与排名</RouterLink>
     <RouterLink v-if="mode === 'overview' && permissions.hasMenu('dashboard')" class="oa-button" :to="{ path: '/', query: { workspace: 'tasks' } }">任务运营看板</RouterLink>
     <RouterLink v-if="mode === 'ranking'" class="oa-button" to="/operations/orders/detail">订单明细</RouterLink>
     <RouterLink v-if="mode === 'ranking'" class="oa-button" to="/operations/orders/refunds">售后退款</RouterLink>
@@ -324,15 +341,13 @@ onUnmounted(() => {
   </PageHead>
   <p v-if="!mayView" class="oa-error" role="alert">当前账号没有经营查询权限。</p>
   <template v-else>
-    <form class="oa-actions oa-filter" @submit.prevent="load()">
-      <RouterLink v-if="mode === 'overview'" class="oa-button" to="/me/performance">我的业绩</RouterLink>
-      <RouterLink v-if="mode === 'overview'" class="oa-button" to="/operations/products">商品经营</RouterLink>
+    <form class="oa-actions oa-filter workspace-filters" @submit.prevent="load()">
       <label v-if="mode === 'ranking'">排名维度 <select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
       <label v-if="mode === 'detail'">SKU <input v-model="selectedSku" required /></label>
-      <label v-if="mode !== 'personal'">店铺 <select v-if="shopOptions.length" v-model="shop"><option value="">全部可见店铺</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" placeholder="全部可见店铺" /></label>
+      <label v-if="mode !== 'personal'">店铺 <select v-if="shopOptions.length" v-model="shop" aria-label="店铺"><option value="">全部可见店铺</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
       <label>开始日期 <input v-model="from" type="date" :max="to" min="2026-06-01" required /></label>
       <label>结束日期 <input v-model="to" type="date" :min="from" :max="today" required /></label>
-      <label v-if="mode !== 'ranking' || group !== 'growth'" class="oa-check-inline"><input v-model="includeBrush" type="checkbox" />包含刷单</label>
+      <details v-if="mode !== 'ranking' || group !== 'growth'" class="workspace-more"><summary>更多筛选{{ includeBrush ? ' · 含刷单' : '' }}</summary><label class="oa-check-inline"><input v-model="includeBrush" type="checkbox" />包含刷单</label></details>
       <button class="oa-button-primary" :disabled="busy">查询</button>
       <button type="button" :disabled="busy" @click="range(6)">近 7 日</button>
     </form>
@@ -344,19 +359,25 @@ onUnmounted(() => {
       <section class="oa-kpis" aria-label="经营指标">
         <div v-for="metric in kpis" :key="metric.name" class="oa-kpi"><span>{{ metric.name }}</span><b>{{ metric.value }}</b><small v-if="metric.foot" :class="['oa-pill', { 'oa-pill-warn': parseFloat(metric.foot) < 90 }]">{{ parseFloat(metric.foot) < 90 ? '仅覆盖' : '覆盖' }} {{ metric.foot }}</small></div>
       </section>
-      <div class="oa-split">
+      <nav class="oa-actions oa-person-tabs" aria-label="经营首页内容">
+        <button type="button" :aria-pressed="overviewSection === 'products'" @click="overviewSection = 'products'">商品表现</button>
+        <button type="button" :aria-pressed="overviewSection === 'trend'" @click="overviewSection = 'trend'">销售趋势</button>
+        <RouterLink class="oa-button" to="/me/performance">我的业绩</RouterLink>
+      </nav>
+      <div v-if="overviewSection === 'trend'" class="oa-split">
         <section class="oa-panel">
           <h2>订单应付趋势</h2>
-          <svg v-if="points.length" class="oa-chart" viewBox="0 0 600 155" role="img" aria-label="按日汇总的订单应付金额">
+          <svg v-if="points.length > 1" class="oa-chart" viewBox="0 0 600 155" role="img" aria-label="按日汇总的订单应付金额">
             <defs><linearGradient id="oa-trend-fill" x2="0" y2="1"><stop stop-color="var(--oa-accent)" stop-opacity=".4" /><stop offset="1" stop-color="var(--oa-active)" stop-opacity=".3" /></linearGradient></defs>
             <line v-for="grid in [29, 61, 93, 125]" :key="grid" x1="45" :y1="grid" x2="580" :y2="grid" stroke="var(--oa-line)" />
             <polygon :points="area" fill="url(#oa-trend-fill)" />
             <polyline :points="line" fill="none" stroke="var(--oa-accent)" stroke-width="2.2" />
             <g v-for="(point, index) in points" :key="point.day">
               <circle :cx="point.x" :cy="point.y" r="3.2" fill="var(--oa-surface)" stroke="var(--oa-accent)"><title>{{ point.day }} {{ money(point.value) }}</title></circle>
-              <text v-if="index === 0 || index === points.length - 1 || points.length <= 7" :x="point.x" y="145" text-anchor="middle" fill="var(--oa-muted)" font-size="10">{{ point.day.slice(5) }}</text>
+              <text v-if="index === 0 || index === points.length - 1 || points.length <= 7" :x="point.x" y="148" text-anchor="middle" fill="var(--oa-muted)" font-size="12">{{ point.day.slice(5) }}</text>
             </g>
           </svg>
+          <p v-else-if="points.length" class="oa-muted">{{ points[0].day }} 订单应付 {{ kpis[0].value }}。<button type="button" :disabled="busy" @click="range(6)">查看近 7 日趋势</button></p>
           <p v-else class="oa-empty">该期间没有订单趋势数据</p>
         </section>
         <section class="oa-panel oa-link-list">
@@ -368,28 +389,29 @@ onUnmounted(() => {
       </div>
     </template>
     <p v-if="productsError" class="oa-error" role="alert">商品数据暂不可用。{{ productsError }}</p>
-    <section v-if="data" class="oa-panel">
+    <section v-if="data && (mode !== 'overview' || !summary || overviewSection === 'products')" class="oa-panel">
       <div v-if="mode === 'personal'" class="oa-actions oa-person-tabs"><span>本月实际 <strong>{{ money(data.month_actual) }}</strong></span><span>月末预估 <strong>{{ data.forecast == null ? '完整日不足或数据不全' : money(data.forecast) }}</strong></span></div>
+      <p v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</p>
       <h2>{{ mode === 'ranking' ? '排名' : mode === 'personal' ? '实际商品销售额' : mode === 'detail' ? 'SKU 成交与成本' : '商品表现' }}</h2>
       <p v-if="!rows.length" class="oa-empty">所选范围暂无数据</p>
-      <div v-else class="oa-table-wrap">
+      <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
         <table v-if="mode === 'ranking' || mode === 'personal'" class="oa-table">
-          <thead><tr><th v-if="mode === 'ranking'">名次</th><th>{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th>{{ mode === 'ranking' && ['shop','platform','growth'].includes(group) ? '订单应付' : '商品销售额' }}</th><th v-if="mode === 'ranking' && group === 'growth'">较同长度基期</th></tr></thead>
-          <tbody><tr v-for="(row, index) in rows" :key="row.key || row.day || index"><td v-if="mode === 'ranking'">{{ offset + index + 1 }}</td><td>{{ mode === 'ranking' && ['shop','growth'].includes(group) ? shopName(row.key) : row.key || row.day }}</td><td>{{ money(mode === 'ranking' && ['shop','platform','growth'].includes(group) ? row.payable_amount : row.item_pay_total) }}</td><td v-if="mode === 'ranking' && group === 'growth'">{{ row.growth_status === 'zero_baseline' ? '基期为零' : row.growth_rate == null ? '—' : (Number(row.growth_rate) * 100).toFixed(1) + '%' }}</td></tr></tbody>
+          <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>
+          <tbody><tr v-for="(row, index) in rows" :key="row.key || row.day || index"><td v-if="mode === 'ranking'" class="oa-number">{{ offset + index + 1 }}</td><td :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' && ['shop','growth'].includes(appliedGroup) ? shopName(row.key) : row.key || row.day }}</td><td class="oa-number">{{ money(mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? row.payable_amount : row.item_pay_total) }}</td><td v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">{{ row.growth_status === 'zero_baseline' ? '基期为零' : row.growth_rate == null ? '—' : (Number(row.growth_rate) * 100).toFixed(1) + '%' }}</td></tr></tbody>
         </table>
         <table v-else class="oa-table">
-          <thead><tr><th>商品 / SKU</th><th>店铺</th><th>销量</th><th>商品销售额</th><th>成交核实成本</th><th>核实毛利</th><th>核实覆盖率</th><th v-if="mode === 'detail'">当前维护单价</th><th v-else>操作</th></tr></thead>
+          <thead><tr><th>商品 / SKU</th><th>店铺</th><th class="oa-number">销量</th><th class="oa-number">商品销售额</th><th class="oa-number">成交核实成本</th><th class="oa-number">核实毛利</th><th class="oa-number">核实覆盖率</th><th v-if="mode === 'detail'" class="oa-number">当前维护单价</th><th v-else class="oa-action-col">操作</th></tr></thead>
           <tbody><tr v-for="(row, index) in rows" :key="`${row.shop_id}-${row.shop_item_id}-${row.sku}-${index}`">
-            <td><b>{{ row.product_name || row.shop_item_id || row.sku }}</b><br><small class="oa-muted">{{ row.sku }}</small></td>
-            <td>{{ shopName(row.shop_id) }}</td><td>{{ row.quantity ?? '—' }}</td><td>{{ money(row.item_pay_total) }}</td>
-            <td>{{ money(row.cost_verified_total) }}</td><td>{{ money(row.verified_gross) }}</td>
-            <td><span v-if="row.verified_coverage != null" :class="['oa-pill', { 'oa-pill-warn': Number(row.verified_coverage) < .9 }]">{{ Number(row.verified_coverage) < .9 ? '仅覆盖 ' : '' }}{{ (Number(row.verified_coverage) * 100).toFixed(1) }}%</span><span v-else>—</span></td>
-            <td v-if="mode === 'detail'">{{ money(data.current_cost) }}</td>
-            <td v-else><RouterLink v-if="row.sku" :to="'/operations/products/' + encodeURIComponent(row.sku)">查看详情</RouterLink></td>
+            <td><b class="oa-ellipsis" :title="row.product_name || row.shop_item_id || row.sku">{{ row.product_name || row.shop_item_id || row.sku }}</b><small v-if="row.sku" class="oa-muted">{{ row.sku }} <button type="button" class="workspace-copy" :aria-label="'复制 SKU ' + row.sku" @click="copySKU(row.sku)">复制</button></small></td>
+            <td>{{ shopName(row.shop_id) }}</td><td class="oa-number">{{ row.quantity ?? '—' }}</td><td class="oa-number">{{ money(row.item_pay_total) }}</td>
+            <td class="oa-number">{{ money(row.cost_verified_total) }}</td><td class="oa-number">{{ money(row.verified_gross) }}</td>
+            <td class="oa-number"><span v-if="row.verified_coverage != null" :class="['oa-pill', { 'oa-pill-warn': Number(row.verified_coverage) < .9 }]">{{ Number(row.verified_coverage) < .9 ? '仅覆盖 ' : '' }}{{ (Number(row.verified_coverage) * 100).toFixed(1) }}%</span><span v-else>—</span></td>
+            <td v-if="mode === 'detail'" class="oa-number">{{ money(data.current_cost) }}</td>
+            <td v-else class="oa-action-col"><RouterLink class="workspace-row-action" v-if="row.sku" :to="'/operations/products/' + encodeURIComponent(row.sku)">查看详情</RouterLink></td>
           </tr></tbody>
         </table>
       </div>
-      <div v-if="mode !== 'overview' && (data.has_more || offset)" class="oa-actions oa-person-tabs"><button v-if="offset" :disabled="busy" @click="offset = Math.max(0, offset - 100); load(false)">上一页</button><button v-if="data.has_more" :disabled="busy" @click="offset += 100; load(false)">下一页</button></div>
+      <div v-if="mode !== 'overview' && (data.has_more || offset)" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset || busy" @click="offset = Math.max(0, offset - 100); load(false)">上一页</button><button :disabled="!data.has_more || busy" @click="offset += 100; load(false)">下一页</button></div>
     </section>
     <template v-if="mode === 'detail' && data">
       <div class="oa-split">
@@ -401,17 +423,17 @@ onUnmounted(() => {
         <section class="oa-panel">
           <h2>上线记录</h2>
           <dl v-if="data.feedback?.length" class="oa-kv">
-            <div v-for="event in data.feedback || []" :key="event.id"><dt>{{ event.adjusted_on || '—' }}</dt><dd>{{ event.note || '—' }} <button :disabled="comparisonBusy" @click="compare(event)">比较前后 7 日</button></dd></div>
+            <div v-for="event in data.feedback || []" :key="event.id"><dt><time v-if="event.adjusted_on" :datetime="event.adjusted_on">{{ event.adjusted_on }}</time><span v-else>—</span></dt><dd class="workspace-note">{{ event.note || '—' }} <button :disabled="comparisonBusy" @click="compare(event)">比较前后 7 日</button></dd></div>
           </dl>
           <p v-else class="oa-empty">暂无上线记录</p>
           <p v-if="comparisonError" class="oa-error" role="alert">{{ comparisonError }}</p>
           <dl v-if="comparison" class="oa-kv"><div v-for="row in comparison" :key="row.phase"><dt>上线{{ row.phase === 'before' ? '前' : '后' }} 7 个完整日 · 商品销售额</dt><dd>{{ money(row.item_pay_total) }}</dd></div></dl>
           <p v-if="saved" class="oa-notice" role="status">{{ saved }}</p>
-          <form v-if="rows.length && !stale" class="oa-form" @submit.prevent="saveFeedback">
-            <label>店铺<select v-model="feedback.shop_id" required><option v-for="id in [...new Set(rows.map(row => row.shop_id).filter(Boolean))]" :key="id" :value="id">{{ shopName(id) }}</option></select></label>
-            <label>实际上线日<input v-model="feedback.adjusted_on" type="date" :max="today" min="2026-06-01" required /></label>
+          <form v-if="rows.length && !stale" class="oa-form workspace-feedback" @submit.prevent="saveFeedback">
+            <label><span>店铺 <span class="workspace-required" aria-hidden="true">*</span></span><select v-model="feedback.shop_id" required><option v-for="id in [...new Set(rows.map(row => row.shop_id).filter(Boolean))]" :key="id" :value="id">{{ shopName(id) }}</option></select></label>
+            <label><span>实际上线日 <span class="workspace-required" aria-hidden="true">*</span></span><input v-model="feedback.adjusted_on" type="date" :max="today" min="2026-06-01" required /></label>
             <label>关联任务<select v-model="feedback.task_id"><option :value="undefined">无</option><option v-for="task in data.tasks || []" :key="task.id" :value="task.id">{{ task.task_no }}</option></select></label>
-            <label>上线说明<textarea v-model.trim="feedback.note" required maxlength="5000" /></label>
+            <label><span>上线说明 <span class="workspace-required" aria-hidden="true">*</span></span><textarea v-model.trim="feedback.note" required maxlength="5000" placeholder="简述实际调整内容，便于对照销售变化" :aria-describedby="feedbackError ? 'oa-feedback-error' : undefined" /></label><p v-if="feedbackError" id="oa-feedback-error" class="oa-error" role="alert">{{ feedbackError }}</p>
             <button class="oa-button-primary" :disabled="busy">登记上线</button>
           </form>
         </section>
@@ -420,10 +442,12 @@ onUnmounted(() => {
         <h2>历史成交成本</h2>
         <button :disabled="busy || !rows.length" @click="loadHistory">读取成本记录</button>
         <p v-if="historyError" class="oa-error">{{ historyError }}</p>
-        <div v-else-if="historyOpen && history.length" class="oa-table-wrap"><table class="oa-table"><thead><tr><th>下单日</th><th>店铺</th><th>订单子行</th><th>记录成本</th><th>成本档位</th><th>可信性</th></tr></thead><tbody><tr v-for="(row, index) in history" :key="index"><td>{{ row.order_time || '—' }}</td><td>{{ shopName(String(row.shop_id || '')) }}</td><td>{{ row.sub_order_id || '—' }}</td><td>{{ money(String(row.cost_amount ?? '')) }}</td><td>{{ row.cost_amount == null ? '未知' : costTierLabels[String(row.cost_tier)] || '未分类' }}</td><td><span v-if="implausibleCost(row.cost_implausible)" class="oa-pill oa-pill-warn">不可信 · 已排除</span><span v-else-if="row.cost_tier === 'verified' && row.cost_amount != null">计入核实毛利</span><span v-else>未计入核实毛利</span></td></tr></tbody></table></div>
+        <div v-else-if="historyOpen && history.length" class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'"><table class="oa-table"><thead><tr><th class="oa-number">下单日</th><th>店铺</th><th>订单子行</th><th class="oa-number">记录成本</th><th>成本档位</th><th>可信性</th></tr></thead><tbody><tr v-for="(row, index) in history" :key="index"><td>{{ row.order_time || '—' }}</td><td>{{ shopName(String(row.shop_id || '')) }}</td><td>{{ row.sub_order_id || '—' }}</td><td>{{ money(String(row.cost_amount ?? '')) }}</td><td>{{ row.cost_amount == null ? '未知' : costTierLabels[String(row.cost_tier)] || '未分类' }}</td><td><span v-if="implausibleCost(row.cost_implausible)" class="oa-pill oa-pill-warn">不可信 · 已排除</span><span v-else-if="row.cost_tier === 'verified' && row.cost_amount != null">计入核实毛利</span><span v-else>未计入核实毛利</span></td></tr></tbody></table></div>
         <p v-else-if="historyOpen" class="oa-empty">当前范围暂无历史成本记录</p>
       </section>
     </template>
   </template>
 </div>
 </template>
+
+<style scoped src="./order-workspace.css" />

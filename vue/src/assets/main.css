@@ -36,6 +36,15 @@
 
 :root {
   color-scheme: light;
+  --oa-font: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --oa-text-rgb: 38 38 38;
+  --oa-secondary-rgb: 89 89 89;
+  --oa-muted-rgb: 140 140 140;
+  --oa-disabled-rgb: 191 191 191;
+  --oa-brand-rgb: 22 119 255;
+  --oa-danger-rgb: 255 77 79;
+  --oa-success-rgb: 82 196 26;
+  --oa-warning-rgb: 250 173 20;
   --yb-font-display: Inter, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --yb-font-text: Inter, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --yb-font-data: 'YB JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
@@ -563,6 +572,62 @@ body {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+html.oa-live-ui {
+  --yb-font-text: var(--oa-font);
+  --yb-font-display: var(--oa-font);
+  --yb-font-data: var(--oa-font);
+  --yb-text: var(--oa-text-rgb);
+  --yb-text-body: var(--oa-text-rgb);
+  --yb-text-secondary: var(--oa-secondary-rgb);
+  --yb-text-muted: var(--oa-muted-rgb);
+  --yb-text-disabled: var(--oa-disabled-rgb);
+  --yb-brand: var(--oa-brand-rgb);
+  --yb-danger: var(--oa-danger-rgb);
+  --yb-success: var(--oa-success-rgb);
+  --yb-warning: var(--oa-warning-rgb);
+  --oa-ink: rgb(var(--oa-text-rgb));
+  --oa-secondary: rgb(var(--oa-secondary-rgb));
+  --oa-muted: rgb(var(--oa-muted-rgb));
+  --oa-disabled: rgb(var(--oa-disabled-rgb));
+  --oa-accent: rgb(var(--oa-brand-rgb));
+  --oa-danger: rgb(var(--oa-danger-rgb));
+  --oa-success: rgb(var(--oa-success-rgb));
+  --oa-warning: rgb(var(--oa-warning-rgb));
+  --oa-surface: rgb(var(--yb-surface));
+  --oa-line: rgb(var(--yb-border));
+}
+
+html.oa-live-ui #app :is(.profile-hero, .notif-hero, .compose-hero) h1,
+html.oa-live-ui #app h1.auth-title {
+  font: 600 20px/1.4 var(--oa-font);
+  letter-spacing: 0;
+}
+
+html.oa-live-ui #app :is(.profile-workbench, .notif-page, .compose-page) h2 {
+  font: 600 16px/1.4 var(--oa-font);
+  letter-spacing: 0;
+}
+
+html.oa-live-ui #app :is(.profile-workbench, .notif-page, .compose-page) h3 {
+  font: 600 14px/1.4 var(--oa-font);
+  letter-spacing: 0;
+}
+
+html.oa-live-ui #app :is(.profile-eyebrow, .compose-page .eyebrow, .auth-subtitle) {
+  font: 400 12px/1.6 var(--oa-font);
+  letter-spacing: 0;
+}
+
+html.oa-live-ui #app .profile-shortcuts a span {
+  font: 400 14px/1.6 var(--oa-font);
+  color: var(--oa-ink);
+}
+
+html.oa-live-ui #app .profile-shortcuts a small {
+  font: 400 12px/1.6 var(--oa-font);
+  color: var(--oa-muted);
 }
 
 #app,
