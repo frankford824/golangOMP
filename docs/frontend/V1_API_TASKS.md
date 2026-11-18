@@ -13739,7 +13739,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/supplement-eli
 ### 简介
 支持方法: GET。
 
-- `GET`: Whole-month piecework report, including open and active-batch work. Counts and coefficient subtotals are per payroll row. Monthly coefficient and contribution rate repeat for the same person across row types. Group benchmarks are arithmetic means of personal monthly error rates among workers of that type with positive page counts.
+- `GET`: Whole-month piecework report, including open and active-batch work. Counts and coefficient subtotals are per payroll row. Monthly coefficient and contribution rate repeat for the same person across row types. Group benchmarks are arithmetic means of personal monthly error rates among workers of that type with positive page and error counts. Workers with no errors do not contribute to the benchmark. A worker type with no eligible workers has no benchmark.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

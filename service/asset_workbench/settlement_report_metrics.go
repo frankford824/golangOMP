@@ -95,7 +95,7 @@ func fillSettlementReportMetrics(report *SettlementReport, coefficients map[stri
 	seen := make(map[int64]bool)
 	for _, row := range report.Rows {
 		person := people[row.PayeeUserID]
-		if seen[row.PayeeUserID] || person.pages == 0 ||
+		if seen[row.PayeeUserID] || person.pages <= 0 || person.errors <= 0 ||
 			(person.workerType != domain.AssetWorkbenchWorkerTypeFulltime && person.workerType != domain.AssetWorkbenchWorkerTypeParttime) {
 			continue
 		}

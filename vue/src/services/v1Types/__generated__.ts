@@ -18737,7 +18737,7 @@ export interface paths {
         };
         /**
          * Get asset workbench settlement report
-         * @description Whole-month piecework report, including open and active-batch work. Counts and coefficient subtotals are per payroll row. Monthly coefficient and contribution rate repeat for the same person across row types. Group benchmarks are arithmetic means of personal monthly error rates among workers of that type with positive page counts.
+         * @description Whole-month piecework report, including open and active-batch work. Counts and coefficient subtotals are per payroll row. Monthly coefficient and contribution rate repeat for the same person across row types. Group benchmarks are arithmetic means of personal monthly error rates among workers of that type with positive page and error counts. Workers with no errors do not contribute to the benchmark. A worker type with no eligible workers has no benchmark.
          */
         get: {
             parameters: {

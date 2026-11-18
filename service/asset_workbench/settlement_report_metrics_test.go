@@ -18,6 +18,7 @@ func TestMonthlyContributionUsesWorksAndOneErrorRatePerPerson(t *testing.T) {
 			{PayeeUserID: 2, WorkerType: "parttime", PageCount: 100, ErrorCount: 10, DifficultyMetrics: []SettlementReportDifficultyMetric{{DifficultyClass: "C", ItemCount: 2}}},
 			{PayeeUserID: 3, WorkerType: "fulltime", PageCount: 10, ErrorCount: 5},
 			{PayeeUserID: 4, WorkerType: "parttime", ErrorCount: 10},
+			{PayeeUserID: 5, WorkerType: "parttime", PageCount: 20},
 		},
 		Totals: SettlementReportRow{DifficultyMetrics: []SettlementReportDifficultyMetric{{DifficultyClass: "A", ItemCount: 2}, {DifficultyClass: "B", ItemCount: 1}, {DifficultyClass: "C", ItemCount: 2}}},
 	}
@@ -28,6 +29,29 @@ func TestMonthlyContributionUsesWorksAndOneErrorRatePerPerson(t *testing.T) {
 		math.Abs(report.WorkerTypeAverageErrorRates["parttime"]-.2) > 1e-9 ||
 		report.WorkerTypeAverageErrorRates["fulltime"] != .5 {
 		t.Fatalf("unexpected contribution and benchmark output: %+v", report)
+	}
+	zeroErrorRow := report.Rows[4]
+	if zeroErrorRow.MonthlyErrorRate != 0 || zeroErrorRow.WorkerTypeAverageErrorRate == nil ||
+		math.Abs(*zeroErrorRow.WorkerTypeAverageErrorRate-.2) > 1e-9 {
+		t.Fatalf("zero-error worker should keep a 0%% personal rate and receive the group's benchmark: %+v", zeroErrorRow)
+	}
+}
+
+func TestMonthlyErrorBenchmarkOmittedForTypeWithoutErrors(t *testing.T) {
+	report := &SettlementReport{
+		Rows: []SettlementReportRow{
+			{PayeeUserID: 1, WorkerType: "fulltime", PageCount: 10},
+			{PayeeUserID: 2, WorkerType: "fulltime", ErrorCount: 2},
+			{PayeeUserID: 3, WorkerType: "parttime", PageCount: 10, ErrorCount: 1},
+		},
+	}
+	fillSettlementReportMetrics(report, nil)
+	if _, ok := report.WorkerTypeAverageErrorRates["fulltime"]; ok ||
+		report.Rows[0].WorkerTypeAverageErrorRate != nil || report.Rows[1].WorkerTypeAverageErrorRate != nil {
+		t.Fatalf("full-time workers have no eligible error rate for a benchmark: %+v", report)
+	}
+	if rate := report.WorkerTypeAverageErrorRates["parttime"]; rate != .1 {
+		t.Fatalf("part-time benchmark = %v, want 0.1", rate)
 	}
 }
 
