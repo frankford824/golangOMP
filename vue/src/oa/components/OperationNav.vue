@@ -5,11 +5,12 @@ import { useOAAccess } from '../access'
 
 defineProps<{ query?: Record<string, string> }>()
 const route = useRoute()
-const { currentProfile } = useOAAccess()
+const { currentProfile, can } = useOAAccess()
 const nav = ref<HTMLElement>()
 const links = computed(() => [
   { path: '/operations', title: '经营总览' },
   { path: '/operations/products', title: '商品表现' },
+  ...(can('pricing.view') ? [{ path: '/operations/pricing', title: 'SKU 核价' }] : []),
   { path: '/operations/rankings', title: '经营排行' },
   { path: '/operations/orders/detail', title: '订单明细' },
   { path: '/operations/orders/refunds', title: '售后退款' },

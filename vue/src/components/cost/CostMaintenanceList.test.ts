@@ -15,6 +15,10 @@ vi.mock("@/services/api/costMaintenanceApi", async (original) => ({
   ...(await original<typeof import("@/services/api/costMaintenanceApi")>()),
   costMaintenanceApi: mocks,
 }));
+vi.mock("vue-router", async (original) => ({
+  ...(await original<typeof import("vue-router")>()),
+  RouterLink: (await import("@vue/test-utils")).RouterLinkStub,
+}));
 import CostMaintenanceList from "./CostMaintenanceList.vue";
 const row = {
   id: 10,

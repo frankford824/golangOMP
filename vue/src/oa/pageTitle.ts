@@ -1,6 +1,6 @@
 const titles: Record<string, string> = {
   '/': '任务看板', '/design-dashboard': '设计部门看板', '/403': '访问受限',
-  '/operations': '经营总览', '/operations/products': '商品表现', '/operations/rankings': '经营排行',
+  '/operations': '经营总览', '/operations/products': '商品表现', '/operations/pricing': 'SKU 核价', '/operations/rankings': '经营排行',
   '/operations/orders/detail': '订单明细', '/operations/orders/refunds': '售后退款', '/operations/orders/ledger': '经营台账',
   '/me/performance': '我的业绩', '/tasks': '任务中心', '/tasks/create': '创建任务单',
   '/asset-center': '资产管理', '/cost-rules': '成本规则', '/data-center': 'AI 数据助手',

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watchEffect } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 import FeePersonSelect from '../components/FeePersonSelect.vue'
-import { approverLabel, type FeePerson as Approver } from '../feePeople'
+import { searchFeePeople, approverLabel, type FeePerson as Approver } from '../feePeople'
 import { feeTabs } from '../routes'
 import PageHead from '../components/PageHead.vue'
 import { api, dateInChina, download, errorText, money, send } from '../api'
@@ -159,12 +159,10 @@ async function findApprovers() {
   approverBusy.value = true
   approverError.value = ''
   try {
-    const query = new URLSearchParams({ q: approverQuery.value.trim() })
     const selected = [...new Set([...(draft.value?.nodes ?? []), draft.value?.extra ?? ''])]
       .filter(value => value.startsWith('fixed:'))
       .map(value => value.slice(6))
-    if (selected.length) query.set('ids', selected.join(','))
-    const { items, selected: resolved } = await api<{ items: Approver[]; selected?: Approver[] }>('/oa-api/finance/approvers?' + query)
+    const { items, selected: resolved } = await searchFeePeople(approverQuery.value, selected)
     if (search !== approverSearch) return
     approverOptions.value = items || []
     for (const person of [...approverOptions.value, ...(resolved ?? [])]) knownApprovers.value[person.id] = person
@@ -518,7 +516,7 @@ onMounted(() => void run(async () => {
           <fieldset class="oa-fieldset"><legend>支付方式</legend><div class="oa-checks"><label v-for="(label, key) in channels" :key="key"><input v-model="draft.channels" type="checkbox" :value="key" />{{ label }}</label></div></fieldset>
           <fieldset v-if="list(templateFields.fields).length" class="oa-fieldset"><legend>必填字段</legend><div class="oa-checks"><label v-for="field in list(templateFields.fields)" :key="field"><input v-model="draft.required" type="checkbox" :value="field" />{{ field }}</label></div></fieldset>
           <fieldset class="oa-fieldset oa-form"><legend>审批节点</legend>
-            <div class="oa-actions oa-filter"><label>搜索审批人<input v-model="approverQuery" placeholder="姓名、部门或工号" @keydown.enter.prevent="findApprovers" /></label><button type="button" :disabled="approverBusy" @click="findApprovers">{{ approverBusy ? '搜索中…' : '搜索' }}</button></div>
+            <div class="oa-actions oa-filter"><label>搜索审批人<input v-model="approverQuery" placeholder="姓名 / 拼音 / 部门 / 工号 / 完整手机号" @keydown.enter.prevent="findApprovers" /></label><button type="button" :disabled="approverBusy" @click="findApprovers">{{ approverBusy ? '搜索中…' : '搜索' }}</button></div>
             <p v-if="approverError" class="oa-error" role="alert">{{ approverError }}</p>
             <p v-else-if="!approverBusy && approverQuery && !approverOptions.length" class="oa-muted" role="status">没有匹配的在职人员。</p>
             <div v-for="(item, index) in draft.nodes" :key="index" class="oa-actions">

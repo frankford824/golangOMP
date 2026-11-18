@@ -749,6 +749,7 @@ onUnmounted(() => {
     <section v-if="mode === 'overview' && summary && canReview" class="oa-panel commerce-shortcuts">
         <div class="commerce-panel-heading"><h2>办理与复盘</h2></div>
         <RouterLink v-if="permissions.hasMenu('task_list')" to="/tasks"><ClipboardList :size="17" /><span>任务运营与设计交付</span><ArrowUpRight :size="15" /></RouterLink>
+        <RouterLink v-if="can('pricing.view')" :to="{ path: '/operations/pricing', query: { sku: productId } }"><Package :size="17" /><span>SKU 核价</span><ArrowUpRight :size="15" /></RouterLink>
         <RouterLink v-if="permissions.hasMenu('cost_rules')" to="/cost-rules"><Package :size="17" /><span>SKU 成本维护</span><ArrowUpRight :size="15" /></RouterLink>
         <RouterLink v-if="can('finance.apply')" to="/fees/mine"><Wallet :size="17" /><span>我的费用申请</span><ArrowUpRight :size="15" /></RouterLink>
     </section>

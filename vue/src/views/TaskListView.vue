@@ -166,11 +166,41 @@
         >
           {{ batchAuditHandoverSubmitting ? '交班中...' : '批量交班' }}
         </BaseButton>
+        <BaseButton
+          v-if="canBatchArchive"
+          size="sm"
+          variant="secondary"
+          :disabled="!canArchiveSelection || batchArchiving"
+          @click="showBatchArchive = true"
+        >
+          批量归档
+        </BaseButton>
+        <span v-if="canBatchArchive && !canArchiveSelection" class="batch-count">
+          {{ selectedIds.size > maxArchiveBatch ? '每次最多归档 100 条任务' : '请只选择当前列表中已结单或已取消的任务' }}
+        </span>
         <BaseButton size="sm" variant="ghost" @click="selectedIds.clear()">
           取消选中
         </BaseButton>
       </div>
     </Transition>
+    <BaseModal
+      v-if="canBatchArchive"
+      :model-value="showBatchArchive"
+      title="批量归档任务"
+      panel-max-width="480px"
+      @update:model-value="closeBatchArchive"
+    >
+      <p>确认将选中的 {{ selectedIds.size }} 条已结单或已取消任务移入已归档？归档后无法通过任务中心重新打开。</p>
+      <p v-if="batchArchiveError" class="list-action-error" role="alert">{{ batchArchiveError }}</p>
+      <template #footer>
+        <footer class="flex flex-wrap justify-end gap-2 px-5 py-4">
+          <BaseButton size="sm" variant="secondary" :disabled="batchArchiving" @click="closeBatchArchive">取消</BaseButton>
+          <BaseButton size="sm" variant="primary" :disabled="!canArchiveSelection || batchArchiving" @click="confirmBatchArchive">
+            {{ batchArchiving ? '归档中…' : '确认归档' }}
+          </BaseButton>
+        </footer>
+      </template>
+    </BaseModal>
     <p v-if="listActionError" class="list-action-error">{{ listActionError }}</p>
     <p v-if="listActionSuccess" class="list-action-success">{{ listActionSuccess }}</p>
 
@@ -645,7 +675,8 @@ import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/t
 import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterPanel.vue'
 import TaskFilterPanel from '@/components/task/TaskFilterPanel.vue'
-import { oaEnabled } from '@/oa/access'
+import { oaEnabled, useOAAccess } from '@/oa/access'
+import { errorText, send } from '@/oa/api'
 import { Copy } from 'lucide-vue-next'
 import TaskTypeBadge from '@/components/task/TaskTypeBadge.vue'
 import TaskMainStatusBadge from '@/components/business/TaskMainStatusBadge.vue'
@@ -877,6 +908,18 @@ const showAuditHandoverEntry = computed(
 
 const selectedIds = reactive(new Set<string>())
 const selectedTasks = computed(() => tasksStore.list.filter((task) => selectedIds.has(task.id)))
+const maxArchiveBatch = 100
+const oaAccess = useOAAccess()
+const canBatchArchive = computed(() => oaEnabled && oaAccess.can('task.archive'))
+const canArchiveSelection = computed(() =>
+  !refreshingList.value && selectedIds.size > 0 && selectedIds.size <= maxArchiveBatch &&
+  selectedIds.size === selectedTasks.value.length &&
+  selectedTasks.value.every((task) => task.status === 'Completed' || task.status === 'Cancelled'),
+)
+const showBatchArchive = ref(false)
+const batchArchiving = ref(false)
+const batchArchiveError = ref('')
+
 const currentUserIdForBatchAuditHandover = computed(() =>
   String(permissionsStore.currentUser?.id ?? '').trim(),
 )
@@ -977,7 +1020,7 @@ const defaultTaskFilters: TaskListFilters = {
 }
 
 /**
- * “已归档/已结束”tab 默认展示所有终态任务：
+ * 主站保留历史已结束范围。OA 的“已归档”默认只展示 Archived：
  * - Archived: 严格归档
  * - Completed: 已结单
  * - Cancelled: 已取消
@@ -1182,7 +1225,7 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
     }
   }
   if (activeTab.value === 'archived' && !f.status.length) {
-    params.status = ARCHIVED_TAB_DEFAULT_STATUSES.join(',')
+    params.status = oaEnabled ? 'Archived' : ARCHIVED_TAB_DEFAULT_STATUSES.join(',')
   }
   if (activeTab.value === 'terminated') {
     const terminatedStatus = f.status.length ? expandTaskListStatusFilter(f.status).join(',') : 'Cancelled'
@@ -1318,6 +1361,36 @@ function overdueLabel(task: Task) {
 function toggleSelect(id: string) {
   if (selectedIds.has(id)) selectedIds.delete(id)
   else selectedIds.add(id)
+}
+
+function closeBatchArchive() {
+  if (batchArchiving.value) return
+  showBatchArchive.value = false
+  batchArchiveError.value = ''
+}
+
+async function confirmBatchArchive() {
+  if (!canBatchArchive.value || !canArchiveSelection.value || batchArchiving.value) return
+  const taskIds = Array.from(selectedIds, Number)
+  if (taskIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+    batchArchiveError.value = '选择的任务无效，请刷新后重新选择'
+    return
+  }
+  batchArchiving.value = true
+  batchArchiveError.value = ''
+  try {
+    const result = await send<{ archived: number; already_archived: number }>('/oa-api/tasks/batch-archive', { task_ids: taskIds })
+    showBatchArchive.value = false
+    selectedIds.clear()
+    await refreshList(true)
+    const replay = result.already_archived > 0 ? `，另有 ${result.already_archived} 条此前已归档` : ''
+    flashListActionSuccess(`已归档 ${result.archived} 条任务${replay}`)
+  } catch (error) {
+    const payload = (error as { responseData?: { error?: unknown } })?.responseData?.error
+    batchArchiveError.value = typeof payload === 'string' ? payload : errorText(error)
+  } finally {
+    batchArchiving.value = false
+  }
 }
 
 async function batchRemind() {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
 import { NSelect } from 'naive-ui'
-import { api, errorText } from '../api'
-import { approverLabel, type FeePerson } from '../feePeople'
+import { errorText } from '../api'
+import { searchFeePeople, approverLabel, type FeePerson } from '../feePeople'
 
 const props = defineProps<{ label: string; disabled?: boolean }>()
 const person = defineModel<FeePerson>()
@@ -22,7 +22,7 @@ function search(query: string) {
   error.value = ''
   timer = window.setTimeout(async () => {
     try {
-      const { items } = await api<{ items: FeePerson[] }>('/oa-api/finance/approvers?' + new URLSearchParams({ q: query.trim() }))
+      const { items } = await searchFeePeople(query)
       if (currentRequest === request) people.value = items ?? []
     } catch (cause) {
       if (currentRequest === request) error.value = errorText(cause)
@@ -52,7 +52,7 @@ onUnmounted(() => {
       :input-props="{ 'aria-label': props.label }"
       :disabled="disabled"
       :loading="busy"
-      placeholder="按姓名、部门或工号搜索在职人员"
+      placeholder="姓名 / 拼音 / 部门 / 工号 / 完整手机号"
       filterable
       remote
       clearable

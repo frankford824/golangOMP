@@ -25,6 +25,7 @@
         ><button type="submit"><Search :size="16" :stroke-width="1.75" aria-hidden="true" />查询</button>
       </form>
       <div>
+        <RouterLink v-if="canPrice" class="pricing-link" :to="{ name: 'OperationsPricing' }">批量核价</RouterLink>
         <button v-if="oaEnabled" type="button" :aria-pressed="status === 'conflict'" @click="toggleConflicts">冲突待确认</button>
         <button @click="openLogs"><History :size="16" :stroke-width="1.75" aria-hidden="true" />修改日志</button
         ><button :disabled="loading" @click="load()">
@@ -119,6 +120,7 @@
               >
                 修改
               </button>
+              <RouterLink v-if="canPrice" class="pricing-link" :to="{ name: 'OperationsPricing', query: { sku: row.sku_code } }" :aria-label="'核价 ' + row.sku_code">核价</RouterLink>
             </td>
           </tr>
           <tr v-if="!rows.length">
@@ -446,6 +448,7 @@
 </template>
 
 <script setup lang="ts">
+import { RouterLink } from "vue-router";
 import { oaEnabled } from "@/oa/access";
 import { retryCostRead } from '@/utils/cost-read-retry';
 import {
@@ -471,6 +474,7 @@ import {
 } from "@/services/api/costMaintenanceApi";
 import "./cost-maintenance.css";
 const permission = usePermission(),
+  canPrice = computed(() => oaEnabled && permission.can("catalog.view")),
   canEdit = computed(
     () => permission.can("catalog.manage") && permission.can("erp.manage"),
   );
@@ -873,4 +877,14 @@ html.oa-live-ui .maintenance :is(td.money, td strong) { font-family: var(--yb-fo
 html.oa-live-ui .maintenance td.money small { font-size: 12px; }
 html.oa-live-ui .maintenance .row-actions button { min-height: 32px; }
 html.oa-live-ui .maintenance .blocked-confirm + button { margin-left: 8px; }
+.pricing-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding-inline: 9px;
+  color: rgb(var(--yb-brand));
+  white-space: nowrap;
+  text-underline-offset: 3px;
+}
+.pricing-link:focus-visible { outline: 2px solid rgb(var(--yb-brand)); outline-offset: 2px; }
 </style>
