@@ -12,11 +12,27 @@ const lineMetrics = `toString(sum(item_pay_amount)) AS item_pay_total, toString(
  toFloat64(sumIf(item_pay_amount, ` + verifiedLine + `))/nullIf(toFloat64(sum(item_pay_amount)),0) AS verified_coverage`
 const realLines = ` FROM jst.v_order_lines WHERE ` + period + shopFilter + ` AND order_is_valid=1 AND order_is_brush=0 AND is_real=1 `
 const attributedLines = `SELECT DISTINCT person_id,sub_order_id FROM jst.v_line_attribution WHERE ` + period + ` AND ({all:UInt8}=1 OR shop_id IN {shops:Array(String)}) AND ({shop:String}='' OR shop_id={shop:String}) AND person_id IS NOT NULL AND person_id!='' `
-const personScope = `SELECT DISTINCT shops.shop_id AS shop_id, person.person_id AS person_id
- FROM jst.v_shops AS shops INNER JOIN jst.v_reg_org_store AS stores ON shops.ledger_store_id=stores.ledger_store_id
- INNER JOIN jst.v_reg_person AS person ON stores.person_id=person.person_id
- WHERE shops.ledger_mapping_status='confirmed' AND person.archived=0 AND if(match(toString(person.employee_no),'^[0-9]+$'),toUInt64OrNull(toString(person.employee_no)),NULL)=toUInt64({employee:String})
- AND (SELECT uniqExact(person_id) FROM jst.v_reg_person WHERE archived=0 AND if(match(toString(employee_no),'^[0-9]+$'),toUInt64OrNull(toString(employee_no)),NULL)=toUInt64({employee:String}))=1`
+const personScope = `WITH
+ matched AS (
+ SELECT DISTINCT person_id FROM jst.v_reg_person WHERE archived=0
+ AND match(toString(employee_no),'^[0-9]+$') AND toUInt64OrNull(toString(employee_no))=toUInt64({employee:String})
+ ),
+ selected AS (SELECT person_id FROM matched WHERE (SELECT count() FROM matched)=1),
+ latest AS (
+ SELECT ledger_store_id,shop_item_id,max(segment_from) AS current_from FROM jst.v_reg_scheme_alloc
+ WHERE segment_from<=toDateTime({at:String},'Asia/Shanghai') GROUP BY ledger_store_id,shop_item_id
+ ),
+ basis AS (
+ SELECT ledger_store_id,person_id FROM jst.v_reg_org_store WHERE person_id IN (SELECT person_id FROM selected)
+ UNION DISTINCT
+ SELECT a.ledger_store_id,a.person_id FROM jst.v_reg_scheme_alloc AS a
+ INNER JOIN latest AS l ON a.ledger_store_id=l.ledger_store_id AND a.shop_item_id=l.shop_item_id AND a.segment_from=l.current_from
+ WHERE (isNull(a.segment_to) OR a.segment_to>toDateTime({at:String},'Asia/Shanghai')) AND a.mode='distribute'
+ AND a.person_id IN (SELECT person_id FROM selected)
+ )
+ SELECT DISTINCT shops.shop_id AS shop_id,basis.person_id AS person_id FROM basis
+ INNER JOIN jst.v_shops AS shops ON shops.ledger_store_id=basis.ledger_store_id AND shops.ledger_mapping_status='confirmed'
+ UNION ALL SELECT '' AS shop_id,person_id FROM selected`
 const summarySQL = `SELECT toString(day) AS day,sales.shop_id AS shop_id,sales.platform AS platform,order_count,
  toString(payable_amount) AS payable_amount,toString(sales.item_pay_total) AS item_pay_total,
  if(sales.cost_verified_total=0 AND sales.item_pay_verified_total=0,NULL,toString(sales.cost_verified_total)) AS cost_verified_total,

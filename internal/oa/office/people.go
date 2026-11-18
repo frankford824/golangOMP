@@ -69,6 +69,33 @@ func ShopTerms(ctx context.Context, db *sql.DB, actorID int64) ([]string, bool, 
 	return shops, known, nil
 }
 
+func ShopOverrides(ctx context.Context, db *sql.DB, actorID int64) (map[string]bool, error) {
+	var raw []byte
+	err := db.QueryRowContext(ctx, "SELECT payload FROM oa_office_people WHERE id=?", actorID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var p person
+	if err = json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	return shopOverrides(p.Terms, businessDate().Format(time.DateOnly)), nil
+}
+
+func shopOverrides(terms []term, today string) map[string]bool {
+	overrides := map[string]bool{}
+	for _, item := range terms {
+		if item.From > today {
+			continue
+		}
+		overrides[item.ShopID] = overrides[item.ShopID] || item.To == "" || item.To > today
+	}
+	return overrides
+}
+
 type change struct {
 	Kind           string   `json:"kind"`
 	EffectiveDate  string   `json:"effective_date"`
@@ -121,7 +148,7 @@ func (p *person) project() {
 }
 
 func ApplyIdentity(ctx context.Context, db *sql.DB, actor platform.Actor) (platform.Actor, bool) {
-	_, departments, teams, err := effectivePeopleAccess(ctx, db, actor.ID)
+	roleCodes, departments, teams, err := effectivePeopleAccess(ctx, db, actor.ID)
 	if err != nil {
 		return actor, false
 	}
@@ -133,6 +160,12 @@ func ApplyIdentity(ctx context.Context, db *sql.DB, actor platform.Actor) (platf
 	}
 	if actor.Actions == nil {
 		actor.Actions = map[string]bool{}
+	}
+	// Core exposes role-based capabilities even if an old frontend only labels
+	// the session "member". Resolve the operating role from its actual grants.
+	actor.Roles = slices.Clone(roleCodes)
+	if slices.Contains(roleCodes, "operations") {
+		actor.Actions["orders.view"] = true
 	}
 	if len(departments) > 0 || len(teams) > 0 {
 		actor.Actions["people.manage"] = true
@@ -551,6 +584,22 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handed := false
+	if app.baseline != nil && (input.Kind == "leave" || input.FromShopID != "" || input.Kind == "handover") {
+		base, err := app.baseline(r.Context(), p.EmployeeNo)
+		if err != nil {
+			platform.Error(w, 503, "暂时无法核对店铺归属")
+			return
+		}
+		overrides := shopOverrides(p.Terms, input.EffectiveDate)
+		for shop := range base {
+			if _, alreadyLocal := overrides[shop]; alreadyLocal {
+				continue
+			}
+			if input.Kind == "leave" || shop == input.FromShopID || input.Kind == "handover" && shop == input.ShopID {
+				addTerm(&p, shop, input.EffectiveDate)
+			}
+		}
+	}
 	if input.Kind == "leave" || input.FromShopID != "" || input.Kind == "handover" {
 		for index := range p.Terms {
 			item := &p.Terms[index]

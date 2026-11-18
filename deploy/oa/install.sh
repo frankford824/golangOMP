@@ -57,6 +57,12 @@ done
 install -m644 "$release/oa.yongbo.cloud.conf" "$site"
 nginx -t
 systemctl reload nginx
+served=0
+for ((i=0;i<20;i++)); do
+  if curl -fsS -m 2 --resolve oa.yongbo.cloud:443:127.0.0.1 https://oa.yongbo.cloud/oa-version.json 2>/dev/null | grep -Fq "$sha"; then served=1; break; fi
+  sleep .5
+done
+[[ "$served" = 1 ]]
 for domain in oa.yongbo.cloud yongbo.cloud assets.yongbo.cloud; do
   curl -fsS --max-time 8 --resolve "$domain:443:127.0.0.1" "https://$domain/" -o /dev/null
 done

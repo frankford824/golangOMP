@@ -62,7 +62,7 @@ func run() error {
 		return fmt.Errorf("OA cost snapshot view: %w", err)
 	}
 	protected := http.NewServeMux()
-	office.Mount(protected, db, db)
+	office.Mount(protected, db, db, orders.BaselineShops)
 	orders.Mount(protected, db, db)
 	protected.HandleFunc("GET /oa-api/me", func(w http.ResponseWriter, r *http.Request) { platform.JSON(w, 200, platform.ActorFrom(r)) })
 	id := platform.NewIdentity(os.Getenv("OA_CORE_URL"))

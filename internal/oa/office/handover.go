@@ -51,10 +51,24 @@ func (app office) handoverItems(w http.ResponseWriter, r *http.Request) {
 	}
 	shops := []string{}
 	today := businessDate().Format(time.DateOnly)
+	if app.baseline != nil {
+		base, err := app.baseline(r.Context(), p.EmployeeNo)
+		if err != nil {
+			platform.Error(w, 503, "暂时无法核对店铺归属")
+			return
+		}
+		overrides := shopOverrides(p.Terms, today)
+		for shop := range base {
+			if _, local := overrides[shop]; !local {
+				shops = append(shops, shop)
+			}
+		}
+	}
 	for _, term := range p.Terms {
 		if term.From <= today && (term.PendingHandover || term.To == "" || term.To > today) && !slices.Contains(shops, term.ShopID) {
 			shops = append(shops, term.ShopID)
 		}
 	}
+	slices.Sort(shops)
 	platform.JSON(w, 200, map[string]any{"items": items, "shops": shops})
 }

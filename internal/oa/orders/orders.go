@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"workflow/internal/oa/office"
 	"workflow/internal/oa/platform"
 )
 
@@ -45,8 +46,10 @@ type server struct {
 	active     map[string]*flight
 }
 
+var sharedClient = sync.OnceValue(newClient)
+
 func Mount(mux *http.ServeMux, db, source *sql.DB) {
-	s := &server{ch: newClient(), db: db, source: source, cache: make(map[string]cached), active: make(map[string]*flight)}
+	s := &server{ch: sharedClient(), db: db, source: source, cache: make(map[string]cached), active: make(map[string]*flight)}
 	s.ch.keepAlive()
 	for _, name := range []string{"summary", "products", "rankings", "personal", "sku", "shops", "cost-history", "refunds", "ledger", "detail", "compare"} {
 		mux.HandleFunc("GET /oa-api/orders/"+name, func(w http.ResponseWriter, r *http.Request) { s.read(w, r, name) })
@@ -65,7 +68,7 @@ func allowed(actor platform.Actor) bool {
 		return true
 	}
 	for _, role := range actor.Roles {
-		if role == "ops" {
+		if role == "ops" || role == "operations" {
 			return true
 		}
 	}
@@ -80,23 +83,26 @@ func (s *server) scope(ctx context.Context, actor platform.Actor, params url.Val
 		params.Set("param_all", "1")
 		return true, nil
 	}
-	if actor.EmployeeNo == nil || *actor.EmployeeNo < 0 {
-		return false, nil
-	}
-	scopeParams := url.Values{"param_employee": {strconv.Itoa(*actor.EmployeeNo)}}
-	rows, err := s.ch.rows(ctx, personScope, scopeParams)
+	set, person, err := s.baselineScope(ctx, actor.EmployeeNo)
 	if err != nil {
 		return false, err
 	}
-	if len(rows) == 0 {
+	overrides, err := office.ShopOverrides(ctx, s.db, actor.ID)
+	if err != nil {
+		return false, err
+	}
+	for shop, active := range overrides {
+		if active {
+			set[shop] = true
+		} else {
+			delete(set, shop)
+		}
+	}
+	if len(set) == 0 || own && person == "" {
 		return false, nil
 	}
-	shops := make([]string, 0, len(rows))
-	for _, item := range rows {
-		var shop string
-		if json.Unmarshal(item["shop_id"], &shop) != nil || shop == "" {
-			return false, errUnavailable
-		}
+	shops := make([]string, 0, len(set))
+	for shop := range set {
 		shops = append(shops, shop)
 	}
 	sort.Strings(shops)
@@ -105,12 +111,40 @@ func (s *server) scope(ctx context.Context, actor platform.Actor, params url.Val
 		quoted = append(quoted, "'"+strings.NewReplacer("\\", "\\\\", "'", "\\'").Replace(shop)+"'")
 	}
 	params.Set("param_shops", "["+strings.Join(quoted, ",")+"]")
-	var person string
-	if json.Unmarshal(rows[0]["person_id"], &person) != nil || person == "" {
-		return false, errUnavailable
-	}
 	params.Set("param_person", person)
 	return true, nil
+}
+
+func (s *server) baselineScope(ctx context.Context, employee *int) (map[string]bool, string, error) {
+	return baselineScope(ctx, s.ch, employee)
+}
+
+func BaselineShops(ctx context.Context, employee *int) (map[string]bool, error) {
+	shops, _, err := baselineScope(ctx, sharedClient(), employee)
+	return shops, err
+}
+
+func baselineScope(ctx context.Context, ch *client, employee *int) (map[string]bool, string, error) {
+	shops := map[string]bool{}
+	if employee == nil || *employee < 0 {
+		return shops, "", nil
+	}
+	rows, err := ch.rows(ctx, personScope, url.Values{"param_employee": {strconv.Itoa(*employee)}, "param_at": {time.Now().In(beijing).Format(time.DateTime)}})
+	if err != nil {
+		return nil, "", err
+	}
+	var person string
+	for _, item := range rows {
+		var shop, id string
+		if json.Unmarshal(item["shop_id"], &shop) != nil || json.Unmarshal(item["person_id"], &id) != nil || id == "" || person != "" && id != person {
+			return nil, "", errUnavailable
+		}
+		person = id
+		if shop != "" {
+			shops[shop] = true
+		}
+	}
+	return shops, person, nil
 }
 
 func filters(r *http.Request, name string, now time.Time) (url.Values, error) {

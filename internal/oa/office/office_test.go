@@ -63,3 +63,19 @@ func TestApplicationEnforcesLockedTemplate(t *testing.T) {
 func TestRoutePatternsMountWithoutConflict(t *testing.T) {
 	Mount(http.NewServeMux(), nil, nil)
 }
+
+func TestShopOverridesEffectivePerShop(t *testing.T) {
+	terms := []term{
+		{ShopID: "removed", From: "2026-11-18", To: "2026-11-18"},
+		{ShopID: "later", From: "2026-11-19"},
+		{ShopID: "reopened", From: "2026-11-17", To: "2026-11-18"},
+		{ShopID: "reopened", From: "2026-11-18"},
+	}
+	got := shopOverrides(terms, "2026-11-18")
+	if active, exists := got["removed"]; active || !exists {
+		t.Fatalf("ended shop must explicitly override the roster: %v", got)
+	}
+	if _, exists := got["later"]; exists || !got["reopened"] {
+		t.Fatalf("future and reopened shops projected incorrectly: %v", got)
+	}
+}

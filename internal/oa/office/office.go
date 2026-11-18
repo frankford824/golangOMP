@@ -13,7 +13,10 @@ import (
 	"workflow/internal/oa/platform"
 )
 
-type office struct{ db, source *sql.DB }
+type office struct {
+	db, source *sql.DB
+	baseline   func(context.Context, *int) (map[string]bool, error)
+}
 
 func EnsureSchema(ctx context.Context, db *sql.DB) error {
 	for _, statement := range []string{
@@ -35,8 +38,11 @@ func EnsureSchema(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func Mount(mux *http.ServeMux, db, source *sql.DB) {
-	app := office{db, source}
+func Mount(mux *http.ServeMux, db, source *sql.DB, readers ...func(context.Context, *int) (map[string]bool, error)) {
+	app := office{db: db, source: source}
+	if len(readers) > 0 {
+		app.baseline = readers[0]
+	}
 	app.mountFinance(mux)
 	app.mountPeople(mux)
 }
