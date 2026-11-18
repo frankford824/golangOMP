@@ -30,6 +30,26 @@ func TestFormalOrderReadProbe(t *testing.T) {
 			t.Fatal("invalid OA_ORDER_READ_PROBE_DATE")
 		}
 	}
+	t.Run("daily-rankings", func(t *testing.T) {
+		params := url.Values{
+			"param_from":  {end.Format(time.DateOnly)},
+			"param_until": {end.AddDate(0, 0, 1).Format(time.DateOnly)},
+			"param_all":   {"1"}, "param_shops": {"[]"},
+			"param_shop": {""}, "param_platform": {""}, "param_offset": {"0"},
+		}
+		for _, ranking := range []struct{ name, query string }{
+			{"shop", shopRankingSQL},
+			{"platform", platformRankingSQL},
+		} {
+			t.Run(ranking.name, func(t *testing.T) {
+				// ClickHouse must resolve payable_amount in the numeric aggregate
+				// against the view rather than the string response alias.
+				if _, err := ch.rows(ctx, ranking.query, params); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	})
 	start := end.AddDate(0, 0, -29)
 	if start.Before(firstDay) {
 		t.Fatal("probe needs 30 days within the documented order range")

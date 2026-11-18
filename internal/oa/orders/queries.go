@@ -2,7 +2,7 @@ package orders
 
 const period = ` order_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Shanghai') AND order_time < toDateTime(concat({until:String}, ' 00:00:00'), 'Asia/Shanghai') `
 const shopFilter = ` AND ({all:UInt8}=1 OR shop_id IN {shops:Array(String)}) AND ({shop:String}='' OR shop_id={shop:String}) AND (({platform:String}='' AND platform NOT IN ('线下店铺','其它平台')) OR platform={platform:String}) `
-const shopDays = ` FROM jst.v_shop_day WHERE day >= toDate({from:String}) AND day < toDate({until:String}) AND order_count>0 ` + shopFilter
+const shopDays = ` FROM jst.v_shop_day AS source WHERE day >= toDate({from:String}) AND day < toDate({until:String}) AND order_count>0 ` + shopFilter
 const gross = `if(countIf(cost_tier='verified' AND cost_implausible=0 AND isNotNull(cost_amount))=0, NULL, CAST(sumIf(item_pay_amount-cost_amount,cost_tier='verified' AND cost_implausible=0 AND isNotNull(cost_amount)) AS Nullable(Decimal(38,2))))`
 const verifiedLine = `cost_tier='verified' AND cost_implausible=0 AND isNotNull(cost_amount)`
 const lineMetrics = `toString(sum(item_pay_amount)) AS item_pay_total, toString(sum(quantity)) AS quantity,
@@ -50,8 +50,8 @@ const myProductsSQL = productSelect + rankedOrderIDs + ` AND is_placeholder_pric
 const personalSQL = `SELECT toString(toDate(order_time,'Asia/Shanghai')) AS day,toString(sum(item_pay_amount)) AS item_pay_total` + realLines + rankedOrderIDs + ` AND sub_order_id IN (SELECT sub_order_id FROM (` + attributedLines + ` AND person_id={person:String})) GROUP BY day ORDER BY day`
 const personRankingSQL = `SELECT person_id AS key,toString(sum(item_pay_amount)) AS item_pay_total FROM (` + attributedLines + `) AS attribution INNER JOIN (SELECT sub_order_id,item_pay_amount` + realLines + rankedOrderIDs + `) AS eligible USING sub_order_id GROUP BY person_id ORDER BY sum(item_pay_amount) DESC,key LIMIT 101 OFFSET {offset:UInt32}`
 const productRankingSQL = `SELECT ifNull(shop_item_id,'') AS key, shop_id,toString(sum(item_pay_amount)) AS item_pay_total` + realLines + rankedOrderIDs + ` AND is_placeholder_price=0 AND notEmpty(ifNull(shop_item_id,'')) GROUP BY shop_id,shop_item_id ORDER BY sum(item_pay_amount) DESC,shop_id,key LIMIT 101 OFFSET {offset:UInt32}`
-const shopRankingSQL = `SELECT shop_id AS key,toString(sum(item_pay_total)) AS item_pay_total,toString(sum(payable_amount)) AS payable_amount` + shopDays + ` GROUP BY shop_id ORDER BY sum(payable_amount) DESC,key LIMIT 101 OFFSET {offset:UInt32}`
-const platformRankingSQL = `SELECT platform AS key,toString(sum(item_pay_total)) AS item_pay_total,toString(sum(payable_amount)) AS payable_amount` + shopDays + ` GROUP BY platform ORDER BY sum(payable_amount) DESC,key LIMIT 101 OFFSET {offset:UInt32}`
+const shopRankingSQL = `SELECT source.shop_id AS key,toString(sum(source.item_pay_total)) AS item_pay_total,toString(sum(source.payable_amount)) AS payable_amount` + shopDays + ` GROUP BY source.shop_id ORDER BY sum(source.payable_amount) DESC,key LIMIT 101 OFFSET {offset:UInt32}`
+const platformRankingSQL = `SELECT source.platform AS key,toString(sum(source.item_pay_total)) AS item_pay_total,toString(sum(source.payable_amount)) AS payable_amount` + shopDays + ` GROUP BY source.platform ORDER BY sum(source.payable_amount) DESC,key LIMIT 101 OFFSET {offset:UInt32}`
 const shopNamesSQL = `SELECT shop_id,shop_name,platform FROM jst.v_shops WHERE ({all:UInt8}=1 OR shop_id IN {shops:Array(String)}) ORDER BY shop_name,shop_id`
 const freshnessSQL = `SELECT source_committed_at,toUInt32(greatest(lag_seconds,0)) AS lag_seconds FROM jst.v_freshness LIMIT 1`
 const historySQL = `SELECT sub_order_id,sku_id AS sku,toString(cost_amount) AS cost_amount,toString(unit_cost) AS unit_cost,cost_source,cost_tier,cost_status,cost_as_of,cost_frozen,cost_implausible,order_time,shop_id` + realLines + rankedOrderIDs + ` AND sku_id={sku:String} ORDER BY order_time DESC,sub_order_id DESC LIMIT 100`
