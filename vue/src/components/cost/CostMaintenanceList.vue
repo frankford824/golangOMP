@@ -125,13 +125,14 @@
           </tr>
           <tr v-if="!rows.length">
             <td colspan="6" class="empty">
-              {{
+              <OAEmpty v-if="oaEnabled && !loading && !error" kind="search" :title="reviewState === 'pending' ? '当前没有待确认的编码' : '没有匹配的已完成编码'" description="可切换确认状态或调整编码重新查询。" />
+              <template v-else>{{
                 loading
                   ? "正在读取已完成编码…"
                   : error
                     ? "暂未取得数据，请重试。"
                   : reviewState === 'pending' ? "当前没有待确认的编码，可切换筛选查看已确认记录。" : "没有匹配的已完成编码。"
-              }}
+              }}</template>
             </td>
           </tr>
         </tbody>
@@ -448,6 +449,7 @@
 </template>
 
 <script setup lang="ts">
+import OAEmpty from '@/oa/components/OAEmpty.vue';
 import { RouterLink } from "vue-router";
 import { oaEnabled } from "@/oa/access";
 import { retryCostRead } from '@/utils/cost-read-retry';

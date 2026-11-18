@@ -5,7 +5,7 @@
 <template>
   <div
     :class="{ 'oa-task-board': oaEnabled }"
-    class="dashboard-shell min-h-[100dvh] w-full min-w-0 max-w-full overflow-x-hidden bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]"
+    class="dashboard-shell w-full min-w-0 max-w-full bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]"
   >
     <div v-if="error" class="dashboard-error mx-auto max-w-lg p-8 text-center">
       <p>{{ error }}</p>
@@ -13,7 +13,7 @@
     </div>
     <template v-else-if="hasBusinessAccess">
       <div
-        class="board dashboard-workbench w-full min-w-0 space-y-4 pb-8 sm:space-y-5 md:space-y-6 min-[901px]:space-y-3"
+        class="board dashboard-workbench w-full min-w-0"
         :data-desktop-section="desktopSection"
       >
         <!-- 顶栏 -->
@@ -106,7 +106,7 @@
         <!-- 任务经营指标与任务看板共用 task.view 权限。 -->
         <section
           v-if="can('task.view')"
-          class="kpi kpi--quality grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 lg:grid-cols-4 lg:gap-4"
+          class="kpi kpi--quality grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-4 lg:gap-4"
         >
           <DashboardKpiCard
             title="本周完成率"
@@ -137,7 +137,7 @@
         </div>
         <section
           v-else
-          class="kpi kpi--queues grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 lg:grid-cols-4 lg:gap-4"
+          class="kpi kpi--queues grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 lg:grid-cols-4 lg:gap-4"
         >
           <DashboardKpiCard
             title="设计待办"
@@ -170,15 +170,15 @@
         >
           <article
             class="board-panel board-panel--trend flex min-h-0 min-w-0 flex-col gap-2 rounded-xl bg-[rgb(var(--yb-surface))] p-4 ring-1 ring-[rgb(var(--yb-border)/0.6)] sm:gap-3 sm:p-5"
+            aria-label="7日任务趋势"
+            tabindex="0"
           >
             <div class="chart-panel-head">
               <div>
                 <h2 class="dashboard-panel-heading m-0 text-[0.9rem] font-semibold sm:text-[0.95rem]">
                   7日任务创建 / 完成趋势
                 </h2>
-                <p class="chart-panel-sub">先看今日结论，再看近 7 日趋势</p>
               </div>
-              <span class="chart-panel-badge">今日概览</span>
             </div>
             <div class="trend-summary-grid" aria-label="今日任务摘要">
               <div class="trend-summary-card trend-summary-card--created">
@@ -201,10 +201,11 @@
               :due-on-day="trend7d.dueOnDay"
               :loading="loading"
             />
-            <p class="m-0 text-[0.7rem] text-[rgb(var(--yb-text-faint))]">近7日新建、完成与截止日分布</p>
           </article>
           <article
             class="board-panel board-panel--status flex min-h-0 min-w-0 flex-col gap-2 rounded-xl bg-[rgb(var(--yb-surface))] p-4 ring-1 ring-[rgb(var(--yb-border)/0.6)] sm:gap-3 sm:p-5"
+            aria-label="任务状态分布"
+            tabindex="0"
           >
             <div class="chart-panel-head">
               <div>
@@ -213,7 +214,6 @@
                 </h2>
                 <p class="chart-panel-sub">{{ statusDistribution.conclusion }}</p>
               </div>
-              <span class="chart-panel-badge">状态分布</span>
             </div>
             <div v-if="loading" class="status-distribution-skeleton">
               <StatusSkeleton :loading="true" :lines="4" class="!py-0" />
@@ -228,7 +228,6 @@
                   :style="{ flexGrow: item.value, flexBasis: `${item.percent}%` }"
                 />
               </div>
-              <p class="status-stack-caption">{{ statusDistribution.caption }}</p>
               <div class="status-cards">
                 <article
                   v-for="item in statusDistribution.items"
@@ -241,7 +240,10 @@
                     <strong>{{ item.name }}</strong>
                     <small>{{ item.hint }}</small>
                   </span>
-                  <span class="status-card-value">{{ item.value }}</span>
+                  <span class="status-card-count">
+                    <strong class="status-card-value">{{ item.value }}</strong>
+                    <small>{{ item.percent }}%</small>
+                  </span>
                 </article>
               </div>
             </div>
@@ -255,13 +257,14 @@
           <article
             class="board-panel board-panel--tasks flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-[rgb(var(--yb-surface))] p-4 ring-1 ring-[rgb(var(--yb-border)/0.6)] sm:p-5"
           >
-            <h2 class="dashboard-panel-heading m-0 mb-3 text-[0.9rem] font-semibold sm:mb-4 sm:text-[0.95rem]">近期任务明细</h2>
+            <div class="dashboard-list-heading">
+              <h2 class="dashboard-panel-heading">近期任务明细</h2>
+              <RouterLink v-if="can('task.view')" class="dashboard-all-tasks" to="/tasks">查看全部任务</RouterLink>
+            </div>
             <div v-if="loading" class="py-4">
               <StatusSkeleton :loading="true" :lines="4" class="!py-0" />
             </div>
-            <div v-else class="min-w-0 overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0">
-              <DashboardTaskSnapshotTable :snapshots="overview?.recent_tasks ?? []" />
-            </div>
+            <DashboardTaskSnapshotTable v-else :snapshots="overview?.recent_tasks ?? []" />
           </article>
           <article
             class="board-panel board-panel--activity flex min-h-0 min-w-0 flex-col gap-2 rounded-xl bg-[rgb(var(--yb-surface))] p-4 ring-1 ring-[rgb(var(--yb-border)/0.6)] sm:gap-3 sm:p-5"
@@ -269,7 +272,10 @@
             <h2 class="dashboard-panel-heading m-0 text-[0.9rem] font-semibold sm:text-[0.95rem]">实时动态</h2>
             <p class="m-0 text-xs text-[rgb(var(--yb-text-faint))] sm:text-[0.7rem]">审核、交班与新建</p>
             <div
-              class="min-h-[12rem] flex-1 overflow-auto rounded-lg bg-[rgb(var(--yb-surface-soft))] p-3 min-[1100px]:min-h-[16rem] sm:p-3 ring-1 ring-[rgb(var(--yb-border)/0.8)]"
+              class="activity-scroll min-h-0 flex-1 rounded-lg bg-[rgb(var(--yb-surface-soft))] p-3 ring-1 ring-[rgb(var(--yb-border)/0.8)]"
+              role="region"
+              aria-label="审核、交班与新建动态"
+              tabindex="0"
             >
               <RecentEventStream
                 :events="recentEvents"
@@ -283,7 +289,7 @@
         </section>
 
         <!-- 风险提示 -->
-        <section class="dashboard-risk-zone min-w-0">
+        <section class="dashboard-risk-zone min-w-0" aria-label="风险提醒" tabindex="0">
           <RiskListCard :items="risks" :loading="loading" :error="error" />
         </section>
       </div>
@@ -444,10 +450,6 @@ const statusDistribution = computed(() => {
       total > 0
         ? `当前任务主要集中在「${lead.name}」，共 ${lead.value} 项`
         : '当前暂无任务',
-    caption:
-      total > 0
-        ? withPercent.map((item) => `${item.name} ${item.percent}%`).join(' · ')
-        : '暂无任务分布数据',
   }
 })
 
@@ -1174,20 +1176,6 @@ onBeforeUnmount(stopRefreshLoop)
   line-height: 1.4;
 }
 
-.chart-panel-badge {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.75rem;
-  padding: 0.3rem 0.62rem;
-  border: 1px solid rgb(var(--yb-brand-subtle));
-  border-radius: 0.55rem;
-  background: rgb(var(--yb-brand-soft));
-  color: rgb(var(--yb-brand-strong));
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
 .trend-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1283,13 +1271,6 @@ onBeforeUnmount(stopRefreshLoop)
   background: rgb(var(--yb-success));
 }
 
-.status-stack-caption {
-  margin: 0;
-  color: rgb(var(--yb-text-muted));
-  font-family: var(--yb-font-data);
-  font-size: 0.74rem;
-}
-
 .status-cards {
   display: grid;
   gap: 0.5rem;
@@ -1333,6 +1314,11 @@ onBeforeUnmount(stopRefreshLoop)
   background: rgb(var(--yb-warning));
 }
 
+.status-card--danger .status-card-dot,
+.status-stack-seg--danger {
+  background: rgb(var(--yb-danger));
+}
+
 .status-card--completed .status-card-dot {
   background: rgb(var(--yb-success));
 }
@@ -1368,6 +1354,8 @@ onBeforeUnmount(stopRefreshLoop)
   font-weight: 800;
   line-height: 1;
 }
+.status-card-count { display: grid; justify-items: end; gap: 0.2rem; font-variant-numeric: tabular-nums; }
+.status-card-count small { color: rgb(var(--yb-text-muted)); font-size: 0.7rem; line-height: 1; }
 
 .status-card--pending .status-card-value {
   color: rgb(var(--yb-brand));
@@ -1404,11 +1392,7 @@ onBeforeUnmount(stopRefreshLoop)
 }
 
 .board-panel--tasks :deep(.task-table) {
-  overflow: hidden;
-  border: 1px solid rgb(var(--yb-border));
-  border-radius: 0.75rem;
   background: rgb(var(--yb-surface));
-  box-shadow: none;
 }
 
 .board-panel :deep(.task-table__row--alt),
@@ -1587,13 +1571,16 @@ onBeforeUnmount(stopRefreshLoop)
     flex-basis: auto;
   }
 
-  .trend-summary-grid {
-    grid-template-columns: 1fr;
-  }
+  .trend-summary-grid { gap: 0.4rem; }
+  .trend-summary-card { padding: 0.5rem; }
 
   .chart-panel-head {
     flex-direction: column;
   }
+}
+
+@media (max-width: 359px) {
+  .trend-summary-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 1180px) {
@@ -1603,9 +1590,24 @@ onBeforeUnmount(stopRefreshLoop)
 }
 .board-header-pending { display: grid; justify-items: center; }
 .dashboard-section-nav { display: none; }
+.dashboard-workbench { display: flex; flex-direction: column; gap: 1rem; padding-bottom: 1.5rem; }
+.dashboard-list-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.dashboard-all-tasks { color: rgb(var(--yb-brand)); font-size: 0.8125rem; }
+.dashboard-all-tasks:hover { text-decoration: underline; }
 
-@media (min-width: 901px) {
-  .dashboard-shell { min-height: 0; }
+@media (min-width: 1024px) {
+  .dashboard-shell, .dashboard-workbench { height: 100%; min-height: 0; }
+  .dashboard-workbench { gap: 0.6rem; padding: 0; }
+  .dashboard-workbench > :not(.dashboard-analysis-grid, .dashboard-bottom-grid, .dashboard-risk-zone) {
+    flex: none;
+  }
   .board-header { min-height: 0; padding: 0.75rem 1rem; align-items: center; }
   .board-header-aside {
     display: flex;
@@ -1651,6 +1653,48 @@ onBeforeUnmount(stopRefreshLoop)
   .dashboard-workbench:not([data-desktop-section='activity']) .dashboard-bottom-grid,
   .dashboard-workbench:not([data-desktop-section='activity']) .kpi--queues,
   .dashboard-workbench:not([data-desktop-section='risks']) .dashboard-risk-zone { display: none; }
+
+  .dashboard-analysis-grid, .dashboard-bottom-grid, .dashboard-risk-zone {
+    flex: 1;
+    min-height: 0;
+  }
+  .dashboard-analysis-grid, .dashboard-bottom-grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+  .board-panel--trend, .board-panel--status, .board-panel--tasks, .board-panel--activity {
+    min-height: 0;
+    overflow: auto;
+    padding: 0.75rem;
+  }
+  .dashboard-risk-zone, .activity-scroll { overflow: auto; }
+  .activity-scroll, .dashboard-risk-zone { overscroll-behavior: contain; }
+  .board-panel--trend :deep(.trend) {
+    display: flex;
+    flex: 1;
+    min-height: 9rem;
+  }
+  .board-panel--trend :deep(.trend__chart),
+  .board-panel--trend :deep(.trend__skeleton) {
+    height: auto;
+    min-height: 0;
+  }
+  .status-distribution { min-height: 0; }
+}
+@media (min-width: 1024px) and (max-height: 760px) {
+  .board-header-subtitle { display: none; }
+  .board-header { padding-block: 0.45rem; }
+  .dashboard-health-strip { padding-block: 0.3rem; }
+  .board-panel--trend, .board-panel--status, .status-distribution { gap: 0.45rem; }
+  .dashboard-shell :deep(.kpi-card) { gap: 0.25rem; min-height: 0; padding: 0.6rem 0.75rem; }
+  .status-card, .trend-summary-card { min-height: 0; padding-block: 0.35rem; }
+}
+@media (min-width: 1200px) and (max-height: 760px) {
+  .status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-shell *,
+  .dashboard-shell :deep(*) {
+    animation: none;
+    transition: none;
+  }
 }
 .oa-task-board .board-header-title { font-size: 18px; font-weight: 600; }
 .oa-task-board .dashboard-panel-heading { font-size: 15px; font-weight: 600; }

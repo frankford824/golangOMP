@@ -101,6 +101,7 @@ describe('DashboardView authoritative refresh', () => {
           DashboardKpiCard: { template: '<div class="kpi-stub" :data-title="title" :data-route="route">{{ title }} {{ value }}</div>', props: ['title', 'value', 'route'] },
           DashboardTrendChart: true,
           DashboardTaskSnapshotTable: true,
+          RouterLink: true,
           RecentEventStream: true,
           RiskListCard: { template: '<div><span v-for="item in items" :key="item.id" class="risk-stub" :data-risk="item.id" :data-route="item.route" /></div>', props: ['items'] },
           StatusSkeleton: true,

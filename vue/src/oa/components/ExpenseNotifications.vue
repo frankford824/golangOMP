@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import OAEmpty from './OAEmpty.vue'
 import { onMounted, ref } from 'vue'
 import { api, errorText } from '../api'
 import { feeDateTime, feeStatus } from '../feeDisplay'
@@ -35,7 +36,7 @@ onMounted(load)
         </RouterLink>
       </li>
     </ul>
-    <p v-else>暂无费用动态</p>
+    <OAEmpty v-else kind="inbox" title="暂无费用动态" description="单据经审批、退回或登记付款后，可在这里查看进展。" />
   </section>
 </template>
 

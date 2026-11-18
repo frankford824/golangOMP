@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import tailwindcss from 'tailwindcss'
 import autoprefixer from 'autoprefixer'
@@ -42,6 +43,13 @@ export default defineConfig(config => {
   const api = main.server?.proxy?.['/v1']
   return {
     ...main,
+    plugins: [...(main.plugins ?? []), {
+      name: 'oa-brand-icon',
+      transformIndexHtml(html: string) {
+        const icon = readFileSync(new URL('./src/oa/assets/yongbo-mark.svg', import.meta.url), 'utf8')
+        return html.replace(/<link rel="icon"[^>]*>/, '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,' + encodeURIComponent(icon) + '">')
+      },
+    }],
     cacheDir: '.vite-oa',
     css: { ...main.css, postcss: { plugins: [tailwindcss(), autoprefixer(), oaTextScale()] } },
     define: { ...main.define, 'import.meta.env.VITE_OA_FEATURES': '"true"' },

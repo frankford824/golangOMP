@@ -201,3 +201,39 @@
   .commerce-overview .commerce-results th { padding-block: 5px; }
   .commerce-overview .commerce-results td:has(.commerce-sku) { padding-block: 1px; }
 }
+
+@media (min-width: 1024px) {
+  .commerce-workspace { display: flex; flex-direction: column; block-size: 100%; min-block-size: 0; }
+  .commerce-workspace > :not(.commerce-body) { flex: none; }
+  .commerce-body { min-block-size: 0; min-inline-size: 0; overflow: auto; scrollbar-gutter: stable; }
+}
+
+@media (max-width: 620px) {
+  .commerce-workspace .workspace-filters > label:has(select[name=product-scope]) { flex-basis: 100%; }
+}
+@media (max-width: 1023px) {
+  .commerce-results:has(.workspace-pager) .desktop-region-scroll { max-block-size: 48dvh; }
+  .commerce-results:has(.workspace-pager) th { position: sticky; inset-block-start: 0; }
+}
+
+@media (min-width: 1024px) {
+  .commerce-overview .commerce-body { display: flex; flex: 1; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; }
+  .commerce-overview .commerce-body > * { flex: none; }
+  .commerce-overview .commerce-body > .commerce-insights {
+    min-height: 80px; max-height: 32%; flex-shrink: 1;
+  }
+  .commerce-overview .commerce-insights > section { min-height: 0; overflow: auto; }
+  .commerce-overview .commerce-body > .commerce-results {
+    flex: 1 1 120px; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .commerce-overview .commerce-results .commerce-panel-heading { flex: none; }
+  .commerce-overview .commerce-results .oa-table-wrap { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+  .commerce-overview .commerce-results thead th { position: sticky; top: 0; z-index: 1; background: rgb(var(--yb-surface-muted)); }
+  .commerce-overview .commerce-results .oa-empty-state { min-height: 0; overflow: auto; }
+  .commerce-overview .commerce-shortcuts {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 4px 12px;
+  }
+  .commerce-overview .commerce-shortcuts .commerce-panel-heading { margin: 0; }
+  .commerce-overview .commerce-shortcuts h2 { font-size: var(--oa-meta-size); color: var(--oa-secondary); }
+  .commerce-overview .commerce-shortcuts a { min-height: 32px; padding: 0; border: 0; margin: 0; width: auto; }
+}

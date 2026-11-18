@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import OAEmpty from '../components/OAEmpty.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
@@ -127,7 +128,7 @@ onMounted(() => { if (props.mode === 'people' && !selected.value) void run(refre
         <button :disabled="busy">搜索</button>
       </form>
       <p v-if="busy && !items.length" class="oa-empty" role="status">正在读取人员…</p>
-      <p v-else-if="!items.length && !error" class="oa-empty">暂无匹配人员</p>
+      <OAEmpty v-else-if="!items.length && !error" kind="search" title="暂无匹配人员" description="试试其他姓名或工号，或清除搜索条件。" />
       <ul class="oa-list oa-link-list">
         <li v-for="item in items.slice(pageStart, pageStart + pageSize)" :key="item.id">
           <RouterLink :to="{ path: '/users', query: { user_id: item.id, tab: 'terms', q: applied || undefined } }">

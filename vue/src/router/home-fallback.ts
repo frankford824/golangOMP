@@ -26,7 +26,7 @@ const HOME_ROUTE_CANDIDATES: HomeRouteCandidate[] = [
   { name: 'TaskList', menuKey: 'task_list' },
   { name: 'CostRules', menuKey: 'cost_rules' },
   { name: 'AssetsIndex', menuKey: 'resource_management' },
-  { name: 'DataCenter', menuKey: 'report_center' },
+  ...(import.meta.env.VITE_OA_FEATURES === 'true' ? [] : [{ name: 'DataCenter', menuKey: 'report_center' }]),
   { name: 'UserManagement', menuKey: 'user_admin' },
 ]
 
@@ -128,5 +128,5 @@ export function resolvePostLoginLandingRoute(
     }
   }
 
-  return resolveFirstAccessibleHomeRoute(permissionsStore) ?? { name: 'Forbidden' }
+  return resolveFirstAccessibleHomeRoute(permissionsStore) ?? { name: import.meta.env.VITE_OA_FEATURES === 'true' ? 'Me' : 'Forbidden' }
 }

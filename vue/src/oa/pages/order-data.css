@@ -216,3 +216,15 @@
     margin-inline-start: 0;
   }
 }
+@media (min-width: 1024px) {
+  .order-data { display: flex; flex-direction: column; block-size: 100%; min-block-size: 0; }
+  .order-data > :not(.order-data-body) { flex: none; }
+  .order-data-body { min-block-size: 0; min-inline-size: 0; overflow: auto; scrollbar-gutter: stable; }
+}
+
+.order-data-filters .order-data-check { min-block-size: 32px; padding-inline: 8px; }
+
+@media (max-width: 1023px) {
+  .order-data-results .desktop-region-scroll { max-block-size: 48dvh; }
+  .order-data-results th { position: sticky; inset-block-start: 0; }
+}

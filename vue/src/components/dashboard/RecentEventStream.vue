@@ -7,9 +7,7 @@
     <div v-else-if="error" class="stream-error">
       <p>{{ error }}</p>
     </div>
-    <div v-else-if="!events.length" class="stream-empty">
-      <p>暂无最近事件</p>
-    </div>
+    <OAEmpty v-else-if="!events.length" title="暂无最近事件" kind="list" />
     <ul v-else :class="variant === 'dashboard' ? 'stream-list stream-list--dashboard' : 'stream-list'">
       <li
         v-for="ev in events"
@@ -40,6 +38,7 @@
 <script setup lang="ts">
 import type { RecentEvent } from '@/types/dashboard'
 import StatusSkeleton from '@/components/common/StatusSkeleton.vue'
+import OAEmpty from '@/oa/components/OAEmpty.vue'
 import { useRouter } from 'vue-router'
 
 withDefaults(
@@ -92,8 +91,7 @@ function onSelect(ev: RecentEvent) {
   color: rgb(var(--yb-text-navy));
 }
 .stream-loading,
-.stream-error,
-.stream-empty {
+.stream-error {
   padding: 0.5rem 0;
   font-size: 0.875rem;
   color: rgb(var(--yb-text-muted-strong));

@@ -7,6 +7,7 @@ import { errorText } from '../api'
 import { useOAAccess } from '../access'
 import OperationNav from '../components/OperationNav.vue'
 import PageHead from '../components/PageHead.vue'
+import '../styles.css'
 
 type Rule = { rule_id: number; rule_name: string; rule_version: number }
 type Basis = { erp_i_id?: string; product_i_id?: string; width?: number; height?: number; area?: number; quantity?: number; process?: string; notes?: string; input?: { area_mode?: string } }
@@ -78,6 +79,7 @@ async function preview() {
       <RouterLink v-if="canOpenMaintenance" class="oa-button" :to="{ name: 'CostRules' }">编码成本维护</RouterLink>
     </PageHead>
     <OperationNav v-if="can('orders.view')" />
+    <div class="pricing-body" tabindex="0" role="region" aria-label="SKU 核价工作区">
     <section class="pricing-panel yb-page-surface" aria-labelledby="price-request-title">
       <h2 id="price-request-title">输入商品编码</h2>
       <form class="code-form" @submit.prevent="preview">
@@ -144,12 +146,19 @@ async function preview() {
         </table>
       </div>
     </section>
+    </div>
   </main>
 </template>
 
 <style scoped>
 .oa-pricing { display: grid; gap: 12px; min-width: 0; }
 .oa-pricing :deep(.oa-page-head) { margin-bottom: 0; }
+.pricing-body { display: grid; align-content: start; gap: 12px; min-inline-size: 0; }
+@media (min-width: 1024px) {
+  .oa-pricing { display: flex; flex-direction: column; block-size: 100%; min-block-size: 0; }
+  .oa-pricing > :not(.pricing-body) { flex: none; }
+  .pricing-body { min-block-size: 0; overflow: auto; scrollbar-gutter: stable; }
+}
 .pricing-panel { border-radius: 8px; padding: 16px; min-width: 0; }
 .code-form { display: grid; gap: 8px; max-width: 640px; margin-top: 8px; }
 .code-form textarea { width: 100%; resize: vertical; }

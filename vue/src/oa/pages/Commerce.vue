@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Copy, FileText, Package, Search, Wallet } from 'lucide-vue-next'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
+import OAEmpty from '../components/OAEmpty.vue'
 import PageHead from '../components/PageHead.vue'
 import FreshnessStatus from '../components/FreshnessStatus.vue'
 import { getToken, TOKEN_STORAGE_KEY, type HttpAppError } from '@/services/http'
@@ -28,7 +29,7 @@ type DataRow = {
 }
 type TaskLink = { id: number; task_no: string; status: string }
 type Feedback = { id: number; shop_id: string; note: string; adjusted_on: string; task_id?: number }
-type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
+type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; scope_state?: 'unassigned'; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
 
 const today = dateInChina()
 const earliest = '2026-06-01'
@@ -66,21 +67,26 @@ function recordScope(query: URLSearchParams) {
     from: start,
     to: end,
     ...(shopID ? { shop_id: shopID } : {}),
-    ...(query.get('include_brush') === '1' ? { include_brush: '1' } : {}),
+    include_brush: query.get('include_brush') === '1' ? '1' : '0',
   }
 }
 function productLink(sku: string, shopId?: string) {
   return {
     path: '/operations/products/' + encodeURIComponent(sku),
-    query: shopId ? { ...navigationQuery.value, shop_id: shopId } : navigationQuery.value,
+    query: {
+      ...navigationQuery.value,
+      ...(shopId ? { shop_id: shopId } : {}),
+      ...(props.mode === 'overview' || new URLSearchParams(appliedQuery).get('mine') !== '1' ? { scope: 'overview' } : {}),
+    },
   }
 }
 const selectedSku = ref(props.productId ?? '')
 const group = ref('shop')
 const appliedGroup = ref('shop')
 let appliedQuery = ''
+const productScope = ref(route.query.scope === 'overview' ? 'overview' : 'mine')
 const includeBrush = ref(route.query.include_brush === '1')
-const loadedDetail = ref<{ shop: string; sku: string; from: string; to: string }>()
+const loadedDetail = ref<{ shop: string; sku: string; from: string; to: string; includeBrush: boolean }>()
 const shopOptions = ref<DataRow[]>([])
 const shopError = ref('')
 const productsError = ref('')
@@ -88,6 +94,8 @@ const history = ref<Record<string, unknown>[]>([])
 const historyError = ref('')
 const historyOpen = ref(false)
 const historyBusy = ref(false)
+const historyOffset = ref(0)
+const historyHasMore = ref(false)
 const feedback = ref({ shop_id: '', adjusted_on: today, note: '', task_id: undefined as number | undefined })
 const saved = ref('')
 const feedbackError = ref('')
@@ -116,6 +124,7 @@ const trendWeekStart = computed(() => overviewDay.value ? [earlierDay(overviewDa
 const trendPrevious = computed(() => overviewDay.value ? earlierDay(overviewDay.value, 1) : '')
 const busy = ref(false)
 const error = ref('')
+const failedPage = ref<number>()
 const latest = ref(0)
 const locallyStale = ref(false)
 let appliedOverview: { query: string; offset: number; account: string; token: string } | undefined
@@ -217,29 +226,29 @@ async function loadOverview(refresh = false, pageChange = false) {
   }
 }
 
-async function load(resetPage = true) {
-  if (resetPage) offset.value = 0
+async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
+  if (resetPage || props.mode === 'overview') offset.value = next
   if (props.mode === 'overview') return loadOverview(false, !resetPage)
   if (!mayView.value) return
   if (props.mode === 'detail' && !selectedSku.value.trim()) return
   const sequence = ++latest.value
-  const detailFilters = !resetPage && loadedDetail.value ? loadedDetail.value : { shop: shop.value, sku: selectedSku.value.trim(), from: from.value, to: to.value }
+  const detailFilters = !resetPage && loadedDetail.value ? loadedDetail.value : { shop: shop.value, sku: selectedSku.value.trim(), from: from.value, to: to.value, includeBrush: includeBrush.value }
   busy.value = true
-  loadedDetail.value = undefined
+  if (resetPage) loadedDetail.value = undefined
   historyOpen.value = false
   comparison.value = undefined
   comparisonError.value = ''
   productsError.value = ''
-  data.value = undefined
+  if (resetPage) data.value = undefined
   summary.value = undefined
-  rankingSummary.value = undefined
+  if (resetPage) rankingSummary.value = undefined
   error.value = ''
+  failedPage.value = undefined
   try {
     const endpoint = { products: 'products', ranking: 'rankings', detail: 'sku', personal: 'personal' }[props.mode]
     const options: Record<string, string> = {}
     if (props.mode === 'ranking') options.group = group.value
-    if (props.mode === 'products' && route.query.scope !== 'overview') options.mine = '1'
-    if (offset.value) options.offset = String(offset.value)
+    if (props.mode === 'products' && productScope.value === 'mine') options.mine = '1'
     if (props.mode === 'detail') options.sku = selectedSku.value.trim()
     if (resetPage || !appliedQuery) {
       appliedGroup.value = group.value
@@ -247,24 +256,32 @@ async function load(resetPage = true) {
       recordScope(new URLSearchParams(appliedQuery))
     }
     const applied = new URLSearchParams(appliedQuery)
-    applied.set('offset', String(offset.value))
+    applied.set('offset', String(next))
     const summaryQuery = new URLSearchParams(applied)
     summaryQuery.delete('offset')
     summaryQuery.delete('group')
     const dimensions = props.mode === 'ranking' && (
-      ['shop', 'growth'].includes(appliedGroup.value) ||
-      (appliedGroup.value === 'platform' && !summaryQuery.has('include_brush'))
+      ['shop', 'growth', 'platform'].includes(appliedGroup.value)
     ) ? api<OrderResult>('/oa-api/orders/summary?' + summaryQuery).catch(() => undefined) : undefined
     const [result, supplemental] = await Promise.all([api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`), dimensions])
     if (sequence === latest.value) {
       data.value = result
+      offset.value = next
       rankingSummary.value = supplemental?.stale ? undefined : supplemental
       if (props.mode === 'detail') {
         loadedDetail.value = detailFilters
         feedback.value.shop_id = detailFilters.shop || result.rows?.[0]?.shop_id || ''
       }
     }
-  } catch (cause) { if (sequence === latest.value) error.value = errorText(cause) }
+  } catch (cause) {
+    if (sequence === latest.value) {
+      const failure = cause as HttpAppError
+      if (failure.status === 401 || failure.status === 403 ||
+          (failure.responseData as { error?: string } | undefined)?.error === '订单数据源拒绝访问') data.value = undefined
+      failedPage.value = next
+      error.value = errorText(cause)
+    }
+  }
   finally { if (sequence === latest.value) busy.value = false }
 }
 
@@ -487,13 +504,13 @@ async function compare(event: Feedback) {
   comparison.value = undefined
   const sequence = latest.value
   try {
-    const query = new URLSearchParams({ shop_id: event.shop_id, sku: filters.sku, adjusted_on: event.adjusted_on, days: '7' })
+    const query = new URLSearchParams({ shop_id: event.shop_id, sku: filters.sku, adjusted_on: event.adjusted_on, days: '7', include_brush: filters.includeBrush ? '1' : '0' })
     const result = await api<OrderResult>('/oa-api/orders/compare?' + query)
     if (sequence === latest.value) comparison.value = result.rows
   } catch (cause) { if (sequence === latest.value) comparisonError.value = errorText(cause) }
   finally { comparisonBusy.value = false }
 }
-async function loadHistory() {
+async function loadHistory(next = 0) {
   const filters = loadedDetail.value
   if (!filters) return
   history.value = []
@@ -502,10 +519,14 @@ async function loadHistory() {
   historyBusy.value = true
   const sequence = latest.value
   try {
-    const query = new URLSearchParams({ from: filters.from, to: filters.to, sku: filters.sku })
+    const query = new URLSearchParams({ from: filters.from, to: filters.to, sku: filters.sku, include_brush: filters.includeBrush ? '1' : '0', offset: String(next) })
     if (filters.shop) query.set('shop_id', filters.shop)
-    const result = await api<{ rows: Record<string, unknown>[] }>('/oa-api/orders/cost-history?' + query)
-    if (sequence === latest.value) history.value = result.rows
+    const result = await api<{ rows: Record<string, unknown>[]; has_more?: boolean }>('/oa-api/orders/cost-history?' + query)
+    if (sequence === latest.value) {
+      history.value = result.rows
+      historyOffset.value = next
+      historyHasMore.value = !!result.has_more
+    }
   } catch (cause) { if (sequence === latest.value) historyError.value = errorText(cause) }
   finally { historyBusy.value = false }
 }
@@ -569,10 +590,11 @@ onUnmounted(() => {
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
     <RouterLink v-if="mode === 'overview' && permissions.hasMenu('dashboard')" class="oa-button" :to="{ path: '/', query: { workspace: 'tasks' } }"><BarChart3 :size="15" />任务运营看板</RouterLink>
-    <RouterLink v-if="mode === 'detail'" class="oa-button" :to="{ path: '/operations/products', query: navigationQuery }"><ChevronLeft :size="15" />返回商品</RouterLink>
+    <RouterLink v-if="mode === 'detail'" class="oa-button" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }"><ChevronLeft :size="15" />返回商品</RouterLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
   <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" />
+  <div class="commerce-body" tabindex="0" role="region" aria-label="经营数据">
   <p v-if="!mayView" class="oa-error" role="alert">当前账号没有经营查询权限。</p>
   <template v-else>
     <form class="oa-panel commerce-filter" aria-label="经营筛选" @submit.prevent="load()">
@@ -583,6 +605,7 @@ onUnmounted(() => {
             :aria-pressed="from === rangeStart(period.daysBack) && to === today" @click="range(period.daysBack)">{{ period.label }}</button>
         </div>
       <label v-if="mode === 'ranking'">排名维度 <select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
+      <label v-if="mode === 'products'">商品范围 <select v-model="productScope" name="product-scope"><option value="mine">归属我的商品</option><option value="overview">全部可见商品</option></select></label>
       <label v-if="mode === 'detail'">SKU <input v-model="selectedSku" required /></label>
       <label v-if="mode !== 'personal'">店铺 <select v-if="shopOptions.length" v-model="shop" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
       <label>日期 <OrderDateField v-model="from" label="开始日期" :max="to" :min="earliest" /></label>
@@ -592,8 +615,10 @@ onUnmounted(() => {
       </div>
     </form>
     <p v-if="shopError" class="oa-watermark">{{ shopError }}</p>
-    <p v-if="error" class="oa-error" role="alert">{{ error }} <button @click="load()">重试</button></p>
+    <p v-if="error" class="oa-error" role="alert">{{ error }} <button @click="failedPage == null ? load() : load(false, failedPage)">重试</button></p>
     <p v-else-if="busy && !summary && !data" class="oa-panel oa-empty" role="status">正在读取经营数据…</p>
+    <OAEmpty v-if="(summary || data)?.scope_state === 'unassigned'" title="暂无经营归属" description="当前账号没有可用的归属范围，请核对人员工号和可访问店铺。" kind="list" />
+    <template v-else>
     <section v-if="mode === 'overview' && summary" class="oa-kpis commerce-metrics" aria-label="经营指标">
       <div v-for="(metric, index) in kpis" :key="metric.name" :class="['oa-kpi', { 'commerce-metric-primary': index === 0 }]">
         <span>{{ metric.name }}</span><b>{{ metric.value }}</b>
@@ -669,7 +694,8 @@ onUnmounted(() => {
           <strong>{{ money(activePoint.amount) }}</strong>
           <button type="button" :disabled="busy" @click="range(6)">查看近 7 日趋势 <ArrowRight :size="15" /></button>
         </div>
-        <p v-else class="oa-empty">{{ weekTrendUnavailable ? '近 7 日趋势暂不可用' : '所选范围暂无趋势数据' }}</p>
+        <OAEmpty v-else-if="weekTrendUnavailable" compact kind="chart" title="近 7 日趋势暂不可用"><button type="button" :disabled="busy" @click="load()">重新查询</button></OAEmpty>
+        <OAEmpty v-else compact kind="chart" title="所选范围暂无趋势数据" />
       </section>
       <section v-if="mode === 'overview'" class="oa-panel commerce-shop-rank">
         <div class="commerce-panel-heading"><div><h2>店铺表现</h2><p class="oa-muted">按订单应付排名 · 前 5</p></div></div>
@@ -681,7 +707,7 @@ onUnmounted(() => {
             </RouterLink>
           </li>
         </ol>
-        <p v-else class="oa-empty">所选范围暂无店铺数据</p>
+        <OAEmpty v-else compact kind="chart" title="所选范围暂无店铺数据" />
       </section>
     </div>
     <p v-if="productsError" class="oa-error" role="alert">商品数据暂不可用。{{ productsError }} <button type="button" @click="load(false)">重试商品数据</button></p>
@@ -692,7 +718,7 @@ onUnmounted(() => {
         <span v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</span>
         <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ rows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
       </div>
-      <p v-if="!rows.length" class="oa-empty">所选范围暂无数据</p>
+      <OAEmpty v-if="!rows.length" title="所选范围暂无数据" kind="search" />
       <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
         <table v-if="mode === 'ranking' || mode === 'personal'" :class="['oa-table', { 'commerce-ranking-table': mode === 'ranking' }]">
           <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><template v-if="mode === 'ranking' && showRankingMetrics"><th class="oa-number">应付占比</th><th class="oa-number">有效订单数</th><th class="oa-number">核实毛利</th><th class="oa-number" title="核实毛利 ÷ 有核实成本的商品销售额">核实毛利率</th></template><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>
@@ -740,11 +766,11 @@ onUnmounted(() => {
             <td>{{ shopName(row.shop_id) }}</td><td class="oa-number">{{ row.quantity ?? '—' }}</td><td class="oa-number">{{ money(row.item_pay_total) }}</td>
             <td class="oa-number">{{ money(row.cost_verified_total) }}</td><td class="oa-number">{{ money(row.verified_gross) }}</td>
             <td class="oa-number"><span v-if="row.verified_coverage != null" :class="['oa-pill', { 'oa-pill-warn': Number(row.verified_coverage) < .9 }]">{{ Number(row.verified_coverage) < .9 ? '仅覆盖 ' : '' }}{{ (Number(row.verified_coverage) * 100).toFixed(1) }}%</span><span v-else>—</span></td>
-            <td v-if="mode === 'detail'" class="oa-number">{{ money(data.current_cost) }}</td>
+            <td v-if="mode === 'detail'" class="oa-number">{{ data.cost_context_available === false ? '成本上下文不可用' : money(data.current_cost) }}</td>
           </tr></tbody>
         </table>
       </div>
-      <div v-if="mode !== 'overview' && (data.has_more || offset)" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset || busy" @click="offset = Math.max(0, offset - 100); load(false)"><ChevronLeft :size="15" />上一页</button><button :disabled="!data.has_more || busy" @click="offset += 100; load(false)">下一页<ChevronRight :size="15" /></button></div>
+      <div v-if="mode !== 'overview' && (data.has_more || offset)" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset || busy" @click="load(false, offset - 100)"><ChevronLeft :size="15" />上一页</button><button :disabled="!data.has_more || offset >= 10000 || busy" @click="load(false, offset + 100)">下一页<ChevronRight :size="15" /></button></div>
     </section>
     <section v-if="mode === 'overview' && summary && canReview" class="oa-panel commerce-shortcuts">
         <div class="commerce-panel-heading"><h2>办理与复盘</h2></div>
@@ -758,14 +784,14 @@ onUnmounted(() => {
         <section class="oa-panel oa-link-list">
           <h2>关联任务</h2>
           <RouterLink v-for="task in data.tasks || []" :key="task.id" :to="'/tasks/' + task.id">{{ task.task_no || task.id }} <ArrowUpRight :size="15" /></RouterLink>
-          <p v-if="!data.tasks?.length" class="oa-empty">暂无可查看的关联任务</p>
+          <OAEmpty v-if="!data.tasks?.length" compact kind="list" title="暂无可查看的关联任务" />
         </section>
         <section class="oa-panel">
           <h2>上线记录</h2>
           <dl v-if="data.feedback?.length" class="oa-kv">
             <div v-for="event in data.feedback || []" :key="event.id"><dt><time v-if="event.adjusted_on" :datetime="event.adjusted_on">{{ event.adjusted_on }}</time><span v-else>—</span></dt><dd class="workspace-note">{{ event.note || '—' }} <button :disabled="comparisonBusy" @click="compare(event)">比较前后 7 日</button></dd></div>
           </dl>
-          <p v-else class="oa-empty">暂无上线记录</p>
+          <OAEmpty v-else compact kind="inbox" title="暂无上线记录" />
           <p v-if="comparisonError" class="oa-error" role="alert">{{ comparisonError }}</p>
           <dl v-if="comparison" class="oa-kv"><div v-for="row in comparison" :key="row.phase"><dt>上线{{ row.phase === 'before' ? '前' : '后' }} 7 个完整日 · 商品销售额</dt><dd>{{ money(row.item_pay_total) }}</dd></div></dl>
           <p v-if="saved" class="oa-notice" role="status">{{ saved }}</p>
@@ -786,10 +812,17 @@ onUnmounted(() => {
         <p v-if="historyError" class="oa-error">{{ historyError }}</p>
         <p v-else-if="historyBusy" class="oa-empty" role="status">正在读取成本记录…</p>
         <div v-else-if="historyOpen && history.length" class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'"><table class="oa-table"><thead><tr><th class="oa-number">下单日</th><th>店铺</th><th>订单子行</th><th class="oa-number">记录成本</th><th>成本档位</th><th>可信性</th></tr></thead><tbody><tr v-for="(row, index) in history" :key="index"><td>{{ row.order_time || '—' }}</td><td>{{ shopName(String(row.shop_id || '')) }}</td><td>{{ row.sub_order_id || '—' }}</td><td>{{ money(String(row.cost_amount ?? '')) }}</td><td>{{ row.cost_amount == null ? '未知' : costTierLabels[String(row.cost_tier)] || '未分类' }}</td><td><span v-if="implausibleCost(row.cost_implausible)" class="oa-pill oa-pill-warn">不可信 · 已排除</span><span v-else-if="row.cost_tier === 'verified' && row.cost_amount != null">计入核实毛利</span><span v-else>未计入核实毛利</span></td></tr></tbody></table></div>
-        <p v-else-if="historyOpen" class="oa-empty">当前范围暂无历史成本记录</p>
+        <OAEmpty v-else-if="historyOpen" compact kind="search" title="当前范围暂无历史成本记录" />
+        <div v-if="historyOpen && !historyBusy && !historyError && (historyOffset || historyHasMore)" class="oa-actions workspace-pager" aria-label="历史成本分页">
+          <span>第 {{ Math.floor(historyOffset / 100) + 1 }} 页</span>
+          <button :disabled="!historyOffset" @click="loadHistory(historyOffset - 100)"><ChevronLeft :size="15" />上一页</button>
+          <button :disabled="!historyHasMore || historyOffset >= 10000" @click="loadHistory(historyOffset + 100)">下一页<ChevronRight :size="15" /></button>
+        </div>
       </section>
     </template>
+    </template>
   </template>
+  </div>
 </div>
 </template>
 

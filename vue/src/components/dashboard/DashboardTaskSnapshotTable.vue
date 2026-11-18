@@ -1,33 +1,55 @@
 <template>
-  <div class="task-table w-full min-w-0">
-    <div class="task-table__head" role="row">
-      <span class="col-task">任务</span>
-      <span class="col-owner">负责人</span>
-      <span class="col-status">状态</span>
-      <span class="col-due">截止</span>
+  <div class="task-snapshot">
+    <div v-if="rows.length || selectedStatus" class="task-snapshot__filter">
+      <label :for="statusFilterId">任务状态</label>
+      <select :id="statusFilterId" v-model="selectedStatus">
+        <option value="">全部状态</option>
+        <option v-for="status in statuses" :key="status" :value="status">{{ status }}</option>
+      </select>
+      <span role="status">{{ visibleRows.length }} 项</span>
     </div>
-    <div v-if="!rows.length" class="task-table__empty" role="status">暂无任务数据</div>
-    <div
-      v-for="(row, i) in rows"
-      v-else
-      :key="row.id"
-      class="task-table__row"
-      :class="{ 'task-table__row--alt': i % 2 === 0 }"
-      role="row"
+    <OAEmpty
+      v-if="!visibleRows.length"
+      :title="selectedStatus ? '所选状态暂无近期任务' : '暂无近期任务'"
+      :kind="selectedStatus ? 'search' : 'inbox'"
     >
-      <span class="col-task" :title="row.title">{{ row.title }}</span>
-      <span class="col-owner">{{ row.owner }}</span>
-      <span
-        class="col-status"
-        :class="`task-table__status--${row.statusTone}`"
-      >{{ row.statusLabel }}</span>
-      <span class="col-due">{{ row.due }}</span>
+      <BaseButton v-if="selectedStatus" variant="ghost" size="sm" @click="selectedStatus = ''">
+        清除状态筛选
+      </BaseButton>
+    </OAEmpty>
+    <div v-else class="task-snapshot__scroll" role="region" aria-label="近期任务列表" tabindex="0">
+      <div class="task-table" role="table" aria-label="近期任务列表">
+        <div class="task-table__head" role="row">
+          <span class="col-task" role="columnheader">任务</span>
+          <span class="col-owner" role="columnheader">负责人</span>
+          <span class="col-status" role="columnheader">状态</span>
+          <span class="col-due" role="columnheader">截止</span>
+        </div>
+        <div
+          v-for="(row, i) in visibleRows"
+          :key="row.id"
+          class="task-table__row"
+          :class="{ 'task-table__row--alt': i % 2 === 0 }"
+          role="row"
+        >
+          <span class="col-task" role="cell">
+            <RouterLink :to="{ name: 'TaskDetail', params: { id: row.id } }" :title="row.title">
+              {{ row.title }}
+            </RouterLink>
+          </span>
+          <span class="col-owner" role="cell" :title="row.owner">{{ row.owner }}</span>
+          <span class="col-status" role="cell" :class="`task-table__status--${row.statusTone}`">{{ row.statusLabel }}</span>
+          <span class="col-due" role="cell">{{ row.due }}</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, useId } from 'vue'
+import BaseButton from '@/components/base/BaseButton.vue'
+import OAEmpty from '@/oa/components/OAEmpty.vue'
 import type { Task } from '@/domain/types/task'
 import type { TaskOperationalRecentTask } from '@/types/dashboard'
 import { getTaskStatusLabel } from '@/domain/enums/task-status'
@@ -73,26 +95,64 @@ const rows = computed(() => {
     return { id: t.id, title, owner, statusLabel, statusTone, due }
   })
 })
+
+const selectedStatus = ref('')
+const statusFilterId = useId()
+const statuses = computed(() => [...new Set([...rows.value.map((row) => row.statusLabel), selectedStatus.value])].filter(Boolean))
+const visibleRows = computed(() => selectedStatus.value
+  ? rows.value.filter((row) => row.statusLabel === selectedStatus.value)
+  : rows.value)
 </script>
 
 <style scoped>
+.task-snapshot {
+  display: flex;
+  flex: 1;
+  min-height: 8rem;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.task-snapshot__filter {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.8125rem;
+}
+.task-snapshot__filter select {
+  height: 2rem;
+  padding-inline: 0.5rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.375rem;
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface));
+}
+.task-snapshot__filter span:last-child { margin-inline-start: auto; }
+.task-snapshot__scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.65rem;
+}
+.col-task a { color: rgb(var(--yb-brand)); }
+.col-task a:hover { text-decoration: underline; }
 .task-table {
   display: flex;
   flex-direction: column;
   gap: 0;
   border-radius: 0.5rem;
-  overflow: hidden;
   font-size: 0.8125rem;
-  min-width: 32rem;
-}
-@media (min-width: 640px) {
-  .task-table {
-    min-width: 0;
-  }
+  min-width: 27rem;
 }
 .task-table__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 6.5rem 5rem 5.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(3rem, 0.4fr) 5.5rem 5.5rem;
   align-items: center;
   column-gap: 0.5rem;
   padding: 0.75rem;
@@ -102,7 +162,7 @@ const rows = computed(() => {
 }
 .task-table__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 6.5rem 5rem 5.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(3rem, 0.4fr) 5.5rem 5.5rem;
   column-gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   min-height: 2.5rem;
@@ -146,11 +206,5 @@ const rows = computed(() => {
 }
 .task-table__status--neutral {
   color: rgb(var(--yb-text-navy));
-}
-.task-table__empty {
-  padding: 1.5rem 0.75rem;
-  text-align: center;
-  color: rgb(var(--yb-text-placeholder));
-  background: rgb(var(--yb-surface-canvas));
 }
 </style>

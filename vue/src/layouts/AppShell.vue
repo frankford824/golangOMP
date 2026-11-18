@@ -9,13 +9,14 @@
     >
       <div class="flex items-center gap-3 px-6 h-16 mb-4">
         <div class="w-8 h-8 rounded-lg bg-[rgb(var(--yb-brand-soft))] border border-[rgb(var(--yb-brand-border))] flex items-center justify-center flex-shrink-0">
-          <span class="material-symbols-outlined text-[rgb(var(--yb-brand))] text-lg">architecture</span>
+          <img v-if="oaEnabled" class="oa-brand-mark" :src="oaBrandMark" alt="永箔" width="32" height="32" />
+          <span v-else class="material-symbols-outlined text-[rgb(var(--yb-brand))] text-lg">architecture</span>
         </div>
         <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">
           <h2 class="font-headline font-extrabold text-[rgb(var(--yb-text))] text-sm tracking-tight">永箔运营</h2>
         </div>
       </div>
-      <nav class="flex-1 px-4 space-y-4 overflow-y-auto custom-scrollbar">
+      <nav aria-label="主导航" class="flex-1 px-4 space-y-4 overflow-y-auto custom-scrollbar">
         <template v-if="workbenchMenus.length > 0">
           <div class="nav-section-label opacity-0 group-hover:opacity-100 transition-opacity">工作台</div>
           <router-link
@@ -36,6 +37,7 @@
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
             <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menuLabel(menu) }}</span>
+            <span v-if="oaEnabled && !sidebarPinned" class="oa-rail-caption" aria-hidden="true">{{ shortLabel[menu.key] || menu.label }}</span>
             <span v-if="menu.badge && menu.badge() > 0" class="nav-badge-p2">{{ menu.badge() }}</span>
           </router-link>
         </template>
@@ -58,6 +60,7 @@
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
             <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menuLabel(menu) }}</span>
+            <span v-if="oaEnabled && !sidebarPinned" class="oa-rail-caption" aria-hidden="true">{{ shortLabel[menu.key] || menu.label }}</span>
           </router-link>
         </template>
         <template v-if="dataMenus.length > 0">
@@ -79,6 +82,7 @@
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
             <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menuLabel(menu) }}</span>
+            <span v-if="oaEnabled && !sidebarPinned" class="oa-rail-caption" aria-hidden="true">{{ shortLabel[menu.key] || menu.label }}</span>
             <span v-if="menu.badge" class="nav-badge-p2">P2</span>
           </router-link>
         </template>
@@ -111,7 +115,7 @@
         <div class="app-topbar__actions">
           <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
             <Search :size="18" aria-hidden="true" />
-            <span class="topbar-search__label">搜索任务、SKU、产品</span><kbd v-if="oaEnabled" class="oa-search-key">Ctrl K</kbd>
+            <span class="topbar-search__label">{{ oaEnabled ? '查找页面、任务、SKU' : '搜索任务、SKU、产品' }}</span><kbd v-if="oaEnabled" class="oa-search-key">Ctrl K</kbd>
           </button>
           <MediaPreparationPanel />
           <NotificationBadge @open="notificationOpen = true" />
@@ -119,7 +123,7 @@
         </div>
       </header>
 
-      <div ref="contentScroller" class="flex-1 overflow-auto custom-scrollbar isolate">
+      <div ref="contentScroller" :class="{ 'oa-dashboard-viewport': oaEnabled && ($route.path === '/operations' || $route.path.startsWith('/operations/') || $route.path === '/me/performance' || $route.name === 'Dashboard') }" class="flex-1 overflow-auto custom-scrollbar isolate">
         <main class="content">
           <PersonalNav v-if="oaEnabled && ($route.path === '/me' || $route.path.startsWith('/me/')) && $route.path !== '/me/performance'" />
           <router-view v-slot="{ Component, route }">
@@ -131,7 +135,7 @@
         </main>
       </div>
     </main>
-    <GlobalSearchOverlay v-model:open="searchOpen" />
+    <GlobalSearchOverlay v-model:open="searchOpen" :pages="oaEnabled ? quickPages : undefined" />
     <NotificationCenter v-model:open="notificationOpen" />
     <transition name="route-progress">
       <div v-if="routeLoading" class="route-progress" role="status" aria-live="polite">
@@ -149,7 +153,8 @@
           <aside class="mobile-sidebar-panel" aria-label="移动端导航">
             <div class="mobile-sidebar-header">
               <div class="mobile-brand">
-                <span class="material-symbols-outlined">architecture</span>
+                <img v-if="oaEnabled" class="oa-brand-mark" :src="oaBrandMark" alt="" width="32" height="32" />
+                <span v-else class="material-symbols-outlined">architecture</span>
                 <strong>永箔运营</strong>
               </div>
               <button type="button" class="mobile-close-button" aria-label="关闭导航" @click="closeMobileSidebar">
@@ -194,18 +199,23 @@ import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import PersonalNav from '@/oa/components/PersonalNav.vue'
 import { oaPageTitle } from '@/oa/pageTitle'
+import oaBrandMark from '@/oa/assets/yongbo-mark.svg'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
 
 const permissionsStore = usePermissionsStore()
 const { can } = useOAAccess()
 const router = useRouter()
 
-const sidebarPinned = ref(oaEnabled && localStorage.getItem('oa.navigation.expanded') === '1')
+const sidebarPinned = ref(oaEnabled && localStorage.getItem('oa.navigation.expanded') !== '0')
 const tip = ref<{ label: string; top: number; left: number } | null>(null)
 function toggleSidebar() {
   sidebarPinned.value = !sidebarPinned.value
   tip.value = null
   localStorage.setItem('oa.navigation.expanded', sidebarPinned.value ? '1' : '0')
+}
+const shortLabel: Record<string, string> = {
+  oa_operations: '经营', dashboard: '看板', task_list: '任务', oa_expenses: '费用',
+  resource_management: '资产', cost_rules: '成本', user_admin: '人员',
 }
 function menuLabel(menu: MenuConfig) {
   return menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label
@@ -288,10 +298,10 @@ const MENU_CONFIG: MenuConfig[] = [
   },
   {
     key: 'report_center',
-    label: oaEnabled ? 'AI 数据助手' : '数据中心',
+    label: '数据中心',
     to: '/data-center',
     section: 'data',
-    icon: oaEnabled ? 'forum' : 'analytics',
+    icon: 'analytics',
   },
   {
     key: 'user_admin',
@@ -310,6 +320,7 @@ const visibleMenus = computed(() => {
   if (!permissionsStore.currentUser) return []
   const userMenus = permissionsStore.menus
   return MENU_CONFIG.filter((menu) => {
+    if (oaEnabled && menu.key === 'report_center') return false
     if (menu.key === 'user_admin' && can('people.manage')) return true
     return menu.oaActions ? menu.oaActions.some(can) : userMenus.includes(menu.key)
   })
@@ -334,6 +345,17 @@ function resolveMenuTo(menu: MenuConfig) {
   if (menu.key === 'dashboard' && can('orders.view')) return { path: '/', query: { workspace: 'tasks' } }
   return menu.to
 }
+
+const quickPages = computed(() => {
+  const links = visibleMenus.value.map(menu => ({ label: menuLabel(menu), path: router.resolve(resolveMenuTo(menu)).fullPath }))
+  if (can('orders.view')) links.push({ label: '订单明细', path: '/operations/orders/detail' }, { label: '商品表现', path: '/operations/products' }, { label: '经营排行', path: '/operations/rankings' })
+  if (can('pricing.view')) links.push({ label: 'SKU 核价', path: '/operations/pricing' })
+  if (can('finance.apply')) links.push({ label: '发起费用申请', path: '/fees/apply' })
+  if (can('finance.approve') || can('finance.pay')) links.push({ label: '审批与付款', path: '/fees/approval' })
+  if (can('people.manage')) links.push({ label: '人员花名册', path: '/users/roster' })
+  links.push({ label: '个人中心', path: '/me' })
+  return links
+})
 
 function openSearch() {
   searchOpen.value = true
@@ -976,7 +998,7 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   .app-topbar__short-name { display: inline; }
 }
 
-.oa-sidebar.sidebar { --sidebar-rail: 64px; --sidebar-drawer: 200px; }
+.oa-sidebar.sidebar { --sidebar-rail: 76px; --sidebar-drawer: 176px; }
 .oa-sidebar.sidebar:not(.oa-sidebar-open):hover { width: var(--sidebar-rail); flex-basis: var(--sidebar-rail); }
 .oa-sidebar.sidebar.oa-sidebar-open { width: var(--sidebar-drawer); flex-basis: var(--sidebar-drawer); }
 .oa-sidebar.sidebar > nav { min-height: 0; padding-inline: 8px; }
@@ -995,4 +1017,20 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 .oa-search-key { display:none; }
 @media (min-width: 1100px) { .app-topbar .topbar-search:has(.oa-search-key) { width: 260px; } .oa-search-key { display: inline-block; margin-left:auto; color: var(--oa-secondary); font: 12px var(--yb-font-mono); } }
 @media (max-width: 600px) { .oa-breadcrumb > span { display:none; } }
+
+.oa-sidebar:not(.oa-sidebar-open) .nav-item { flex-direction: column; justify-content: center; gap: 0; padding: 4px; }
+.oa-sidebar:not(.oa-sidebar-open) .nav-item > div { width: 24px; height: 24px; }
+.oa-rail-caption { font: 500 12px/1.45 var(--oa-font); white-space: nowrap; }
+.oa-sidebar .nav-item.active .oa-rail-caption { color: var(--oa-accent); }
+.oa-sidebar.sidebar .nav-item:focus-visible { outline: 2px solid var(--oa-accent); outline-offset: -2px; }
+.oa-sidebar.sidebar h2 { font: 600 16px/1.4 var(--oa-font); letter-spacing: 0; }
+@media (min-width: 1024px) {
+  .oa-dashboard-viewport { min-height: 0; overflow: hidden; }
+  .oa-dashboard-viewport > .content { height: 100%; min-height: 0; overflow: hidden; box-sizing: border-box; }
+}
+
+.oa-brand-mark { flex: none; display: block; width: 32px; height: 32px; }
+.oa-sidebar.sidebar > div:first-child { align-items: center; padding-inline: 12px; }
+.oa-sidebar.sidebar:not(.oa-sidebar-open) > div:first-child { justify-content: center; }
+.oa-sidebar.sidebar > div:first-child > div:first-child { border: 0; background: transparent; }
 </style>

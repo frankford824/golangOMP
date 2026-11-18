@@ -6,13 +6,14 @@ import { orderState } from '../ordersDisplay'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import type { HttpAppError } from '@/services/http'
+import OAEmpty from '../components/OAEmpty.vue'
 import PageHead from '../components/PageHead.vue'
 import FreshnessStatus from '../components/FreshnessStatus.vue'
 import { api, dateInChina, errorText, money } from '../api'
 import { useOAAccess } from '../access'
 import '../styles.css'
 
-const { currentProfile } = useOAAccess()
+const { currentProfile, can } = useOAAccess()
 const route = useRoute()
 
 const props = defineProps<{ mode: 'detail' | 'refunds' | 'ledger' }>()
@@ -49,16 +50,18 @@ const to = ref(today)
 const shop = ref('')
 const platform = ref('')
 const orderNo = ref('')
+const includeBrush = ref(true)
+const shopError = ref('')
 const offset = ref(0)
 const applied = ref('')
-type OrderData = { rows: Row[]; has_more?: boolean; stale?: boolean; freshness?: { source_committed_at?: string; lag_seconds?: number } }
+type OrderData = { rows: Row[]; has_more?: boolean; scope_state?: 'unassigned'; stale?: boolean; freshness?: { source_committed_at?: string; lag_seconds?: number } }
 const data = ref<OrderData>()
 const shopNames = ref<{ shop_id: string; shop_name: string }[]>([])
 const busy = ref(false)
 const error = ref('')
 const failedRequest = ref<{ offset: number; query: string }>()
 const scope = computed(() => currentProfile.value?.id)
-const allowed = computed(() => scope.value != null && (props.mode !== 'ledger' || !!currentProfile.value?.super_admin))
+const allowed = computed(() => scope.value != null && can('orders.view') && (props.mode !== 'ledger' || !!currentProfile.value?.super_admin))
 const copyStatus = ref('')
 const selected = ref<Row>()
 const dialog = ref<HTMLDialogElement>()
@@ -88,6 +91,7 @@ let scopeId = 0
 
 function filterQuery() {
   const params = new URLSearchParams({ from: from.value, to: to.value, shop_id: shop.value, platform: platform.value })
+  if (props.mode === 'detail') params.set('include_brush', includeBrush.value ? '1' : '0')
   if (props.mode === 'detail' && orderNo.value) params.set('online_order_no', orderNo.value)
   return params.toString()
 }
@@ -98,6 +102,7 @@ function resetFilters() {
   shop.value = ''
   platform.value = ''
   orderNo.value = ''
+  includeBrush.value = true
 }
 
 function restoreRouteFilters() {
@@ -109,16 +114,18 @@ function restoreRouteFilters() {
   }
   shop.value = typeof shopId === 'string' ? shopId : ''
   orderNo.value = props.mode === 'detail' && typeof route.query.online_order_no === 'string' ? route.query.online_order_no : ''
-  platform.value = props.mode === 'detail' && typeof platformCode === 'string' ? platformCode : ''
+  platform.value = typeof platformCode === 'string' ? platformCode : ''
+  includeBrush.value = route.query.include_brush !== '0'
 }
 
 const navigationQuery = computed(() => {
   const params = new URLSearchParams(applied.value)
   const query: Record<string, string> = {}
-  for (const key of ['from', 'to', 'shop_id']) {
+  for (const key of ['from', 'to', 'shop_id', 'platform', 'include_brush']) {
     const value = params.get(key)
     if (value) query[key] = value
   }
+  if (!query.include_brush && typeof route.query.include_brush === 'string') query.include_brush = route.query.include_brush
   return query
 })
 
@@ -220,12 +227,13 @@ function stateClass(column: Column, row: Row) {
 watch([scope, allowed], async () => {
   const currentScope = ++scopeId
   shopNames.value = []
+  shopError.value = ''
   if (!allowed.value) return
   try {
     const result = await api<{ rows: { shop_id: string; shop_name: string }[] }>('/oa-api/orders/shops')
     if (scopeId === currentScope) shopNames.value = result.rows || []
   } catch {
-    // Keep the shop code input available when the store list cannot be read.
+    if (scopeId === currentScope) shopError.value = '店铺列表暂不可用，可手动输入店铺 ID。'
   }
 }, { immediate: true, flush: 'sync' })
 
@@ -249,6 +257,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
     <PageHead :title="title" :subtitle="subtitle" />
     <OperationNav :query="navigationQuery" />
 
+    <div class="order-data-body" tabindex="0" role="region" :aria-label="title + '工作区'">
     <p v-if="!allowed" class="oa-error" role="alert">当前账号没有{{ title }}权限。</p>
     <template v-else>
       <form class="order-data-filters" @submit.prevent="load()">
@@ -262,15 +271,17 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
           <input v-else v-model.trim="shop" placeholder="全部可见店铺" />
         </label>
         <label v-if="mode === 'detail'">平台订单号<input v-model.trim="orderNo" maxlength="128" placeholder="精确查单" /></label>
-        <label v-if="mode === 'detail'">平台<input v-model.trim="platform" placeholder="默认平台范围" /></label>
+        <label>平台<input v-model.trim="platform" placeholder="默认平台范围" /></label>
         <label>日期<OrderDateField v-model="from" label="开始日期" :max="to" :min="firstDay" /></label>
         <label>至<OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
+        <label v-if="mode === 'detail'" class="order-data-check"><input v-model="includeBrush" type="checkbox" />包含刷单</label>
         <div class="order-data-filter-actions">
           <button class="oa-button-primary" type="submit" :disabled="busy"><Search :size="16" aria-hidden="true" />查询</button>
           <button type="button" :disabled="busy" @click="resetAndLoad">重置</button>
         </div>
       </form>
 
+      <p v-if="shopError" class="oa-watermark">{{ shopError }}</p>
       <p v-if="error" class="oa-error order-data-error" role="alert">
         <span>{{ error }}</span>
         <button v-if="failedRequest" type="button" @click="load(failedRequest.offset, failedRequest.query)">重试</button>
@@ -283,7 +294,8 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
           <FreshnessStatus :freshness="data.freshness" :stale="data.stale" />
           <p v-if="copyStatus && !selected" class="oa-muted" role="status">{{ copyStatus }}</p>
         </header>
-        <p v-if="!visibleRows.length" class="oa-empty">所选范围暂无{{ title }}数据</p>
+        <OAEmpty v-if="data.scope_state === 'unassigned'" title="暂无经营归属" description="当前账号没有分配可访问店铺。" kind="list" />
+        <OAEmpty v-else-if="!visibleRows.length" :title="'所选范围暂无' + title + '数据'" kind="search" />
         <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
           <table class="oa-table order-data-table">
             <thead>
@@ -309,7 +321,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
           <span class="oa-muted">第 {{ page }} 页<span v-if="visibleRows.length"> · 本页 {{ visibleRows.length }} 条</span></span>
           <div>
             <button type="button" :disabled="busy || !offset" @click="changePage(Math.max(0, offset - pageSize))"><ChevronLeft :size="16" aria-hidden="true" />上一页</button>
-            <button type="button" :disabled="busy || !hasNext" @click="changePage(offset + pageSize)">下一页<ChevronRight :size="16" aria-hidden="true" /></button>
+            <button type="button" :disabled="busy || !hasNext || (mode !== 'refunds' && offset >= 10000)" @click="changePage(offset + pageSize)">下一页<ChevronRight :size="16" aria-hidden="true" /></button>
           </div>
         </div>
       </section>
@@ -333,6 +345,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
         <p v-if="copyStatus" class="oa-muted order-data-copy-status" role="status">{{ copyStatus }}</p>
       </dialog>
     </template>
+    </div>
   </div>
 </template>
 

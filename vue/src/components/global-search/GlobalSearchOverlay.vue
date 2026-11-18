@@ -11,8 +11,12 @@
         v-model="keyword"
         :aria-busy="isSearching"
         class="w-full rounded-md border border-[var(--v1-border)] bg-[var(--v1-bg-surface-soft)] px-3 py-2 text-sm text-[var(--v1-text-primary)] outline-none"
-        placeholder="搜索任务、资产、产品、用户"
+        :placeholder="pages ? '输入页面名、任务号或 SKU' : '搜索任务、资产、产品、用户'"
       />
+      <nav v-if="matchingPages.length" class="oa-page-jumps" aria-label="页面直达">
+        <strong>页面直达</strong>
+        <div><RouterLink v-for="page in matchingPages" :key="page.path" :to="page.path" @click="close">{{ page.label }}</RouterLink></div>
+      </nav>
       <div class="mt-3 flex flex-wrap gap-2 text-xs">
         <button
           v-for="item in scopes"
@@ -163,7 +167,7 @@ type CacheEntry = {
   savedAt: number
 }
 
-const props = defineProps<{ open: boolean }>()
+const props = defineProps<{ open: boolean; pages?: { label: string; path: string }[] }>()
 const emit = defineEmits<{ 'update:open': [boolean] }>()
 const router = useRouter()
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -240,6 +244,8 @@ const hasAnyResults = computed(() =>
 )
 
 const normalizedKeyword = computed(() => keyword.value.trim())
+const matchingPages = computed(() => (props.pages ?? []).filter(page =>
+  page.label.toLowerCase().includes(normalizedKeyword.value.toLowerCase())))
 const showMinimumHint = computed(() =>
   normalizedKeyword.value.length > 0 && Array.from(normalizedKeyword.value).length < 2,
 )
@@ -497,7 +503,9 @@ function onKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     activeFlatIndex.value = Math.max(activeFlatIndex.value - 1, 0)
   }
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' && event.target === inputRef.value && !event.isComposing) {
+    const page = matchingPages.value.find(candidate => candidate.label === normalizedKeyword.value)
+    if (page) { event.preventDefault(); void router.push(page.path); close(); return }
     const item = flatResults.value[activeFlatIndex.value]
     if (item) {
       goResult(item.result, item.groupKey)
@@ -683,4 +691,10 @@ onUnmounted(() => {
 }
 
 .order-lookup { margin-top: 8px; padding: 4px 12px; min-height: 32px; color: var(--oa-accent); background: rgb(var(--yb-brand-soft)); border-radius: 6px; }
+
+.oa-page-jumps { display: grid; gap: 8px; padding-block: 12px; }
+.oa-page-jumps > strong { color: var(--oa-secondary); font-size: 12px; }
+.oa-page-jumps > div { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.oa-page-jumps a { display: inline-flex; align-items: center; padding: 4px 8px; min-height: 32px; border: 1px solid var(--oa-line); border-radius: 6px; color: var(--oa-ink); }
+.oa-page-jumps a:hover,.oa-page-jumps a:focus-visible { color: var(--oa-accent); background: rgb(var(--yb-brand-soft)); }
 </style>

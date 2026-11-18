@@ -17,7 +17,8 @@
       <!-- 顶部 Header -->
       <div class="auth-heading text-center mb-10">
         <div class="auth-logo inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[rgb(var(--yb-brand-soft))] mb-4">
-          <span class="material-symbols-outlined text-[rgb(var(--yb-brand))] text-2xl">architecture</span>
+          <img v-if="oaEnabled" :src="oaBrandMark" width="36" height="36" alt="" />
+          <span v-else class="material-symbols-outlined text-[rgb(var(--yb-brand))] text-2xl">architecture</span>
         </div>
         <h1 class="auth-title text-2xl font-headline font-extrabold text-[rgb(var(--yb-text))] mb-2 text-center whitespace-nowrap">
           永箔运营管理系统
@@ -207,6 +208,7 @@
 </template>
 
 <script setup lang="ts">
+import oaBrandMark from '@/oa/assets/yongbo-mark.svg'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
 import { ref, computed, onMounted } from 'vue'

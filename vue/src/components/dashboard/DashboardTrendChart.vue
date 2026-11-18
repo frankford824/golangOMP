@@ -40,8 +40,11 @@ let chart: ECharts | null = null
 const chartFontFamily = 'Segoe UI, PingFang SC, Microsoft YaHei, sans-serif'
 
 const option = computed<EChartsCoreOption>(() => {
-  const axisColor = '--yb-chart-axis'
+  const axisColor = '--yb-text-muted-strong'
+  const axisText = resolveCssRgbToken(axisColor, '71 85 105')
+  const gridline = resolveCssRgbToken('--yb-border-strong', '203 213 225')
   return {
+    animation: false,
     color: [
       resolveCssRgbToken('--yb-chart-trend-created', '111 140 255'),
       resolveCssRgbToken('--yb-chart-trend-completed', '142 226 127'),
@@ -69,19 +72,19 @@ const option = computed<EChartsCoreOption>(() => {
       type: 'scroll' as const,
       top: 0,
       left: 'center',
-      textStyle: { color: resolveCssRgbToken('--yb-chart-legend-text', '170 181 204'), fontFamily: chartFontFamily, fontSize: 10 },
+      textStyle: { color: axisText, fontFamily: chartFontFamily, fontSize: 11 },
     },
     xAxis: {
       type: 'category' as const,
       data: props.labels,
-      axisLine: { lineStyle: { color: resolveCssRgbToken(axisColor, '220 230 255', 0.42) } },
-      axisLabel: { color: resolveCssRgbToken(axisColor, '220 230 255', 0.56), fontFamily: chartFontFamily, fontSize: 10, interval: 0 },
+      axisLine: { lineStyle: { color: gridline } },
+      axisLabel: { color: axisText, fontFamily: chartFontFamily, fontSize: 11, interval: 0 },
     },
     yAxis: {
       type: 'value' as const,
       minInterval: 1,
-      splitLine: { lineStyle: { color: resolveCssRgbToken(axisColor, '220 230 255', 0.18) } },
-      axisLabel: { color: resolveCssRgbToken(axisColor, '220 230 255', 0.62), fontFamily: chartFontFamily, fontSize: 10 },
+      splitLine: { lineStyle: { color: gridline } },
+      axisLabel: { color: axisText, fontFamily: chartFontFamily, fontSize: 11 },
     },
     series: [
       { name: '新建', type: 'bar' as const, data: props.created, barMaxWidth: 16 },
@@ -92,12 +95,12 @@ const option = computed<EChartsCoreOption>(() => {
 })
 
 function resize() {
-  chart?.resize()
+  if (chartRef.value?.clientWidth && chartRef.value.clientHeight) chart?.resize()
 }
 
 function render() {
-  if (!chartRef.value) return
   if (!chart) {
+    if (!chartRef.value?.clientWidth || !chartRef.value.clientHeight) return
     chart = init(chartRef.value, undefined, { renderer: 'canvas' })
   }
   chart.setOption(option.value, { notMerge: true })
@@ -136,7 +139,9 @@ onMounted(() => {
     window.addEventListener('resize', resize)
     if (typeof ResizeObserver !== 'undefined' && chartRef.value) {
       resizeObserver = new ResizeObserver(() => {
-        resize()
+        if (props.loading) return
+        if (chart) resize()
+        else render()
       })
       resizeObserver.observe(chartRef.value)
     }

@@ -7,9 +7,7 @@
     <div v-else-if="error" class="risk-error">
       <p>{{ error }}</p>
     </div>
-    <div v-else-if="!items.length" class="risk-empty">
-      <p>暂无风险项</p>
-    </div>
+    <OAEmpty v-else-if="!items.length" title="暂无风险项" kind="inbox" />
     <template v-else>
       <ul class="risk-list">
         <li
@@ -44,10 +42,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import type { RiskItem } from '@/types/dashboard'
 import StatusSkeleton from '@/components/common/StatusSkeleton.vue'
+import OAEmpty from '@/oa/components/OAEmpty.vue'
 import { useRouter } from 'vue-router'
 
 const props = defineProps<{
@@ -71,13 +70,6 @@ const displayItems = computed(() => {
   }
   return props.items.slice(0, RISK_LIST_LIMIT)
 })
-
-watch(
-  () => props.items,
-  () => {
-    expanded.value = false
-  },
-)
 
 function isNavigable(item: RiskItem): boolean {
   if (item.route) return true
@@ -119,8 +111,7 @@ function onSelect(item: RiskItem) {
   color: rgb(var(--yb-text-navy));
 }
 .risk-loading,
-.risk-error,
-.risk-empty {
+.risk-error {
   padding: 0.5rem 0;
   font-size: 0.875rem;
   color: rgb(var(--yb-text-muted-strong));

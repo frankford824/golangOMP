@@ -139,17 +139,14 @@ const routes: RouteRecordRaw[] = [
         props: (route) => ({ initialSku: oaEnabled && typeof route.query.sku === 'string' ? route.query.sku.trim() : '' }),
         meta: { requiresAuth: true, requiredMenuKey: 'cost_rules', keepAlive: true },
       },
-      {
-        path: 'data-center',
-        name: 'DataCenter',
-        component: () => import('@/views/data-center/DataCenterView.vue'),
-        meta: {
-          requiresAuth: true,
-          requiredMenuKey: 'report_center',
-          requiredPermissions: ['report.view'],
-          emptyTitle: '数据中心',
-        },
-      },
+      ...(import.meta.env.VITE_OA_FEATURES === 'true'
+        ? [{ path: 'data-center', redirect: { name: 'Me' } }]
+        : [{
+            path: 'data-center',
+            name: 'DataCenter',
+            component: () => import('@/views/data-center/DataCenterView.vue'),
+            meta: { requiresAuth: true, requiredMenuKey: 'report_center', requiredPermissions: ['report.view'], emptyTitle: '数据中心' },
+          }]),
       {
         path: 'users',
         name: 'UserManagement',

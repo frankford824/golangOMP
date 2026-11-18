@@ -43,7 +43,8 @@
 
     <template v-if="!loading || result.items.length || result.flat_items.length">
     <template v-if="isFlatMode">
-      <div v-if="!result.flat_items.length && !error" class="empty">没有找到符合条件的资源。</div>
+      <OAEmpty v-if="oaEnabled && !result.flat_items.length && !error" kind="files" title="没有找到符合条件的资源" description="可调整搜索词或筛选条件，再查看结果。" />
+      <div v-else-if="!result.flat_items.length && !error" class="empty">没有找到符合条件的资源。</div>
       <section v-else-if="result.flat_items.length" class="grid flat-grid" aria-label="匹配资源列表">
         <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
           <span class="cover">
@@ -62,7 +63,8 @@
     </template>
 
     <template v-else>
-      <div v-if="!result.items.length && !externalItems.length && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
+      <OAEmpty v-if="oaEnabled && !result.items.length && !externalItems.length && !error" kind="files" title="没有找到符合条件的 SKU 资源" description="可调整搜索词或筛选条件，再查看结果。" />
+      <div v-else-if="!result.items.length && !externalItems.length && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
       <div v-else-if="oaEnabled && showLedger && result.items.length" class="asset-ledger-scroll" role="region" aria-label="SKU 规格台账" tabindex="0">
         <table class="asset-ledger">
           <thead>
@@ -242,6 +244,7 @@
 </template>
 
 <script setup lang="ts">
+import OAEmpty from '@/oa/components/OAEmpty.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { ImageIcon } from 'lucide-vue-next'
