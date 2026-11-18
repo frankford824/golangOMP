@@ -22,11 +22,12 @@ var beijing = time.FixedZone("Asia/Shanghai", 8*3600)
 var firstDay = time.Date(2026, 6, 1, 0, 0, 0, 0, beijing)
 
 type result struct {
-	Cache     string `json:"-"`
-	Rows      []row  `json:"rows"`
-	Freshness row    `json:"freshness"`
-	Stale     bool   `json:"stale"`
-	HasMore   bool   `json:"has_more"`
+	Cache      string `json:"-"`
+	Rows       []row  `json:"rows"`
+	Freshness  row    `json:"freshness"`
+	Stale      bool   `json:"stale"`
+	HasMore    bool   `json:"has_more"`
+	ScopeState string `json:"scope_state,omitempty"`
 }
 
 type cached struct {
@@ -77,24 +78,32 @@ func allowed(actor platform.Actor) bool {
 	return false
 }
 
-func (s *server) scope(ctx context.Context, actor platform.Actor, params url.Values, own bool) (bool, error) {
+type scopeState string
+
+const (
+	scopeAllowed    scopeState = ""
+	scopeUnassigned scopeState = "unassigned"
+	scopeForbidden  scopeState = "forbidden"
+)
+
+func (s *server) orderScope(ctx context.Context, actor platform.Actor, params url.Values, own bool) (scopeState, error) {
 	params.Set("param_all", "0")
 	params.Set("param_shops", "[]")
 	params.Set("param_person", "")
 	if actor.SuperAdmin && !own {
 		params.Set("param_all", "1")
-		return true, nil
+		return scopeAllowed, nil
 	}
 	set, person, err := s.baselineScope(ctx, actor.EmployeeNo)
 	if err != nil {
-		return false, err
+		return scopeForbidden, err
 	}
 	overrides := map[string]bool{}
 	if s.db != nil {
 		overrides, err = office.ShopOverrides(ctx, s.db, actor.ID)
 	}
 	if err != nil {
-		return false, err
+		return scopeForbidden, err
 	}
 	for shop, active := range overrides {
 		if active {
@@ -103,8 +112,11 @@ func (s *server) scope(ctx context.Context, actor platform.Actor, params url.Val
 			delete(set, shop)
 		}
 	}
+	if shop := params.Get("param_shop"); shop != "" && !set[shop] {
+		return scopeForbidden, nil
+	}
 	if len(set) == 0 || own && person == "" {
-		return false, nil
+		return scopeUnassigned, nil
 	}
 	shops := make([]string, 0, len(set))
 	for shop := range set {
@@ -117,7 +129,12 @@ func (s *server) scope(ctx context.Context, actor platform.Actor, params url.Val
 	}
 	params.Set("param_shops", "["+strings.Join(quoted, ",")+"]")
 	params.Set("param_person", person)
-	return true, nil
+	return scopeAllowed, nil
+}
+
+func (s *server) scope(ctx context.Context, actor platform.Actor, params url.Values, own bool) (bool, error) {
+	state, err := s.orderScope(ctx, actor, params, own)
+	return state == scopeAllowed, err
 }
 
 func (s *server) baselineScope(ctx context.Context, employee *int) (map[string]bool, string, error) {
@@ -199,7 +216,7 @@ func filters(r *http.Request, name string, now time.Time) (url.Values, error) {
 	}
 	params.Set("param_offset", strconv.Itoa(offset))
 	params.Set("param_brush", "0")
-	if query.Get("include_brush") == "1" {
+	if query.Get("include_brush") == "1" || (name == "detail" && query.Get("include_brush") == "") {
 		params.Set("param_brush", "1")
 	}
 	return params, nil
@@ -233,7 +250,7 @@ func (s *server) read(w http.ResponseWriter, r *http.Request, name string) {
 			platform.Error(w, 400, "排行类型无效")
 			return
 		}
-		if (group == "person" || name == "ledger") && !actor.SuperAdmin {
+		if group == "person" && !actor.SuperAdmin {
 			platform.Error(w, 403, "当前账号无人员排行权限")
 			return
 		}
@@ -242,7 +259,7 @@ func (s *server) read(w http.ResponseWriter, r *http.Request, name string) {
 		platform.Error(w, 403, "当前账号无台账权限")
 		return
 	}
-	if group == "growth" {
+	if name == "rankings" && group == "growth" {
 		from, _ := time.ParseInLocation(time.DateOnly, params.Get("param_from"), beijing)
 		until, _ := time.ParseInLocation(time.DateOnly, params.Get("param_until"), beijing)
 		baseline := from.Add(-until.Sub(from))
@@ -282,16 +299,20 @@ func (s *server) read(w http.ResponseWriter, r *http.Request, name string) {
 	if own && name == "products" {
 		query = myProductsSQL
 	}
-	permitted, err := s.scope(r.Context(), actor, params, own)
+	state, err := s.orderScope(r.Context(), actor, params, own)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	if !permitted {
-		platform.JSON(w, 200, result{Rows: []row{}})
+	if state == scopeForbidden {
+		platform.Error(w, 403, "当前账号无该店铺的经营查询权限")
 		return
 	}
-	key := fmt.Sprintf("%d/%s/%s/%s", actor.ID, name, group, params.Encode())
+	if state == scopeUnassigned {
+		platform.JSON(w, 200, result{Rows: []row{}, ScopeState: string(state)})
+		return
+	}
+	key := fmt.Sprintf("%d/%s/%s/%t/%s", actor.ID, name, group, own, params.Encode())
 	data, err := s.load(r.Context(), key, query, params)
 	if err != nil {
 		writeError(w, err)
@@ -368,7 +389,7 @@ func (s *server) load(ctx context.Context, key, query string, params url.Values)
 		pending.err = err
 		return result{}, err
 	}
-	pending.result = result{Cache: "miss", Rows: rows, Freshness: freshness[0], HasMore: len(rows) == 101 && (query == productsSQL || query == skuSQL || query == myProductsSQL || query == personRankingSQL || query == productRankingSQL || query == shopRankingSQL || query == platformRankingSQL || query == brushShopRankSQL || query == brushPlatformRankSQL || query == growthSQL || query == ledgerSQL || query == orderDetailSQL || query == exactOrderDetailSQL)}
+	pending.result = result{Cache: "miss", Rows: rows, Freshness: freshness[0], HasMore: len(rows) == 101 && (query == productsSQL || query == historySQL || query == skuSQL || query == myProductsSQL || query == personRankingSQL || query == productRankingSQL || query == shopRankingSQL || query == platformRankingSQL || query == brushShopRankSQL || query == brushPlatformRankSQL || query == growthSQL || query == ledgerSQL || query == orderDetailSQL || query == exactOrderDetailSQL)}
 	if pending.result.HasMore {
 		pending.result.Rows = rows[:100]
 	}

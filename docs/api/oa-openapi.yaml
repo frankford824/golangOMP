@@ -914,6 +914,13 @@ paths:
         schema:
           type: string
         required: true
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        description: 每页最多 100 条；has_more 指示后续页
       responses:
         '200':
           description: 成功
@@ -1195,6 +1202,14 @@ paths:
         schema:
           type: string
         description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 0 排除整单刷单，1 或省略则含整单刷单
       - in: query
         name: offset
         schema:
@@ -2902,6 +2917,11 @@ components:
     OrderResult:
       type: object
       properties:
+        scope_state:
+          type: string
+          enum:
+          - unassigned
+          description: 当前账号未映射到可访问店铺，或个人查询未匹配唯一人员归属；有范围但无成交时不返回该字段
         rows:
           type: array
           items:
