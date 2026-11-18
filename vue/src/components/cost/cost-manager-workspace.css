@@ -240,13 +240,22 @@
 .binding-dialog .binding-option,.binding-dialog .bulk-binding label{display:flex;align-items:center;gap:10px;min-width:0}
 .binding-dialog .binding-option input,.binding-dialog .bulk-binding input{width:16px;height:16px;flex:0 0 auto;accent-color:rgb(var(--yb-brand))}
 .binding-dialog .binding-option span{display:grid;gap:5px;min-width:0}
-.binding-dialog .binding-pagination span{flex:1;color:rgb(var(--yb-text-muted))}
+.binding-dialog .binding-pagination span{color:rgb(var(--yb-text-muted))}
 
 .binding-dialog .binding-search-form{display:grid;gap:6px;padding:0 20px;font-size:13px}
 .binding-dialog .binding-search-form>div{display:flex;gap:8px;align-items:center}
 .binding-dialog .binding-search-form input{flex:1;min-width:0;width:auto;padding:10px 12px;border:1px solid rgb(var(--yb-border));border-radius:8px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}
 .binding-dialog .binding-search-form button{flex:0 0 auto}
-.binding-dialog .bulk-binding,.binding-dialog .binding-pagination{padding:0 20px;box-sizing:border-box;margin:0}
+.binding-dialog .bulk-binding{padding:0 20px;box-sizing:border-box;margin:0}
+.binding-dialog .candidate-list { flex: 0 1 auto; scrollbar-gutter: stable; }
+.binding-dialog .binding-pagination {
+  flex: 0 0 auto;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0.55rem 1.2rem;
+  border-top: 1px solid rgb(var(--yb-border));
+}
+.binding-dialog .binding-page-controls { display: flex; align-items: center; gap: 0.55rem; }
 .binding-dialog button:disabled{opacity:.45;cursor:default}
 
 /* Cost workspace typography and icon geometry, including teleported dialogs. */

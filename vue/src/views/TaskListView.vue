@@ -170,9 +170,76 @@
     <p v-if="listActionError" class="list-action-error">{{ listActionError }}</p>
     <p v-if="listActionSuccess" class="list-action-success">{{ listActionSuccess }}</p>
 
-    <div v-if="filteredList.length > 0" class="footer-card">
+    <!-- 主内容区（三态统一包裹） -->
+    <div ref="taskCardsViewport" class="task-results desktop-region-scroll" role="region" aria-label="任务列表" tabindex="0">
+      <AsyncStateWrapper
+        :loading="tasksStore.loading"
+        :error="tasksStore.loadError"
+        :empty="filteredList.length === 0"
+        empty-title="暂无任务"
+        :empty-description="emptyDescription"
+        :skeleton-rows="6"
+        @retry="refreshList(true)"
+      >
+        <template #empty-action>
+          <BaseButton
+            v-if="can('task.create')"
+            variant="primary"
+            size="sm"
+            @click="goCreate"
+          >
+            创建任务
+          </BaseButton>
+        </template>
+
+        <!-- 统一卡片视图 -->
+        <div class="task-cards">
+          <TaskCard
+            v-for="task in pagedList"
+            :key="task.id"
+            :task="task"
+            :selected="selectedIds.has(task.id)"
+            :overdue="isOverdue(task)"
+            :claimable="canClaimTask(task)"
+            :customization="isCustomizationTask(task)"
+            :title="taskCardTitle(task)"
+            :sku="displaySku(task)"
+            :ownership="ownershipPrimary(task)"
+            :creator="taskCreatorDisplayName(task)"
+            :designer="taskDesignerDisplayName(task)"
+            :show-designer="shouldShowDesignerMetaOnTaskCenterCard(task)"
+            :category-label="taskCategoryLabel(task)"
+            :category-kind="isCustomizationTask(task) ? 'custom' : 'normal'"
+            :show-lane-tag="shouldShowWorkflowLaneTagOnCard(task)"
+            :status-label-override="getTaskCenterCardStatusLabel(task) ?? undefined"
+            :is-retouch="isRetouchTask(task)"
+            :is-batch="isBatchCard(task)"
+            :batch-count="batchItemCount(task)"
+            :batch-preview="taskCardBatchPreview(task)"
+            :has-more-batch="batchItemCount(task) > 2"
+            :claiming="claimingTaskId === task.id"
+            :claim-disabled="Boolean(claimingTaskId)"
+            :claim-label="taskCenterClaimButtonLabel(task, claimingTaskId === task.id)"
+            :can-copy-no="canCopyTaskField(task.taskNo)"
+            :can-copy-title="canCopyTaskField(taskCardTitle(task))"
+            :can-copy-sku="canCopyTaskField(displaySku(task))"
+            :updated-text="formatUpdatedDate(task.updatedAt)"
+            :due-text="task.dueAt ? formatDate(task.dueAt) : '-'"
+            @pointerdown="onTaskCardPointerDown"
+            @pointermove="onTaskCardPointerMove"
+            @click="onTaskCardClick($event, task)"
+            @toggle-select="toggleSelect(task.id)"
+            @copy="copyTaskCardText"
+            @claim="claimTask(task)"
+            @open-batch="openBatchItemsModal(task)"
+          />
+        </div>
+      </AsyncStateWrapper>
+    </div>
+
+    <nav v-if="filteredList.length > 0" class="footer-card" aria-label="任务分页">
       <span class="text-xs text-[rgb(var(--yb-text-muted))]">共 {{ tasksStore.listTotal }} 条</span>
-      <div class="flex items-center gap-3">
+      <div class="footer-controls">
         <label class="flex items-center gap-1 text-xs text-[rgb(var(--yb-text-muted))]">
           每页
           <BaseSelect
@@ -229,72 +296,7 @@
           </BaseButton>
         </div>
       </div>
-    </div>
-
-    <!-- 主内容区（三态统一包裹） -->
-    <AsyncStateWrapper
-      :loading="tasksStore.loading"
-      :error="tasksStore.loadError"
-      :empty="filteredList.length === 0"
-      empty-title="暂无任务"
-      :empty-description="emptyDescription"
-      :skeleton-rows="6"
-      @retry="refreshList(true)"
-    >
-      <template #empty-action>
-        <BaseButton
-          v-if="can('task.create')"
-          variant="primary"
-          size="sm"
-          @click="goCreate"
-        >
-          创建任务
-        </BaseButton>
-      </template>
-
-      <!-- 统一卡片视图 -->
-      <div ref="taskCardsViewport" class="task-cards" role="region" aria-label="任务列表" tabindex="0">
-        <TaskCard
-          v-for="task in pagedList"
-          :key="task.id"
-          :task="task"
-          :selected="selectedIds.has(task.id)"
-          :overdue="isOverdue(task)"
-          :claimable="canClaimTask(task)"
-          :customization="isCustomizationTask(task)"
-          :title="taskCardTitle(task)"
-          :sku="displaySku(task)"
-          :ownership="ownershipPrimary(task)"
-          :creator="taskCreatorDisplayName(task)"
-          :designer="taskDesignerDisplayName(task)"
-          :show-designer="shouldShowDesignerMetaOnTaskCenterCard(task)"
-          :category-label="taskCategoryLabel(task)"
-          :category-kind="isCustomizationTask(task) ? 'custom' : 'normal'"
-          :show-lane-tag="shouldShowWorkflowLaneTagOnCard(task)"
-          :status-label-override="getTaskCenterCardStatusLabel(task) ?? undefined"
-          :is-retouch="isRetouchTask(task)"
-          :is-batch="isBatchCard(task)"
-          :batch-count="batchItemCount(task)"
-          :batch-preview="taskCardBatchPreview(task)"
-          :has-more-batch="batchItemCount(task) > 2"
-          :claiming="claimingTaskId === task.id"
-          :claim-disabled="Boolean(claimingTaskId)"
-          :claim-label="taskCenterClaimButtonLabel(task, claimingTaskId === task.id)"
-          :can-copy-no="canCopyTaskField(task.taskNo)"
-          :can-copy-title="canCopyTaskField(taskCardTitle(task))"
-          :can-copy-sku="canCopyTaskField(displaySku(task))"
-          :updated-text="formatUpdatedDate(task.updatedAt)"
-          :due-text="task.dueAt ? formatDate(task.dueAt) : '-'"
-          @pointerdown="onTaskCardPointerDown"
-          @pointermove="onTaskCardPointerMove"
-          @click="onTaskCardClick($event, task)"
-          @toggle-select="toggleSelect(task.id)"
-          @copy="copyTaskCardText"
-          @claim="claimTask(task)"
-          @open-batch="openBatchItemsModal(task)"
-        />
-      </div>
-    </AsyncStateWrapper>
+    </nav>
 
     <!-- v0.6 批量指派弹窗 -->
     <DesignerSelectDialog
@@ -3214,7 +3216,9 @@ watch(totalPages, (value) => {
 @media (min-width: 769px) {
   .quick-apply { min-block-size: 2.75rem; }
 
-  .task-cards {
+}
+@media (min-width: 769px) and (max-width: 900px) {
+  .task-results {
     max-block-size: clamp(15rem, calc(100dvh - 23rem), 47rem);
     overflow-y: auto;
     scrollbar-gutter: stable;
@@ -3222,7 +3226,25 @@ watch(totalPages, (value) => {
   }
 }
 
-.task-cards:focus-visible {
+.footer-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+}
+
+@media (min-width: 901px) {
+  .task-list-view {
+    block-size: calc(100dvh - 6rem);
+    gap: 0.55rem;
+  }
+
+  .task-list-view > :not(.task-results) { flex-shrink: 0; }
+  .task-results { flex: 1 1 auto; min-block-size: 8rem; padding: 0.125rem; }
+  .task-cards { margin-block-start: 0; }
+}
+
+.task-results:focus-visible {
   outline: 2px solid rgb(var(--yb-brand));
   outline-offset: 2px;
 }
