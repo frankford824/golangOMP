@@ -1,18 +1,13 @@
-// Package pricing records operator-accepted SKU cost evidence alongside the core.
+// Package pricing resolves read-only SKU cost evidence from the main site.
 package pricing
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"database/sql"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,29 +22,20 @@ import (
 const batchLimit = 30
 const basePath = "/oa-api/pricing/"
 
-var requestIDPattern = regexp.MustCompile("^[a-zA-Z0-9-]{16,64}$")
-
 type app struct {
-	db     *sql.DB
 	native http.Handler
 }
 
-func Mount(mux *http.ServeMux, db *sql.DB, native http.Handler) {
-	app := app{db: db, native: native}
+func Mount(mux *http.ServeMux, native http.Handler) {
+	app := app{native: native}
 	mux.HandleFunc("POST "+basePath+"preview", app.preview)
-	mux.HandleFunc("POST "+basePath+"confirm", app.confirm)
 }
 
 func CanView(actor platform.Actor) bool {
 	return actor.SuperAdmin || actor.Actions["catalog.view"]
 }
 
-func CanConfirm(actor platform.Actor) bool {
-	return CanView(actor) && (actor.SuperAdmin || (actor.Actions["catalog.manage"] && actor.Actions["erp.manage"]))
-}
-
 type row struct {
-	evidenceHash string
 	SKU          string                         `json:"sku_code"`
 	Product      string                         `json:"product_name,omitempty"`
 	TaskID       int64                          `json:"task_id,omitempty"`
@@ -63,19 +49,6 @@ type row struct {
 	AppliedRules []domain.CostRulePreviewMatch  `json:"applied_rules,omitempty"`
 	State        string                         `json:"state"`
 	Reason       string                         `json:"reason"`
-	Token        string                         `json:"token,omitempty"`
-	Review       *review                        `json:"review,omitempty"`
-}
-
-type review struct {
-	ID           int64           `json:"id"`
-	BatchID      int64           `json:"batch_id"`
-	OperatorID   int64           `json:"operator_id"`
-	Operator     string          `json:"operator"`
-	Reason       string          `json:"reason"`
-	ConfirmedAt  time.Time       `json:"confirmed_at"`
-	AcceptedCost float64         `json:"accepted_cost"`
-	Evidence     json.RawMessage `json:"evidence"`
 }
 
 func decode(w http.ResponseWriter, r *http.Request, input any) bool {
@@ -125,7 +98,7 @@ func (a app) preview(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 400, "请输入 1 到 30 个有效的商品编码")
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"rows": a.resolve(r, skus), "can_confirm": CanConfirm(actor)})
+	platform.JSON(w, 200, map[string]any{"rows": a.resolve(r, skus)})
 }
 
 func (a app) resolve(r *http.Request, skus []string) []row {
@@ -152,8 +125,8 @@ func (a app) resolve(r *http.Request, skus []string) []row {
 	return rows
 }
 
-func (a app) resolveSKU(r *http.Request, sku string) (result row) {
-	result = row{SKU: sku, State: "unavailable"}
+func (a app) resolveSKU(r *http.Request, sku string) row {
+	result := row{SKU: sku, State: "unavailable"}
 	finish := func(state, reason string) row { result.State, result.Reason = state, reason; return result }
 	canonical, state := a.loadCanonical(r, sku)
 	switch state {
@@ -188,13 +161,6 @@ func (a app) resolveSKU(r *http.Request, sku string) (result row) {
 	}
 	if item == nil {
 		return finish("unavailable", "任务中缺少与当前成本记录一致的 SKU 明细")
-	}
-	stored, err := a.findReview(r.Context(), sku)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return finish("unavailable", "暂时无法核实 OA 核价记录")
-	}
-	if err == nil {
-		defer func() { result.Review = &stored }()
 	}
 	if canonical.Reviewed {
 		return finish("protected", "主站人工审核已确认当前成本")
@@ -234,22 +200,7 @@ func (a app) resolveSKU(r *http.Request, sku string) (result row) {
 		return finish("needs_review", reason)
 	}
 	result.Suggested = quote.EstimatedCost
-	result = finish("ready", quote.Explanation)
-	result.evidenceHash = digest([]any{
-		result.TaskID, result.SKUItemID, result.Current, result.Suggested,
-		result.Input, result.Rule, result.AppliedRules, result.Calculation, result.MatchMode,
-	})
-	result.Token = digest([]any{result.evidenceHash, stored.ID})
-	if prior, exists, err := a.findMatchingReview(r.Context(), sku, result.evidenceHash); err != nil {
-		result.Token = ""
-		return finish("unavailable", "暂时无法核实该计价依据是否已经确认")
-	} else if exists {
-		stored = prior
-		result.Review = &prior
-		result.Token = ""
-		return finish("confirmed", "同一计价依据已有 OA 核价记录")
-	}
-	return result
+	return finish("ready", quote.Explanation)
 }
 
 func equalPrice(a, b *float64) bool {
@@ -321,7 +272,7 @@ func (a app) loadCanonical(r *http.Request, sku string) (result domain.CostMaint
 			}
 		}
 		if page.Next == 0 {
-			if result.ID > 0 && result.TaskID > 0 && result.Token != "" {
+			if result.ID > 0 && result.TaskID > 0 {
 				return result, "ok"
 			}
 			return result, "not_found"
@@ -335,10 +286,9 @@ func (a app) loadCanonical(r *http.Request, sku string) (result domain.CostMaint
 }
 
 type responseWriter struct {
-	header  http.Header
-	status  int
-	body    bytes.Buffer
-	discard bool
+	header http.Header
+	status int
+	body   bytes.Buffer
 }
 
 func (w *responseWriter) Header() http.Header    { return w.header }
@@ -346,9 +296,6 @@ func (w *responseWriter) WriteHeader(status int) { w.status = status }
 func (w *responseWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = 200
-	}
-	if w.discard {
-		return len(p), nil
 	}
 	return w.body.Write(p)
 }
@@ -366,9 +313,9 @@ func (a app) readCore(r *http.Request, method, path string, payload any, out any
 		return 500
 	}
 	request.Header.Set("Authorization", r.Header.Get("Authorization"))
-	response := &responseWriter{header: make(http.Header), discard: out == nil}
+	response := &responseWriter{header: make(http.Header)}
 	a.native.ServeHTTP(response, request)
-	if response.status != 200 || out == nil {
+	if response.status != 200 {
 		return response.status
 	}
 	raw := response.body.Bytes()
@@ -385,10 +332,4 @@ func (a app) readCore(r *http.Request, method, path string, payload any, out any
 		}
 	}
 	return 200
-}
-
-func digest(v any) string {
-	raw, _ := json.Marshal(v)
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
 }

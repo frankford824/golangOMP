@@ -24,8 +24,6 @@ def workflow_grants(sql,database,peer):
     number=re.match(r'(\d+)\.(\d+)\.(\d+)',version)
     if not number or tuple(map(int,number.groups())) < (8,0,22):
         raise RuntimeError('OA append-only task auditing requires MySQL 8.0.22 or later')
-    if sql("SELECT COUNT(*) FROM schema_migrations WHERE file_name='153_oa_sku_price_reviews.sql' AND status='applied'")!='1':
-        raise RuntimeError('Migration 153 must be applied first')
     source=f"'oa_formal_reader'@'{peer}'"
     writer=f"'oa_formal_extension'@'{peer}'"
     for principal in ('oa_formal_reader','oa_formal_extension'):
@@ -33,7 +31,6 @@ def workflow_grants(sql,database,peer):
             raise RuntimeError('Existing OA service account expected')
     sql(f"GRANT SELECT (mobile) ON `{database}`.`users` TO {source}")
     grants={
-        'oa_sku_price_reviews':'SELECT, INSERT',
         'tasks':'SELECT (id, task_status), UPDATE (task_status)',
         'task_event_logs':'SELECT (task_id, sequence), INSERT (id, task_id, sequence, event_type, operator_id, payload, created_at)',
         'task_event_sequences':'SELECT (task_id, last_sequence), INSERT (task_id, last_sequence), UPDATE (task_id, last_sequence)',
@@ -76,8 +73,7 @@ def main():
         else:
             for tab in tables:sql(f"GRANT SELECT, INSERT, UPDATE, DELETE ON `{database}`.`{tab}` TO '{user}'@'{peer}'")
         params[name]=f'{user}:{password}@tcp({dbhost}:{port})/{database}?parseTime=true&loc=Asia%2FShanghai&charset=utf8mb4'
-    if sql("SELECT COUNT(*) FROM schema_migrations WHERE file_name='153_oa_sku_price_reviews.sql' AND status='applied'")=='1':
-        workflow_grants(sql,database,peer)
+    workflow_grants(sql,database,peer)
     key=sys.stdin.buffer.read().rstrip(b'\r\n').decode()
     if not key or '\r' in key or '\n' in key:raise RuntimeError('Missing order reader credential')
     params.update(OPS_READER_PASSWORD=key,OA_FORMAL_DATABASE=database,OA_FILES_DIR='/var/lib/yongbo-oa-live/files',TZ='Asia/Shanghai')
