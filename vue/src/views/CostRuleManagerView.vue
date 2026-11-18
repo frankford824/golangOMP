@@ -26,7 +26,7 @@
         <component :is="tab.icon" :size="16" :stroke-width="1.75" aria-hidden="true" />{{tab.label}}
       </button>
     </nav>
-    <CostMaintenanceList v-if="entryTab==='costs'" />
+    <CostMaintenanceList v-if="entryTab==='costs'" :initial-sku="initialSku" />
     <div v-show="entryTab==='schemes'" class="cost-module">
 
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
@@ -301,7 +301,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref, watch } from 'vue'
 import { Calculator, CheckCheck, History, Layers3, Link2, ListChecks, Plus, RefreshCw, X, ChevronDown } from 'lucide-vue-next'
 import CostModelEditor from '@/components/cost/CostModelEditor.vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
@@ -390,8 +390,15 @@ const candidateKeyword = ref('')
 const preview = ref<CostRulePreviewResponse | null>(null)
 const ruleDraft = reactive<RuleDraft>(emptyRuleDraft())
 const calculator = reactive({ rule_group: '', width: 1, height: 1, area: null as number | null, quantity: 1, process: '' })
-const props=defineProps<{initialTab?:'costs'|'schemes'}>()
-const entryTab=ref(props.initialTab||'costs')
+const props=defineProps<{initialTab?:'costs'|'schemes'; initialSku?:string}>()
+const entryTab=ref(props.initialSku ? 'costs' : props.initialTab || 'costs')
+function openSKUEntry() {
+  if (!props.initialSku) return
+  entryTab.value = 'costs'
+  calculatorOpen.value = false
+}
+watch(() => props.initialSku, openSKUEntry)
+onActivated(openSKUEntry)
 let schemesLoaded=false
 const workspaceTabs = [
   { key: '计价方案', label: '计价方案', icon: Layers3 },

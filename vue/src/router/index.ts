@@ -136,6 +136,7 @@ const routes: RouteRecordRaw[] = [
         path: 'cost-rules',
         name: 'CostRules',
         component: () => import('@/views/CostRuleManagerView.vue'),
+        props: (route) => ({ initialSku: oaEnabled && typeof route.query.sku === 'string' ? route.query.sku.trim() : '' }),
         meta: { requiresAuth: true, requiredMenuKey: 'cost_rules', keepAlive: true },
       },
       {

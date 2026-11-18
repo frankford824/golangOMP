@@ -478,10 +478,11 @@ const permission = usePermission(),
   canEdit = computed(
     () => permission.can("catalog.manage") && permission.can("erp.manage"),
   );
+const props = defineProps<{ initialSku?: string }>();
 const rows = ref<MaintenanceRow[]>([]),
-  keyword = ref(""),
+  keyword = ref(props.initialSku ?? ""),
   status = ref(""),
-  reviewState = ref<"pending" | "reviewed" | "all">("pending"),
+  reviewState = ref<"pending" | "reviewed" | "all">(props.initialSku ? "all" : "pending"),
   pageSize = ref(50),
   cursors = ref([0]),
   nextID = ref(0),
@@ -625,6 +626,13 @@ function search() {
   notice.value = "";
   load();
 }
+watch(() => props.initialSku, (sku, previousSku) => {
+  if (!sku && !previousSku) return;
+  keyword.value = sku ?? "";
+  status.value = "";
+  reviewState.value = sku ? "all" : "pending";
+  search();
+});
 function next() {
   if (nextID.value) {
     cursors.value.push(nextID.value);
