@@ -4,6 +4,7 @@
  */
 <template>
   <div
+    :class="{ 'oa-task-board': oaEnabled }"
     class="dashboard-shell min-h-[100dvh] w-full min-w-0 max-w-full overflow-x-hidden bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]"
   >
     <div v-if="error" class="dashboard-error mx-auto max-w-lg p-8 text-center">
@@ -73,7 +74,7 @@
               <span class="dashboard-health-label">今日结单</span>
               <strong class="dashboard-health-value">{{ summary.todayCompletedCount }}</strong>
             </span>
-            <span class="dashboard-health-item dashboard-health-item--quality">
+            <span v-if="!oaEnabled" class="dashboard-health-item dashboard-health-item--quality">
               <span class="dashboard-health-dot" aria-hidden="true" />
               <span class="dashboard-health-label">打回率</span>
               <strong class="dashboard-health-value">{{ kpiStats.rejectRateLabel }}</strong>
@@ -337,6 +338,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import { ref, onMounted, onBeforeUnmount, computed, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import type {
@@ -1650,4 +1652,12 @@ onBeforeUnmount(stopRefreshLoop)
   .dashboard-workbench:not([data-desktop-section='activity']) .kpi--queues,
   .dashboard-workbench:not([data-desktop-section='risks']) .dashboard-risk-zone { display: none; }
 }
+.oa-task-board .board-header-title { font-size: 18px; font-weight: 600; }
+.oa-task-board .dashboard-panel-heading { font-size: 15px; font-weight: 600; }
+.oa-task-board .chart-panel-sub, .oa-task-board .trend-summary-label { font-size: 12px; }
+.oa-task-board :deep(.kpi-card__value) { font-size: 24px; }
+.oa-task-board :deep(.kpi-card__hint) { font-size: 12px; }
+.oa-task-board .dashboard-health-item--danger { order: -1; font-weight: 650; font-size: 14px; }
+.oa-task-board .trend-summary-value, .oa-task-board .board-header-pending strong { font-size: 24px; font-weight: 600; }
+.oa-task-board strong { font-weight: 600; }
 </style>

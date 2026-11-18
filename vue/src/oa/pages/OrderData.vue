@@ -2,6 +2,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, Copy, Search, X } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
+import { orderState } from '../ordersDisplay'
+import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import type { HttpAppError } from '@/services/http'
 import PageHead from '../components/PageHead.vue'
@@ -46,6 +48,7 @@ const from = ref(today)
 const to = ref(today)
 const shop = ref('')
 const platform = ref('')
+const orderNo = ref('')
 const offset = ref(0)
 const applied = ref('')
 type OrderData = { rows: Row[]; has_more?: boolean; stale?: boolean; freshness?: { source_committed_at?: string; lag_seconds?: number } }
@@ -84,7 +87,9 @@ let requestId = 0
 let scopeId = 0
 
 function filterQuery() {
-  return new URLSearchParams({ from: from.value, to: to.value, shop_id: shop.value, platform: platform.value }).toString()
+  const params = new URLSearchParams({ from: from.value, to: to.value, shop_id: shop.value, platform: platform.value })
+  if (props.mode === 'detail' && orderNo.value) params.set('online_order_no', orderNo.value)
+  return params.toString()
 }
 
 function resetFilters() {
@@ -92,6 +97,7 @@ function resetFilters() {
   to.value = today
   shop.value = ''
   platform.value = ''
+  orderNo.value = ''
 }
 
 function restoreRouteFilters() {
@@ -102,6 +108,7 @@ function restoreRouteFilters() {
     to.value = end
   }
   shop.value = typeof shopId === 'string' ? shopId : ''
+  orderNo.value = props.mode === 'detail' && typeof route.query.online_order_no === 'string' ? route.query.online_order_no : ''
   platform.value = props.mode === 'detail' && typeof platformCode === 'string' ? platformCode : ''
 }
 
@@ -189,7 +196,7 @@ const appliedRange = computed(() => {
   return [
     start === end ? start : [start, end].filter(Boolean).join(' 至 '),
     shopId && (shopNames.value.find(item => item.shop_id === shopId)?.shop_name || shopId),
-    params.get('platform'),
+    params.get('platform'), params.get('online_order_no'),
   ].filter(Boolean).join(' · ')
 })
 function display(column: Column, row: Row) {
@@ -201,9 +208,14 @@ function display(column: Column, row: Row) {
     if (instant && !Number.isNaN(instant.getTime())) return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(instant)
     return value.replace('T', ' ').slice(0, 16)
   }
+  if (column.key === 'status' || column.key === 'state') return orderState(column.key, value)?.label ?? '—'
   if (column.money) return money(String(value))
   if (column.key.startsWith('is_')) return value === true || value === 1 || value === '1' ? '是' : '否'
   return value
+}
+function stateClass(column: Column, row: Row) {
+  const tone = orderState(column.key, row[column.key])?.tone
+  return tone ? ['oa-pill', 'order-state-' + tone] : undefined
 }
 watch([scope, allowed], async () => {
   const currentScope = ++scopeId
@@ -249,9 +261,10 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
           </select>
           <input v-else v-model.trim="shop" placeholder="全部可见店铺" />
         </label>
+        <label v-if="mode === 'detail'">平台订单号<input v-model.trim="orderNo" maxlength="128" placeholder="精确查单" /></label>
         <label v-if="mode === 'detail'">平台<input v-model.trim="platform" placeholder="默认平台范围" /></label>
-        <label>开始日期<input v-model="from" type="date" :max="to" :min="firstDay" required /></label>
-        <label>结束日期<input v-model="to" type="date" :min="from" :max="today" required /></label>
+        <label>日期<OrderDateField v-model="from" label="开始日期" :max="to" :min="firstDay" /></label>
+        <label>至<OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
         <div class="order-data-filter-actions">
           <button class="oa-button-primary" type="submit" :disabled="busy"><Search :size="16" aria-hidden="true" />查询</button>
           <button type="button" :disabled="busy" @click="resetAndLoad">重置</button>
@@ -283,6 +296,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
               <tr v-for="(row, index) in visibleRows" :key="index">
                 <td v-for="column in columns[mode]" :key="column.key" :class="{ 'oa-number': column.money, 'order-data-wide': !mobileColumns[mode].includes(column.key) }">
                   <time v-if="column.date && row[column.key]" :datetime="String(row[column.key])">{{ display(column, row) }}</time>
+                  <span v-else-if="column.key === 'status' || column.key === 'state'" :class="stateClass(column, row)" :title="row[column.key] == null ? undefined : String(row[column.key])">{{ display(column, row) }}</span>
                   <span v-else :class="{ 'oa-ellipsis': ['online_order_no', 'shop_id', 'name'].includes(column.key), 'order-data-order-no': column.key === 'online_order_no' }" :title="String(display(column, row))">{{ display(column, row) }}</span>
                   <button v-if="column.key === 'online_order_no' && row[column.key]" class="order-data-copy order-data-inline-copy" type="button" aria-label="复制平台订单号" @click="copyOrder(String(row.online_order_no))"><Copy :size="14" aria-hidden="true" /></button>
                 </td>
@@ -310,6 +324,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
             <dt>{{ column.label }}</dt>
             <dd>
               <time v-if="column.date && selected[column.key]" :datetime="String(selected[column.key])">{{ display(column, selected) }}</time>
+              <span v-else-if="column.key === 'status' || column.key === 'state'" :class="stateClass(column, selected)" :title="selected[column.key] == null ? undefined : String(selected[column.key])">{{ display(column, selected) }}</span>
               <template v-else>{{ display(column, selected) }}</template>
               <button v-if="column.key === 'online_order_no' && selected[column.key]" class="order-data-copy" type="button" @click="copyOrder(String(selected.online_order_no))"><Copy :size="14" aria-hidden="true" />复制</button>
             </dd>

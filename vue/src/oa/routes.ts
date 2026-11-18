@@ -7,7 +7,12 @@ const Fees = () => import('./pages/Fees.vue')
 const OrderData = () => import('./pages/OrderData.vue')
 const ordersMeta = { requiresAuth: true, oaAction: 'orders.view' }
 const peopleMeta = { requiresAuth: true, oaAction: 'people.manage', oaFallback: 'UserManagement' }
-const feeActions = { apply: 'finance.apply', mine: 'finance.apply', approval: ['finance.approve', 'finance.pay'], templates: ['finance.templates', 'finance.admin'], report: 'finance.report' }
+export const feeTabs = [
+  { mode: 'approval', label: '审批待办', actions: ['finance.approve', 'finance.pay'] },
+  { mode: 'mine', label: '我的申请', actions: ['finance.apply'] },
+  { mode: 'report', label: '费用报表', actions: ['finance.report'] },
+  { mode: 'templates', label: '模板与授权', actions: ['finance.templates', 'finance.admin'] },
+] as const
 
 export const oaRoutes: RouteRecordRaw[] = oaEnabled ? [
   { path: 'operations', name: 'OperationsOverview', component: Commerce, props: { mode: 'overview' }, meta: ordersMeta },
@@ -20,8 +25,10 @@ export const oaRoutes: RouteRecordRaw[] = oaEnabled ? [
   { path: 'people', redirect: to => ({ name: 'UserManagement', query: to.query, hash: to.hash }) },
   { path: 'people/roster', redirect: to => ({ name: 'PeopleRoster', query: to.query, hash: to.hash }) },
   { path: 'people/:id(\\d+)', redirect: to => ({ name: 'UserManagement', query: { ...to.query, user_id: String(to.params.id), tab: 'terms' }, hash: to.hash }) },
-  ...Object.entries(feeActions).map(([mode, oaAction]) => ({
-    path: 'fees/' + mode, component: Fees, props: { mode }, meta: { requiresAuth: true, oaAction, oaFallback: 'Me' },
+  { path: 'fees', name: 'FeesHome', component: Fees, props: { mode: 'home' }, meta: { requiresAuth: true } },
+  { path: 'fees/apply', component: Fees, props: { mode: 'apply' }, meta: { requiresAuth: true, title: '发起费用申请' } },
+  ...feeTabs.map(({ mode, label }) => ({
+    path: 'fees/' + mode, component: Fees, props: { mode }, meta: { requiresAuth: true, title: label },
   })),
-  { path: 'fees/document', component: Fees, props: { mode: 'document' }, meta: { requiresAuth: true, oaAction: ['finance.apply', 'finance.approve', 'finance.pay', 'finance.report'], oaFallback: 'MeNotifications' } },
+  { path: 'fees/document', component: Fees, props: { mode: 'document' }, meta: { requiresAuth: true, title: '费用单据' } },
 ] : []

@@ -6,7 +6,8 @@
       </div>
       <div>
         <p>我的组织</p>
-        <h1>{{ departmentLabel }}</h1>
+        <h1>{{ oaEnabled ? '我的组织' : departmentLabel }}</h1>
+        <p v-if="oaEnabled">{{ departmentLabel }}</p>
         <span>{{ teamLabel }}</span>
       </div>
     </header>
@@ -68,6 +69,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import { computed, onMounted, ref } from 'vue'
 import { BadgeCheck, Building2, ShieldCheck, UsersRound } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'

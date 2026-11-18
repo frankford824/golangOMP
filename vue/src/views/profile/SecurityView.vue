@@ -6,7 +6,7 @@
       </div>
       <div>
         <p>安全设置</p>
-        <h1>修改密码</h1>
+        <h1>{{ oaEnabled ? '安全设置' : '修改密码' }}</h1>
       </div>
     </header>
 
@@ -77,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import { computed, ref } from 'vue'
 import { CheckCircle2, Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-vue-next'
 import { meApi } from '@/services/api/meApi'

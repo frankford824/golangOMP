@@ -11,7 +11,10 @@ vi.mock('@/services/api/assetsApi', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@/services/api/assetsApi')>()
   return { ...original, assetsApi: { ...original.assetsApi, batchSearchAssets: mocks.batchSearchAssets } }
 })
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
+vi.mock('vue-router', () => ({
+  RouterLink: { props: ['to'], template: '<a :href="`/asset-center/${to.params.id}`"><slot /></a>' },
+  useRouter: () => ({ push: mocks.push }),
+}))
 vi.mock('@/composables/useTaskFilterOptions', async () => {
   const { ref } = await import('vue')
   return { useTaskFilterOptions: () => ({ creatorOptions: ref([{ value: '', label: '全部' }, { value: '12', label: '李运营' }]) }) }
@@ -87,6 +90,35 @@ describe('ResourceGroupsView', () => {
     mocks.batchSearchAssets.mockResolvedValue({
       data: { data: { results: [], matched_count: 0, failed_count: 1 } },
     })
+  })
+
+  it.skipIf(import.meta.env.VITE_OA_FEATURES !== 'true')('switches reference-image results to the SKU ledger without reloading', async () => {
+    mocks.list.mockResolvedValue({
+      items: [{
+        ...group,
+        finalized_revision: {
+          ...group.finalized_revision,
+          items: [],
+          references: [{ formal_task_asset_id: 2026, file_name: 'reference.png' }],
+        },
+      }],
+      view_mode: 'group',
+      flat_items: [],
+      page: 1,
+      page_size: 24,
+      total: 1,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.get('.reference-badge').text()).toBe('参考图')
+    expect(wrapper.get('[data-task-asset-id="2026"]').attributes('alt')).toBe('reference.png')
+    await wrapper.findAll('.asset-view-modes button')[1]!.trigger('click')
+    expect(wrapper.get('.asset-ledger .sku-code').attributes('href')).toBe('/asset-center/8')
+    expect(wrapper.get('.asset-ledger').text()).toContain('0.960 ㎡')
+    expect(wrapper.get('.asset-ledger').text()).toContain('¥ 18.50')
+    expect(wrapper.get('.asset-ledger tbody td:nth-child(5)').text()).toBe('—')
+    expect(mocks.list).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('hides the production packaging entry from the asset-center header', async () => {

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Copy, FileText, Package, Search, Wallet } from 'lucide-vue-next'
+import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import PageHead from '../components/PageHead.vue'
 import FreshnessStatus from '../components/FreshnessStatus.vue'
@@ -18,7 +19,7 @@ const route = useRoute()
 type Mode = 'overview' | 'products' | 'detail' | 'ranking' | 'personal'
 const props = defineProps<{ mode: Mode; productId?: string }>()
 type DataRow = {
-  day?: string; shop_id?: string; platform?: string; shop_item_id?: string; sku?: string; product_name?: string
+  day?: string; hour?: number | string; shop_id?: string; platform?: string; shop_item_id?: string; sku?: string; product_name?: string
   quantity?: string; order_count?: number; payable_amount?: string; item_pay_total?: string
   cost_verified_total?: string | null; item_pay_verified_total?: string | null; verified_gross?: string | null; verified_coverage?: string | null
   key?: string; tasks?: { id?: number; task_id?: number; task_no?: string; title?: string }[]
@@ -27,7 +28,7 @@ type DataRow = {
 }
 type TaskLink = { id: number; task_no: string; status: string }
 type Feedback = { id: number; shop_id: string; note: string; adjusted_on: string; task_id?: number }
-type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number }; stale?: boolean; has_more?: boolean; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
+type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
 
 const today = dateInChina()
 const earliest = '2026-06-01'
@@ -101,6 +102,18 @@ const comparisonBusy = ref(false)
 const offset = ref(0)
 const data = ref<OrderResult>()
 const summary = ref<OrderResult>()
+const hourlyTrend = ref<OrderResult>()
+const weekTrend = ref<OrderResult>()
+const weekTrendUnavailable = ref(false)
+const rankingSummary = ref<OrderResult>()
+const overviewDay = computed(() => props.mode === 'overview' && appliedPeriod.value?.from === appliedPeriod.value?.to ? appliedPeriod.value?.to : undefined)
+function earlierDay(day: string, days: number) {
+  const date = new Date(day + 'T12:00:00Z')
+  date.setUTCDate(date.getUTCDate() - days)
+  return date.toISOString().slice(0, 10)
+}
+const trendWeekStart = computed(() => overviewDay.value ? [earlierDay(overviewDay.value, 6), earliest].sort()[1] : '')
+const trendPrevious = computed(() => overviewDay.value ? earlierDay(overviewDay.value, 1) : '')
 const busy = ref(false)
 const error = ref('')
 const latest = ref(0)
@@ -108,7 +121,7 @@ const locallyStale = ref(false)
 let appliedOverview: { query: string; offset: number; account: string; token: string } | undefined
 let refreshTimer: number | undefined
 const mayView = computed(() => can('orders.view'))
-const title = computed(() => ({ overview: '我的经营', products: '商品经营', detail: '商品详情与经营反馈', ranking: '经营分析与排名', personal: '我的业绩' }[props.mode]))
+const title = computed(() => ({ overview: '经营总览', products: '商品表现', detail: '商品详情', ranking: '经营排行', personal: '我的业绩' }[props.mode]))
 
 function queryParams(options: Record<string, string> = {}) {
   const query = new URLSearchParams({ from: from.value, to: to.value, ...options })
@@ -120,6 +133,9 @@ function clearOverview() {
   data.value = undefined
   summary.value = undefined
   locallyStale.value = false
+  hourlyTrend.value = undefined
+  weekTrend.value = undefined
+  weekTrendUnavailable.value = false
 }
 
 async function loadOverview(refresh = false, pageChange = false) {
@@ -143,19 +159,40 @@ async function loadOverview(refresh = false, pageChange = false) {
   productsError.value = ''
   error.value = ''
   try {
-    const [head, tail] = await Promise.allSettled(['summary', 'products'].map(endpoint => {
-      const request = new URLSearchParams(scope.query)
-      if (endpoint === 'products' && scope.offset) request.set('offset', String(scope.offset))
-      return api<OrderResult>('/oa-api/orders/' + endpoint + '?' + request).catch((failure: HttpAppError) => {
+    async function readOrders(endpoint: string, request: URLSearchParams) {
+      try {
+        return await api<OrderResult>('/oa-api/orders/' + endpoint + '?' + request)
+      } catch (cause) {
+        const failure = cause as HttpAppError
         const raw = failure.responseData as { error?: string } | undefined
         if (sequence === latest.value && (failure.status === 401 || failure.status === 403 || raw?.error === '订单数据源拒绝访问')) {
           clearOverview()
           appliedOverview = undefined
           error.value = errorText(failure)
         }
-        throw failure
-      })
-    }))
+        throw cause
+      }
+    }
+    async function readTrend(query: string) {
+      if (!overviewDay.value) return
+      const request = new URLSearchParams(query)
+      if (trendPrevious.value >= earliest) {
+        request.set('from', trendPrevious.value)
+        try {
+          const hourly = await readOrders('hourly', request)
+          if (hourly.rows?.some(row => row?.day && row.hour != null)) return { hourly }
+        } catch (cause) {
+          if (!appliedOverview || sequence !== latest.value) throw cause
+        }
+      }
+      request.set('from', trendWeekStart.value)
+      return { weekly: await readOrders('summary', request) }
+    }
+    const [head, tail, trend] = await Promise.allSettled([
+      readOrders('summary', new URLSearchParams(scope.query)),
+      readOrders('products', new URLSearchParams(scope.query)),
+      readTrend(scope.query),
+    ])
     if (sequence !== latest.value) return
     if (!appliedOverview) return
     if (scope.account !== currentProfile.value?.id || scope.token !== getToken() || !mayView.value) {
@@ -166,6 +203,11 @@ async function loadOverview(refresh = false, pageChange = false) {
     locallyStale.value = sameScope && (
       (head.status === 'rejected' && !!summary.value) || (sameProductPage && tail.status === 'rejected' && !!data.value)
     )
+    if (trend.status === 'fulfilled') {
+      hourlyTrend.value = trend.value?.hourly
+      weekTrend.value = trend.value?.weekly
+    }
+    weekTrendUnavailable.value = trend.status === 'rejected'
     if (head.status === 'fulfilled') summary.value = head.value
     else if (!summary.value) error.value = errorText(head.reason)
     if (tail.status === 'fulfilled') data.value = tail.value
@@ -190,12 +232,13 @@ async function load(resetPage = true) {
   productsError.value = ''
   data.value = undefined
   summary.value = undefined
+  rankingSummary.value = undefined
   error.value = ''
   try {
     const endpoint = { products: 'products', ranking: 'rankings', detail: 'sku', personal: 'personal' }[props.mode]
     const options: Record<string, string> = {}
     if (props.mode === 'ranking') options.group = group.value
-    if (props.mode === 'products') options.mine = '1'
+    if (props.mode === 'products' && route.query.scope !== 'overview') options.mine = '1'
     if (offset.value) options.offset = String(offset.value)
     if (props.mode === 'detail') options.sku = selectedSku.value.trim()
     if (resetPage || !appliedQuery) {
@@ -205,9 +248,17 @@ async function load(resetPage = true) {
     }
     const applied = new URLSearchParams(appliedQuery)
     applied.set('offset', String(offset.value))
-    const result = await api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`)
+    const summaryQuery = new URLSearchParams(applied)
+    summaryQuery.delete('offset')
+    summaryQuery.delete('group')
+    const dimensions = props.mode === 'ranking' && (
+      ['shop', 'growth'].includes(appliedGroup.value) ||
+      (appliedGroup.value === 'platform' && !summaryQuery.has('include_brush'))
+    ) ? api<OrderResult>('/oa-api/orders/summary?' + summaryQuery).catch(() => undefined) : undefined
+    const [result, supplemental] = await Promise.all([api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`), dimensions])
     if (sequence === latest.value) {
       data.value = result
+      rankingSummary.value = supplemental?.stale ? undefined : supplemental
       if (props.mode === 'detail') {
         loadedDetail.value = detailFilters
         feedback.value.shop_id = detailFilters.shop || result.rows?.[0]?.shop_id || ''
@@ -236,8 +287,9 @@ function sum(rows: DataRow[], key: MoneyKey): string | null {
   return `${total < 0n ? '-' : ''}${absolute / unit}${fraction}`
 }
 
-const summaryRows = computed(() => summary.value?.rows ?? [])
-const rows = computed(() => data.value?.rows ?? [])
+const summaryRows = computed(() => summary.value?.rows?.filter(Boolean) ?? [])
+const rows = computed(() => data.value?.rows?.filter(Boolean) ?? [])
+const displayRows = computed(() => props.mode === 'overview' ? rows.value.slice(0, 10) : rows.value)
 const linkedTask = computed(() => {
   const filters = loadedDetail.value
   if (!filters || !rows.value.length || data.value?.stale) return ''
@@ -247,7 +299,7 @@ const linkedTask = computed(() => {
   return '/tasks/create?' + query
 })
 const freshness = computed(() => {
-  const available = [summary.value?.freshness, data.value?.freshness].filter(value => value !== undefined)
+  const available = [summary.value?.freshness, data.value?.freshness].filter(value => value != null)
   if (!available.length) return undefined
   const watermarks = available.flatMap(item => item.source_committed_at ? [item.source_committed_at] : []).sort()
   const delays = available.flatMap(item => Number.isFinite(Number(item.lag_seconds)) ? [Number(item.lag_seconds)] : [])
@@ -287,7 +339,7 @@ const leadingShops = computed(() => {
   })
   return sorted.sort((left, right) => left.value === right.value ? left.id.localeCompare(right.id) : left.value > right.value ? -1 : 1).slice(0, 5)
 })
-const chartRows = computed(() => props.mode === 'personal' ? rows.value : summaryRows.value)
+const chartRows = computed(() => props.mode === 'personal' ? rows.value : overviewDay.value ? (weekTrend.value?.rows?.filter(Boolean) ?? []) : summaryRows.value)
 const chartKey = computed<MoneyKey>(() => props.mode === 'personal' ? 'item_pay_total' : 'payable_amount')
 const chartDays = computed(() => {
   const byDay = new Map<string, DataRow[]>()
@@ -303,18 +355,42 @@ const chartDays = computed(() => {
     return [{ day, amount, value: Number(amount) }]
   })
 })
-const chartHeading = computed(() => props.mode === 'personal' ? '实际商品销售额趋势' : '订单应付趋势')
-const plot = { left: 100, right: 702, top: 12, bottom: 121 }
+const chartHeading = computed(() => props.mode === 'personal' ? '实际商品销售额趋势' : hourlyTrend.value ? '分时订单应付' : overviewDay.value ? '近 7 日订单应付' : '订单应付趋势')
+const chartPeriod = computed(() => hourlyTrend.value ? overviewDay.value + ' 对比 ' + trendPrevious.value : overviewDay.value ? trendWeekStart.value + ' 至 ' + overviewDay.value : periodLabel.value)
+const plot = { left: 100, right: 702, top: 12, bottom: props.mode === 'overview' ? 92 : 121 }
+const chartHeight = props.mode === 'overview' ? 120 : 149
+const hourlySeries = computed(() => {
+  const entries = (hourlyTrend.value?.rows ?? []).flatMap(row => {
+    const hour = Number(row?.hour)
+    const value = Number(row?.payable_amount)
+    if (!row?.day || row.hour == null || !Number.isInteger(hour) || hour < 0 || hour > 23 ||
+      row.payable_amount == null || !Number.isFinite(value)) return []
+    return [{ day: row.day, hour, amount: row.payable_amount, value }]
+  })
+  const isToday = overviewDay.value === today
+  const currentHour = isToday ? Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23' }).format(new Date())) : 23
+  const current = entries.filter(point => point.day === overviewDay.value && point.hour <= currentHour).sort((a, b) => a.hour - b.hour)
+  const lastHour = isToday ? current.at(-1)?.hour ?? currentHour : 23
+  const previous = entries.filter(point => point.day === trendPrevious.value && point.hour <= lastHour).sort((a, b) => a.hour - b.hour)
+  return [{ label: '所选日', points: current }, { label: '前一日同期', points: previous }]
+})
+const axisValues = computed(() => hourlyTrend.value ? hourlySeries.value.flatMap(series => series.points.map(point => point.value)) : chartDays.value.map(day => day.value))
 const domain = computed(() => ({
-  min: Math.min(0, ...chartDays.value.map(day => day.value)),
-  max: Math.max(0, ...chartDays.value.map(day => day.value)),
+  min: Math.min(0, ...axisValues.value),
+  max: Math.max(0, ...axisValues.value),
 }))
 const plotY = (value: number) => plot.bottom - (value - domain.value.min) / (domain.value.max - domain.value.min || 1) * (plot.bottom - plot.top)
+const hourX = (hour: number) => plot.left + hour / 24 * (plot.right - plot.left)
+const hourLabel = (hour: number) => String(hour).padStart(2, '0') + ':00'
+const hourlyLines = computed(() => hourlySeries.value.map(series => ({
+  label: series.label,
+  points: series.points.map(point => ({ ...point, x: hourX(point.hour), y: plotY(point.value) })),
+})))
 const ticks = computed(() => (domain.value.min === domain.value.max ? [0] : [0, 1, 2, 3].map(index =>
   domain.value.min + (domain.value.max - domain.value.min) * index / 3)))
 const axisNumber = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 })
 const points = computed(() => {
-  const start = Date.parse(appliedPeriod.value?.from ?? '')
+  const start = Date.parse(overviewDay.value ? trendWeekStart.value : appliedPeriod.value?.from ?? '')
   const end = Date.parse(appliedPeriod.value?.to ?? '')
   return chartDays.value.map(day => ({
     ...day,
@@ -350,11 +426,31 @@ function range(daysBack: number) {
 
 const rankingUsesPayable = computed(() => ['shop', 'platform', 'growth'].includes(appliedGroup.value))
 const rankingValue = (row: DataRow) => rankingUsesPayable.value ? row.payable_amount : row.item_pay_total
-const largestRank = computed(() => Math.max(0, ...rows.value.map(row => Number(rankingValue(row)) || 0)))
-function rankBar(row: DataRow) {
-  const value = Number(rankingValue(row))
-  return largestRank.value && value > 0 ? (value / largestRank.value * 100).toFixed(2) + '%' : '0%'
-}
+const rankingMetrics = computed(() => {
+  const groups = new Map<string, DataRow[]>()
+  for (const row of rankingSummary.value?.rows ?? []) {
+    const key = appliedGroup.value === 'platform' ? row?.platform : row?.shop_id
+    if (!key) continue
+    const entries = groups.get(key) ?? []
+    entries.push(row)
+    groups.set(key, entries)
+  }
+  const total = Number(sum(rankingSummary.value?.rows?.filter(Boolean) ?? [], 'payable_amount'))
+  return new Map([...groups].map(([key, entries]) => {
+    const payable = Number(sum(entries, 'payable_amount'))
+    const gross = sum(entries, 'verified_gross')
+    const verifiedSales = Number(sum(entries, 'item_pay_verified_total'))
+    const share = total > 0 && payable >= 0 && payable <= total ? payable / total : null
+    return [key, {
+      count: entries.every(row => row.order_count != null) ? entries.reduce((value, row) => value + Number(row.order_count), 0) : null,
+      gross,
+      grossRate: gross != null && verifiedSales > 0 ? Number(gross) / verifiedSales : null,
+      share,
+    }]
+  }))
+})
+const showRankingMetrics = computed(() => ['shop', 'platform', 'growth'].includes(appliedGroup.value))
+const percent = (value?: number | null) => value == null ? '—' : (value * 100).toFixed(1) + '%'
 const rankingGroups: Record<string, string> = { shop: '店铺', growth: '店铺', person: '人员', platform: '平台', product: '商品' }
 const periodLabel = computed(() => {
   const value = appliedPeriod.value
@@ -469,7 +565,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-<div class="oa-page commerce-workspace">
+<div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview' }]">
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
     <RouterLink v-if="mode === 'overview' && permissions.hasMenu('dashboard')" class="oa-button" :to="{ path: '/', query: { workspace: 'tasks' } }"><BarChart3 :size="15" />任务运营看板</RouterLink>
@@ -489,8 +585,8 @@ onUnmounted(() => {
       <label v-if="mode === 'ranking'">排名维度 <select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
       <label v-if="mode === 'detail'">SKU <input v-model="selectedSku" required /></label>
       <label v-if="mode !== 'personal'">店铺 <select v-if="shopOptions.length" v-model="shop" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
-      <label>开始日期 <input v-model="from" type="date" :max="to" min="2026-06-01" required /></label>
-      <label>结束日期 <input v-model="to" type="date" :min="from" :max="today" required /></label>
+      <label>日期 <OrderDateField v-model="from" label="开始日期" :max="to" :min="earliest" /></label>
+      <label>至 <OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
       <label v-if="mode !== 'ranking' || group !== 'growth'" class="oa-check-inline"><input v-model="includeBrush" type="checkbox" />包含刷单</label>
       <button class="oa-button-primary" :disabled="busy"><Search :size="15" />{{ busy ? '查询中…' : '查询' }}</button>
       </div>
@@ -511,14 +607,47 @@ onUnmounted(() => {
     <div v-if="(mode === 'overview' && summary) || (mode === 'personal' && data)" :class="['commerce-insights', { 'commerce-insights-links': mode === 'overview' }]">
       <section class="oa-panel commerce-chart-panel">
         <div class="commerce-panel-heading">
-          <div><h2>{{ chartHeading }}</h2><p class="oa-muted">{{ periodLabel }}</p></div>
-          <div v-if="activePoint && points.length > 1" class="commerce-chart-value">
+          <div><h2>{{ chartHeading }}</h2><p class="oa-muted">{{ chartPeriod }}</p></div>
+          <p v-if="hourlyTrend" class="commerce-hourly-legend"><span>所选日</span><span>前一日同期</span></p>
+          <div v-else-if="activePoint && (overviewDay || points.length > 1)" class="commerce-chart-value">
             <time :datetime="activePoint.day">{{ activePoint.day }}</time>
             <strong>{{ money(activePoint.amount) }}</strong>
           </div>
         </div>
-        <div v-if="points.length > 1" class="commerce-chart-scroll">
-          <svg class="commerce-chart" viewBox="0 0 720 149" role="group" :aria-label="chartHeading" @pointermove="setActivePoint">
+        <div v-if="hourlyTrend" class="commerce-chart-scroll">
+          <svg class="commerce-chart" :viewBox="`0 0 720 ${chartHeight}`" role="group" aria-label="分时订单应付，按小时显示已有数据">
+            <g v-for="tick in ticks" :key="tick">
+              <line :x1="plot.left" :x2="plot.right" :y1="plotY(tick)" :y2="plotY(tick)" stroke="var(--oa-line)" />
+              <text :x="plot.left - 12" :y="plotY(tick) + 4" text-anchor="end">{{ axisNumber.format(tick) }} 元</text>
+            </g>
+            <text v-for="hour in [0, 4, 8, 12, 16, 20, 24]" :key="hour" :x="hourX(hour)" :y="chartHeight - 7" text-anchor="middle">{{ hourLabel(hour) }}</text>
+            <g v-for="(series, index) in hourlyLines" :key="series.label" :class="{ 'commerce-hourly-baseline': index === 1 }">
+              <g v-for="(point, i) in series.points" :key="point.hour">
+                <line v-if="i > 0 && series.points[i - 1].hour + 1 === point.hour" class="commerce-hourly-segment"
+                  :x1="series.points[i - 1].x" :y1="series.points[i - 1].y" :x2="point.x" :y2="point.y" />
+                <circle class="commerce-chart-dot" :cx="point.x" :cy="point.y" r="3" tabindex="0" :aria-label="point.day + ' ' + hourLabel(point.hour) + ' ' + money(point.amount)">
+                  <title>{{ point.day }} {{ hourLabel(point.hour) }} {{ money(point.amount) }}</title>
+                </circle>
+              </g>
+            </g>
+          </svg>
+          <p v-if="hourlyTrend.stale || weekTrendUnavailable" class="oa-muted">分时趋势显示上次查询成功的快照。</p>
+        </div>
+        <div v-else-if="overviewDay && points.length" class="commerce-chart-scroll">
+          <svg class="commerce-chart commerce-week-chart" viewBox="0 0 720 98" role="group" :aria-label="chartHeading" @pointermove="setActivePoint">
+            <line :x1="plot.left" :x2="plot.right" :y1="plotY(0) * .7" :y2="plotY(0) * .7" stroke="var(--oa-line)" />
+            <g v-for="point in points" :key="point.day">
+              <rect :x="point.x - 15" :y="Math.min(point.y, plotY(0)) * .7" width="30" :height="Math.max(1, Math.abs(point.y - plotY(0)) * .7)" rx="3"
+                :class="{ 'commerce-today-bar': point.day === overviewDay }" tabindex="0" :aria-label="point.day + ' ' + money(point.amount)" @focus="activeDay = point.day">
+                <title>{{ point.day }} {{ money(point.amount) }}</title>
+              </rect>
+              <text :x="point.x" y="91" text-anchor="middle">{{ point.day.slice(5) }}</text>
+            </g>
+          </svg>
+          <p v-if="weekTrendUnavailable || weekTrend?.stale" class="oa-muted">近 7 日趋势显示上次查询成功的快照。</p>
+        </div>
+        <div v-else-if="points.length > 1" class="commerce-chart-scroll">
+          <svg class="commerce-chart" :viewBox="`0 0 720 ${chartHeight}`" role="group" :aria-label="chartHeading" @pointermove="setActivePoint">
             <defs><linearGradient id="commerce-trend-fill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="var(--oa-accent)" stop-opacity=".18" /><stop offset="1" stop-color="var(--oa-accent)" stop-opacity=".02" /></linearGradient></defs>
             <g v-for="tick in ticks" :key="tick">
               <line :x1="plot.left" :x2="plot.right" :y1="plotY(tick)" :y2="plotY(tick)" stroke="var(--oa-line)" />
@@ -531,7 +660,7 @@ onUnmounted(() => {
               <circle :cx="point.x" :cy="point.y" :r="point.day === activePoint?.day ? 5 : 3" class="commerce-chart-dot" tabindex="0" :aria-label="point.day + ' ' + money(point.amount)" @focus="activeDay = point.day">
                 <title>{{ point.day }} {{ money(point.amount) }}</title>
               </circle>
-              <text v-if="showDateLabel(index)" :x="point.x" y="142" text-anchor="middle">{{ point.day.slice(5) }}</text>
+              <text v-if="showDateLabel(index)" :x="point.x" :y="chartHeight - 7" text-anchor="middle">{{ point.day.slice(5) }}</text>
             </g>
           </svg>
         </div>
@@ -540,7 +669,7 @@ onUnmounted(() => {
           <strong>{{ money(activePoint.amount) }}</strong>
           <button type="button" :disabled="busy" @click="range(6)">查看近 7 日趋势 <ArrowRight :size="15" /></button>
         </div>
-        <p v-else class="oa-empty">所选范围暂无趋势数据</p>
+        <p v-else class="oa-empty">{{ weekTrendUnavailable ? '近 7 日趋势暂不可用' : '所选范围暂无趋势数据' }}</p>
       </section>
       <section v-if="mode === 'overview'" class="oa-panel commerce-shop-rank">
         <div class="commerce-panel-heading"><div><h2>店铺表现</h2><p class="oa-muted">按订单应付排名 · 前 5</p></div></div>
@@ -558,14 +687,15 @@ onUnmounted(() => {
     <p v-if="productsError" class="oa-error" role="alert">商品数据暂不可用。{{ productsError }} <button type="button" @click="load(false)">重试商品数据</button></p>
     <section v-if="data" class="oa-panel commerce-results">
       <div class="commerce-panel-heading">
-        <div><h2>{{ mode === 'ranking' ? rankingGroups[appliedGroup] + (appliedGroup === 'growth' ? '增长' : '') + '排名' : mode === 'personal' ? '实际商品销售额' : mode === 'detail' ? 'SKU 成交与成本' : '商品表现' }}</h2><p class="oa-muted">{{ periodLabel }}</p></div>
+        <div><h2>{{ mode === 'ranking' ? rankingGroups[appliedGroup] + (appliedGroup === 'growth' ? '增长' : '') + '排名' : mode === 'personal' ? '实际商品销售额' : mode === 'detail' ? 'SKU 成交与成本' : mode === 'overview' ? '热销商品 Top 10' : '商品表现' }}</h2><p class="oa-muted">{{ periodLabel }}</p></div>
+        <RouterLink v-if="mode === 'overview'" class="workspace-row-action" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: 'overview' } }">查看全部商品表现 <ArrowRight :size="14" /></RouterLink>
         <span v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</span>
-        <span v-else-if="rows.length" class="oa-muted">{{ rows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
+        <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ rows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
       </div>
       <p v-if="!rows.length" class="oa-empty">所选范围暂无数据</p>
       <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
-        <table v-if="mode === 'ranking' || mode === 'personal'" class="oa-table">
-          <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>
+        <table v-if="mode === 'ranking' || mode === 'personal'" :class="['oa-table', { 'commerce-ranking-table': mode === 'ranking' }]">
+          <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><template v-if="mode === 'ranking' && showRankingMetrics"><th class="oa-number">应付占比</th><th class="oa-number">有效订单数</th><th class="oa-number">核实毛利</th><th class="oa-number" title="核实毛利 ÷ 有核实成本的商品销售额">核实毛利率</th></template><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>
           <tbody>
             <tr v-for="(row, index) in rows" :key="row.key ? (row.shop_id || '') + ':' + row.key : row.day || index">
               <td v-if="mode === 'ranking'" class="oa-number"><span :class="['commerce-rank', { 'commerce-rank-leading': offset + index < 3 }]">{{ offset + index + 1 }}</span></td>
@@ -577,13 +707,19 @@ onUnmounted(() => {
                 </RouterLink>
                 <span v-else>{{ row.key || row.day || '—' }}</span>
               </td>
-              <td class="oa-number">
-                <div v-if="mode === 'ranking'" class="commerce-rank-amount">
-                  <span class="commerce-rank-track" aria-hidden="true"><span :style="{ inlineSize: rankBar(row) }" /></span>
-                  <strong>{{ money(rankingValue(row)) }}</strong>
-                </div>
-                <strong v-else>{{ money(row.item_pay_total) }}</strong>
-              </td>
+              <td class="oa-number"><strong>{{ money(mode === 'ranking' ? rankingValue(row) : row.item_pay_total) }}</strong></td>
+              <template v-if="mode === 'ranking' && showRankingMetrics">
+                <td class="oa-number">
+                  <div v-if="row.key && rankingMetrics.get(row.key)?.share != null" class="commerce-rank-amount">
+                    <span class="commerce-rank-track" aria-hidden="true"><span :style="{ inlineSize: percent(rankingMetrics.get(row.key)?.share) }" /></span>
+                    {{ percent(rankingMetrics.get(row.key)?.share) }}
+                  </div>
+                  <span v-else>—</span>
+                </td>
+                <td class="oa-number">{{ row.key ? (rankingMetrics.get(row.key)?.count?.toLocaleString('zh-CN') ?? '—') : '—' }}</td>
+                <td class="oa-number">{{ money(row.key ? rankingMetrics.get(row.key)?.gross : null) }}</td>
+                <td class="oa-number">{{ percent(row.key ? rankingMetrics.get(row.key)?.grossRate : null) }}</td>
+              </template>
               <td v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">
                 <span v-if="row.growth_rate != null && row.growth_status !== 'zero_baseline'" :class="['commerce-growth', Number(row.growth_rate) > 0 ? 'commerce-growth-positive' : Number(row.growth_rate) < 0 ? 'commerce-growth-negative' : '']">
                   <ArrowUpRight v-if="Number(row.growth_rate) > 0" :size="14" /><ArrowDownRight v-else-if="Number(row.growth_rate) < 0" :size="14" />{{ (Number(row.growth_rate) * 100).toFixed(1) }}%
@@ -594,8 +730,8 @@ onUnmounted(() => {
           </tbody>
         </table>
         <table v-else class="oa-table">
-          <thead><tr><th>商品 / SKU</th><th>店铺</th><th class="oa-number">销量</th><th class="oa-number">商品销售额</th><th class="oa-number">成交核实成本</th><th class="oa-number">核实毛利</th><th class="oa-number">核实覆盖率</th><th v-if="mode === 'detail'" class="oa-number">当前维护单价</th><th v-else class="oa-action-col">操作</th></tr></thead>
-          <tbody><tr v-for="(row, index) in rows" :key="`${row.shop_id}-${row.shop_item_id}-${row.sku}-${index}`">
+          <thead><tr><th>商品 / SKU</th><th>店铺</th><th class="oa-number">销量</th><th class="oa-number">商品销售额</th><th class="oa-number">成交核实成本</th><th class="oa-number">核实毛利</th><th class="oa-number">核实覆盖率</th><th v-if="mode === 'detail'" class="oa-number">当前维护单价</th></tr></thead>
+          <tbody><tr v-for="(row, index) in displayRows" :key="`${row.shop_id}-${row.shop_item_id}-${row.sku}-${index}`">
             <td>
               <RouterLink v-if="mode !== 'detail' && row.sku" class="commerce-product-name" :to="productLink(row.sku, row.shop_id)" :title="row.product_name || row.shop_item_id || row.sku">{{ row.product_name || row.shop_item_id || row.sku }}</RouterLink>
               <b v-else class="oa-ellipsis" :title="row.product_name || row.shop_item_id || row.sku">{{ row.product_name || row.shop_item_id || row.sku || '—' }}</b>
@@ -605,11 +741,10 @@ onUnmounted(() => {
             <td class="oa-number">{{ money(row.cost_verified_total) }}</td><td class="oa-number">{{ money(row.verified_gross) }}</td>
             <td class="oa-number"><span v-if="row.verified_coverage != null" :class="['oa-pill', { 'oa-pill-warn': Number(row.verified_coverage) < .9 }]">{{ Number(row.verified_coverage) < .9 ? '仅覆盖 ' : '' }}{{ (Number(row.verified_coverage) * 100).toFixed(1) }}%</span><span v-else>—</span></td>
             <td v-if="mode === 'detail'" class="oa-number">{{ money(data.current_cost) }}</td>
-            <td v-else class="oa-action-col"><RouterLink class="workspace-row-action" v-if="row.sku" :to="productLink(row.sku, row.shop_id)">详情 <ArrowRight :size="14" /></RouterLink></td>
           </tr></tbody>
         </table>
       </div>
-      <div v-if="data.has_more || offset" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset || busy" @click="offset = Math.max(0, offset - 100); load(false)"><ChevronLeft :size="15" />上一页</button><button :disabled="!data.has_more || busy" @click="offset += 100; load(false)">下一页<ChevronRight :size="15" /></button></div>
+      <div v-if="mode !== 'overview' && (data.has_more || offset)" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset || busy" @click="offset = Math.max(0, offset - 100); load(false)"><ChevronLeft :size="15" />上一页</button><button :disabled="!data.has_more || busy" @click="offset += 100; load(false)">下一页<ChevronRight :size="15" /></button></div>
     </section>
     <section v-if="mode === 'overview' && summary && canReview" class="oa-panel commerce-shortcuts">
         <div class="commerce-panel-heading"><h2>办理与复盘</h2></div>

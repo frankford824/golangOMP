@@ -7,7 +7,8 @@
       </div>
       <div class="profile-hero__main">
         <p class="profile-eyebrow">{{ roleLabel }}</p>
-        <h1>{{ displayName || '未设置展示名称' }}</h1>
+        <h1>{{ oaEnabled ? '基本资料' : displayName || '未设置展示名称' }}</h1>
+        <p v-if="oaEnabled">{{ displayName || '未设置展示名称' }}</p>
         <p>{{ accountLabel || '账号信息待同步' }}</p>
       </div>
       <button type="button" class="profile-logout" @click="logout">
@@ -130,6 +131,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import { computed, onMounted, ref, watch } from 'vue'
 import { usePermissionsStore } from '@/stores/permissions'
 import { useOAAccess } from '@/oa/access'

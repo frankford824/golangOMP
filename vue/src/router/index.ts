@@ -10,7 +10,7 @@ import {
 } from '@/router/home-fallback'
 import { installUsageTelemetry } from '@/shared/telemetry/usage'
 import { ensureOAAccess, oaEnabled, useOAAccess } from '@/oa/access'
-import { oaRoutes } from '@/oa/routes'
+import { feeTabs, oaRoutes } from '@/oa/routes'
 
 /**
  * 路由门禁：以后端 `frontend_access.menus` 为 SoT（Single Source of Truth）。
@@ -200,6 +200,13 @@ router.beforeEach(async (to, _from, next) => {
   if (oaEnabled && currentUser) {
     await ensureOAAccess()
     const { can } = useOAAccess()
+    if (to.name === 'FeesHome') {
+      const defaultTab = feeTabs.find(tab => tab.actions.some(can))
+      if (defaultTab) {
+        next({ path: '/fees/' + defaultTab.mode, replace: true })
+        return
+      }
+    }
     const oaAction = to.meta.oaAction
     const required = Array.isArray(oaAction) ? oaAction : typeof oaAction === 'string' ? [oaAction] : []
     if (required.length && !required.some(key => can(String(key)))) {

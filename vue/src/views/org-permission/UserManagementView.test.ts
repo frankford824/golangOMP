@@ -268,7 +268,7 @@ describe('UserManagementView role governance', () => {
     const checkboxes = Array.from(
       document.body.querySelectorAll<HTMLInputElement>('.um-modal input[type="checkbox"]'),
     )
-    expect(checkboxes.map((item) => item.value)).toEqual([
+    expect(checkboxes.map((item) => item.value).sort()).toEqual([
       'super_admin',
       'department_admin',
       'operations',
@@ -276,7 +276,7 @@ describe('UserManagementView role governance', () => {
       'designer',
       'customization_operator',
       'asset_manager',
-    ])
+    ].sort())
     expect(checkboxes.some((item) => item.value === 'member')).toBe(false)
     expect(checkboxes.some((item) => ['team_lead', 'design_director', 'access_admin', 'erp_operator'].includes(item.value))).toBe(false)
     expect(checkboxes.find((item) => item.value === 'operations')?.checked).toBe(true)

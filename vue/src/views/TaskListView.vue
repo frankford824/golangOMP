@@ -1,10 +1,14 @@
 <template>
-  <div class="task-list-view">
+  <div class="task-list-view" :class="{ 'oa-task-list': oaEnabled }">
     <!-- 顶栏 + 搜索/过滤：统一卡片容器 -->
     <div class="header-card yb-page-surface" data-page-header="task-center">
       <div class="page-header yb-page-header-row">
-        <h2 class="page-title task-list-page-title yb-page-title">任务中心</h2>
+        <component :is="oaEnabled ? 'h1' : 'h2'" class="page-title task-list-page-title yb-page-title">任务中心</component>
         <div class="page-header-actions">
+          <div v-if="oaEnabled" class="oa-task-views" role="group" aria-label="任务视图">
+            <button type="button" :aria-pressed="taskView === 'table'" @click="taskView = 'table'">表格</button>
+            <button type="button" :aria-pressed="taskView === 'cards'" @click="taskView = 'cards'">卡片</button>
+          </div>
           <BaseButton
             size="sm"
             variant="secondary"
@@ -193,7 +197,28 @@
         </template>
 
         <!-- 统一卡片视图 -->
-        <div class="task-cards">
+        <table v-if="oaEnabled && taskView === 'table'" class="oa-task-table">
+          <thead><tr>
+            <th scope="col"><input type="checkbox" aria-label="选择本页任务" :checked="allPageSelected" :indeterminate="somePageSelected && !allPageSelected" @change="selectTaskPage" /></th>
+            <th scope="col">任务单号</th><th scope="col">任务名称</th><th scope="col">SKU</th><th scope="col">类型与优先级</th><th scope="col">当前节点</th><th scope="col">归属</th><th scope="col">当前处理人</th><th scope="col">截止时间</th>
+          </tr></thead>
+          <tbody><tr v-for="task in pagedList" :key="task.id" :class="{ 'is-selected': selectedIds.has(task.id) }">
+            <td><input type="checkbox" :aria-label="`选择任务 ${task.taskNo}`" :checked="selectedIds.has(task.id)" @change="toggleSelect(task.id)" /></td>
+            <td class="oa-task-number">{{ task.taskNo }}</td>
+            <td><RouterLink v-slot="{ href }" :to="`/tasks/${task.id}`" custom>
+              <a class="oa-task-name" :href="href" @click="openTaskLink($event, task)">
+                <img v-if="task.referenceFileRefs?.[0]?.thumbnail_url" :src="task.referenceFileRefs[0].thumbnail_url" alt="" loading="lazy" />
+                {{ taskCardTitle(task) }}
+              </a>
+            </RouterLink></td>
+            <td><span class="oa-task-number">{{ displaySku(task) }}</span><button v-if="canCopyTaskField(displaySku(task))" type="button" class="oa-task-copy" :aria-label="`复制 SKU ${displaySku(task)}`" @click="copyTaskCardText(displaySku(task), 'SKU')"><Copy :size="14" /></button></td>
+            <td><TaskTypeBadge :type="task.businessType ?? task.taskType" /> {{ TASK_PRIORITY_OPTIONS.find((item) => item.value === task.priority)?.label ?? '—' }}</td>
+            <td><TaskMainStatusBadge v-if="task.mainStatus" :status="task.mainStatus" :label-override="getTaskCenterCardStatusLabel(task) ?? undefined" /><TaskStatusTag v-else :status="task.status" /></td>
+            <td>{{ ownershipPrimary(task) }}</td><td>{{ task.currentHandlerName || '—' }}</td>
+            <td :class="{ 'oa-task-overdue': isOverdue(task) }">{{ task.dueAt ? formatDate(task.dueAt) : '—' }}<small v-if="isOverdue(task)">{{ overdueLabel(task) }}</small></td>
+          </tr></tbody>
+        </table>
+        <div v-else class="task-cards">
           <TaskCard
             v-for="task in pagedList"
             :key="task.id"
@@ -236,6 +261,37 @@
         </div>
       </AsyncStateWrapper>
     </div>
+
+    <Teleport v-if="oaEnabled" to="body">
+      <dialog ref="peekDialog" class="oa-task-peek" aria-labelledby="oa-task-peek-title" @close="peekId = ''" @keydown.up.prevent="stepPeek(-1)" @keydown.down.prevent="stepPeek(1)">
+        <template v-if="peekTask">
+          <header>
+            <h2 id="oa-task-peek-title">任务速览</h2>
+            <RouterLink :to="`/tasks/${peekTask.id}`" @click="saveState">打开完整详情</RouterLink>
+            <button type="button" aria-label="关闭任务速览" @click="peekDialog?.close()">×</button>
+          </header>
+          <section class="oa-task-peek-body">
+            <p>{{ peekTask.taskNo }}</p><h3>{{ taskCardTitle(peekTask) }}</h3>
+            <dl>
+              <dt>SKU</dt><dd>{{ displaySku(peekTask) }}</dd>
+              <dt>状态</dt><dd><TaskMainStatusBadge v-if="peekTask.mainStatus" :status="peekTask.mainStatus" :label-override="getTaskCenterCardStatusLabel(peekTask) ?? undefined" /><TaskStatusTag v-else :status="peekTask.status" /></dd>
+              <dt>归属</dt><dd>{{ ownershipPrimary(peekTask) }}</dd>
+              <dt>当前处理人</dt><dd>{{ peekTask.currentHandlerName || '—' }}</dd>
+              <dt>截止时间</dt><dd>{{ peekTask.dueAt ? formatDate(peekTask.dueAt) : '—' }}</dd>
+              <dt v-if="peekRequirement">设计要求</dt><dd v-if="peekRequirement">{{ peekRequirement }}</dd>
+            </dl>
+            <button v-if="canClaimTask(peekTask)" type="button" :disabled="Boolean(claimingTaskId)" @click="claimTask(peekTask)">{{ taskCenterClaimButtonLabel(peekTask, claimingTaskId === peekTask.id) }}</button>
+            <p v-if="peekLoading" role="status">正在读取任务资料…</p>
+            <p v-if="peekError" role="status">{{ peekError }}</p>
+            <img v-for="file in peekReferences" :key="file.ref_id || file.asset_id || file.thumbnail_url!" :src="file.thumbnail_url!" :alt="file.filename || '运营参考图'" />
+          </section>
+          <footer>
+            <button type="button" :disabled="peekIndex <= 0" @click="stepPeek(-1)">上一单 ↑</button>
+            <button type="button" :disabled="peekIndex >= pagedList.length - 1" @click="stepPeek(1)">下一单 ↓</button>
+          </footer>
+        </template>
+      </dialog>
+    </Teleport>
 
     <nav v-if="filteredList.length > 0" class="footer-card" aria-label="任务分页">
       <span class="text-xs text-[rgb(var(--yb-text-muted))]">共 {{ tasksStore.listTotal }} 条</span>
@@ -579,7 +635,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, nextTick, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -589,6 +645,11 @@ import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/t
 import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterPanel.vue'
 import TaskFilterPanel from '@/components/task/TaskFilterPanel.vue'
+import { oaEnabled } from '@/oa/access'
+import { Copy } from 'lucide-vue-next'
+import TaskTypeBadge from '@/components/task/TaskTypeBadge.vue'
+import TaskMainStatusBadge from '@/components/business/TaskMainStatusBadge.vue'
+import TaskStatusTag from '@/components/task/TaskStatusTag.vue'
 import TaskCard from '@/components/task/TaskCard.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
@@ -604,6 +665,7 @@ import type {
   BatchAuditHandoverPayload,
   BatchAuditHandoverResultItem,
 } from '@/services/api/tasksApi'
+import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { TaskListParams } from '@/services/apiTypes'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import {
@@ -1193,6 +1255,64 @@ function onFilterReset(nextFilters: TaskListFilters, nextKeyword: string) {
 const totalPages = computed(() => Math.max(1, Math.ceil(tasksStore.listTotal / pageSize.value)))
 
 const pagedList = computed(() => filteredList.value)
+const taskView = ref<'table' | 'cards'>('table')
+const allPageSelected = computed(() => pagedList.value.length > 0 && pagedList.value.every((task) => selectedIds.has(task.id)))
+const somePageSelected = computed(() => pagedList.value.some((task) => selectedIds.has(task.id)))
+const peekDialog = ref<HTMLDialogElement>()
+const peekId = ref('')
+const peekIndex = computed(() => pagedList.value.findIndex((task) => task.id === peekId.value))
+const peekTask = computed(() => pagedList.value[peekIndex.value])
+
+const peekDetail = ref<{ design_requirement?: string; reference_file_refs?: ReferenceFileRef[] }>()
+const peekLoading = ref(false)
+const peekError = ref('')
+const peekRequirement = computed(() => peekDetail.value?.design_requirement || peekTask.value?.designRequirement)
+const peekReferences = computed(() => (peekDetail.value?.reference_file_refs ?? peekTask.value?.referenceFileRefs ?? []).filter((file) => file.thumbnail_url))
+watch(peekId, async (id, _previous, onCleanup) => {
+  peekDetail.value = undefined
+  peekError.value = ''
+  peekLoading.value = Boolean(id)
+  if (!id) return
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
+  try {
+    const { data } = await tasksApi.getById(id, controller.signal)
+    if (!controller.signal.aborted) peekDetail.value = data?.data ?? data
+  } catch {
+    if (!controller.signal.aborted) peekError.value = '任务资料暂时无法读取，可打开完整详情重试。'
+  } finally {
+    if (!controller.signal.aborted) peekLoading.value = false
+  }
+})
+watch(peekTask, (task) => { if (!task && peekDialog.value?.open) peekDialog.value.close() })
+
+function selectTaskPage() {
+  const clear = allPageSelected.value
+  for (const task of pagedList.value) {
+    if (clear) selectedIds.delete(task.id)
+    else selectedIds.add(task.id)
+  }
+}
+
+async function openTaskLink(event: MouseEvent, task: Task) {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !peekDialog.value) return
+  event.preventDefault()
+  peekId.value = task.id
+  await nextTick()
+  if (peekTask.value && peekDialog.value && !peekDialog.value.open) peekDialog.value.showModal()
+}
+
+function stepPeek(offset: number) {
+  const task = pagedList.value[peekIndex.value + offset]
+  if (task) peekId.value = task.id
+}
+
+function overdueLabel(task: Task) {
+  if (!task.dueAt) return ''
+  const hours = Math.floor((Date.now() - Date.parse(task.dueAt)) / 3600000)
+  if (!Number.isFinite(hours) || hours < 1) return '已逾期'
+  return hours >= 24 ? `逾期 ${Math.floor(hours / 24)} 天` : `逾期 ${hours} 小时`
+}
 
 // ── 批量选择 ────────────────────────────────────────────────────────────────
 function toggleSelect(id: string) {
@@ -3248,4 +3368,32 @@ watch(totalPages, (value) => {
   outline: 2px solid rgb(var(--yb-brand));
   outline-offset: 2px;
 }
+.oa-task-list .task-list-page-title { font-size: 18px; font-weight: 600; }
+.oa-task-views { display: inline-flex; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; overflow: hidden; }
+.oa-task-views button, .oa-task-peek button { padding: 6px 12px; min-height: 32px; font-size: 14px; }
+.oa-task-views button[aria-pressed=true] { background: rgb(var(--yb-bg-page)); font-weight: 650; }
+.oa-task-table { width: 100%; min-width: 1040px; border-collapse: collapse; text-align: left; font-size: 13px; }
+.oa-task-table th { background: rgb(var(--yb-bg-page)); color: rgb(var(--yb-text-muted-strong)); white-space: nowrap; font-size: 13px; font-weight: 600; }
+.oa-task-table th, .oa-task-table td { height: 44px; padding: 4px 8px; border-bottom: 1px solid rgb(var(--yb-border)); }
+.oa-task-table tr.is-selected { background: rgb(var(--yb-bg-page)); }
+.oa-task-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.oa-task-name:hover, .oa-task-peek a { text-decoration: underline; }
+.oa-task-name img { width: 30px; height: 30px; object-fit: cover; border-radius: 4px; flex: none; }
+.oa-task-number { font-family: ui-monospace, monospace; }
+.oa-task-copy { display: inline-grid; place-items: center; margin-inline-start: 4px; width: 26px; height: 28px; vertical-align: middle; }
+.oa-task-overdue { color: rgb(var(--yb-danger)); }
+.oa-task-overdue small { display: block; }
+.oa-task-list .batch-action-bar { position: sticky; top: 0; z-index: 3; }
+.oa-task-peek { position: fixed; inset: 0 0 0 auto; margin: 0 0 0 auto; width: min(720px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; font-size: 14px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); border-left: 1px solid rgb(var(--yb-border)); }
+.oa-task-peek[open] { display: flex; flex-direction: column; animation: oa-peek-in .2s ease-out; }
+@keyframes oa-peek-in { from { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .oa-task-peek[open] { animation: none; } }
+.oa-task-peek::backdrop { background: rgb(var(--yb-shadow) / .25); }
+.oa-task-peek header, .oa-task-peek footer { display: flex; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid rgb(var(--yb-border)); }
+.oa-task-peek h2 { margin-right: auto; font-size: 15px; font-weight: 600; }
+.oa-task-peek-body { padding: 18px; flex: 1; overflow: auto; }
+.oa-task-peek-body h3 { font-size: 18px; font-weight: 600; }
+.oa-task-peek-body dl { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; margin-block: 16px; }
+.oa-task-peek-body dd { white-space: pre-wrap; overflow-wrap: anywhere; }
+.oa-task-peek-body img { width: min(100%, 420px); margin-top: 12px; }
 </style>

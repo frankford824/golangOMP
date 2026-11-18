@@ -40,7 +40,9 @@ describe('durable preparation panel', () => {
   it('restores owned preparation and clears it on account change', async () => {
     mocks.get.mockResolvedValue({ data: { data: [row('processing')] } })
     const wrapper = mount(MediaPreparationPanel)
-    await wrapper.get('button').trigger('click'); await flushPromises()
+    wrapper.get('details').element.open = true
+    await wrapper.get('details').trigger('toggle')
+    await flushPromises()
     expect(wrapper.text()).toContain('准备中')
     expect(wrapper.text()).toContain('50 / 100 字节')
     window.dispatchEvent(new Event('asset-media-session-reset')); await flushPromises()
@@ -53,7 +55,9 @@ describe('durable preparation panel', () => {
     mocks.resolve.mockResolvedValue({ state: 'ready', download_url: 'https://files.example.com/original', filename: '原件.psd' })
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mount(MediaPreparationPanel)
-    await wrapper.get('button').trigger('click'); await flushPromises()
+    wrapper.get('details').element.open = true
+    await wrapper.get('details').trigger('toggle')
+    await flushPromises()
     expect(click).not.toHaveBeenCalled()
     const download = wrapper.findAll('button').find((button) => button.text() === '获取链接并下载')!
     await download.trigger('click'); await flushPromises()

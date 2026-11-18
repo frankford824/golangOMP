@@ -17,7 +17,7 @@ const formattedWatermark = computed(() => {
 <template>
   <p v-if="freshness?.source_committed_at || stale || lag > 60" class="oa-watermark" role="status" :class="{ 'oa-watermark-warn': stale || lag > 60 }">
     <span v-if="freshness?.source_committed_at">数据截至 <time :datetime="freshness.source_committed_at">{{ formattedWatermark }}</time></span>
-    <span v-if="lag > 600" class="oa-watermark-detail">同步已停，显示的是最后一次数据</span>
+    <span v-if="lag > 600" class="oa-watermark-detail">自动同步已停滞，当前展示最后一次同步快照</span>
     <span v-else-if="lag > 60" class="oa-watermark-detail">同步较慢</span>
     <span v-if="stale" class="oa-watermark-detail">暂无法连接订单数据，显示上次查询成功的快照</span>
   </p>

@@ -2,6 +2,8 @@
   <div class="app-shell font-body flex overflow-hidden h-[100dvh]">
     <!-- Light Slim Sidebar -->
     <aside
+      :class="{ 'oa-sidebar': oaEnabled, 'oa-sidebar-open': sidebarPinned }"
+      @pointerleave="tip = null"
       class="sidebar hidden md:flex flex-col h-full w-20 bg-[rgb(var(--yb-surface))] border-r border-[rgb(var(--yb-border))] transition-all duration-300 overflow-hidden group hover:w-64"
       @transitionend="onSidebarTransitionEnd"
     >
@@ -19,7 +21,13 @@
           <router-link
             v-for="menu in workbenchMenus"
             :key="menu.key"
+            :aria-label="menuLabel(menu)"
+            @pointerenter="showTip(menu, $event)"
+            @focus="showTip(menu, $event)"
+            @blur="tip = null"
+            @pointerleave="tip = null"
             :to="resolveMenuTo(menu)"
+            :class="{ active: oaEnabled && menu.key === 'oa_operations' && $route.path.startsWith('/operations/') }"
             :active-class="menu.exact ? '' : 'active'"
             :exact-active-class="menu.exact ? 'active' : ''"
             class="nav-item flex items-center gap-4 p-2 rounded-xl text-[rgb(var(--yb-text-muted))] hover:text-[rgb(var(--yb-text))] hover:bg-[rgb(var(--yb-surface-muted))] sidebar-item-hover transition-all"
@@ -27,7 +35,7 @@
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
-            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
+            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menuLabel(menu) }}</span>
             <span v-if="menu.badge && menu.badge() > 0" class="nav-badge-p2">{{ menu.badge() }}</span>
           </router-link>
         </template>
@@ -36,14 +44,20 @@
           <router-link
             v-for="menu in businessMenus"
             :key="menu.key"
+            :aria-label="menuLabel(menu)"
+            @pointerenter="showTip(menu, $event)"
+            @focus="showTip(menu, $event)"
+            @blur="tip = null"
+            @pointerleave="tip = null"
             :to="menu.to"
+            :class="{ active: menu.key === 'oa_expenses' && $route.path.startsWith('/fees/') }"
             active-class="active"
             class="nav-item flex items-center gap-4 p-2 rounded-xl text-[rgb(var(--yb-text-muted))] hover:text-[rgb(var(--yb-text))] hover:bg-[rgb(var(--yb-surface-muted))] sidebar-item-hover transition-all"
           >
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
-            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
+            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menuLabel(menu) }}</span>
           </router-link>
         </template>
         <template v-if="dataMenus.length > 0">
@@ -51,6 +65,11 @@
           <router-link
             v-for="menu in dataMenus"
             :key="menu.key"
+            :aria-label="menuLabel(menu)"
+            @pointerenter="showTip(menu, $event)"
+            @focus="showTip(menu, $event)"
+            @blur="tip = null"
+            @pointerleave="tip = null"
             :to="menu.to"
             :class="{ active: isPersonnelSubpage(menu) }"
             active-class="active"
@@ -59,14 +78,18 @@
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
-            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
+            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menuLabel(menu) }}</span>
             <span v-if="menu.badge" class="nav-badge-p2">P2</span>
           </router-link>
         </template>
       </nav>
-      <div class="mt-auto p-4" />
+      <button v-if="oaEnabled" type="button" class="oa-sidebar-pin" :aria-pressed="sidebarPinned" :aria-label="sidebarPinned ? '收起导航' : '展开导航'" :title="sidebarPinned ? '收起导航' : '展开导航'" @click="toggleSidebar">
+        <PanelLeftClose v-if="sidebarPinned" :size="18"/><PanelLeftOpen v-else :size="18"/><span v-if="sidebarPinned">收起导航</span>
+      </button>
+      <div v-else class="mt-auto p-4" />
     </aside>
 
+    <Teleport to="body"><span v-if="tip" class="oa-sidebar-tip" role="tooltip" :style="{ top: tip.top + 'px', left: tip.left + 'px' }">{{ tip.label }}</span></Teleport>
     <main class="app-main flex-1 flex flex-col h-full overflow-hidden relative min-w-0">
       <header class="app-topbar">
         <div class="app-topbar__brand">
@@ -78,16 +101,17 @@
           >
             <Menu :size="18" aria-hidden="true" />
           </button>
-          <span class="app-topbar__title" title="永箔运营管理系统">
+          <span v-if="oaEnabled" class="oa-breadcrumb"><span v-if="moduleName && moduleName !== pageTitle">{{ moduleName }} / </span>{{ pageTitle }}</span>
+          <span v-else class="app-topbar__title" title="永箔运营管理系统">
             <span class="app-topbar__full-name">永箔运营管理系统</span>
             <span class="app-topbar__short-name">永箔运营</span>
           </span>
-          <span v-if="oaEnabled" class="oa-formal-badge" title="这里提交的业务操作会写入正式系统"><span class="oa-badge-prefix">新版 · </span>正式数据</span>
+
         </div>
         <div class="app-topbar__actions">
           <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
             <Search :size="18" aria-hidden="true" />
-            <span class="topbar-search__label">搜索任务、SKU、产品</span>
+            <span class="topbar-search__label">搜索任务、SKU、产品</span><kbd v-if="oaEnabled" class="oa-search-key">Ctrl K</kbd>
           </button>
           <MediaPreparationPanel />
           <NotificationBadge @open="notificationOpen = true" />
@@ -97,6 +121,7 @@
 
       <div ref="contentScroller" class="flex-1 overflow-auto custom-scrollbar isolate">
         <main class="content">
+          <PersonalNav v-if="oaEnabled && ($route.path === '/me' || $route.path.startsWith('/me/')) && $route.path !== '/me/performance'" />
           <router-view v-slot="{ Component, route }">
             <KeepAlive :max="8">
               <component v-if="Component && route.meta.keepAlive" :is="Component" :key="String(route.name || route.path)" />
@@ -145,7 +170,7 @@
                   @click="closeMobileSidebar"
                 >
                   <span class="material-symbols-outlined">{{ menu.icon }}</span>
-                  <span>{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
+                  <span>{{ menuLabel(menu) }}</span>
                   <span v-if="menu.badge && menu.badge() > 0" class="mobile-nav-badge">{{ menu.badge() }}</span>
                 </router-link>
               </template>
@@ -158,20 +183,51 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Menu, Search } from 'lucide-vue-next'
+import { Menu, Search, PanelLeftOpen, PanelLeftClose } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
+import PersonalNav from '@/oa/components/PersonalNav.vue'
+import { oaPageTitle } from '@/oa/pageTitle'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
 
 const permissionsStore = usePermissionsStore()
 const { can } = useOAAccess()
 const router = useRouter()
+
+const sidebarPinned = ref(oaEnabled && localStorage.getItem('oa.navigation.expanded') === '1')
+const tip = ref<{ label: string; top: number; left: number } | null>(null)
+function toggleSidebar() {
+  sidebarPinned.value = !sidebarPinned.value
+  tip.value = null
+  localStorage.setItem('oa.navigation.expanded', sidebarPinned.value ? '1' : '0')
+}
+function menuLabel(menu: MenuConfig) {
+  return menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label
+}
+function showTip(menu: MenuConfig, event: Event) {
+  if (!oaEnabled || sidebarPinned.value) return
+  const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  tip.value = { label: menuLabel(menu), top: box.top + box.height / 2, left: box.right + 12 }
+}
+const pageTitle = computed(() => oaPageTitle(router.currentRoute.value.path))
+const moduleName = computed(() => {
+  const path = router.currentRoute.value.path
+  if (path.startsWith('/operations') || path === '/me/performance') return '经营中心'
+  if (path.startsWith('/fees')) return '费用中心'
+  if (path.startsWith('/me')) return '个人中心'
+  if (path.startsWith('/tasks/')) return '任务中心'
+  return ''
+})
+watch(pageTitle, title => {
+  tip.value = null
+  if (oaEnabled) document.title = title + ' · 永箔运营'
+}, { immediate: true })
 
 const searchOpen = ref(false)
 const notificationOpen = ref(false)
@@ -198,11 +254,8 @@ interface MenuConfig {
 // 侧边栏完全以后端 `frontend_access.menus` 为 SoT；
 // 原菜单使用正式 frontend_access.menus；OA 增补菜单使用同会话返回的业务动作。
 const MENU_CONFIG: MenuConfig[] = [
-  { key: 'oa_operations', label: '经营首页', to: '/operations', exact: true, section: 'workbench', icon: 'monitoring', oaActions: ['orders.view'] },
-  { key: 'oa_expenses', label: '我的费用申请', to: '/fees/mine', section: 'business', icon: 'receipt_long', oaActions: ['finance.apply'] },
-  { key: 'oa_approval', label: '审批与付款', to: '/fees/approval', section: 'business', icon: 'payments', oaActions: ['finance.approve', 'finance.pay'] },
-  { key: 'oa_finance_templates', label: '费用模板与授权', to: '/fees/templates', section: 'data', icon: 'assignment', oaActions: ['finance.templates', 'finance.admin'] },
-  { key: 'oa_finance_report', label: '费用统计', to: '/fees/report', section: 'data', icon: 'analytics', oaActions: ['finance.report'] },
+  { key: 'oa_operations', label: '经营总览', to: '/operations', exact: true, section: 'workbench', icon: 'monitoring', oaActions: ['orders.view'] },
+  { key: 'oa_expenses', label: '费用中心', to: '/fees', section: 'business', icon: 'receipt_long', oaActions: ['finance.apply', 'finance.approve', 'finance.pay', 'finance.templates', 'finance.admin', 'finance.report'] },
   // v4.2 修复：老板要求 + Dashboard 使用精确高亮，避免 '/' 前缀匹配导致所有页面都高亮
   {
     key: 'dashboard',
@@ -235,10 +288,10 @@ const MENU_CONFIG: MenuConfig[] = [
   },
   {
     key: 'report_center',
-    label: '数据中心',
+    label: oaEnabled ? 'AI 数据助手' : '数据中心',
     to: '/data-center',
     section: 'data',
-    icon: 'analytics',
+    icon: oaEnabled ? 'forum' : 'analytics',
   },
   {
     key: 'user_admin',
@@ -649,7 +702,6 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .app-topbar__brand { min-width: 0; }
-.oa-formal-badge { flex: none; font: 400 12px/1.6 var(--oa-font); white-space: nowrap; padding: 4px 8px; border-radius: 4px; color: var(--oa-secondary); background: rgb(var(--yb-surface-muted)); }
 .app-topbar__actions { flex: 0 0 auto; }
 
 .app-topbar__title {
@@ -920,25 +972,27 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
     gap: 0.35rem;
   }
 
-  .oa-badge-prefix { display: none; }
-  .app-topbar__brand:has(.oa-formal-badge) {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    column-gap: 8px;
-    row-gap: 0;
-  }
-  .app-topbar__brand:has(.oa-formal-badge) .mobile-menu-button {
-    grid-row: span 2;
-  }
-  .app-topbar__brand .oa-formal-badge {
-    width: fit-content;
-    padding: 0;
-    color: var(--oa-secondary);
-    background: transparent;
-    font-size: 12px;
-    line-height: 1.4;
-  }
   .app-topbar__full-name { display: none; }
   .app-topbar__short-name { display: inline; }
 }
+
+.oa-sidebar.sidebar { --sidebar-rail: 64px; --sidebar-drawer: 200px; }
+.oa-sidebar.sidebar:not(.oa-sidebar-open):hover { width: var(--sidebar-rail); flex-basis: var(--sidebar-rail); }
+.oa-sidebar.sidebar.oa-sidebar-open { width: var(--sidebar-drawer); flex-basis: var(--sidebar-drawer); }
+.oa-sidebar.sidebar > nav { min-height: 0; padding-inline: 8px; }
+.oa-sidebar.sidebar > nav > * { margin-block: 4px; }
+.oa-sidebar.sidebar .nav-item { min-height: 40px; padding: 4px 8px; gap: 8px; border-radius: 6px; }
+.oa-sidebar:not(.oa-sidebar-open) .opacity-0 { display: none; }
+.oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-section-label { display: block; height: 1px; padding: 0; margin: 8px; overflow: hidden; opacity: 1; font-size: 0; background: rgb(var(--yb-border)); }
+.oa-sidebar.sidebar.oa-sidebar-open .opacity-0 { opacity: 1; }
+.oa-sidebar.sidebar.oa-sidebar-open .nav-section-label { padding: 4px 8px; font-size: 12px; letter-spacing: 0; white-space: nowrap; }
+.oa-sidebar.sidebar > div:first-child { width: auto; }
+.oa-sidebar-pin { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; margin: 8px; border-radius: 6px; color: var(--oa-secondary); }
+.oa-sidebar-pin:hover { background: rgb(var(--yb-surface-muted)); }
+.oa-sidebar-tip { position: fixed; z-index: 130; transform: translateY(-50%); padding: 4px 8px; border: 1px solid var(--oa-line); border-radius: 6px; background: var(--oa-surface); color: var(--oa-ink); pointer-events: none; font-size: 14px; }
+.oa-breadcrumb { font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.oa-breadcrumb > span { color: var(--oa-secondary); font-weight: 400; }
+.oa-search-key { display:none; }
+@media (min-width: 1100px) { .app-topbar .topbar-search:has(.oa-search-key) { width: 260px; } .oa-search-key { display: inline-block; margin-left:auto; color: var(--oa-secondary); font: 12px var(--yb-font-mono); } }
+@media (max-width: 600px) { .oa-breadcrumb > span { display:none; } }
 </style>

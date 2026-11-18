@@ -1,10 +1,10 @@
 <template>
-  <main class="task-page task-detail-view">
+  <main class="task-page task-detail-view" :class="{ 'oa-task-detail': oaEnabled }">
     <div v-if="loading && !task" class="state">正在打开任务…</div>
     <div v-else-if="error && !task" class="state error" role="alert">{{ error }}</div>
     <template v-else-if="task">
       <section class="task-hero" :class="{ 'is-terminal': isTerminal }">
-        <TaskDetailAtmosphere />
+        <TaskDetailAtmosphere v-if="!oaEnabled" />
         <div class="hero-content">
           <nav class="hero-nav" aria-label="页面位置">
             <button class="back-button" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>{{ backButtonLabel }}</span></button>
@@ -390,6 +390,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import {
@@ -1386,4 +1387,23 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
     padding: 0.1rem;
   }
 }
+.oa-task-detail .task-hero { min-height: 0; border: 1px solid rgb(var(--yb-border)); border-radius: 12px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); box-shadow: none; }
+.oa-task-detail .task-hero::after { display: none; }
+.oa-task-detail .hero-content { min-height: 0; padding: 12px 16px; }
+.oa-task-detail .hero-identity h1 { font-size: 18px; font-weight: 600; letter-spacing: 0; }
+.oa-task-detail .task-number, .oa-task-detail .hero-facts dt { color: rgb(var(--yb-text-muted-strong)); font-size: 12px; }
+.oa-task-detail .hero-facts dd { color: rgb(var(--yb-text-strong)); }
+.oa-task-detail .hero-facts dd.is-danger { color: rgb(var(--yb-danger)); }
+.oa-task-detail .hero-facts, .oa-task-detail .back-button, .oa-task-detail .hero-actions button, .oa-task-detail .identity-badge { color: rgb(var(--yb-text)); background: rgb(var(--yb-bg-page)); border-color: rgb(var(--yb-border)); box-shadow: none; }
+.oa-task-detail .hero-progress, .oa-task-detail .hero-facts div + div { border-color: rgb(var(--yb-border)); }
+.oa-task-detail .stage-copy h2, .oa-task-detail .brief-card h2, .oa-task-detail .resource-story h2 { font-size: 15px; font-weight: 600; }
+.oa-task-detail .stage-copy, .oa-task-detail .brief-card, .oa-task-detail .resource-story { font-size: 14px; }
+.oa-task-detail .hero-facts dd { font-weight: 600; }
+.oa-task-detail .hero-progress :deep(li) { color: rgb(var(--yb-text-muted-strong)); }
+.oa-task-detail .hero-progress :deep(.is-current), .oa-task-detail .hero-progress :deep(.is-done) { color: rgb(var(--yb-text-strong)); }
+.oa-task-detail .hero-progress :deep(.step-marker) { font-weight: 600; border-color: rgb(var(--yb-border)); color: rgb(var(--yb-text-muted-strong)); background: rgb(var(--yb-bg-page)); }
+.oa-task-detail .hero-progress :deep(.is-current .step-marker), .oa-task-detail .hero-progress :deep(.is-done .step-marker) { color: rgb(var(--yb-text-inverse)); }
+.oa-task-detail .hero-progress :deep(.is-current .step-marker) { background: rgb(var(--yb-brand)); border-color: rgb(var(--yb-brand)); }
+.oa-task-detail .hero-progress :deep(.is-done .step-marker) { background: rgb(var(--yb-success-strong)); border-color: rgb(var(--yb-success-strong)); }
+.oa-task-detail .hero-progress :deep(.step-connector), .oa-task-detail .hero-progress :deep(.step-connector i) { background: rgb(var(--yb-border)); }
 </style>

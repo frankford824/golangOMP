@@ -29,6 +29,7 @@
           {{ scopeLabel(item) }}
         </button>
       </div>
+      <button v-if="orderCandidate" class="order-lookup" type="button" @click="openOrderSearch">按平台订单号查近 30 日明细 · {{ normalizedKeyword }}</button>
       <div class="mt-4 max-h-[min(70vh,640px)] space-y-4 overflow-y-auto pr-1">
         <div v-if="showMinimumHint" class="search-state-card" role="status">
           请输入至少 2 个字或完整编号，减少无效扫描。
@@ -135,6 +136,8 @@ import {
   type V1GlobalSearchScope,
 } from '@/domain/global-search'
 import { searchApi } from '@/services/api/searchApi'
+import { useOAAccess } from '@/oa/access'
+import { dateInChina } from '@/oa/api'
 import { usePermission } from '@/composables/usePermission'
 import { PermissionEnum } from '@/types'
 
@@ -165,6 +168,7 @@ const emit = defineEmits<{ 'update:open': [boolean] }>()
 const router = useRouter()
 const inputRef = ref<HTMLInputElement | null>(null)
 const { can } = usePermission()
+const { can: canOA } = useOAAccess()
 
 const keyword = ref('')
 const scope = ref<V1GlobalSearchScope>('all')
@@ -463,6 +467,16 @@ function goResult(result: GlobalSearchOverlayHit, groupKey: string): void {
   close()
 }
 
+const orderCandidate = computed(() => canOA('orders.view') && /^[a-zA-Z0-9][a-zA-Z0-9_-]{5,127}$/.test(normalizedKeyword.value))
+function openOrderSearch() {
+  const to = dateInChina()
+  const start = new Date(to + 'T12:00:00Z')
+  start.setUTCDate(start.getUTCDate() - 29)
+  const from = [start.toISOString().slice(0, 10), '2026-06-01'].sort()[1]
+  void router.push({ path: '/operations/orders/detail', query: { from, to, online_order_no: normalizedKeyword.value } })
+  close()
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault()
@@ -487,6 +501,9 @@ function onKeydown(event: KeyboardEvent): void {
     const item = flatResults.value[activeFlatIndex.value]
     if (item) {
       goResult(item.result, item.groupKey)
+    } else if (orderCandidate.value && event.target === inputRef.value && !event.isComposing) {
+      event.preventDefault()
+      openOrderSearch()
     }
   }
 }
@@ -665,4 +682,5 @@ onUnmounted(() => {
   color: rgb(var(--yb-brand-context-strong));
 }
 
+.order-lookup { margin-top: 8px; padding: 4px 12px; min-height: 32px; color: var(--oa-accent); background: rgb(var(--yb-brand-soft)); border-radius: 6px; }
 </style>

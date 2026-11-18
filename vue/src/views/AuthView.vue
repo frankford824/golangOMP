@@ -1,7 +1,8 @@
 <template>
-  <div class="auth-page flex flex-col min-h-screen w-full bg-surface overflow-auto font-body">
+  <div :class="{ 'oa-auth': oaEnabled, 'oa-auth-register': oaEnabled && activeTab === 'register' }" class="auth-page flex flex-col min-h-screen w-full bg-surface overflow-auto font-body">
     <!-- 背景水印：极浅色全局底纹 -->
     <div
+      v-if="!oaEnabled"
       class="fixed inset-0 pointer-events-none select-none overflow-hidden flex items-center justify-center"
       aria-hidden="true"
     >
@@ -14,24 +15,22 @@
         class="auth-card relative z-10 my-8 rounded-[2rem] p-6 sm:p-12"
       >
       <!-- 顶部 Header -->
-      <div class="text-center mb-10">
+      <div class="auth-heading text-center mb-10">
         <div class="auth-logo inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[rgb(var(--yb-brand-soft))] mb-4">
           <span class="material-symbols-outlined text-[rgb(var(--yb-brand))] text-2xl">architecture</span>
         </div>
         <h1 class="auth-title text-2xl font-headline font-extrabold text-[rgb(var(--yb-text))] mb-2 text-center whitespace-nowrap">
           永箔运营管理系统
         </h1>
-        <p class="auth-subtitle text-xs text-[rgb(var(--yb-text-faint))] tracking-widest uppercase text-center whitespace-nowrap">
+        <p v-if="!oaEnabled" class="auth-subtitle text-xs text-[rgb(var(--yb-text-faint))] tracking-widest uppercase text-center whitespace-nowrap">
           请使用账号密码登录或注册新账号
         </p>
-        <template v-if="oaEnabled">
-          <p class="mt-4 inline-block rounded-md bg-[rgb(var(--yb-surface-muted))] px-2 py-1 text-xs text-[rgb(var(--yb-text-muted))]">新版 · 正式数据</p>
-          <p class="mt-2 text-xs text-[rgb(var(--yb-text-muted))]">使用正式账号登录。提交、审批与资料变更会写入正式系统。</p>
-        </template>
+        <p v-if="oaEnabled" class="auth-formal-note">使用正式账号登录，业务提交写入正式数据。</p>
       </div>
 
       <!-- 错误提示 -->
       <div
+        role="alert"
         v-if="errorMessage"
         class="auth-error mb-6 p-3 bg-[rgb(var(--yb-danger-soft))] border border-[rgb(var(--yb-danger-border))] rounded-xl text-sm text-[rgb(var(--yb-danger))] break-words leading-relaxed"
       >
@@ -67,24 +66,26 @@
       </div>
 
       <!-- 登录表单 -->
-      <form v-if="activeTab === 'login'" class="space-y-6" @submit.prevent="handleLogin">
+      <form v-if="activeTab === 'login'" :class="{ 'space-y-6': !oaEnabled }" @submit.prevent="handleLogin">
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
+          <label for="loginForm.username" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
           <input
-            v-model="loginForm.username"
+            id="loginForm.username" autocomplete="username" v-model="loginForm.username"
             type="text"
             placeholder="请输入用户名"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
-          <input
-            v-model="loginForm.password"
-            type="password"
+          <label for="loginForm.password" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
+          <div class="auth-password"><input
+            id="loginForm.password" autocomplete="current-password" v-model="loginForm.password"
+            :type="oaEnabled && revealPassword ? 'text' : 'password'"
             placeholder="请输入密码"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
+            <button v-if="oaEnabled" type="button" class="password-toggle" :aria-label="revealPassword ? '隐藏密码' : '显示密码'" :aria-pressed="revealPassword" @click="revealPassword = !revealPassword"><EyeOff v-if="revealPassword" :size="16" /><Eye v-else :size="16" /></button>
+          </div>
         </div>
         <button
           type="submit"
@@ -96,80 +97,82 @@
       </form>
 
       <!-- 注册表单 -->
-      <form v-else class="space-y-6" @submit.prevent="handleRegister">
+      <form v-else class="register-form" :class="{ 'space-y-6': !oaEnabled }" @submit.prevent="handleRegister">
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
+          <label for="registerForm.username" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">用户名</label>
           <input
-            v-model="registerForm.username"
+            id="registerForm.username" autocomplete="username" v-model="registerForm.username"
             type="text"
             placeholder="请输入用户名"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
-          <input
-            v-model="registerForm.password"
-            type="password"
-            placeholder="请输入密码"
+          <label for="registerForm.password" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
+          <div class="auth-password"><input
+            id="registerForm.password" autocomplete="new-password" v-model="registerForm.password"
+            :type="oaEnabled && revealPassword ? 'text' : 'password'"
+            placeholder="至少 8 位，含字母和数字"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
-          <p class="auth-help mt-1 text-xs text-[rgb(var(--yb-text-muted))]">至少 8 位，需包含字母和数字</p>
+            <button v-if="oaEnabled" type="button" class="password-toggle" :aria-label="revealPassword ? '隐藏密码' : '显示密码'" :aria-pressed="revealPassword" @click="revealPassword = !revealPassword"><EyeOff v-if="revealPassword" :size="16" /><Eye v-else :size="16" /></button>
+          </div>
+          <p v-if="!oaEnabled" class="auth-help mt-1 text-xs text-[rgb(var(--yb-text-muted))]">至少 8 位，需包含字母和数字</p>
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">确认密码</label>
+          <label for="registerForm.confirmPassword" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">确认密码</label>
           <input
-            v-model="registerForm.confirmPassword"
-            type="password"
+            id="registerForm.confirmPassword" autocomplete="new-password" v-model="registerForm.confirmPassword"
+            :type="oaEnabled && revealPassword ? 'text' : 'password'"
             placeholder="请再次输入密码"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
-          <p class="auth-help mt-1 text-xs text-[rgb(var(--yb-text-muted))]">需与上方密码保持一致</p>
+          <p v-if="!oaEnabled" class="auth-help mt-1 text-xs text-[rgb(var(--yb-text-muted))]">需与上方密码保持一致</p>
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">姓名</label>
+          <label for="registerForm.displayName" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">姓名</label>
           <input
-            v-model="registerForm.displayName"
+            id="registerForm.displayName" autocomplete="name" v-model="registerForm.displayName"
             type="text"
             placeholder="请输入真实姓名"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">手机号</label>
+          <label for="registerForm.mobile" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">手机号</label>
           <input
-            v-model="registerForm.mobile"
+            id="registerForm.mobile" autocomplete="tel" v-model="registerForm.mobile"
             type="tel"
             placeholder="请输入手机号"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">邮箱（可选）</label>
+          <label for="registerForm.email" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">邮箱（可选）</label>
           <input
-            v-model="registerForm.email"
+            id="registerForm.email" autocomplete="email" v-model="registerForm.email"
             type="email"
             placeholder="请输入邮箱地址"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">部门</label>
+          <label for="registerForm.department" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">部门</label>
           <select
-            v-model="registerForm.department"
+            id="registerForm.department" v-model="registerForm.department"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] appearance-none cursor-pointer whitespace-nowrap"
             @change="onDepartmentChange"
           >
             <option value="">请选择部门</option>
-            <option v-for="dept in departments" :key="dept.name" :value="dept.name">
+            <option v-for="dept in registrationDepartments" :key="dept.name" :value="dept.name">
               {{ dept.name }}
             </option>
           </select>
         </div>
         <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">组</label>
+          <label for="registerForm.team" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">组</label>
           <select
-            v-model="registerForm.team"
+            id="registerForm.team" v-model="registerForm.team"
             :disabled="!availableTeams.length"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           >
@@ -204,6 +207,7 @@
 </template>
 
 <script setup lang="ts">
+import { Eye, EyeOff } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -224,6 +228,7 @@ const isLoading = ref(false)
 const errorMessage = ref('')
 
 // 登录表单
+const revealPassword = ref(false)
 const loginForm = ref({
   username: '',
   password: '',
@@ -256,6 +261,10 @@ function onDepartmentChange() {
 }
 
 // 页面加载时获取注册选项（兼容后端返回数组 [{ data: { departments } }] 或对象 { data: { departments } }）
+const registrationDepartments = computed(() =>
+  oaEnabled ? departments.value.filter(dept => dept.name.trim() !== '未分配') : departments.value,
+)
+
 onMounted(async () => {
   try {
     const res = await authApi.registerOptions()
@@ -299,7 +308,7 @@ async function handleLogin() {
     // 登录成功，跳转
     const redirect = (route.query.redirect as string | undefined) ?? undefined
     const landing = resolvePostLoginLandingRoute(router, permissionsStore, redirect)
-    router.push(landing)
+    await router.push(landing)
   } catch (err: unknown) {
     errorMessage.value = formatAuthPageError(err)
   } finally {
@@ -364,7 +373,7 @@ async function handleRegister() {
     // 登录成功，跳转
     const redirect = (route.query.redirect as string | undefined) ?? undefined
     const landing = resolvePostLoginLandingRoute(router, permissionsStore, redirect)
-    router.push(landing)
+    await router.push(landing)
   } catch (err: unknown) {
     errorMessage.value = formatAuthPageError(err)
   } finally {
@@ -488,4 +497,31 @@ async function handleRegister() {
   width: 0;
   height: 0;
 }
+
+.oa-auth { background: rgb(var(--yb-bg-page)); }
+.oa-auth .auth-card { width: min(100%, 420px); max-width: 100%; margin-block: 0; border-radius: 12px; padding: 24px 32px; }
+.oa-auth-register .auth-card { width: min(100%, 620px); }
+.oa-auth .auth-card > .text-center { margin-bottom: 16px; }
+.oa-auth .auth-logo { width: 36px; height: 36px; margin-bottom: 8px; }
+.oa-auth .auth-card > .mb-8 { margin-bottom: 16px; }
+.oa-auth .auth-switch { height: 40px; border-radius: 8px; }
+.oa-auth .auth-switch button { border-radius: 6px; }
+.oa-auth .auth-switch button.is-active { background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); box-shadow: 0 1px 4px rgb(var(--yb-shadow)/0.12); }
+.oa-auth .auth-card .auth-input, .oa-auth .auth-submit { height: 40px; border-radius: 6px; font-size: 14px; }
+.oa-auth label { letter-spacing: 0; font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.oa-auth form { display: grid; gap: 16px; }
+.oa-auth form > * { margin-block: 0; min-width: 0; }
+.oa-auth .auth-env { margin-top: 8px; }
+.oa-auth .auth-password { position: relative; }
+.oa-auth .auth-password input { padding-inline-end: 44px; }
+.password-toggle { position: absolute; inset: 0 0 0 auto; width: 40px; display: grid; place-items: center; color: var(--oa-secondary); }
+@media(min-width: 600px) { .oa-auth .register-form { grid-template-columns: repeat(2,minmax(0,1fr)); } .oa-auth .register-form .auth-submit { grid-column: 1/-1; } }
+@media(max-width: 599px) { .oa-auth .auth-card { padding: 24px 16px; } }
+
+.oa-auth .auth-heading { display: grid; grid-template-columns: 36px auto; align-items: center; justify-content: center; gap: 4px 8px; }
+.oa-auth .auth-heading .auth-title, .oa-auth .auth-heading .auth-logo { margin: 0; }
+.oa-auth .auth-formal-note { grid-column: 1/-1; font: 400 var(--oa-meta-size)/1.45 var(--oa-font); color: var(--oa-secondary); margin-block: 4px 0; }
+.oa-auth .auth-card { margin: 0; }
+.oa-auth .register-form { gap: 12px 16px; }
+.oa-auth .register-form label { line-height: 1.45; }
 </style>

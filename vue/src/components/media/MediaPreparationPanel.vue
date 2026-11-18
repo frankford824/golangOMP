@@ -16,6 +16,11 @@ const notice = ref('')
 const busy = ref(false)
 const handedOff = ref(new Set<string>())
 const disclosure = ref<HTMLDetailsElement | null>(null)
+const open = ref(false)
+function handleToggle() {
+  open.value = disclosure.value?.open === true
+  if (open.value) void refresh()
+}
 const trigger = ref<HTMLElement | null>(null)
 let session = 0
 const clearSession = () => { session += 1; rows.value = []; notice.value = ''; handedOff.value.clear() }
@@ -87,11 +92,11 @@ async function change(row: Preparation, action: 'cancel' | 'retry') {
 </script>
 
 <template>
-  <details ref="disclosure" class="media-preparation" @toggle="disclosure?.open && refresh()" @keydown.esc.stop.prevent="closePanel(true)">
+  <details ref="disclosure" class="media-preparation" @toggle="handleToggle" @keydown.esc.stop.prevent="closePanel(true)">
     <summary ref="trigger" class="topbar-icon" aria-label="下载" title="下载">
       <Download :size="18" aria-hidden="true" />
     </summary>
-    <div class="media-preparation__panel" role="region" aria-label="下载">
+    <div v-if="open" class="media-preparation__panel" role="region" aria-label="下载">
       <div class="media-preparation__header">
         <h2>下载</h2>
         <BaseButton size="sm" variant="secondary" :disabled="busy" @click="refresh">刷新状态</BaseButton>

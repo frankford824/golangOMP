@@ -5,6 +5,10 @@
         <h1 class="yb-page-title">SKU 资产中心</h1>
       </div>
       <div class="page-actions">
+        <div v-if="oaEnabled && !isFlatMode" class="asset-view-modes" role="group" aria-label="结果视图">
+          <button type="button" class="quiet-button" :aria-pressed="!showLedger" @click="showLedger = false">图库网格</button>
+          <button type="button" class="quiet-button" :aria-pressed="showLedger" @click="showLedger = true">规格台账</button>
+        </div>
         <button class="quiet-button" :disabled="loading" @click="load">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
@@ -14,7 +18,7 @@
     <section class="search-workbench" aria-label="资产检索">
       <form class="search-row" @submit.prevent="search">
         <label class="search-field">
-          <span class="search-icon" aria-hidden="true">⌕</span>
+          <span class="search-icon" :class="{ 'material-symbols-outlined': oaEnabled }" aria-hidden="true">{{ oaEnabled ? 'search' : '⌕' }}</span>
           <input v-model.trim="filters.q" aria-label="搜索资产" placeholder="搜索 SKU、产品名称或文件名" />
         </label>
         <button class="primary-button">搜索</button>
@@ -43,8 +47,8 @@
       <section v-else-if="result.flat_items.length" class="grid flat-grid" aria-label="匹配资源列表">
         <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
           <span class="cover">
-            <AssetPreviewMedia v-if="item.task_asset_id && (item.resource_role !== 'default_style' || item.preview_url)" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" rendition="thumbnail" :open-full-on-click="false" />
-            <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
+            <AssetPreviewMedia v-if="item.task_asset_id && (item.resource_role !== 'default_style' || item.preview_url)" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" :quiet-loading="oaEnabled" :show-recovery-actions="!oaEnabled" rendition="thumbnail" :open-full-on-click="false" />
+            <span v-else class="preview-fallback"><ImageIcon v-if="oaEnabled" :size="28" aria-hidden="true" /><span v-else class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
             <span class="mode-badge">{{ roleLabel(item.resource_role) }}</span>
           </span>
             <span class="card-body">
@@ -59,8 +63,26 @@
 
     <template v-else>
       <div v-if="!result.items.length && !externalItems.length && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
-      <section v-else-if="result.items.length || externalItems.length" class="grid" aria-label="SKU 资源列表">
-        <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" @click="openGroup(group.id)">
+      <div v-else-if="oaEnabled && showLedger && result.items.length" class="asset-ledger-scroll" role="region" aria-label="SKU 规格台账" tabindex="0">
+        <table class="asset-ledger">
+          <thead>
+            <tr><th scope="col">SKU / 产品</th><th scope="col">规格 / 尺寸</th><th scope="col">计价面积</th><th scope="col">系统计算成本</th><th scope="col">ERP 实际成本</th><th scope="col">同步状态</th><th scope="col">操作</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="group in result.items" :key="group.id">
+              <td><RouterLink :to="{ name: 'AssetDetail', params: { id: group.id } }" class="sku-code">{{ displaySKU(group) }}</RouterLink><span>{{ productTitle(group) }}</span></td>
+              <td>{{ group.sku_profile?.size_text || group.sku_profile?.spec_text || '—' }}</td>
+              <td>{{ group.sku_profile?.area_trace?.area_m2 == null ? '—' : areaText(group) }}</td>
+              <td>{{ group.sku_profile?.cost_price == null ? '—' : costText(group) }}</td>
+              <td>{{ liveCost(group.id) ? erpCostText(liveCost(group.id)) : '—' }}</td>
+              <td><span class="sync-pill" :class="syncTone(group)">{{ syncLabel(group) }}</span></td>
+              <td><button type="button" class="quiet-button ledger-preview-button" @click="previewGroupID = group.id">速览</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <section v-else-if="result.items.length || (!oaEnabled && externalItems.length)" class="grid" aria-label="SKU 资源列表">
+        <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" :aria-label="oaEnabled ? `查看 ${displaySKU(group)} ${productTitle(group)} 资产详情` : undefined" @click="openGroup(group.id)">
           <span class="cover">
             <AssetPreviewMedia
               v-if="coverAssetID(group) > 0"
@@ -69,10 +91,27 @@
               :alt="coverName(group)"
               img-class="resource-cover-media"
               inner-img-class="resource-cover-image"
+              :quiet-loading="oaEnabled"
+              :show-recovery-actions="!oaEnabled"
               defer-until-visible
             />
+            <template v-else-if="oaEnabled && coverReference(group)">
+              <AssetPreviewMedia
+                :task-asset-id="coverReference(group)?.formal_task_asset_id?.toString()"
+                :resolved-preview-url="referencePreviewURL(group)"
+                :alt="coverReference(group)?.file_name || '参考图'"
+                :open-full-on-click="false"
+                img-class="resource-cover-media"
+                inner-img-class="resource-cover-image"
+                quiet-loading
+                :show-recovery-actions="false"
+                defer-until-visible
+              />
+              <span class="mode-badge reference-badge">参考图</span>
+            </template>
+            <span v-else-if="oaEnabled" class="preview-fallback"><ImageIcon :size="28" aria-hidden="true" /><small>暂无图片</small></span>
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(coverName(group)) }}</span><small>暂无成品预览</small></span>
-            <span class="mode-badge">{{ revision(group)?.mode === 'set' ? '套装' : '单图' }}</span>
+            <span v-if="!oaEnabled || coverAssetID(group) || !coverReference(group)" class="mode-badge">{{ revision(group)?.mode === 'set' ? '套装' : '单图' }}</span>
             <span class="item-count">{{ revision(group)?.final_output_waived ? '无需成品图' : `${finals(group).length} 张成品` }}</span>
           </span>
           <span class="card-body sku-card-body">
@@ -117,10 +156,12 @@
                 :asset-id="externalResourceID(asset)"
                 :alt="externalFileName(asset)"
                 img-class="external-cover-media"
+                :quiet-loading="oaEnabled"
+                :show-recovery-actions="!oaEnabled"
                 rendition="thumbnail"
                 :open-full-on-click="false"
               />
-              <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(externalFileName(asset)) }}</span><small>外部资源</small></span>
+              <span v-else class="preview-fallback"><ImageIcon v-if="oaEnabled" :size="28" aria-hidden="true" /><span v-else class="file-mark">{{ fileInitial(externalFileName(asset)) }}</span><small>外部资源</small></span>
               <span class="mode-badge">外部</span>
             </span>
             <span class="card-body">
@@ -145,6 +186,40 @@
     </nav>
 
     <Teleport to="body">
+      <div v-if="previewGroup" class="drawer-layer">
+        <button class="drawer-backdrop" tabindex="-1" aria-label="关闭资产速览" @click="previewGroupID = null" />
+        <aside ref="previewDrawerPanel" class="filter-drawer asset-preview-drawer" role="dialog" aria-modal="true" aria-labelledby="asset-preview-title" @keydown.up.prevent="stepPreview(-1)" @keydown.down.prevent="stepPreview(1)">
+          <header>
+            <h2 id="asset-preview-title">资产速览</h2>
+            <button type="button" class="icon-button" aria-label="关闭资产速览" @click="previewGroupID = null">×</button>
+          </header>
+          <div class="asset-preview-content">
+            <h3>{{ displaySKU(previewGroup) }}</h3>
+            <p>{{ productTitle(previewGroup) }}</p>
+            <div v-if="coverAssetID(previewGroup) || coverReference(previewGroup)" class="preview-media-frame">
+              <AssetPreviewMedia
+                :task-asset-id="coverAssetID(previewGroup) ? String(coverAssetID(previewGroup)) : coverReference(previewGroup)?.formal_task_asset_id?.toString()"
+                :resolved-preview-url="coverAssetID(previewGroup) ? undefined : referencePreviewURL(previewGroup)"
+                :alt="coverAssetID(previewGroup) ? coverName(previewGroup) : coverReference(previewGroup)?.file_name || '参考图'"
+                :open-full-on-click="false"
+                quiet-loading
+              />
+              <small v-if="!coverAssetID(previewGroup)">参考图</small>
+            </div>
+            <dl>
+              <div><dt>规格 / 尺寸</dt><dd>{{ specificationText(previewGroup) }}</dd></div>
+              <div><dt>计价面积</dt><dd>{{ areaText(previewGroup) }}</dd></div>
+              <div><dt>系统计算成本</dt><dd>{{ costText(previewGroup) }}</dd></div>
+              <div><dt>同步状态</dt><dd>{{ syncLabel(previewGroup) }}</dd></div>
+            </dl>
+            <RouterLink :to="{ name: 'AssetDetail', params: { id: previewGroup.id } }" @click="previewGroupID = null">前往资产详情</RouterLink>
+          </div>
+          <footer>
+            <button type="button" class="quiet-button" :disabled="previewGroupIndex <= 0" @click="stepPreview(-1)">上一项 ↑</button>
+            <button type="button" class="quiet-button" :disabled="previewGroupIndex >= result.items.length - 1" @click="stepPreview(1)">下一项 ↓</button>
+          </footer>
+        </aside>
+      </div>
       <div v-if="filterDrawerOpen" class="drawer-layer">
         <button class="drawer-backdrop" tabindex="-1" aria-label="关闭筛选" @click="filterDrawerOpen = false" />
         <aside ref="filterDrawerPanel" class="filter-drawer" role="dialog" aria-modal="true" aria-labelledby="asset-filter-title">
@@ -168,7 +243,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
+import { ImageIcon } from 'lucide-vue-next'
+import { oaEnabled } from '@/oa/access'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import { useModalA11y } from '@/composables/useModalA11y'
@@ -180,6 +257,9 @@ type FilterKey = 'resource_role' | 'file_format' | 'created_from' | 'created_to'
 
 const router = useRouter()
 const loading = ref(false)
+const showLedger = ref(false)
+const previewGroupID = ref<number | null>(null)
+const previewDrawerPanel = ref<HTMLElement | null>(null)
 const resultsViewport = ref<HTMLElement | null>(null)
 const error = ref('')
 const filterDrawerOpen = ref(false)
@@ -193,6 +273,13 @@ let liveCostRequestVersion = 0
 const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final' | 'default_style', file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
 const initialPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? Math.max(80, Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE || 100)) : 24
 const result = reactive({ items: [] as ResourceGroup[], flat_items: [] as FlatResourceItem[], view_mode: 'group' as 'group' | 'flat', page: 1, page_size: initialPageSize, total: 0 })
+const previewGroupIndex = computed(() => result.items.findIndex(group => group.id === previewGroupID.value))
+const previewGroup = computed(() => result.items[previewGroupIndex.value])
+useModalA11y(computed(() => Boolean(previewGroup.value)), previewDrawerPanel, { onEsc: () => { previewGroupID.value = null } })
+function stepPreview(direction: -1 | 1) {
+  const group = result.items[previewGroupIndex.value + direction]
+  if (group) previewGroupID.value = group.id
+}
 const { creatorOptions: rawCreatorOptions } = useTaskFilterOptions(true, '全部')
 const creatorOptions = computed(() => rawCreatorOptions.value.filter((item) => item.value))
 const totalPages = computed(() => Math.max(1, Math.ceil(result.total / result.page_size)))
@@ -203,8 +290,18 @@ const laneLabel = (lane?: string) => ({ normal: '常规', customization: '定制
 const roleLabel = (role: string) => ({ reference: '参考图', source: '源文件', final: '最终成品', default_style: '默认款' }[role] || role)
 const displaySKU = (group: ResourceGroup) => group.sku_code || group.sku_profile?.sku_code || 'SKU 待关联'
 const productTitle = (group: ResourceGroup) => group.sku_profile?.product_name || group.product_name || (group.scope_kind === 'retouch_requirement' ? '修图成品' : '未命名产品')
-const coverName = (group: ResourceGroup) => finals(group)[0]?.file?.file_name || finals(group)[0]?.item_name || group.product_name || '资源'
-const coverAssetID = (group: ResourceGroup) => finals(group)[0]?.file?.task_asset_id || finals(group)[0]?.task_asset_id || 0
+const coverFinal = (group: ResourceGroup) => oaEnabled
+  ? finals(group).find((item) => item.file?.availability !== 'historical_unavailable' && (item.file?.task_asset_id || item.task_asset_id))
+  : finals(group)[0]
+const coverName = (group: ResourceGroup) => coverFinal(group)?.file?.file_name || coverFinal(group)?.item_name || group.product_name || '资源'
+const coverAssetID = (group: ResourceGroup) => coverFinal(group)?.file?.task_asset_id || coverFinal(group)?.task_asset_id || 0
+const coverReference = (group: ResourceGroup) => revision(group)?.references?.find(
+  (reference) => reference.availability !== 'historical_unavailable' && (reference.formal_task_asset_id || reference.preview_url),
+)
+function referencePreviewURL(group: ResourceGroup) {
+  const reference = coverReference(group)
+  return reference?.formal_task_asset_id ? undefined : reference?.preview_url
+}
 const specificationText = (group: ResourceGroup) => group.sku_profile?.size_text || group.sku_profile?.spec_text || '规格待补充'
 const areaText = (group: ResourceGroup) => {
   const area = group.sku_profile?.area_trace?.area_m2
@@ -629,4 +726,34 @@ onMounted(load)
     width: 100%;
   }
 }
+html.oa-live-ui .asset-view-modes { display: flex; gap: 4px; }
+html.oa-live-ui .asset-view-modes [aria-pressed="true"] { background: rgb(var(--yb-brand-soft)); color: rgb(var(--yb-brand)); border-color: currentColor; }
+html.oa-live-ui .search-field input,
+html.oa-live-ui .search-row > button { min-height: 36px; height: 36px; border-radius: 6px; }
+html.oa-live-ui .search-icon { font-size: 18px; top: 9px; }
+html.oa-live-ui .resource-card .cover { aspect-ratio: 16 / 10; pointer-events: none; }
+html.oa-live-ui .reference-badge { color: rgb(var(--yb-text-muted)); }
+html.oa-live-ui :is(.sku-facts small, .sku-facts b, .preview-fallback small, .mode-badge, .item-count) { font-size: 12px; }
+html.oa-live-ui .groups-page { grid-template-columns: minmax(0, 1fr); }
+html.oa-live-ui .asset-results-region { min-width: 0; }
+.asset-ledger-scroll { min-width: 0; overflow-x: auto; }
+.ledger-preview-button, .asset-preview-drawer footer .quiet-button { min-height: 32px; border-radius: 6px; }
+.asset-preview-drawer { grid-template-rows: auto minmax(0, 1fr) auto; }
+.asset-preview-drawer h2 { font-size: var(--oa-h2-size); font-weight: 600; }
+.asset-preview-content { overflow: auto; min-height: 0; padding: 16px 22px; }
+.asset-preview-content h3 { margin: 0; font: 600 15px/1.4 var(--yb-font-mono); }
+.asset-preview-content p { margin: 4px 0 12px; font-size: 14px; }
+.preview-media-frame { aspect-ratio: 16 / 10; overflow: hidden; position: relative; background: rgb(var(--yb-surface-muted)); }
+.preview-media-frame :deep(.apm) { width: 100%; height: 100%; }
+.preview-media-frame > small { position: absolute; inset: 8px auto auto 8px; padding: 3px 6px; border-radius: 6px; background: rgb(var(--yb-surface-muted)); font-size: 12px; }
+.asset-preview-content dl { margin: 12px 0; font-size: 13px; }
+.asset-preview-content dl > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgb(var(--yb-border)); }
+.asset-preview-content dd { margin: 0; text-align: right; }
+.asset-preview-content a { display: inline-flex; min-height: 32px; align-items: center; color: var(--oa-accent); font-size: 14px; }
+.asset-preview-drawer footer { position: static; }
+.asset-ledger { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; line-height: 1.5; background: rgb(var(--yb-surface)); }
+.asset-ledger :is(th, td) { padding: 8px 12px; border-bottom: 1px solid rgb(var(--yb-border)); text-align: left; white-space: nowrap; }
+.asset-ledger th { background: rgb(var(--yb-surface-muted)); font-weight: 600; }
+.asset-ledger td:first-child span { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.asset-ledger :is(td:nth-child(n+2):nth-child(-n+5), .sku-code) { font-family: var(--yb-font-mono, monospace); font-variant-numeric: tabular-nums; }
 </style>

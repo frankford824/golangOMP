@@ -17,7 +17,7 @@
           <History aria-hidden="true" />
         </button>
         <div>
-          <h1 id="assistant-title">数据智能助手</h1>
+          <h1 id="assistant-title">{{ oaEnabled ? 'AI 数据助手' : '数据智能助手' }}</h1>
           <p>回答均附检索依据</p>
         </div>
         <div class="header-actions">
@@ -112,6 +112,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { oaEnabled } from '@/oa/access'
 import { ArrowUpRight, BotOff, CircleAlert, History, LoaderCircle, Plus, Sparkles, Trash2, X } from 'lucide-vue-next'
 import AIChatAdminDrawer from '@/components/data-center/AIChatAdminDrawer.vue'
 import AIChatComposer from '@/components/data-center/AIChatComposer.vue'
@@ -376,4 +377,8 @@ function friendlyError(reason: unknown) {
   .history-button { display: none; }
   .assistant-header { grid-template-columns: minmax(0, 1fr) auto; }
 }
+html.oa-live-ui .assistant-header h1 { font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+html.oa-live-ui :is(.assistant-empty, .stage-state) h2 { font-size: 15px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+html.oa-live-ui .assistant-header p,
+html.oa-live-ui .composer-dock > p { font-size: 12px; color: rgb(var(--yb-text-muted)); }
 </style>

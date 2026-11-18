@@ -1,6 +1,7 @@
 <template>
   <div ref="rootEl" class="apm" :class="imgClass">
-    <template v-if="phase === 'loading'">
+    <div v-if="quietLoading && (phase === 'loading' || phase === 'deferred')" class="apm-skeleton" aria-hidden="true" />
+    <template v-else-if="phase === 'loading'">
       <div class="apm-placeholder apm-loading" role="status" aria-live="polite">加载预览…</div>
     </template>
     <template v-else-if="phase === 'deferred'">
@@ -14,20 +15,20 @@
     <template v-else-if="phase === 'unavailable'">
       <div class="apm-empty apm-empty--stack" aria-label="当前不可预览，仅可下载">
         <img :src="placeholderSrc" alt="" class="apm-placeholder-img" />
-        <button type="button" class="apm-retry apm-retry--below" @click.stop="reload">重试</button>
+        <button v-if="showRecoveryActions" type="button" class="apm-retry apm-retry--below" @click.stop="reload">重试</button>
       </div>
     </template>
     <template v-else-if="phase === 'preparing'">
       <div class="apm-placeholder apm-loading" role="status" aria-live="polite">
         <span>{{ errorHint }}</span>
-        <button type="button" class="apm-retry apm-retry--below" @click.stop="reload">刷新</button>
+        <button v-if="showRecoveryActions" type="button" class="apm-retry apm-retry--below" @click.stop="reload">刷新</button>
       </div>
     </template>
     <template v-else-if="phase === 'error'">
       <div class="apm-empty apm-empty--stack" role="alert">
         <img :src="placeholderSrc" alt="" class="apm-placeholder-img" />
         <div class="apm-empty-caption">{{ errorHint }}</div>
-        <button type="button" class="apm-retry" @click.stop="reload">重新获取预览</button>
+        <button v-if="showRecoveryActions" type="button" class="apm-retry" @click.stop="reload">重新获取预览</button>
       </div>
     </template>
     <template v-else-if="displaySrc">
@@ -88,6 +89,9 @@ const props = withDefaults(
      * 为 true 时仅在根节点进入视口（含 margin）后再发起预览请求，用于缩略图网格等。
      */
     deferUntilVisible?: boolean
+    quietLoading?: boolean
+    /** Navigation cards expose a single hit target; recovery is available on the detail page. */
+    showRecoveryActions?: boolean
     rendition?: 'thumbnail' | 'preview'
     /** 卡片导航场景交由父级处理点击，不请求详情预览。 */
     openFullOnClick?: boolean
@@ -102,6 +106,7 @@ const props = withDefaults(
     deferUntilVisible: true,
     rendition: 'thumbnail',
     openFullOnClick: true,
+    showRecoveryActions: true,
   },
 )
 
@@ -501,4 +506,13 @@ async function onOpenFull() {
   line-height: 1.35;
   max-width: 100%;
 }
+  .apm-skeleton {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(100deg, rgb(var(--yb-surface-muted)) 25%, rgb(var(--yb-surface)) 45%, rgb(var(--yb-surface-muted)) 65%);
+    background-size: 240% 100%;
+    animation: apm-shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes apm-shimmer { to { background-position: -180% 0; } }
+  @media (prefers-reduced-motion: reduce) { .apm-skeleton { animation: none; } }
 </style>

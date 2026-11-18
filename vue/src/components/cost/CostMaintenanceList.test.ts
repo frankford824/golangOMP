@@ -52,6 +52,26 @@ beforeEach(() => {
   mocks.logs.mockResolvedValue({ data: [], pagination: { total: 0 } });
 });
 describe("completed SKU maintenance", () => {
+  it.skipIf(import.meta.env.VITE_OA_FEATURES !== 'true')("explains a missing price and opens the existing dimension editor without writing", async () => {
+    mocks.list.mockResolvedValue({
+      data: [{ ...row, width_cm: null, height_cm: null, area_m2: null, size_text: "", cost_price: null, status: "conflict" }],
+      next_before_id: 0,
+      refreshed_at: row.updated_at,
+    });
+    const wrapper = mount(CostMaintenanceList, { global: { stubs: { Teleport: true } } });
+    await flushPromises();
+    expect(wrapper.get(".blocked-confirm").attributes("title")).toContain("当前无系统成本");
+    expect(wrapper.get("tbody").text()).not.toContain("㎡");
+    await wrapper.get("button.missing-dimensions").trigger("click");
+    const fields = wrapper.findAll('.dimension-fields input');
+    await fields[0]!.setValue(20);
+    await fields[1]!.setValue(30);
+    await flushPromises();
+    const area = wrapper.findAll('.dimension-fields input')[2]!;
+    expect((area.element as HTMLInputElement).value).toBe("0.06");
+    expect(mocks.maintain).not.toHaveBeenCalled();
+  });
+
   it("defaults to pending and resets the cursor when switching to reviewed or all",async()=>{
     mocks.list.mockResolvedValue({data:[row],next_before_id:10,refreshed_at:row.updated_at});
     const w=mount(CostMaintenanceList);await flushPromises();

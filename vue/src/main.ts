@@ -1,9 +1,13 @@
 import { createMainApp } from './app/main-app'
 import { router } from './router'
 import './assets/main.css'
+import { installChunkRecovery } from './oa/chunkRecovery'
 import { oaEnabled } from './oa/access'
 
-if (oaEnabled) document.documentElement.classList.add('oa-live-ui')
+if (oaEnabled) {
+  document.documentElement.classList.add('oa-live-ui')
+  installChunkRecovery(router)
+}
 
 if (oaEnabled && window.location.hostname === 'oa.yongbo.cloud') {
   const marker = 'yb.oa.formal-session-initialized.v2'

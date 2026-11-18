@@ -44,7 +44,7 @@
             :key="item.id"
             class="notif-row"
             :class="{ 'is-read': isRead(item) }"
-            @click="openNotification(item)"
+            @click="!oaEnabled && openNotification(item)"
           >
             <div class="notif-row-icon">
               <Circle v-if="!isRead(item)" class="h-3 w-3" />
@@ -56,7 +56,8 @@
                 <time>{{ displayTime(item.created_at) }}</time>
               </div>
               <p>{{ displayContent(item) }}</p>
-              <span>{{ displayType(item) }}</span>
+              <span v-if="!oaEnabled || displayType(item) !== displayTitle(item)" :class="oaEnabled && notificationTone(item)">{{ displayType(item) }}</span>
+              <RouterLink v-if="oaEnabled && notificationTaskID(item)" :to="{ name: 'TaskDetail', params: { id: notificationTaskID(item) } }" class="notif-task-link" @click="markNotificationRead(item)">查看任务</RouterLink>
             </div>
             <button
               v-if="!isRead(item)"
@@ -243,7 +244,8 @@ import {
 } from 'lucide-vue-next'
 import { formatNotification } from '@/domain/notification-text'
 import { defineAsyncComponent } from 'vue'
-import { useOAAccess } from '@/oa/access'
+import type { TaskSKUSyncFailedPayload } from '@/services/v1Types'
+import { oaEnabled, useOAAccess } from '@/oa/access'
 import { notificationsApi } from '@/services/api/notificationsApi'
 import { usersApi } from '@/services/api/usersApi'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
@@ -325,14 +327,35 @@ function notificationText(item: NotificationItem) {
 }
 
 function displayTitle(item: NotificationItem): string {
+  if (oaEnabled && item.notification_type === 'task_sku_sync_failed') {
+    const payload = item.payload as TaskSKUSyncFailedPayload | undefined
+    const sku = payload?.failed_items?.[0]?.sku_code?.trim()
+    const count = payload?.failed_count ?? payload?.failed_items?.length ?? 0
+    if (sku) return count > 1 ? `SKU ${sku} 等 ${count} 项同步至 ERP 失败` : `SKU ${sku} 同步至 ERP 失败`
+    if (payload?.task_no) return `任务 ${payload.task_no} 的 SKU 同步至 ERP 失败`
+    return 'SKU 同步至 ERP 失败'
+  }
   return item.title ?? notificationText(item).title
 }
 
 function displayContent(item: NotificationItem): string {
+  if (oaEnabled && item.notification_type === 'task_sku_sync_failed') {
+    const payload = item.payload as TaskSKUSyncFailedPayload | undefined
+    const reason = [item.content, payload?.summary, ...(payload?.failed_items?.map((entry) => entry.error) ?? [])]
+      .filter(Boolean).join(' ')
+    if (/erp bridge request failed|timeout|deadline exceeded/i.test(reason)) {
+      return '系统未能从 ERP 接口取得成功响应。请查看任务中的同步状态后再重试。'
+    }
+    return notificationTaskID(item)
+      ? 'ERP 同步未完成。请打开任务查看 SKU 同步状态。'
+      : 'ERP 同步未完成。请按 SKU 在成本规则或资产中心核对同步状态。'
+  }
   return item.content ?? notificationText(item).content
 }
 
 function displayType(item: NotificationItem): string {
+  if (oaEnabled && item.notification_type === 'task_sku_sync_failed') return 'ERP 同步异常'
+  if (oaEnabled && item.notification_type === 'task_pending_audit') return '审批提醒'
   if (item.notification_type === 'system_broadcast') return '系统广播'
   if (item.notification_type === 'task_assigned_to_me') return '任务分配'
   if (item.notification_type === 'task_pending_audit') return '待审核'
@@ -344,7 +367,23 @@ function displayType(item: NotificationItem): string {
   return '系统通知'
 }
 
+function notificationTone(item: NotificationItem): string {
+  if (item.notification_type === 'task_sku_sync_failed') return 'notif-type-error'
+  if (item.notification_type === 'task_rejected') return 'notif-type-warning'
+  return 'notif-type-info'
+}
+
+function notificationTaskID(item: NotificationItem): number | undefined {
+  const taskId = Number((item.payload as Record<string, unknown> | undefined)?.task_id)
+  return Number.isSafeInteger(taskId) && taskId > 0 ? taskId : undefined
+}
+
+function markNotificationRead(item: NotificationItem): void {
+  if (!isRead(item)) void notificationsStore.markRead(item.id).catch(() => undefined)
+}
+
 function displayTime(createdAt: string | undefined): string {
+  if (oaEnabled) return formatDateTimeBeijing(createdAt) || '—'
   if (!createdAt) return '-'
   const diffMs = Date.now() - taskInstantMs(createdAt)
   if (Number.isFinite(diffMs) && diffMs >= 0) {
@@ -1301,4 +1340,8 @@ onMounted(() => {
   .notif-empty { min-height: 7rem; align-content: center; }
   .notification-tools { align-self: start; max-block-size: 100%; }
 }
+html.oa-live-ui .notif-row { cursor: default; }
+html.oa-live-ui .notif-row .notif-type-error { background: rgb(var(--yb-danger-soft)); color: rgb(var(--yb-danger-text)); }
+html.oa-live-ui .notif-row .notif-type-warning { background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
+.notif-task-link { margin-left: 8px; font-size: 13px; color: var(--oa-primary, rgb(var(--yb-brand))); }
 </style>

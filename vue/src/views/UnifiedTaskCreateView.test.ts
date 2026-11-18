@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  oaEnabled: false,
   route: { query: { intent: 'planning_sku' } as Record<string, string> },
   push: vi.fn(), replace: vi.fn(),
   create: vi.fn(), addTask: vi.fn(), getTaskById: vi.fn(), parseBatch: vi.fn(), getProducts: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   gridFocus: vi.fn(),
 }))
 
+vi.mock('@/oa/access', () => ({ get oaEnabled() { return mocks.oaEnabled }, useOAAccess: () => ({ can: () => false }) }))
 vi.mock('vue-router', () => ({
   useRoute: () => mocks.route,
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
@@ -104,6 +106,26 @@ describe('UnifiedTaskCreateView', () => {
     expect(wrapper.text()).toContain('暂时无法核对款式编码')
     expect(wrapper.text()).not.toContain('未匹配到已同步的 ERP 款式')
     wrapper.unmount()
+  })
+
+  it('shows OA validation on submit with the visible detail row number', async () => {
+    mocks.oaEnabled = true
+    const wrapper = await mountNewDesignBatch(['同款', '同款'])
+    try {
+      expect(wrapper.find('.validation-items').exists()).toBe(false)
+      expect(wrapper.get('.validation-dock .primary-button').attributes('disabled')).toBeUndefined()
+      await wrapper.get('.validation-dock .primary-button').trigger('click')
+      await flushPromises()
+      const issue = wrapper.get('.validation-items button')
+      expect(issue.text()).toContain('第 2 行明细')
+      expect(issue.text()).toContain('第 1 行明细')
+      expect(issue.text()).not.toContain('表格第')
+      expect(mocks.gridFocus).toHaveBeenCalledWith(1, 'product_name')
+      expect(mocks.addTask).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      mocks.oaEnabled = false
+    }
   })
 
   it('blocks duplicate rows before submission, locates the row, and accepts a genuine correction', async () => {

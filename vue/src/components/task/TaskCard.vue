@@ -3,6 +3,7 @@
     class="tc"
     :class="{
       'tc--selected': selected,
+      'tc--oa': oaEnabled,
       'tc--overdue': overdue,
       'tc--claimable': claimable,
       'tc--customization': customization,
@@ -20,21 +21,22 @@
         />
       </label>
       <span class="tc-no tc-copy-zone" data-card-copy-zone>{{ task.taskNo }}</span>
+      <button v-if="oaEnabled && canCopyNo" type="button" class="tc-copy-icon" aria-label="复制任务号" @click.stop="emit('copy', task.taskNo, '任务号')"><Copy :size="14" /></button>
       <span class="tc-eyebrow-spacer"></span>
       <div class="tc-tags">
         <span class="tc-priority" :class="`tc-priority--${priorityMeta.tone}`">
           {{ priorityMeta.label }}
         </span>
-        <span class="tc-tag" :class="categoryKind === 'custom' ? 'tc-tag--custom' : 'tc-tag--brand'">
+        <span v-if="!oaEnabled" class="tc-tag" :class="categoryKind === 'custom' ? 'tc-tag--custom' : 'tc-tag--brand'">
           {{ categoryLabel }}
         </span>
-        <WorkflowLaneTag v-if="showLaneTag" :lane="task.businessLane" />
+        <WorkflowLaneTag v-if="!oaEnabled && showLaneTag" :lane="task.businessLane" />
         <TaskTypeBadge :type="task.businessType ?? task.taskType" />
       </div>
     </div>
 
     <!-- 悬停复制条 -->
-    <div class="tc-copy-toolbar" data-card-no-nav="true" @click.stop>
+    <div v-if="!oaEnabled" class="tc-copy-toolbar" data-card-no-nav="true" @click.stop>
       <button
         v-if="canCopyNo"
         type="button"
@@ -65,7 +67,8 @@
     </div>
 
     <!-- 标题 -->
-    <div class="tc-title tc-copy-zone" :title="title" data-card-copy-zone>{{ title }}</div>
+    <RouterLink v-if="oaEnabled" class="tc-title" :to="`/tasks/${task.id}`" :title="title" @click.stop>{{ title }}</RouterLink>
+    <div v-else class="tc-title tc-copy-zone" :title="title" data-card-copy-zone>{{ title }}</div>
 
     <!-- 状态:圆点 + 文字 -->
     <div class="tc-status">
@@ -114,7 +117,7 @@
       <span class="tc-meta-key">归属</span>
       <span class="tc-meta-val" :title="ownership">{{ ownership }}</span>
       <span class="tc-meta-key">SKU</span>
-      <span class="tc-meta-val tc-meta-sku tc-copy-zone" :title="sku" data-card-copy-zone>{{ sku }}</span>
+      <span class="tc-meta-val tc-meta-sku tc-copy-zone" :title="sku" data-card-copy-zone>{{ sku }}<button v-if="oaEnabled && canCopySku" type="button" class="tc-copy-icon" aria-label="复制 SKU" @click.stop="emit('copy', sku, 'SKU')"><Copy :size="14" /></button></span>
       <template v-if="!isBatch">
         <span class="tc-meta-key">创建</span>
         <span class="tc-meta-val" :title="creator">{{ creator }}</span>
@@ -147,6 +150,9 @@
 </template>
 
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
+import { oaEnabled } from '@/oa/access'
+import { Copy } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Task } from '@/domain/types/task'
 import TaskStatusTag from './TaskStatusTag.vue'
@@ -585,5 +591,13 @@ const emit = defineEmits<{
   }
 
   .tc-copy-toolbar button { min-block-size: 1.75rem; }
+}
+.tc--oa .tc-title:hover { text-decoration: underline; }
+.tc--oa .tc-no, .tc--oa .tc-meta, .tc--oa .tc-time { font-size: 12px; }
+.tc--oa .tc-title { font-size: 14px; }
+.tc-copy-icon { display: inline-grid; place-items: center; margin-inline-start: 4px; min-width: 24px; min-height: 24px; opacity: .65; }
+@media (hover: hover) {
+  .tc-copy-icon { opacity: 0; }
+  .tc:hover .tc-copy-icon, .tc:focus-within .tc-copy-icon { opacity: 1; }
 }
 </style>

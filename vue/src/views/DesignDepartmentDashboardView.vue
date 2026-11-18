@@ -1,9 +1,9 @@
 <template>
-  <div class="design-board-page">
+  <div class="design-board-page" :class="{ 'oa-design-board': oaEnabled }">
     <header class="design-board-header">
       <div>
         <button class="back-link" type="button" @click="router.push('/')"><ArrowLeft :size="16" />返回主页</button>
-        <h1>{{ dashboard?.department_name || '设计部' }}数据看板</h1>
+        <h1>{{ departmentTitle }}</h1>
         <p>人员产能、任务结构、设计文件量、效率与质量风险的部门级视图。</p>
       </div>
       <div class="header-actions">
@@ -14,11 +14,14 @@
     </header>
 
     <section class="filter-panel" aria-label="看板筛选条件">
+      <div class="filter-top">
       <div class="preset-row">
         <span>快捷周期</span>
         <button v-for="preset in presets" :key="preset.days" type="button" :class="{ active: selectedPreset === preset.days }" @click="applyPreset(preset.days)">{{ preset.label }}</button>
       </div>
-      <div class="filter-grid">
+      <button v-if="oaEnabled" type="button" class="filter-expand" :aria-expanded="showFilters" aria-controls="design-board-filter-grid" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '展开筛选' }}</button>
+      </div>
+      <div v-show="!oaEnabled || showFilters" id="design-board-filter-grid" class="filter-grid">
         <label>开始日期<input v-model="filters.start_date" type="date" /></label>
         <label>结束日期<input v-model="filters.end_date" type="date" /></label>
         <label>日期口径<select v-model="filters.date_basis"><option value="created">任务创建</option><option value="completed">任务完成</option><option value="deadline">截止日期</option></select></label>
@@ -30,14 +33,14 @@
         <label>优先级<select v-model="filters.priority"><option value="">全部优先级</option><option v-for="item in priorityOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
         <label>业务类型<select v-model="filters.business_lane"><option value="">全部业务</option><option value="normal">常规</option><option value="customization">定制</option></select></label>
       </div>
-      <div class="filter-actions"><span>所有指标、图表和明细共用当前筛选范围</span><BaseButton variant="ghost" size="sm" @click="resetFilters">重置</BaseButton><BaseButton variant="primary" size="sm" :disabled="loading" @click="load">应用筛选</BaseButton></div>
+      <div v-show="!oaEnabled || showFilters" class="filter-actions"><span>所有指标、图表和明细共用当前筛选范围</span><BaseButton variant="ghost" size="sm" @click="resetFilters">重置</BaseButton><BaseButton variant="primary" size="sm" :disabled="loading" @click="load">应用筛选</BaseButton></div>
     </section>
 
     <div v-if="error" class="state-card error" role="alert">{{ error }}<BaseButton variant="ghost" size="sm" @click="load">重试</BaseButton></div>
     <div v-else-if="loading && !dashboard" class="state-card">正在汇总设计部数据…</div>
     <template v-else-if="dashboard">
       <section class="kpi-grid" aria-label="部门核心指标">
-        <article v-for="card in kpiCards" :key="card.label" class="kpi-card" :class="card.tone">
+        <article v-for="card in kpiCards" :key="card.label" class="kpi-card" :class="oaEnabled ? (card.tone === 'red' && Number(card.value) > 0 ? 'oa-kpi-risk' : undefined) : card.tone">
           <span>{{ card.label }}</span><strong>{{ card.value }}</strong><small>{{ card.hint }}</small>
         </article>
       </section>
@@ -75,6 +78,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, RefreshCw } from 'lucide-vue-next'
+import { oaEnabled } from '@/oa/access'
 import BaseButton from '@/components/base/BaseButton.vue'
 import DesignDepartmentTrendChart from '@/components/dashboard/DesignDepartmentTrendChart.vue'
 import DesignDepartmentBreakdownChart from '@/components/dashboard/DesignDepartmentBreakdownChart.vue'
@@ -83,6 +87,12 @@ import type { DesignDepartmentDashboard, DesignDepartmentDashboardBreakdown, Des
 
 const router = useRouter()
 const dashboard = ref<DesignDepartmentDashboard | null>(null)
+const showFilters = ref(false)
+const departmentTitle = computed(() => {
+  const department = dashboard.value?.department_name
+  if (oaEnabled && dashboard.value && (!dashboard.value.department_id || !department || department === '未分配')) return '跨部门设计产能看板（全部可见范围）'
+  return `${department || '设计部'}数据看板`
+})
 const loading = ref(false)
 const error = ref('')
 const peopleKeyword = ref('')
@@ -168,4 +178,17 @@ onBeforeUnmount(() => controller?.abort())
 
 <style scoped>
 .design-board-page{min-height:100%;padding:24px;background:rgb(var(--yb-bg-page));color:rgb(var(--yb-text-strong))}.design-board-header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.design-board-header h1{font-size:30px;margin:8px 0 3px}.design-board-header p,.panel-head p{margin:0;color:rgb(var(--yb-text-muted));font-size:13px}.back-link,.person-link,.task-link{border:0;background:none;color:rgb(var(--yb-brand));padding:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer}.header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.freshness{font-size:12px;color:rgb(var(--yb-text-label))}.filter-panel,.panel,.kpi-card,.state-card,.definitions{background:rgb(var(--yb-surface));border:1px solid rgb(var(--yb-border-slate));border-radius:14px;box-shadow:0 4px 18px rgb(var(--yb-shadow)/.04)}.filter-panel{padding:16px;margin-bottom:16px}.preset-row{display:flex;align-items:center;gap:7px;margin-bottom:13px;font-size:13px;color:rgb(var(--yb-text-muted-strong))}.preset-row button{border:1px solid rgb(var(--yb-border-blue-soft));background:rgb(var(--yb-surface-subtle));border-radius:20px;padding:5px 11px;cursor:pointer}.preset-row button.active{background:rgb(var(--yb-surface-blue-control));border-color:rgb(var(--yb-brand-border-strong));color:rgb(var(--yb-brand-link))}.filter-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px}.filter-grid label{font-size:12px;color:rgb(var(--yb-text-muted-strong));display:flex;flex-direction:column;gap:5px}.filter-grid input,.filter-grid select,.panel-head input,.panel-head select{height:36px;border:1px solid rgb(var(--yb-border-form));border-radius:8px;background:rgb(var(--yb-surface));padding:0 9px;color:rgb(var(--yb-text-body-strong))}.filter-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px}.filter-actions>span{margin-right:auto;color:rgb(var(--yb-text-form-muted));font-size:12px}.state-card{padding:24px;text-align:center}.state-card.error{color:rgb(var(--yb-danger-action))}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{padding:16px;min-height:118px;display:flex;flex-direction:column;border-top:3px solid rgb(var(--yb-status-pending))}.kpi-card span{font-size:13px;color:rgb(var(--yb-text-form-secondary))}.kpi-card strong{font-size:28px;margin:10px 0 5px}.kpi-card small{color:rgb(var(--yb-text-form-muted-alt))}.kpi-card.green{border-top-color:rgb(var(--yb-success-emerald-bright))}.kpi-card.violet{border-top-color:rgb(var(--yb-purple))}.kpi-card.cyan{border-top-color:rgb(var(--yb-teal-accent))}.kpi-card.amber{border-top-color:rgb(var(--yb-warning-accent))}.kpi-card.red{border-top-color:rgb(var(--yb-red))}.analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}.analysis-grid--wide{grid-template-columns:1.6fr 1fr}.panel{padding:17px;min-width:0}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}.panel-head h2{font-size:16px;margin:0 0 3px}.panel-head>span{font-size:12px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));border-radius:20px;padding:4px 9px}.people-bars{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto}.people-bars button{display:grid;grid-template-columns:85px 1fr 58px;gap:8px;align-items:center;border:0;background:none;padding:4px;cursor:pointer;text-align:left}.people-bars i{height:9px;background:rgb(var(--yb-surface-slate));border-radius:5px;overflow:hidden}.people-bars b{display:block;height:100%;background:linear-gradient(90deg,rgb(var(--yb-brand-bright)),rgb(var(--yb-purple)));border-radius:5px}.people-bars strong{text-align:right;font-size:12px}.composition-list{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.composition-list>div,.quality-grid>div{padding:12px;border-radius:10px;background:rgb(var(--yb-surface-subtle));display:flex;justify-content:space-between}.composition-list strong{font-size:20px}.quality-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}.quality-grid>div{flex-direction:column;gap:7px}.quality-grid span{font-size:12px;color:rgb(var(--yb-text-form-secondary))}.quality-grid b{font-size:18px}.table-panel{margin-bottom:16px}.table-scroll{overflow:auto;max-height:520px}.table-panel table{width:100%;border-collapse:collapse;min-width:1050px;font-size:12px}.table-panel th{position:sticky;top:0;background:rgb(var(--yb-surface-raised));color:rgb(var(--yb-text-soft));text-align:left;padding:10px 8px;z-index:1}.table-panel td{padding:10px 8px;border-top:1px solid rgb(var(--yb-border-quiet))}.table-panel td small{display:block;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgb(var(--yb-text-form-muted-alt));margin-top:3px}.danger{color:rgb(var(--yb-danger));font-weight:700}.status-pill{display:inline-block;padding:3px 7px;border-radius:10px;background:rgb(var(--yb-surface-slate))}.status-pill.overdue{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger))}.definitions{padding:13px 16px;margin-bottom:24px}.definitions summary{cursor:pointer;font-weight:600}.definitions dl{display:grid;grid-template-columns:120px 1fr;gap:8px 14px}.definitions dt{font-weight:600}.definitions dd{margin:0;color:rgb(var(--yb-text-muted-strong))}.error button{margin-left:12px}@media(max-width:1250px){.filter-grid{grid-template-columns:repeat(4,1fr)}.kpi-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.design-board-page{padding:14px}.design-board-header{flex-direction:column}.filter-grid{grid-template-columns:repeat(2,1fr)}.analysis-grid,.analysis-grid--wide{grid-template-columns:1fr}.kpi-grid{grid-template-columns:1fr 1fr}.header-actions{width:100%}}@media(max-width:480px){.filter-grid,.kpi-grid{grid-template-columns:1fr}.design-board-header h1{font-size:24px}}
+.oa-design-board .design-board-header h1 { font-size: 18px; font-weight: 600; }
+.oa-design-board .panel-head h2 { font-size: 15px; font-weight: 600; }
+.oa-design-board .panel-head p, .oa-design-board .kpi-card small { font-size: 12px; }
+.oa-design-board td, .oa-design-board th { font-size: 13px; }
+.oa-design-board th, .oa-design-board strong, .oa-design-board b { font-weight: 600; }
+.oa-design-board .back-link { font-size: 14px; }
+.oa-design-board .filter-panel { padding: 5px 12px; }
+.oa-design-board .filter-top { min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.oa-design-board .preset-row { margin: 0; }
+.oa-design-board .filter-expand { min-height: 32px; font-size: 13px; padding: 4px 8px; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; }
+.oa-design-board .kpi-card { color: rgb(var(--yb-text)); background: rgb(var(--yb-surface)); border-color: rgb(var(--yb-border)); }
+.oa-design-board .kpi-card strong { font-weight: 600; color: rgb(var(--yb-text-strong)); }
+.oa-design-board .kpi-card.oa-kpi-risk strong { color: rgb(var(--yb-danger)); }
 </style>

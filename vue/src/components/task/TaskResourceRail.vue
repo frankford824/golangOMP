@@ -1,5 +1,5 @@
 <template>
-  <section class="resource-rail" aria-label="任务资源链路">
+  <section class="resource-rail" :class="{ 'oa-resource-rail': oaEnabled }" aria-label="任务资源链路">
     <header>
       <div><p>任务资源链路</p><h2>参考图、有效源文件与最终成品</h2></div>
       <button type="button" @click="$emit('openResources')">SKU 资源总览 <ArrowRight :size="15" aria-hidden="true" /></button>
@@ -23,7 +23,8 @@
               <span v-else class="reference-thumbnail-error">缩略图暂不可用</span>
             </template>
             <FileText v-else :size="23" aria-hidden="true" />
-            <span>{{ referenceName(file) }}</span>
+            <span :title="referenceName(file)">{{ referenceName(file) }}</span>
+            <small v-if="oaEnabled && file.file_size">{{ fileSize(file.file_size) }}</small>
           </button>
         </div>
         <p v-else class="empty-copy">暂无参考附件</p>
@@ -34,7 +35,7 @@
       <article class="rail-column sources">
         <div class="column-head"><span>02</span><div><strong>当前有效源文件</strong><small>{{ sourceSummary }}</small></div></div>
         <div v-if="sources.length" class="file-strip">
-          <div v-for="source in sources.slice(0,4)" :key="source.task_asset_id"><FileArchive :size="23" aria-hidden="true" /><span><strong>{{ source.file_name }}</strong><small>{{ sourceStageLabel(source.stage) }}</small></span></div>
+          <div v-for="source in sources.slice(0,4)" :key="source.task_asset_id"><FileArchive :size="23" aria-hidden="true" /><span><strong>{{ source.file_name }}</strong><small>{{ sourceStageLabel(source.stage) }}<template v-if="oaEnabled && source.file_size"> · {{ fileSize(source.file_size) }}</template></small></span></div>
         </div>
         <p v-else class="empty-copy">{{ sourceEmptyCopy }}</p>
       </article>
@@ -56,6 +57,7 @@
             />
             <Images v-else :size="23" aria-hidden="true" />
             <span>{{ item.item_name || item.file?.file_name || `成品 ${item.sort_order + 1}` }}</span>
+            <small v-if="oaEnabled && item.file?.file_size">{{ fileSize(item.file.file_size) }}</small>
           </button>
         </div>
         <div v-else-if="finalLocked" class="locked-copy"><LockKeyhole :size="22" aria-hidden="true" /><span><strong>设计阶段不上传成品</strong><small>审核人员会按设计判定的单图或套装模式完成定稿。</small></span></div>
@@ -75,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import { computed, ref } from 'vue'
 import { ArrowRight, FileArchive, FileText, Images, LockKeyhole } from 'lucide-vue-next'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
@@ -88,6 +91,11 @@ type RailReference = (ResourceReference | ReferenceFileRef) & { source?: 'task' 
 const props = defineProps<{ bundle: ResourceBundle; taskStatus: string; taskType: string; taskReferences?: ReferenceFileRef[]; canOperate?: boolean; actionLabel?: string }>()
 const emit = defineEmits<{ openResources: []; openAttachments: []; openWorkflow: []; refreshReferences: [] }>()
 const failedThumbnails = ref(new Set<string>())
+function fileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+}
 function referenceThumbnail(file: RailReference): string {
   return file.source === 'task' && 'thumbnail_url' in file && typeof file.thumbnail_url === 'string' ? file.thumbnail_url.trim() : ''
 }
@@ -194,4 +202,13 @@ function sourceStageLabel(stage: string) { return stage === 'audit' ? '审核确
 .reference-thumbnail { display:block;width:100%;object-fit:contain;border-radius:inherit; }
 .reference-thumbnail-error { display:grid;place-items:center;height:58px;font-size:11px;color:rgb(var(--yb-text-muted)); }
 .resource-rail{overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:15px;background:rgb(var(--yb-surface));box-shadow:0 5px 18px rgb(var(--yb-shadow)/.045)}.resource-rail>header{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 15px;border-bottom:1px solid rgb(var(--yb-border))}.resource-rail header p{margin:0;color:rgb(var(--yb-brand));font-size:10px;font-weight:850;letter-spacing:.08em}.resource-rail h2{margin:3px 0 0;font-size:16px}.resource-rail header button,.resource-rail>footer button,.column-head button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:11px;font-weight:720;cursor:pointer}.rail-grid{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr);align-items:stretch}.rail-column{min-width:0;padding:12px 14px}.rail-column+.rail-arrow+.rail-column{border-left:1px solid rgb(var(--yb-border))}.rail-arrow{align-self:center;color:rgb(var(--yb-text-faint))}.column-head{min-height:37px;display:flex;align-items:center;gap:9px}.column-head>span:first-child{display:grid;flex:0 0 auto;width:28px;height:28px;place-items:center;border-radius:8px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font:800 11px var(--yb-font-data)}.column-head>div{min-width:0;display:grid}.column-head strong{font-size:12px}.column-head small{color:rgb(var(--yb-text-muted));font-size:10px}.column-head button,.column-head>svg{margin-left:auto}.media-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}.media-strip button{min-width:0;display:grid;grid-template-rows:58px auto;gap:5px;border:0;padding:0;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer}.media-strip :deep(.resource-preview-shell),.media-strip button>svg{width:100%;height:58px;border-radius:7px;background:rgb(var(--yb-surface-muted));object-fit:cover}.media-strip :deep(.resource-preview-img){width:100%;height:100%;border-radius:inherit;object-fit:cover}.resource-preview{pointer-events:none}.media-strip button>svg{padding:16px;color:rgb(var(--yb-text-muted))}.media-strip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.file-strip{display:grid;gap:6px;margin-top:9px}.file-strip>div{min-width:0;display:flex;align-items:center;gap:8px;border:1px solid rgb(var(--yb-border));border-radius:8px;padding:7px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-brand))}.file-strip>div>span{min-width:0;display:grid}.file-strip strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgb(var(--yb-text));font-size:10px}.file-strip small{color:rgb(var(--yb-text-muted));font-size:9px}.locked{background:rgb(var(--yb-surface-soft))}.locked-copy{display:flex;align-items:center;gap:9px;margin-top:9px;border:1px dashed rgb(var(--yb-border-strong));border-radius:8px;padding:11px;color:rgb(var(--yb-text-muted))}.locked-copy>span{display:grid}.locked-copy strong{color:rgb(var(--yb-text));font-size:11px}.locked-copy small{font-size:9px;line-height:1.45}.empty-copy{margin:13px 0 0;color:rgb(var(--yb-text-muted));font-size:10px}.resource-rail>footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 15px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-brand-soft)/.36);color:rgb(var(--yb-text-muted));font-size:11px}.resource-rail>footer button{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}@media(max-width:1000px){.rail-grid{grid-template-columns:1fr}.rail-arrow{transform:rotate(90deg);justify-self:center}.rail-column+.rail-arrow+.rail-column{border-top:1px solid rgb(var(--yb-border));border-left:0}.media-strip button{grid-template-rows:72px auto}.media-strip :deep(.resource-preview-shell),.media-strip button>svg{height:72px}}@media(max-width:620px){.resource-rail>header,.resource-rail>footer{align-items:flex-start;flex-direction:column}.resource-rail>header button,.resource-rail>footer button{width:100%}.media-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.media-strip button{grid-template-rows:86px auto}.media-strip :deep(.resource-preview-shell),.media-strip button>svg{height:86px}}
+.oa-resource-rail .column-head > span { font-size: 12px; font-weight: 600; }
+.oa-resource-rail strong { font-weight: 600; }
+.oa-resource-rail header h2 { font-size: 15px; font-weight: 600; }
+.oa-resource-rail .media-strip button > span:not(.resource-preview-shell), .oa-resource-rail .file-strip strong { font-size: 12px; }
+.oa-resource-rail .media-strip small { font-size: 12px; color: rgb(var(--yb-text-muted-strong)); }
+.oa-resource-rail .media-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.oa-resource-rail .media-strip button { grid-template-rows: clamp(88px, 11vw, 172px) auto; }
+.oa-resource-rail .media-strip :deep(.resource-preview-shell), .oa-resource-rail .media-strip button > svg { height: 100%; }
+.oa-resource-rail .media-strip :deep(.resource-preview-img) { object-fit: contain; }
 </style>

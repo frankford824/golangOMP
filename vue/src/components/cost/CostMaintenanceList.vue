@@ -25,6 +25,7 @@
         ><button type="submit"><Search :size="16" :stroke-width="1.75" aria-hidden="true" />查询</button>
       </form>
       <div>
+        <button v-if="oaEnabled" type="button" :aria-pressed="status === 'conflict'" @click="toggleConflicts">冲突待确认</button>
         <button @click="openLogs"><History :size="16" :stroke-width="1.75" aria-hidden="true" />修改日志</button
         ><button :disabled="loading" @click="load()">
           <RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? "刷新中…" : "刷新" }}
@@ -42,7 +43,7 @@
             <th>编码与名称</th>
             <th>款式编码</th>
             <th>尺寸与面积</th>
-            <th class="money">成本价（元）</th>
+            <th class="money">{{ oaEnabled ? "ERP 现价 / 系统成本" : "成本价（元）" }}</th>
             <th>状态</th>
             <th>操作</th>
           </tr>
@@ -55,15 +56,33 @@
             </td>
             <td>{{ row.style_code || "待绑定" }}</td>
             <td>
-              <span>{{ dimensions(row) }}</span
-              ><small>{{ area(row.area_m2) }} ㎡</small>
+              <template v-if="oaEnabled">
+                <button
+                  v-if="needsDimensions(row) && canEdit && busyID === null && row.revision >= 1"
+                  type="button"
+                  class="missing-dimensions"
+                  @click="editDimensions(row)"
+                >待补尺寸</button>
+                <span v-else-if="needsDimensions(row)" class="missing-dimensions">待补尺寸</span>
+                <span v-else>{{ dimensions(row) }}</span>
+                <small v-if="row.area_m2 != null">{{ area(row.area_m2) }} ㎡</small>
+              </template>
+              <template v-else>
+                <span>{{ dimensions(row) }}</span><small>{{ area(row.area_m2) }} ㎡</small>
+              </template>
             </td>
-            <td class="money">{{ money(row.cost_price) }}</td>
+            <td class="money">
+              <template v-if="oaEnabled">
+                <span>ERP {{ observedPrice(row.erp_cost) }}</span>
+                <small>系统 {{ observedPrice(row.cost_price, '待定') }}</small>
+              </template>
+              <template v-else>{{ money(row.cost_price) }}</template>
+            </td>
             <td>
               <span :class="['maintenance-state', row.status]">{{
                 maintenanceStatuses[row.status] || "待核对"
               }}</span
-              ><small v-if="row.status === 'conflict'"
+              ><small v-if="!oaEnabled && row.status === 'conflict'"
                 >ERP {{ money(row.erp_cost) }} 元</small
               >
               <small
@@ -80,18 +99,20 @@
                 class="maintenance-reviewed"
                 >已确认</span
               >
-              <button
-                v-else
-                :disabled="
-                  !canEdit ||
-                  busyID !== null ||
-                  row.cost_price === null ||
-                  row.revision < 1
-                "
-                @click="confirm(row)"
+              <span
+                v-else-if="oaEnabled && confirmBlocker(row)"
+                class="blocked-confirm"
+                tabindex="0"
+                :title="confirmBlocker(row)"
+                :aria-label="`确认不可用：${confirmBlocker(row)}`"
               >
-                {{ busyID === row.id ? "提交中…" : "确认" }}</button
-              ><button
+                <button disabled>{{ busyID === row.id ? "提交中…" : "确认" }}</button>
+                <small>{{ confirmBlocker(row) }}</small>
+              </span>
+              <button v-else :disabled="Boolean(confirmBlocker(row))" @click="confirm(row)">
+                {{ busyID === row.id ? "提交中…" : "确认" }}
+              </button>
+              <button
                 :disabled="!canEdit || busyID !== null || row.revision < 1"
                 class="accent"
                 @click="edit(row)"
@@ -196,18 +217,17 @@
               ><div class="dimension-fields">
                 <label
                   >宽（cm）<input
+                    ref="widthInput"
                     v-model.number="draft.width_cm"
                     type="number"
                     min="0.0001"
-                    step="any"
-                    @input="deriveArea" /></label
+                    step="any" /></label
                 ><label
                   >高（cm）<input
                     v-model.number="draft.height_cm"
                     type="number"
                     min="0.0001"
-                    step="any"
-                    @input="deriveArea" /></label
+                    step="any" /></label
                 ><label
                   >面积（㎡）<input
                     v-model.number="draft.area_m2"
@@ -426,6 +446,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from "@/oa/access";
 import { retryCostRead } from '@/utils/cost-read-retry';
 import {
   computed,
@@ -474,7 +495,8 @@ const selected = ref<MaintenanceRow | null>(null),
   reasonDetail = ref(""),
   autoArea = ref(false),
   structuredInput = ref(emptyCostInput()),
-  editorElement = ref<HTMLFormElement>();
+  editorElement = ref<HTMLFormElement>(),
+  widthInput = ref<HTMLInputElement>();
 const logsOpen = ref(false),
   logs = ref<MaintenanceLog[]>([]),
   logKeyword = ref(""),
@@ -513,6 +535,10 @@ const money = (n: number | null) =>
     : Number(n)
         .toFixed(4)
         .replace(/\.?0+$/, "") || "0";
+const oaPriceFormat = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+function observedPrice(value: number | null, empty = "—"): string {
+  return typeof value === "number" && Number.isFinite(value) ? `¥${oaPriceFormat.format(value)}` : empty;
+}
 const area = (n: number | null) =>
   n == null
     ? "待补充"
@@ -527,6 +553,24 @@ const dimensions = (r: MaintenanceRow) =>
       : r.cost_input?.area_mode === "total"
         ? "整套总面积"
         : r.size_text || "尺寸待补充";
+function needsDimensions(row: MaintenanceRow) {
+  return !(row.width_cm && row.height_cm) && !row.size_text?.trim() &&
+    row.cost_input?.area_mode !== "faces" && row.cost_input?.area_mode !== "total";
+}
+function confirmBlocker(row: MaintenanceRow): string {
+  if (!canEdit.value) return "需要成本维护和 ERP 管理权限";
+  if (busyID.value !== null) return "请等待当前提交完成";
+  if (row.revision < 1) return "当前版本不可维护，请刷新核对";
+  if (row.cost_price === null) return needsDimensions(row)
+    ? "当前无系统成本，请核对尺寸与计价方案"
+    : "当前无系统成本，请核对计价方案";
+  return "";
+}
+function toggleConflicts() {
+  status.value = status.value === "conflict" ? "" : "conflict";
+  if (status.value === "conflict") reviewState.value = "pending";
+  search();
+}
 const date = (value: string) =>
   new Date(value).toLocaleString("zh-CN", {
     timeZone: "Asia/Shanghai",
@@ -638,6 +682,11 @@ function edit(row: MaintenanceRow) {
   stale.value = false;
   nextTick(() => editorElement.value?.focus());
 }
+function editDimensions(row: MaintenanceRow) {
+  edit(row);
+  if (!row.cost_input && row.area_m2 == null) autoArea.value = true;
+  void nextTick(() => widthInput.value?.focus());
+}
 function closeEditor() {
   if (!saving.value) {
     selected.value = null;
@@ -665,6 +714,7 @@ function trapFocus(e: KeyboardEvent) {
     first?.focus();
   }
 }
+watch(() => [draft.width_cm, draft.height_cm], deriveArea);
 function deriveArea() {
   if (
     autoArea.value &&
@@ -811,3 +861,16 @@ onBeforeUnmount(() => {
     document.body.style.cssText = savedBodyStyle;
 });
 </script>
+
+<style scoped>
+html.oa-live-ui .maintenance .missing-dimensions { min-height: 32px; background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
+html.oa-live-ui .maintenance .blocked-confirm small { display: none; }
+html.oa-live-ui .maintenance .blocked-confirm:is(:hover, :focus-visible) small { display: block; }
+html.oa-live-ui .maintenance table { font-size: 13px; line-height: 1.5; }
+html.oa-live-ui .maintenance th { height: 40px; padding: 6px 10px; }
+html.oa-live-ui .maintenance td { height: 56px; padding: 6px 10px; }
+html.oa-live-ui .maintenance :is(td.money, td strong) { font-family: var(--yb-font-mono); }
+html.oa-live-ui .maintenance td.money small { font-size: 12px; }
+html.oa-live-ui .maintenance .row-actions button { min-height: 32px; }
+html.oa-live-ui .maintenance .blocked-confirm + button { margin-left: 8px; }
+</style>

@@ -23,6 +23,14 @@
 }
 
 @font-face {
+  font-family: 'YB JetBrains Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('@fontsource/jetbrains-mono/files/jetbrains-mono-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
   font-family: 'Material Symbols Outlined';
   font-style: normal;
   font-weight: 300;
@@ -36,15 +44,21 @@
 
 :root {
   color-scheme: light;
-  --oa-font: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --oa-text-rgb: 38 38 38;
-  --oa-secondary-rgb: 89 89 89;
-  --oa-muted-rgb: 140 140 140;
-  --oa-disabled-rgb: 191 191 191;
-  --oa-brand-rgb: 22 119 255;
-  --oa-danger-rgb: 255 77 79;
-  --oa-success-rgb: 82 196 26;
-  --oa-warning-rgb: 250 173 20;
+  --oa-font: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --oa-kpi-size: 24px;
+  --oa-h1-size: 18px;
+  --oa-h2-size: 15px;
+  --oa-body-size: 14px;
+  --oa-table-size: 13px;
+  --oa-meta-size: 12px;
+  --oa-text-rgb: 20 24 31;
+  --oa-secondary-rgb: 71 84 103;
+  --oa-muted-rgb: 102 112 133;
+  --oa-disabled-rgb: 152 162 179;
+  --oa-brand-rgb: 29 91 214;
+  --oa-danger-rgb: 185 28 28;
+  --oa-success-rgb: 21 128 61;
+  --oa-warning-rgb: 180 83 9;
   --yb-font-display: Inter, 'SF Pro Display', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --yb-font-text: Inter, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --yb-font-data: 'YB JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
@@ -575,9 +589,19 @@ body {
 }
 
 html.oa-live-ui {
+  --yb-bg-page: 244 246 249;
+  --yb-surface: 255 255 255;
+  --yb-surface-muted: 248 250 252;
+  --yb-surface-hover: 241 245 249;
+  --yb-border: 229 233 240;
+  --yb-border-strong: 203 213 225;
+  --yb-brand-strong: 23 73 179;
+  --yb-brand-soft: 239 244 255;
+  --yb-text-faint: var(--oa-muted-rgb);
+  --yb-font-sans: var(--oa-font);
   --yb-font-text: var(--oa-font);
   --yb-font-display: var(--oa-font);
-  --yb-font-data: var(--oa-font);
+  --yb-font-data: var(--yb-font-mono);
   --yb-text: var(--oa-text-rgb);
   --yb-text-body: var(--oa-text-rgb);
   --yb-text-secondary: var(--oa-secondary-rgb);
@@ -601,12 +625,12 @@ html.oa-live-ui {
 
 html.oa-live-ui #app :is(.profile-hero, .notif-hero, .compose-hero) h1,
 html.oa-live-ui #app h1.auth-title {
-  font: 600 20px/1.4 var(--oa-font);
+  font: 600 var(--oa-h1-size)/1.4 var(--oa-font);
   letter-spacing: 0;
 }
 
 html.oa-live-ui #app :is(.profile-workbench, .notif-page, .compose-page) h2 {
-  font: 600 16px/1.4 var(--oa-font);
+  font: 600 var(--oa-h2-size)/1.45 var(--oa-font);
   letter-spacing: 0;
 }
 
@@ -1071,3 +1095,23 @@ body > :where(.fixed, [role='listbox'], [role='dialog']) {
     box-shadow: 0 1px 2px rgb(var(--yb-shadow) / 0.06);
   }
 }
+
+html.oa-live-ui #app :is(.oa-number, .oa-kpi b, .commerce-sku, .commerce-chart-value strong, time, .yb-code, .yb-num) {
+  font-family: var(--yb-font-data), var(--oa-font);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+html.oa-live-ui #app .content h1 { font: 600 var(--oa-h1-size)/1.4 var(--oa-font); letter-spacing: 0; }
+
+#oa-page-recovery { position: fixed; inset: 12px 12px auto; z-index: 5000; display: flex; justify-content: center; align-items: center; gap: 16px; padding: 12px; border: 1px solid rgb(var(--yb-warning-border)); border-radius: 8px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); }
+#oa-page-recovery a { color: rgb(var(--yb-brand)); text-decoration: underline; }
+
+html.oa-live-ui #app .content h2 { font: 600 var(--oa-h2-size)/1.45 var(--oa-font); letter-spacing: 0; }
+html.oa-live-ui #app .content :is(table td, .n-data-table-td) { font-size: var(--oa-table-size); line-height: 1.5; }
+html.oa-live-ui #app .content :is(table th, .n-data-table-th, small) { font-size: var(--oa-meta-size); }
+html.oa-live-ui #app .content :is(.commerce-metrics .oa-kpi b, .oa-kpi > strong) { font-size: var(--oa-kpi-size); font-weight: 600; line-height: 1.25; }
+
+html.oa-live-ui #app :where(.content,.auth-page) { font-size: var(--oa-body-size); line-height: 1.55; }
+html.oa-live-ui #app .content :is(strong,b,th) { font-weight: 600; }
+html.oa-live-ui #app .content :where(button,select,input,textarea) { font-size: var(--oa-body-size); }
+html.oa-live-ui #app .content :is(button,select,input,textarea):not(.material-symbols-outlined) { letter-spacing: 0; }

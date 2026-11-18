@@ -27,7 +27,7 @@
               v-if="dept.teams.length"
               type="button"
               class="org-tree-toggle"
-              :aria-label="isExpanded(dept.value) ? `折叠 ${dept.label}` : `展开 ${dept.label}`"
+              :aria-label="isExpanded(dept.value) ? `折叠 ${displayOrgName(dept.label)}` : `展开 ${displayOrgName(dept.label)}`"
               :aria-expanded="isExpanded(dept.value)"
               @click.stop="toggleExpanded(dept.value)"
             >
@@ -41,7 +41,7 @@
               @click="onSelectDepartment(dept)"
               @contextmenu.prevent="emit('manage-policy', 'department', Number(dept.id || 0))"
             >
-              <span class="org-item-name">{{ dept.label }}</span>
+              <span class="org-item-name">{{ displayOrgName(dept.label) }}</span>
               <span v-if="dept.memberCount != null" class="org-count-badge">{{ dept.memberCount }}</span>
             </button>
             <button v-if="canManagePolicy && dept.id" type="button" class="org-policy-shortcut" aria-label="设置部门默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'department', Number(dept.id))">⋯</button>
@@ -55,7 +55,7 @@
                 @click="$emit('select-team', dept.value, team.value)"
                 @contextmenu.prevent="emit('manage-policy', 'team', Number(team.id || 0))"
               >
-                <span class="org-item-name">{{ team.label }}</span>
+                <span class="org-item-name">{{ displayOrgName(team.label) }}</span>
                 <span v-if="team.memberCount != null" class="org-count-badge">{{ team.memberCount }}</span>
               </button>
               <button v-if="canManagePolicy && team.id" type="button" class="org-policy-shortcut" aria-label="设置小组默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'team', Number(team.id))">⋯</button>
@@ -84,7 +84,7 @@
                 @click="onSelectDepartment(dept)"
                 @contextmenu.prevent="emit('manage-policy', 'department', Number(dept.id || 0))"
               >
-                <span class="org-item-name">{{ dept.label }}</span>
+                <span class="org-item-name">{{ displayOrgName(dept.label) }}</span>
                 <span v-if="dept.memberCount != null" class="org-count-badge">{{ dept.memberCount }}</span>
                 <span v-if="!dept.enabled" class="org-state-pill org-state-pill--off">已停用</span>
               </button>
@@ -99,7 +99,7 @@
                   @click="$emit('select-team', dept.value, team.value)"
                   @contextmenu.prevent="emit('manage-policy', 'team', Number(team.id || 0))"
                 >
-                  <span class="org-item-name">{{ team.label }}</span>
+                  <span class="org-item-name">{{ displayOrgName(team.label) }}</span>
                   <span v-if="team.memberCount != null" class="org-count-badge">{{ team.memberCount }}</span>
                   <span v-if="!team.enabled" class="org-state-pill org-state-pill--off">已停用</span>
                 </button>
@@ -118,6 +118,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { oaEnabled } from '@/oa/access'
 import type { OrgTreeDepartment } from './orgTreeTypes'
 
 const props = defineProps<{
@@ -145,13 +146,17 @@ const scrollEl = ref<HTMLElement | null>(null)
 
 const isSearching = computed(() => searchKeyword.value !== '')
 
+function displayOrgName(value: string): string {
+  return oaEnabled ? value.replace(/\(/g, '（').replace(/\)/g, '）') : value
+}
+
 function matchTree(tree: OrgTreeDepartment[]): OrgTreeDepartment[] {
   if (!isSearching.value) return tree
-  const kw = searchKeyword.value.toLowerCase()
+  const kw = displayOrgName(searchKeyword.value).toLowerCase()
   const out: OrgTreeDepartment[] = []
   for (const dept of tree) {
-    const deptHit = dept.label.toLowerCase().includes(kw)
-    const teams = deptHit ? dept.teams : dept.teams.filter((team) => team.label.toLowerCase().includes(kw))
+    const deptHit = displayOrgName(dept.label).toLowerCase().includes(kw)
+    const teams = deptHit ? dept.teams : dept.teams.filter((team) => displayOrgName(team.label).toLowerCase().includes(kw))
     if (deptHit || teams.length) out.push({ ...dept, teams })
   }
   return out
@@ -472,5 +477,17 @@ watch(searchKeyword, () => {
   margin: 0.4rem 0.2rem;
   color: rgb(var(--yb-text-zinc-faint));
   font-size: 0.75rem;
+}
+html.oa-live-ui .org-filter-item.is-active {
+  background: rgb(var(--yb-brand-soft));
+  border-left: 3px solid var(--oa-accent);
+  border-top-color: transparent;
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+  color: var(--oa-accent);
+}
+html.oa-live-ui .org-filter-item.is-active .org-count-badge {
+  background: rgb(var(--yb-brand-soft));
+  color: var(--oa-accent);
 }
 </style>

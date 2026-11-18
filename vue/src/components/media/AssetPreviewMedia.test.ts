@@ -77,6 +77,21 @@ describe('AssetPreviewMedia', () => {
     wrapper.unmount()
   })
 
+  it('keeps an unavailable thumbnail inside the navigation card without nesting another button', async () => {
+    mocks.fetchTaskAssetPreview.mockResolvedValue({ status: 'unavailable' })
+    const navigate = vi.fn()
+    const wrapper = mount({
+      components: { AssetPreviewMedia },
+      setup: () => ({ navigate }),
+      template: '<button @click="navigate"><AssetPreviewMedia task-asset-id="24174" :open-full-on-click="false" :show-recovery-actions="false" /></button>',
+    })
+    await flushPromises()
+    expect(wrapper.find('.apm-retry').exists()).toBe(false)
+    await wrapper.get('.apm-empty').trigger('click')
+    expect(navigate).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('keeps standalone lightbox clicks isolated from the parent by default', async () => {
     const navigate = vi.fn()
     const wrapper = mount({
