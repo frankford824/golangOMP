@@ -2,24 +2,32 @@
   <div class="design-board-page" :class="{ 'oa-design-board': oaEnabled }">
     <header class="design-board-header">
       <div>
-        <button class="back-link" type="button" @click="router.push('/')"><ArrowLeft :size="16" />返回主页</button>
         <h1>{{ departmentTitle }}</h1>
         <p>人员产能、任务结构、设计文件量、效率与质量风险的部门级视图。</p>
       </div>
+      <DesktopSlot target="status">
+        <span v-if="dashboard" class="freshness" role="status" :title="departmentTitle + ' · ' + formatDateTime(dashboard.generated_at)">{{ formatTime(dashboard.generated_at) }} 已更新</span>
+      </DesktopSlot>
+      <DesktopSlot target="actions">
       <div class="header-actions">
-        <span v-if="dashboard" class="freshness">更新于 {{ formatDateTime(dashboard.generated_at) }}</span>
+        <button class="back-link" type="button" @click="router.push('/')"><ArrowLeft :size="16" />返回主页</button>
         <BaseButton variant="ghost" size="sm" :disabled="loading" @click="load"><RefreshCw :size="15" />{{ loading ? '刷新中…' : '刷新' }}</BaseButton>
         <BaseButton variant="primary" size="sm" :disabled="!dashboard" @click="exportCsv"><Download :size="15" />导出明细</BaseButton>
       </div>
+      </DesktopSlot>
     </header>
 
     <section class="filter-panel" aria-label="看板筛选条件">
       <div class="filter-top">
       <div class="preset-row">
-        <span>快捷周期</span>
+        <strong v-if="oaEnabled" class="design-scope">{{ departmentTitle }}</strong>
+        <span v-else>快捷周期</span>
         <button v-for="preset in presets" :key="preset.days" type="button" :class="{ active: selectedPreset === preset.days }" @click="applyPreset(preset.days)">{{ preset.label }}</button>
       </div>
-      <button v-if="oaEnabled" type="button" class="filter-expand" :aria-expanded="showFilters" aria-controls="design-board-filter-grid" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '展开筛选' }}</button>
+      <div v-if="oaEnabled" class="design-filter-actions">
+        <button v-if="dashboard?.summary.overdue_task_count || overdueOnly" type="button" class="design-risk-filter" :aria-pressed="overdueOnly" @click="toggleOverdue">已逾期 {{ dashboard?.summary.overdue_task_count ?? 0 }}</button>
+      <button type="button" class="filter-expand" :aria-expanded="showFilters" aria-controls="design-board-filter-grid" @click="showFilters = !showFilters">{{ showFilters ? '收起筛选' : '展开筛选' }}</button>
+      </div>
       </div>
       <div v-show="!oaEnabled || showFilters" id="design-board-filter-grid" class="filter-grid">
         <label>开始日期<input v-model="filters.start_date" type="date" /></label>
@@ -61,12 +69,12 @@
 
       <section class="panel table-panel">
         <div class="panel-head"><div><h2>人员绩效明细</h2><p>共 {{ dashboard.people.length }} 人；停用账号保留历史数据</p></div><input v-model.trim="peopleKeyword" type="search" placeholder="搜索人员" /></div>
-        <div class="table-scroll"><table><thead><tr><th>人员</th><th>任务</th><th>完成</th><th>进行中</th><th>逾期</th><th>设计文件</th><th>SKU</th><th>完成率</th><th>一次通过</th><th>按期完成</th><th>平均时长</th><th>工作量占比</th></tr></thead><tbody><tr v-for="person in filteredPeople" :key="person.user_id"><td><button type="button" class="person-link" @click="selectPerson(person.user_id)">{{ person.display_name }}</button><small>{{ person.team_name || '未分组' }}</small></td><td>{{ person.task_count }}</td><td>{{ person.completed_task_count }}</td><td>{{ person.active_task_count }}</td><td :class="{ danger: person.overdue_task_count > 0 }">{{ person.overdue_task_count }}</td><td>{{ person.design_file_count }}</td><td>{{ person.sku_count }}</td><td>{{ percent(person.completion_rate) }}</td><td>{{ percent(person.first_pass_rate) }}</td><td>{{ percent(person.on_time_rate) }}</td><td>{{ hours(person.average_turnaround_hours) }}</td><td>{{ percent(person.workload_share) }}</td></tr></tbody></table></div>
+        <div class="design-table-wrap"><table><thead><tr><th>人员</th><th>任务</th><th>完成</th><th>进行中</th><th>逾期</th><th>设计文件</th><th>SKU</th><th>完成率</th><th>一次通过</th><th>按期完成</th><th>平均时长</th><th>工作量占比</th></tr></thead><tbody><tr v-for="person in filteredPeople" :key="person.user_id"><td><button type="button" class="person-link" @click="selectPerson(person.user_id)">{{ person.display_name }}</button><small>{{ person.team_name || '未分组' }}</small></td><td>{{ person.task_count }}</td><td>{{ person.completed_task_count }}</td><td>{{ person.active_task_count }}</td><td :class="{ danger: person.overdue_task_count > 0 }">{{ person.overdue_task_count }}</td><td>{{ person.design_file_count }}</td><td>{{ person.sku_count }}</td><td>{{ percent(person.completion_rate) }}</td><td>{{ percent(person.first_pass_rate) }}</td><td>{{ percent(person.on_time_rate) }}</td><td>{{ hours(person.average_turnaround_hours) }}</td><td>{{ percent(person.workload_share) }}</td></tr></tbody></table></div>
       </section>
 
-      <section class="panel table-panel">
-        <div class="panel-head"><div><h2>任务明细与异常定位</h2><p>最多展示当前筛选范围内最近200条任务</p></div><input v-model.trim="taskKeyword" type="search" placeholder="任务号、产品或人员" /></div>
-        <div class="table-scroll"><table><thead><tr><th>任务号</th><th>设计人员</th><th>类型</th><th>状态</th><th>优先级</th><th>源文件</th><th>成品</th><th>SKU</th><th>打回</th><th>处理时长</th><th>截止时间</th></tr></thead><tbody><tr v-for="task in filteredTasks" :key="task.task_id"><td><button type="button" class="task-link" @click="router.push(`/tasks/${task.task_id}?from=design-dashboard`)">{{ task.task_no }}</button><small>{{ task.product_name }}</small></td><td>{{ task.designer_name }}</td><td>{{ taskTypeLabel(task.task_type) }}</td><td><span class="status-pill" :class="{ overdue: task.overdue }">{{ taskStatusLabel(task.task_status) }}</span></td><td>{{ priorityLabel(task.priority) }}</td><td>{{ task.source_file_count }}</td><td>{{ task.final_file_count }}</td><td>{{ task.sku_count }}</td><td :class="{ danger: task.audit_reject_count > 0 }">{{ task.audit_reject_count }}</td><td>{{ task.turnaround_hours == null ? '—' : hours(task.turnaround_hours) }}</td><td>{{ task.deadline_at ? formatDateTime(task.deadline_at) : '—' }}</td></tr></tbody></table></div>
+      <section id="design-task-exceptions" ref="taskSection" class="panel table-panel">
+        <div class="panel-head"><div><h2>任务明细与异常定位</h2><p>{{ overdueOnly ? '最近 200 条任务中的逾期明细' : '最多展示当前筛选范围内最近 200 条任务' }}</p></div><input v-model.trim="taskKeyword" type="search" placeholder="任务号、产品或人员" /></div>
+        <div class="design-table-wrap"><table><thead><tr><th>任务号</th><th>设计人员</th><th>类型</th><th>状态</th><th>优先级</th><th>源文件</th><th>成品</th><th>SKU</th><th>打回</th><th>处理时长</th><th>截止时间</th></tr></thead><tbody><tr v-for="task in filteredTasks" :key="task.task_id"><td><button type="button" class="task-link" @click="router.push(`/tasks/${task.task_id}?from=design-dashboard`)">{{ task.task_no }}</button><small>{{ task.product_name }}</small></td><td>{{ task.designer_name }}</td><td>{{ taskTypeLabel(task.task_type) }}</td><td><span class="status-pill" :class="{ overdue: task.overdue }">{{ taskStatusLabel(task.task_status) }}</span></td><td>{{ priorityLabel(task.priority) }}</td><td>{{ task.source_file_count }}</td><td>{{ task.final_file_count }}</td><td>{{ task.sku_count }}</td><td :class="{ danger: task.audit_reject_count > 0 }">{{ task.audit_reject_count }}</td><td>{{ task.turnaround_hours == null ? '—' : hours(task.turnaround_hours) }}</td><td>{{ task.deadline_at ? formatDateTime(task.deadline_at) : '—' }}</td></tr></tbody></table></div>
       </section>
 
       <details class="definitions"><summary>指标口径说明</summary><dl><template v-for="(definition, key) in dashboard.definitions" :key="key"><dt>{{ definitionLabel(key) }}</dt><dd>{{ definition }}</dd></template></dl></details>
@@ -79,6 +87,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, RefreshCw } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 import DesignDepartmentTrendChart from '@/components/dashboard/DesignDepartmentTrendChart.vue'
 import DesignDepartmentBreakdownChart from '@/components/dashboard/DesignDepartmentBreakdownChart.vue'
@@ -97,6 +106,12 @@ const loading = ref(false)
 const error = ref('')
 const peopleKeyword = ref('')
 const taskKeyword = ref('')
+const overdueOnly = ref(false)
+const taskSection = ref<HTMLElement>()
+function toggleOverdue() {
+  overdueOnly.value = !overdueOnly.value
+  if (overdueOnly.value) taskSection.value?.scrollIntoView({ block: 'start' })
+}
 const taskTypeOptions = ref<DesignDepartmentDashboardBreakdown[]>([])
 const statusOptions = ref<DesignDepartmentDashboardBreakdown[]>([])
 const priorityOptions = ref<DesignDepartmentDashboardBreakdown[]>([])
@@ -161,11 +176,12 @@ const kpiCards = computed(() => {
 })
 const sortedPeople = computed(() => [...(dashboard.value?.people ?? [])].sort((a, b) => Number(b[peopleSort.value]) - Number(a[peopleSort.value])))
 const filteredPeople = computed(() => { const q = peopleKeyword.value.toLowerCase(); return sortedPeople.value.filter((item) => !q || `${item.display_name} ${item.username} ${item.team_name}`.toLowerCase().includes(q)) })
-const filteredTasks = computed(() => { const q = taskKeyword.value.toLowerCase(); return (dashboard.value?.recent_tasks ?? []).filter((item) => !q || `${item.task_no} ${item.product_name} ${item.designer_name}`.toLowerCase().includes(q)) })
+const filteredTasks = computed(() => { const q = taskKeyword.value.toLowerCase(); return (dashboard.value?.recent_tasks ?? []).filter((item) => (!overdueOnly.value || item.overdue) && (!q || `${item.task_no} ${item.product_name} ${item.designer_name}`.toLowerCase().includes(q))) })
 function personMetricValue(person: DesignDepartmentPersonMetric) { const value = person[peopleSort.value]; return peopleSort.value === 'average_turnaround_hours' ? hours(Number(value)) : String(value) }
 function personBarWidth(person: DesignDepartmentPersonMetric) { const max = Math.max(...sortedPeople.value.map((item) => Number(item[peopleSort.value])), 1); return Math.max(2, Number(person[peopleSort.value]) / max * 100) }
 function percent(value: number) { return `${Number(value || 0).toFixed(1)}%` }
 function hours(value: number) { return `${Number(value || 0).toFixed(1)}小时` }
+function formatTime(value: string) { return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) }
 function taskTypeLabel(value: string) { return ({ new_product_development: '新品开发', original_product_development: '原品开发', retouch_task: '修图任务', sku_planning: 'SKU规划' } as Record<string, string>)[value] ?? value }
 function taskStatusLabel(value: string) { return ({ Completed: '已完成', InProgress: '处理中', PendingAudit: '待审核', Cancelled: '已取消', Blocked: '已阻塞', PendingAssign: '待指派', Assigned: '已指派' } as Record<string, string>)[value] ?? value }
@@ -177,7 +193,7 @@ onBeforeUnmount(() => controller?.abort())
 </script>
 
 <style scoped>
-.design-board-page{min-height:100%;padding:24px;background:rgb(var(--yb-bg-page));color:rgb(var(--yb-text-strong))}.design-board-header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.design-board-header h1{font-size:30px;margin:8px 0 3px}.design-board-header p,.panel-head p{margin:0;color:rgb(var(--yb-text-muted));font-size:13px}.back-link,.person-link,.task-link{border:0;background:none;color:rgb(var(--yb-brand));padding:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer}.header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.freshness{font-size:12px;color:rgb(var(--yb-text-label))}.filter-panel,.panel,.kpi-card,.state-card,.definitions{background:rgb(var(--yb-surface));border:1px solid rgb(var(--yb-border-slate));border-radius:14px;box-shadow:0 4px 18px rgb(var(--yb-shadow)/.04)}.filter-panel{padding:16px;margin-bottom:16px}.preset-row{display:flex;align-items:center;gap:7px;margin-bottom:13px;font-size:13px;color:rgb(var(--yb-text-muted-strong))}.preset-row button{border:1px solid rgb(var(--yb-border-blue-soft));background:rgb(var(--yb-surface-subtle));border-radius:20px;padding:5px 11px;cursor:pointer}.preset-row button.active{background:rgb(var(--yb-surface-blue-control));border-color:rgb(var(--yb-brand-border-strong));color:rgb(var(--yb-brand-link))}.filter-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px}.filter-grid label{font-size:12px;color:rgb(var(--yb-text-muted-strong));display:flex;flex-direction:column;gap:5px}.filter-grid input,.filter-grid select,.panel-head input,.panel-head select{height:36px;border:1px solid rgb(var(--yb-border-form));border-radius:8px;background:rgb(var(--yb-surface));padding:0 9px;color:rgb(var(--yb-text-body-strong))}.filter-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px}.filter-actions>span{margin-right:auto;color:rgb(var(--yb-text-form-muted));font-size:12px}.state-card{padding:24px;text-align:center}.state-card.error{color:rgb(var(--yb-danger-action))}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{padding:16px;min-height:118px;display:flex;flex-direction:column;border-top:3px solid rgb(var(--yb-status-pending))}.kpi-card span{font-size:13px;color:rgb(var(--yb-text-form-secondary))}.kpi-card strong{font-size:28px;margin:10px 0 5px}.kpi-card small{color:rgb(var(--yb-text-form-muted-alt))}.kpi-card.green{border-top-color:rgb(var(--yb-success-emerald-bright))}.kpi-card.violet{border-top-color:rgb(var(--yb-purple))}.kpi-card.cyan{border-top-color:rgb(var(--yb-teal-accent))}.kpi-card.amber{border-top-color:rgb(var(--yb-warning-accent))}.kpi-card.red{border-top-color:rgb(var(--yb-red))}.analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}.analysis-grid--wide{grid-template-columns:1.6fr 1fr}.panel{padding:17px;min-width:0}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}.panel-head h2{font-size:16px;margin:0 0 3px}.panel-head>span{font-size:12px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));border-radius:20px;padding:4px 9px}.people-bars{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto}.people-bars button{display:grid;grid-template-columns:85px 1fr 58px;gap:8px;align-items:center;border:0;background:none;padding:4px;cursor:pointer;text-align:left}.people-bars i{height:9px;background:rgb(var(--yb-surface-slate));border-radius:5px;overflow:hidden}.people-bars b{display:block;height:100%;background:linear-gradient(90deg,rgb(var(--yb-brand-bright)),rgb(var(--yb-purple)));border-radius:5px}.people-bars strong{text-align:right;font-size:12px}.composition-list{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.composition-list>div,.quality-grid>div{padding:12px;border-radius:10px;background:rgb(var(--yb-surface-subtle));display:flex;justify-content:space-between}.composition-list strong{font-size:20px}.quality-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}.quality-grid>div{flex-direction:column;gap:7px}.quality-grid span{font-size:12px;color:rgb(var(--yb-text-form-secondary))}.quality-grid b{font-size:18px}.table-panel{margin-bottom:16px}.table-scroll{overflow:auto;max-height:520px}.table-panel table{width:100%;border-collapse:collapse;min-width:1050px;font-size:12px}.table-panel th{position:sticky;top:0;background:rgb(var(--yb-surface-raised));color:rgb(var(--yb-text-soft));text-align:left;padding:10px 8px;z-index:1}.table-panel td{padding:10px 8px;border-top:1px solid rgb(var(--yb-border-quiet))}.table-panel td small{display:block;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgb(var(--yb-text-form-muted-alt));margin-top:3px}.danger{color:rgb(var(--yb-danger));font-weight:700}.status-pill{display:inline-block;padding:3px 7px;border-radius:10px;background:rgb(var(--yb-surface-slate))}.status-pill.overdue{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger))}.definitions{padding:13px 16px;margin-bottom:24px}.definitions summary{cursor:pointer;font-weight:600}.definitions dl{display:grid;grid-template-columns:120px 1fr;gap:8px 14px}.definitions dt{font-weight:600}.definitions dd{margin:0;color:rgb(var(--yb-text-muted-strong))}.error button{margin-left:12px}@media(max-width:1250px){.filter-grid{grid-template-columns:repeat(4,1fr)}.kpi-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.design-board-page{padding:14px}.design-board-header{flex-direction:column}.filter-grid{grid-template-columns:repeat(2,1fr)}.analysis-grid,.analysis-grid--wide{grid-template-columns:1fr}.kpi-grid{grid-template-columns:1fr 1fr}.header-actions{width:100%}}@media(max-width:480px){.filter-grid,.kpi-grid{grid-template-columns:1fr}.design-board-header h1{font-size:24px}}
+.design-board-page{min-height:100%;padding:24px;background:rgb(var(--yb-bg-page));color:rgb(var(--yb-text-strong))}.design-board-header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.design-board-header h1{font-size:30px;margin:8px 0 3px}.design-board-header p,.panel-head p{margin:0;color:rgb(var(--yb-text-muted));font-size:13px}.back-link,.person-link,.task-link{border:0;background:none;color:rgb(var(--yb-brand));padding:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer}.header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.freshness{font-size:12px;color:rgb(var(--yb-text-label))}.filter-panel,.panel,.kpi-card,.state-card,.definitions{background:rgb(var(--yb-surface));border:1px solid rgb(var(--yb-border-slate));border-radius:14px;box-shadow:0 4px 18px rgb(var(--yb-shadow)/.04)}.filter-panel{padding:16px;margin-bottom:16px}.preset-row{display:flex;align-items:center;gap:7px;margin-bottom:13px;font-size:13px;color:rgb(var(--yb-text-muted-strong))}.preset-row button{border:1px solid rgb(var(--yb-border-blue-soft));background:rgb(var(--yb-surface-subtle));border-radius:20px;padding:5px 11px;cursor:pointer}.preset-row button.active{background:rgb(var(--yb-surface-blue-control));border-color:rgb(var(--yb-brand-border-strong));color:rgb(var(--yb-brand-link))}.filter-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px}.filter-grid label{font-size:12px;color:rgb(var(--yb-text-muted-strong));display:flex;flex-direction:column;gap:5px}.filter-grid input,.filter-grid select,.panel-head input,.panel-head select{height:36px;border:1px solid rgb(var(--yb-border-form));border-radius:8px;background:rgb(var(--yb-surface));padding:0 9px;color:rgb(var(--yb-text-body-strong))}.filter-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px}.filter-actions>span{margin-right:auto;color:rgb(var(--yb-text-form-muted));font-size:12px}.state-card{padding:24px;text-align:center}.state-card.error{color:rgb(var(--yb-danger-action))}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{padding:16px;min-height:118px;display:flex;flex-direction:column;border-top:3px solid rgb(var(--yb-status-pending))}.kpi-card span{font-size:13px;color:rgb(var(--yb-text-form-secondary))}.kpi-card strong{font-size:28px;margin:10px 0 5px}.kpi-card small{color:rgb(var(--yb-text-form-muted-alt))}.kpi-card.green{border-top-color:rgb(var(--yb-success-emerald-bright))}.kpi-card.violet{border-top-color:rgb(var(--yb-purple))}.kpi-card.cyan{border-top-color:rgb(var(--yb-teal-accent))}.kpi-card.amber{border-top-color:rgb(var(--yb-warning-accent))}.kpi-card.red{border-top-color:rgb(var(--yb-red))}.analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}.analysis-grid--wide{grid-template-columns:1.6fr 1fr}.panel{padding:17px;min-width:0}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}.panel-head h2{font-size:16px;margin:0 0 3px}.panel-head>span{font-size:12px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));border-radius:20px;padding:4px 9px}.people-bars{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto}.people-bars button{display:grid;grid-template-columns:85px 1fr 58px;gap:8px;align-items:center;border:0;background:none;padding:4px;cursor:pointer;text-align:left}.people-bars i{height:9px;background:rgb(var(--yb-surface-slate));border-radius:5px;overflow:hidden}.people-bars b{display:block;height:100%;background:linear-gradient(90deg,rgb(var(--yb-brand-bright)),rgb(var(--yb-purple)));border-radius:5px}.people-bars strong{text-align:right;font-size:12px}.composition-list{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.composition-list>div,.quality-grid>div{padding:12px;border-radius:10px;background:rgb(var(--yb-surface-subtle));display:flex;justify-content:space-between}.composition-list strong{font-size:20px}.quality-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}.quality-grid>div{flex-direction:column;gap:7px}.quality-grid span{font-size:12px;color:rgb(var(--yb-text-form-secondary))}.quality-grid b{font-size:18px}.table-panel{margin-bottom:16px}.design-table-wrap{overflow:auto;max-height:520px}.table-panel table{width:100%;border-collapse:collapse;min-width:1050px;font-size:12px}.table-panel th{position:sticky;top:0;background:rgb(var(--yb-surface-raised));color:rgb(var(--yb-text-soft));text-align:left;padding:10px 8px;z-index:1}.table-panel td{padding:10px 8px;border-top:1px solid rgb(var(--yb-border-quiet))}.table-panel td small{display:block;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgb(var(--yb-text-form-muted-alt));margin-top:3px}.danger{color:rgb(var(--yb-danger));font-weight:700}.status-pill{display:inline-block;padding:3px 7px;border-radius:10px;background:rgb(var(--yb-surface-slate))}.status-pill.overdue{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger))}.definitions{padding:13px 16px;margin-bottom:24px}.definitions summary{cursor:pointer;font-weight:600}.definitions dl{display:grid;grid-template-columns:120px 1fr;gap:8px 14px}.definitions dt{font-weight:600}.definitions dd{margin:0;color:rgb(var(--yb-text-muted-strong))}.error button{margin-left:12px}@media(max-width:1250px){.filter-grid{grid-template-columns:repeat(4,1fr)}.kpi-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.design-board-page{padding:14px}.design-board-header{flex-direction:column}.filter-grid{grid-template-columns:repeat(2,1fr)}.analysis-grid,.analysis-grid--wide{grid-template-columns:1fr}.kpi-grid{grid-template-columns:1fr 1fr}.header-actions{width:100%}}@media(max-width:480px){.filter-grid,.kpi-grid{grid-template-columns:1fr}.design-board-header h1{font-size:24px}}
 .oa-design-board .design-board-header h1 { font-size: 18px; font-weight: 600; }
 .oa-design-board .panel-head h2 { font-size: 15px; font-weight: 600; }
 .oa-design-board .panel-head p, .oa-design-board .kpi-card small { font-size: 12px; }
@@ -191,4 +207,40 @@ onBeforeUnmount(() => controller?.abort())
 .oa-design-board .kpi-card { color: rgb(var(--yb-text)); background: rgb(var(--yb-surface)); border-color: rgb(var(--yb-border)); }
 .oa-design-board .kpi-card strong { font-weight: 600; color: rgb(var(--yb-text-strong)); }
 .oa-design-board .kpi-card.oa-kpi-risk strong { color: rgb(var(--yb-danger)); }
+
+.design-filter-actions { display: flex; align-items: center; gap: 6px; }
+.design-risk-filter { border: 1px solid rgb(var(--yb-warning-accent) / .35); border-radius: 999px; background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); padding: 5px 9px; font-size: 12px; white-space: nowrap; }
+.design-risk-filter:hover, .design-risk-filter[aria-pressed=true] { background: rgb(var(--yb-warning-accent) / .2); }
+@media (min-width: 1280px) {
+  .oa-design-board { width: 100%; max-width: none; margin: 0; padding: 0; background: transparent; }
+  .oa-design-board .design-board-header { display: contents; }
+  .oa-design-board .design-board-header > div:first-child { display: none; }
+  .header-actions { flex-wrap: nowrap; gap: 8px; white-space: nowrap; }
+  .header-actions :deep(button) { min-height: 28px; padding: 4px 8px; font-size: 12px; }
+  .header-actions :deep(button > span) { display: inline-flex; align-items: center; gap: 4px; }
+  .freshness { white-space: nowrap; }
+  .oa-design-board .filter-panel { border-radius: 6px; margin-bottom: 10px; box-shadow: none; }
+  .design-scope { margin-inline-end: 8px; }
+  .oa-design-board .kpi-grid { gap: 0; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; overflow: hidden; margin-bottom: 12px; }
+  .oa-design-board .kpi-card { min-height: 72px; gap: 2px; border: 0; border-radius: 0; box-shadow: none; padding: 6px 12px; }
+  .oa-design-board .kpi-card + .kpi-card { border-inline-start: 1px solid rgb(var(--yb-border)); }
+  .oa-design-board .kpi-card:nth-child(n+5) { border-block-start: 1px solid rgb(var(--yb-border)); }
+  .oa-design-board .kpi-card strong { font-size: 20px; line-height: 1.15; margin: 0; font-variant-numeric: tabular-nums; }
+  .oa-design-board .analysis-grid { gap: 12px; margin-bottom: 12px; }
+  .oa-design-board .panel { padding: 12px; border-radius: 6px; }
+  .oa-design-board :deep(.design-trend-chart) { height: 176px; min-height: 0; }
+  .oa-design-board .people-bars { max-height: none; overflow: visible; }
+  .oa-design-board .design-table-wrap { max-height: none; overflow: visible; }
+  .oa-design-board .table-panel table { min-width: 0; }
+  .oa-design-board .table-panel th { position: static; }
+  .oa-design-board .table-panel td { height: 40px; padding: 4px 8px; }
+  .oa-design-board .table-panel tr:hover td { background: rgb(var(--yb-surface-hover)); }
+  .oa-design-board .table-panel th:nth-child(n+2), .oa-design-board .table-panel td:nth-child(n+2) { font-variant-numeric: tabular-nums; }
+  .oa-design-board .table-panel:not(#design-task-exceptions) :is(th, td):nth-child(n+2),
+  .oa-design-board #design-task-exceptions :is(th, td):nth-child(n+6) { text-align: right; white-space: nowrap; }
+}
+@media (min-width: 2300px) {
+  .oa-design-board .kpi-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  .oa-design-board .kpi-card:nth-child(n+5) { border-block-start: 0; }
+}
 </style>

@@ -4,13 +4,16 @@
       <div class="yb-page-heading-copy">
         <h1 class="yb-page-title">成本规则</h1>
       </div>
+      <DesktopSlot target="actions">
       <div v-if="entryTab==='schemes'" class="header-actions">
         <button class="secondary" :disabled="loading" @click="loadAll"><RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? '刷新中…' : '刷新数据' }}</button>
         <button v-if="workspaceTab==='计价方案'" type="button" class="secondary calculator-toggle" :aria-expanded="calculatorOpen" :aria-controls="calculatorOpen ? 'cost-calculator' : undefined" @click="calculatorOpen=!calculatorOpen"><Calculator :size="16" :stroke-width="1.75" aria-hidden="true" />{{ calculatorOpen ? '收起试算' : '试算' }}</button>
         <button class="primary" @click="openRuleEditor()"><Plus :size="16" :stroke-width="1.75" aria-hidden="true" />新增方案</button>
       </div>
+      </DesktopSlot>
     </header>
 
+    <DesktopSlot target="tabs">
     <nav class="workspace-tabs cost-primary-nav" aria-label="成本维护入口">
       <button type="button" :class="{active:entryTab==='costs'}" :aria-pressed="entryTab==='costs'" @click="entryTab='costs'; calculatorOpen=false">
         <ListChecks :size="16" :stroke-width="1.75" aria-hidden="true" />编码成本
@@ -26,7 +29,8 @@
         <component :is="tab.icon" :size="16" :stroke-width="1.75" aria-hidden="true" />{{tab.label}}
       </button>
     </nav>
-    <CostMaintenanceList v-if="entryTab==='costs'" :initial-sku="initialSku" />
+    </DesktopSlot>
+    <CostMaintenanceList v-if="entryTab==='costs'" :initial-sku="initialSku" :focus="costFocus" :focus-revision="costFocus === 'cost-conflicts' ? (route?.fullPath ?? '') + ':' + shortcutClicks : undefined" />
     <div v-show="entryTab==='schemes'" class="cost-module">
 
     <div v-if="error" class="message error" role="alert">{{ error }}<button @click="loadAll">重试</button></div>
@@ -301,7 +305,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onMounted, reactive, ref, watch } from 'vue'
+import { oaEnabled } from '@/oa/access'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import { routeLocationKey } from 'vue-router'
+import { computed, inject, onActivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Calculator, CheckCheck, History, Layers3, Link2, ListChecks, Plus, RefreshCw, X, ChevronDown } from 'lucide-vue-next'
 import CostModelEditor from '@/components/cost/CostModelEditor.vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
@@ -391,6 +398,19 @@ const preview = ref<CostRulePreviewResponse | null>(null)
 const ruleDraft = reactive<RuleDraft>(emptyRuleDraft())
 const calculator = reactive({ rule_group: '', width: 1, height: 1, area: null as number | null, quantity: 1, process: '' })
 const props=defineProps<{initialTab?:'costs'|'schemes'; initialSku?:string}>()
+const route = inject(routeLocationKey, null)
+const shortcutClicks = ref(0)
+function refocusConflicts() {
+  if (route?.path !== '/cost-rules') return
+  entryTab.value = 'costs'
+  shortcutClicks.value++
+}
+onMounted(() => { if (oaEnabled) window.addEventListener('oa-refocus-cost-conflicts', refocusConflicts) })
+onUnmounted(() => { if (oaEnabled) window.removeEventListener('oa-refocus-cost-conflicts', refocusConflicts) })
+const costFocus = computed(() => {
+  const focus = route?.query.focus
+  return focus === 'cost-conflicts' || focus === 'cost-detail' ? focus : undefined
+})
 const entryTab=ref(props.initialSku ? 'costs' : props.initialTab || 'costs')
 function openSKUEntry() {
   if (!props.initialSku) return
@@ -398,6 +418,11 @@ function openSKUEntry() {
   calculatorOpen.value = false
 }
 watch(() => props.initialSku, openSKUEntry)
+watch([costFocus, () => route?.fullPath], ([focus]) => {
+  if (focus !== 'cost-conflicts' && focus !== 'cost-detail') return
+  entryTab.value = 'costs'
+  calculatorOpen.value = false
+})
 onActivated(openSKUEntry)
 let schemesLoaded=false
 const workspaceTabs = [

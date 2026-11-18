@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import DesktopSlot from './DesktopSlot.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useOAAccess } from '../access'
 
+defineOptions({ inheritAttrs: false })
 defineProps<{ query?: Record<string, string> }>()
 const route = useRoute()
 const { currentProfile, can } = useOAAccess()
@@ -31,10 +33,12 @@ watch(() => route.path, async () => {
 </script>
 
 <template>
-  <nav ref="nav" class="operation-nav" aria-label="经营工作区">
+  <DesktopSlot target="tabs">
+  <nav v-bind="$attrs" ref="nav" class="operation-nav" aria-label="经营工作区">
     <RouterLink v-for="link in links" :key="link.path" :to="{ path: link.path, query }"
       :class="{ selected: active(link.path) }" :aria-current="active(link.path) ? 'page' : undefined">{{ link.title }}</RouterLink>
   </nav>
+  </DesktopSlot>
 </template>
 
 <style scoped>

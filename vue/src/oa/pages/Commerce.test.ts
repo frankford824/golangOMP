@@ -49,6 +49,15 @@ it('keeps the overview usable with null freshness and renders a scoped Top 10 an
   expect(wrapper.findAll('.commerce-chart circle').map(point => point.attributes('aria-label'))).toEqual([
     '2026-11-18 04:00 ¥600.00', '2026-11-17 04:00 ¥400.00',
   ])
+  expect(wrapper.get('.commerce-comparison').text()).toContain('+50.0%')
+  const chart = wrapper.get('.commerce-chart')
+  await chart.trigger('focus')
+  expect(wrapper.get('.commerce-chart-tooltip').text()).toContain('所选日 ¥600.00')
+  expect(wrapper.get('.commerce-chart-tooltip').text()).toContain('前一日 ¥400.00')
+  await chart.trigger('keydown', { key: 'ArrowLeft' })
+  expect(wrapper.get('.commerce-chart-tooltip').text()).toContain('03:00')
+  await chart.trigger('keydown', { key: 'Escape' })
+  expect(wrapper.find('.commerce-chart-tooltip').exists()).toBe(false)
   expect(orderAPI).toHaveBeenCalledWith('/oa-api/orders/hourly?from=2026-11-17&to=2026-11-18')
   wrapper.unmount()
 })
@@ -62,5 +71,27 @@ it('falls back to a daily trend without changing the selected day', async () => 
   await flushPromises()
   expect(wrapper.get('.commerce-chart').attributes('aria-label')).toBe('近 7 日订单应付')
   expect(wrapper.findAll('input[type=date]').map(input => (input.element as HTMLInputElement).value)).toEqual(['2026-11-18', '2026-11-18'])
+  wrapper.unmount()
+})
+
+
+it.each([
+  { hours: [3, 4], baseline: [3], stale: false, basis: 'one date has an unmatched completed hour' },
+  { hours: [16], baseline: [16], stale: false, basis: 'only the current incomplete hour is available' },
+  { hours: [3, 4], baseline: [3, 4], stale: true, basis: 'the hourly snapshot is stale' },
+])('hides the change when $basis', async ({ hours, baseline, stale }) => {
+  orderAPI.mockImplementation(async (path: string) => {
+    if (path.includes('/hourly?')) return {
+      stale,
+      rows: [
+        ...hours.map(hour => ({ day: '2026-11-18', hour, payable_amount: '600' })),
+        ...baseline.map(hour => ({ day: '2026-11-17', hour, payable_amount: '400' })),
+      ],
+    }
+    return { rows: [], freshness: null }
+  })
+  const wrapper = mount(Commerce, { props: { mode: 'overview' } })
+  await flushPromises()
+  expect(wrapper.find('.commerce-comparison').exists()).toBe(false)
   wrapper.unmount()
 })

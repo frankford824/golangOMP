@@ -313,3 +313,76 @@ body .modal-card.cost-rule-dialog .binding-search-form input{font:400 14px/20px 
 body .modal-card.cost-rule-dialog .binding-option strong{font-size:14px;font-weight:600;line-height:20px}
 body .modal-card.cost-rule-dialog .binding-option small{font-size:12px;line-height:18px}
 @media(max-width:1150px){#app .cost-manager-page .rule-card{grid-template-columns:1fr;gap:4px}#app .cost-manager-page .price-actions{justify-content:flex-start}}
+
+@media (min-width: 1280px) {
+  html.oa-live-ui #app .cost-manager-page {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    block-size: calc(100dvh - 68px);
+    min-block-size: 0;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  html.oa-live-ui #app .cost-manager-page .cost-titlebar { display: none; }
+  html.oa-live-ui #app .cost-manager-page > .maintenance {
+    display: grid;
+    overflow: hidden;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  html.oa-live-ui #app .cost-manager-page > .maintenance:has(.inline-inspector) {
+    grid-template-columns: minmax(0, 1fr) var(--cost-inspector-width, 420px);
+    column-gap: 12px;
+  }
+  html.oa-live-ui #app .cost-manager-page > .maintenance .maintenance-table {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+  }
+  html.oa-live-ui #app .cost-manager-page > .maintenance .maintenance-footer {
+    margin: 0;
+    height: 40px;
+  }
+}
+
+@media (min-width: 2300px) {
+  html.oa-live-ui #app .cost-manager-page > .maintenance { --cost-inspector-width: 480px; }
+}
+
+@media (min-width: 1280px) {
+  html.oa-live-ui #app .app-topbar .cost-primary-nav {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0;
+    align-items: center;
+  }
+  html.oa-live-ui #app .app-topbar .cost-primary-nav button {
+    height: 43px;
+    min-height: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 4px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    white-space: nowrap;
+    background: transparent;
+    font-size: 13px;
+  }
+  html.oa-live-ui #app .app-topbar .cost-primary-nav button[aria-pressed="true"] {
+    border-bottom-color: rgb(var(--yb-brand));
+    color: rgb(var(--yb-brand));
+    background: transparent;
+  }
+  html.oa-live-ui #app .app-topbar .header-actions :is(.primary,.secondary) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 30px;
+    padding-inline: 6px;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+}

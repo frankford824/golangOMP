@@ -4,7 +4,7 @@
       <div class="yb-page-heading-copy">
         <h1 class="yb-page-title">SKU 资产中心</h1>
       </div>
-      <div class="page-actions">
+      <DesktopSlot target="actions"><div class="page-actions">
         <div v-if="oaEnabled && !isFlatMode" class="asset-view-modes" role="group" aria-label="结果视图">
           <button type="button" class="quiet-button" :aria-pressed="!showLedger" @click="showLedger = false">图库网格</button>
           <button type="button" class="quiet-button" :aria-pressed="showLedger" @click="showLedger = true">规格台账</button>
@@ -12,7 +12,7 @@
         <button class="quiet-button" :disabled="loading" @click="load">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
-      </div>
+      </div></DesktopSlot>
     </header>
 
     <section class="search-workbench" aria-label="资产检索">
@@ -244,6 +244,7 @@
 </template>
 
 <script setup lang="ts">
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'

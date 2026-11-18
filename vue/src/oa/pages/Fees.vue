@@ -9,11 +9,12 @@ let savedApplication: {
 <script setup lang="ts">
 import { ArrowLeft, Check, CircleAlert, FileText, Wallet } from 'lucide-vue-next'
 import OAEmpty from '../components/OAEmpty.vue'
-import { computed, nextTick, onMounted, ref, watch, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, nextTick, onMounted, ref, watch, watchEffect } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 import FeePersonSelect from '../components/FeePersonSelect.vue'
 import { searchFeePeople, approverLabel, type FeePerson as Approver } from '../feePeople'
 import { feeTabs } from '../routes'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import PageHead from '../components/PageHead.vue'
 import { api, dateInChina, download, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
@@ -100,7 +101,53 @@ const queueGuide = computed(() => ({
   todo: '审批流转到你时，单据会出现在这里。',
   pay: '全部审批通过后，其他申请人的单据会出现在这里。',
 })[queue.value])
-const showQueue = computed(() => allowed.value && !detail.value && ['mine', 'approval'].includes(props.mode))
+const desktopApproval = ref(false)
+const pinApproval = ref(false)
+const approvalClosed = ref(false)
+const queuePage = ref<HTMLElement>()
+let desktopQuery: MediaQueryList | undefined
+let pinnedQuery: MediaQueryList | undefined
+const showQueue = computed(() => allowed.value && (!detail.value || desktopApproval.value) && ['mine', 'approval'].includes(props.mode))
+const openDocumentLink = (id: string) => ({ path: '/fees/document', query: { id, queue: queue.value } })
+function syncApprovalSize() {
+  desktopApproval.value = Boolean(desktopQuery?.matches)
+  pinApproval.value = Boolean(pinnedQuery?.matches)
+  if (pinApproval.value && !approvalClosed.value && !detail.value && visibleDocs.value[0]) {
+    void run(() => open(visibleDocs.value[0].id, false))
+  }
+}
+function selectFeeRow(event: MouseEvent, id: string) {
+  if (desktopApproval.value && !(event.target as HTMLElement).closest('a,button,input,select,[role=button]')) void run(() => open(id))
+}
+function navigateApproval(event: KeyboardEvent) {
+  if (!desktopApproval.value || !detail.value || busy.value || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    void run(returnToQueue)
+    return
+  }
+  if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable=true]')) return
+  const delta = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
+  if (!delta) return
+  event.preventDefault()
+  const target = visibleDocs.value[visibleDocs.value.findIndex(item => item.id === detail.value?.id) + delta]
+  if (target) void run(() => open(target.id))
+}
+async function advanceApproval(id: string) {
+  if (!desktopApproval.value) return
+  const index = docs.value.findIndex(item => item.id === id)
+  const following = docs.value.slice(index + 1).map(item => item.id)
+  await loadDocs(false)
+  const nextID = following.find(candidate => docs.value.some(item => item.id === candidate))
+    ?? docs.value.find(item => item.id !== id)?.id
+  const nextIndex = docs.value.findIndex(item => item.id === nextID)
+  if (nextIndex >= 0) {
+    page.value = Math.floor(nextIndex / 15) + 1
+    await open(docs.value[nextIndex].id)
+  } else {
+    detail.value = undefined
+  }
+}
 const requestedPeriod = route.query.period
 const period = ref(typeof requestedPeriod === 'string' && /^\d{4}(-\d{2}){0,2}$/.test(requestedPeriod) ? requestedPeriod : dateInChina().slice(0, 7))
 const reportPeriod = ref(period.value)
@@ -200,6 +247,8 @@ const stageGuide = computed(() => ({
 const mayDecide = computed(() => detail.value?.state === 'waiting' && !own.value && String(detail.value.route?.[detail.value.current]) === String(currentProfile.value?.id))
 const major = (cents?: number) => cents == null ? '—' : money(cents / 100)
 const lastReturn = computed(() => [...(detail.value?.history || [])].reverse().find(entry => entry.action === 'return'))
+const showApprovalForm = computed(() => (queue.value === 'todo' || props.mode === 'document') && can('finance.approve') && mayDecide.value)
+const showPaymentForm = computed(() => (queue.value === 'pay' || props.mode === 'document') && !own.value && canPay.value && detail.value?.state === 'approved')
 const approvalButton = computed(() => ({ approve: '同意申请', return: '退回申请', reject: '拒绝申请' }[approval.value.decision]))
 const leaveForm = () => !edited.value || window.confirm('费用申请尚未提交。放弃已填内容并离开？')
 const draftOwner = computed(() => String(currentProfile.value?.id || ''))
@@ -349,22 +398,38 @@ async function loadTemplates() {
     draftRestored.value = true
   }
 }
-async function loadDocs() {
-  detail.value = undefined
+async function loadDocs(reset = true) {
+  if (reset) detail.value = undefined
   loadedDocs.value = false
   const data = await api<{ items: FeeDoc[] }>('/oa-api/finance/documents?' + new URLSearchParams({ queue: queue.value }))
   docs.value = data.items ?? []
   page.value = Math.min(page.value, pages.value)
   loadedDocs.value = true
   approvalsChanged.value = false
+  if (reset && pinApproval.value && !approvalClosed.value && visibleDocs.value[0]) await open(visibleDocs.value[0].id, false)
+}
+function changeQueue(nextQueue: 'todo' | 'pay') {
+  if (!desktopApproval.value) {
+    queue.value = nextQueue
+    page.value = 1
+    return run(loadDocs)
+  }
+  if (nextQueue !== queue.value) docs.value = []
+  queue.value = nextQueue
+  page.value = 1
+  approvalClosed.value = false
+  return run(loadDocs)
 }
 async function returnToQueue() {
+  approvalClosed.value = true
   detail.value = undefined
   revealed.value = false
   if (route.query.id) await router.replace({ query: {} })
   if (approvalsChanged.value || !loadedDocs.value) await loadDocs()
+  await nextTick()
+  queuePage.value?.focus()
 }
-async function open(id: string) {
+async function open(id: string, focus = true) {
   revealed.value = false
   touched.delete('date')
   delete fieldErrors.value.date
@@ -372,8 +437,12 @@ async function open(id: string) {
   approval.value = { decision: 'approve', comment: '' }
   payment.value = { date: dateInChina(), receipt: '', receiptName: '' }
   receiptError.value = ''
-  await nextTick()
-  heading.value?.focus()
+  if (focus) {
+    approvalClosed.value = false
+    await nextTick()
+    heading.value?.focus()
+    queuePage.value?.querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest' })
+  }
 }
 async function revealAccount() {
   if (!detail.value?.id) return
@@ -495,6 +564,7 @@ async function act() {
     returned: '已退回申请人修改',
     rejected: '已拒绝，审批已结束',
   } as Record<string, string>)[detail.value.state] || '审批结果已保存'
+  await advanceApproval(id)
 }
 async function pay() {
   if (!detail.value || !payment.value.receipt) return
@@ -507,6 +577,7 @@ async function pay() {
   revealed.value = false
   approvalsChanged.value = true
   notice.value = '付款已登记，回单已归档'
+  await advanceApproval(id)
 }
 async function loadReport(initial = false) {
   reportLoaded.value = false
@@ -576,10 +647,18 @@ async function saveDelegate() {
 
 onMounted(() => void run(async () => {
   if (!allowed.value) return
+  if (props.mode === 'approval' && typeof window.matchMedia === 'function') {
+    desktopQuery = window.matchMedia('(min-width: 1280px)')
+    pinnedQuery = window.matchMedia('(min-width: 2300px)')
+    desktopQuery.addEventListener('change', syncApprovalSize)
+    pinnedQuery.addEventListener('change', syncApprovalSize)
+    syncApprovalSize()
+  }
   if (props.mode === 'apply' || props.mode === 'templates') await loadTemplates()
   if (props.mode === 'templates' && isAdmin.value && route.query.manage === 'publish') openGrantPanel(delegatePanel.value)
   if (props.mode === 'templates' && isAdmin.value) await loadGrants()
   if (['mine', 'approval', 'document'].includes(props.mode) && typeof route.query.id === 'string') {
+    if (desktopApproval.value) await loadDocs(false)
     await open(route.query.id)
     if (props.mode === 'mine' && route.query.submitted === '1' && own.value) notice.value = '申请已提交，等待审批'
   } else if (props.mode === 'approval' || props.mode === 'mine') {
@@ -588,6 +667,10 @@ onMounted(() => void run(async () => {
   if (props.mode === 'report') await loadReport(true)
   if (props.mode === 'templates' && canEditTemplate.value && route.query.new === '1') beginTemplate()
 }))
+onBeforeUnmount(() => {
+  desktopQuery?.removeEventListener('change', syncApprovalSize)
+  pinnedQuery?.removeEventListener('change', syncApprovalSize)
+})
 watch(() => route.query.id, (id, previous) => {
   if (props.mode !== 'document' || !allowed.value || typeof id !== 'string' || id === previous) return
   detail.value = undefined
@@ -596,10 +679,11 @@ watch(() => route.query.id, (id, previous) => {
 </script>
 
 <template>
-<div class="oa-page">
+<div class="oa-page" :class="{ 'fee-approval-page': desktopApproval }" @keydown="navigateApproval">
   <PageHead :title="title" :subtitle="({ mine: '跟踪费用申请的审批进度与付款记录', approval: '处理轮到自己的审批和已获授权的付款登记', templates: '维护费用类型、审批节点与经办权限', report: '按实付日期查询费用支出' } as Record<string, string>)[mode]">
     <RouterLink v-if="mode !== 'apply' && can('finance.apply')" class="oa-button oa-button-primary" to="/fees/apply">＋ 发起费用申请</RouterLink>
   </PageHead>
+  <DesktopSlot target="tabs">
   <nav class="fee-tabs" aria-label="费用中心">
     <RouterLink v-for="tab in feeTabs.filter(item => item.actions.some(can))" :key="tab.mode" :to="'/fees/' + tab.mode"
       :aria-current="mode === tab.mode ? 'page' : undefined">{{ tab.mode === 'approval' && !can('finance.approve') ? '待付款' : tab.label }}</RouterLink>
@@ -607,6 +691,7 @@ watch(() => route.query.id, (id, previous) => {
       费用动态<span v-if="expenseActivity.todoCount"> · {{ expenseActivity.todoCount }} 项待办</span>
     </RouterLink>
   </nav>
+  </DesktopSlot>
   <section v-if="!allowed" class="oa-panel">
     <OAEmpty kind="inbox" title="当前页面不可用" :description="accessMessage" />
   </section>
@@ -668,12 +753,13 @@ watch(() => route.query.id, (id, previous) => {
   </div>
 
   <template v-else-if="mode === 'mine' || mode === 'approval' || mode === 'document'">
-    <div v-if="mode === 'approval' && !detail && can('finance.approve') && canPay" class="oa-actions oa-person-tabs">
-      <button v-if="can('finance.approve')" :aria-pressed="queue === 'todo'" :disabled="busy" @click="queue = 'todo'; page = 1; run(loadDocs)">审批待办</button>
-      <button v-if="canPay" :aria-pressed="queue === 'pay'" :disabled="busy" @click="queue = 'pay'; page = 1; run(loadDocs)">待付款</button>
+    <div v-if="mode === 'approval' && (!detail || desktopApproval) && can('finance.approve') && canPay" class="oa-actions oa-person-tabs">
+      <button v-if="can('finance.approve')" :aria-pressed="queue === 'todo'" :disabled="busy" @click="changeQueue('todo')">审批待办</button>
+      <button v-if="canPay" :aria-pressed="queue === 'pay'" :disabled="busy" @click="changeQueue('pay')">待付款</button>
     </div>
-    <section v-if="!detail" class="oa-panel">
-      <p v-if="showQueue && busy" class="oa-muted" role="status">正在读取{{ queueLabel }}…</p>
+    <div class="fee-queue-layout" :class="{ 'has-fee-detail': detail }">
+    <section v-if="!detail || desktopApproval" class="oa-panel fee-queue">
+      <p v-if="showQueue && busy && (desktopApproval ? !loadedDocs : true)" class="oa-muted" role="status">正在读取{{ queueLabel }}…</p>
       <div v-else-if="showQueue && error" class="fee-banner fee-banner-error" role="alert">
         <CircleAlert :size="17" aria-hidden="true" /><span>{{ error }}</span>
         <button v-if="typeof route.query.id === 'string'" type="button" @click="run(() => open(String(route.query.id)))">重试读取单据</button>
@@ -685,21 +771,24 @@ watch(() => route.query.id, (id, previous) => {
         <RouterLink v-if="mode === 'mine'" class="oa-button oa-button-primary" to="/fees/apply">发起费用申请</RouterLink>
         <RouterLink v-else-if="mode === 'document'" class="oa-button" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : '返回费用列表' }}</RouterLink>
       </OAEmpty>
-      <div v-if="!busy && !error && docs.length" class="oa-table-wrap">
+      <div v-if="docs.length && (desktopApproval || (!busy && !error))" ref="queuePage" class="oa-table-wrap" role="region" aria-label="费用单据" tabindex="0">
         <table class="oa-table"><thead><tr><th>申请 / 单号</th><th>申请人</th><th class="oa-number">金额</th><th>来源</th><th>状态</th><th class="oa-action-col">操作</th></tr></thead><tbody>
-          <tr v-for="item in visibleDocs" :key="item.id"><td><b class="oa-ellipsis" :title="item.template?.name">{{ item.template?.name }}</b><small class="oa-muted oa-ellipsis" :title="item.id">{{ item.id }}</small></td><td>#{{ item.applicant_id }}</td><td class="oa-number">{{ major(item.amount_cents) }}</td><td>{{ item.site === 'asset' ? '资产办理区' : 'OA' }}</td><td><span :class="['oa-pill', 'oa-state-' + item.state]">{{ status(item.state) }}</span></td><td class="oa-action-col"><button :disabled="busy" @click="run(() => open(item.id))">打开单据</button></td></tr>
+          <tr v-for="item in visibleDocs" :key="item.id" :class="{ 'fee-row-selected': detail?.id === item.id }" :aria-selected="desktopApproval ? detail?.id === item.id : undefined" @click="selectFeeRow($event, item.id)"><td><RouterLink v-if="desktopApproval" class="oa-ellipsis" :title="item.template?.name" :to="openDocumentLink(item.id)" @click.exact.prevent="run(() => open(item.id))">{{ item.template?.name }}</RouterLink><b v-else class="oa-ellipsis" :title="item.template?.name">{{ item.template?.name }}</b><small class="oa-muted oa-ellipsis" :title="item.id">{{ item.id }}</small></td><td>#{{ item.applicant_id }}</td><td class="oa-number">{{ major(item.amount_cents) }}</td><td>{{ item.site === 'asset' ? '资产办理区' : 'OA' }}</td><td><span :class="['oa-pill', 'oa-state-' + item.state]">{{ status(item.state) }}</span></td><td class="oa-action-col"><button :disabled="busy" @click="run(() => open(item.id))">{{ desktopApproval ? (queue === 'pay' ? '登记付款' : '去审批') : '打开单据' }}</button></td></tr>
         </tbody></table>
       </div>
-      <nav v-if="!busy && !error && pages > 1" class="oa-actions fee-pager" aria-label="费用单据分页">
+      <nav v-if="desktopApproval || (!busy && !error && pages > 1)" class="oa-actions fee-pager" aria-label="费用单据分页">
         <span>共 {{ docs.length }} 项 · {{ page }} / {{ pages }} 页</span>
-        <button :disabled="page <= 1" @click="page--">上一页</button>
-        <button :disabled="page >= pages" @click="page++">下一页</button>
+        <button :disabled="busy || page <= 1" @click="page--">上一页</button>
+        <button :disabled="busy || page >= pages" @click="page++">下一页</button>
       </nav>
     </section>
-    <template v-else>
+    <div v-if="detail && (!desktopApproval || !returned)" class="fee-inspector" :role="desktopApproval ? 'region' : undefined" :aria-label="desktopApproval ? '费用单据详情' : undefined">
+      <button v-if="desktopApproval" class="fee-inspector-backdrop" type="button" aria-label="关闭单据详情" @click="run(returnToQueue)"></button>
+      <div class="fee-inspector-body">
       <div class="oa-actions fee-back">
         <RouterLink v-if="mode === 'document'" class="oa-button" :to="documentReturn"><ArrowLeft :size="15" aria-hidden="true" /> {{ route.query.from === 'notifications' ? '返回费用动态' : '返回列表' }}</RouterLink>
         <button v-else type="button" :disabled="busy" @click="run(returnToQueue)"><ArrowLeft :size="15" aria-hidden="true" /> 返回{{ returnLabel }}</button>
+        <RouterLink v-if="desktopApproval" class="oa-button" :to="openDocumentLink(detail.id)" target="_blank" rel="noopener">完整详情 ↗</RouterLink>
         <button v-if="own && detail.state === 'returned'" class="oa-button-primary" :disabled="busy" @click="editReturned">修改并重提</button>
       </div>
       <div class="oa-split fee-document">
@@ -720,19 +809,19 @@ watch(() => route.query.id, (id, previous) => {
         <h2>审批与付款记录</h2>
         <p class="oa-muted">{{ stageGuide }}</p>
         <ol v-if="detail.route?.length" class="oa-steps fee-timeline"><li v-for="(item, index) in detail.route" :key="index" :class="{ 'fee-step-current': detail.state === 'waiting' && detail.current === index }">{{ node(item) }}<small v-if="detail.current > index"> · 已通过</small><small v-else-if="detail.state === 'waiting' && detail.current === index"> · 当前节点</small></li></ol>
-        <form v-if="(queue === 'todo' || mode === 'document') && can('finance.approve') && mayDecide" class="oa-form" @submit.prevent="run(act)">
+        <form v-if="showApprovalForm" id="fee-approval-form" class="oa-form" @submit.prevent="run(act)">
           <label>审批结果<select v-model="approval.decision"><option v-for="(text, key) in decisions" :key="key" :value="key">{{ text }}</option></select></label>
           <label>审批意见<textarea v-model.trim="approval.comment" maxlength="2000" :required="approval.decision !== 'approve'" /></label>
-          <button :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy">{{ approvalButton }}</button>
+          <button v-if="!desktopApproval" :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy">{{ approvalButton }}</button>
         </form>
-        <form v-if="(queue === 'pay' || mode === 'document') && !own && canPay && detail.state === 'approved'" class="oa-form" @submit.prevent="run(pay)">
+        <form v-if="showPaymentForm" id="fee-payment-form" class="oa-form" @submit.prevent="run(pay)">
           <label><span>实付日期<i aria-hidden="true">*</i></span><input v-model="payment.date" type="date" :max="dateInChina()" required v-bind="fieldAttrs('date', 'fee-date-help')" @blur="validateField('date', dateProblem, true)" @input="validateField('date', dateProblem)" /><small id="fee-date-help">填写实际付款日，最晚为今天。</small><small v-if="fieldErrors.date" id="fee-error-date" class="fee-error">{{ fieldErrors.date }}</small></label>
           <div class="fee-payment"><Wallet :size="19" aria-hidden="true" /><div><span>应付金额</span><strong>{{ major(detail.amount_cents) }}</strong></div></div>
           <p class="oa-muted">实际转账后填写实付日期、上传回单。</p>
           <label>付款回单 *<input ref="receipt" type="file" accept=".pdf,.png,.jpg,.jpeg" :disabled="busy" aria-describedby="fee-receipt-help" @change="uploadReceipt" /><small id="fee-receipt-help">PDF、PNG、JPEG，单个文件不超过 10 MB。</small></label>
           <p v-if="receiptError" class="fee-error" role="alert">{{ receiptError }}</p>
           <div v-if="payment.receipt" class="oa-actions" role="status"><span>已上传：{{ payment.receiptName }}</span><button type="button" :disabled="busy" @click="payment.receipt = ''; payment.receiptName = ''">移除回单</button></div>
-          <button class="oa-button-primary" :disabled="busy || !payment.receipt || !!dateProblem()">确认登记实付</button>
+          <button v-if="!desktopApproval" class="oa-button-primary" :disabled="busy || !payment.receipt || !!dateProblem()">确认登记实付</button>
         </form>
         <template v-if="detail.payment">
           <dl class="oa-kv"><div><dt>实付日期</dt><dd>{{ detail.payment.date }}</dd></div><div><dt>实付金额</dt><dd>{{ major(detail.payment.amount_cents) }}</dd></div></dl>
@@ -744,7 +833,13 @@ watch(() => route.query.id, (id, previous) => {
         </details>
       </section>
       </div>
-    </template>
+      <footer v-if="desktopApproval && (showApprovalForm || showPaymentForm)" class="fee-inspector-footer">
+        <button v-if="showApprovalForm" type="submit" form="fee-approval-form" :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy">{{ approvalButton }}并下一条</button>
+        <button v-else type="submit" form="fee-payment-form" class="oa-button-primary" :disabled="busy || !payment.receipt || !!dateProblem()">登记实付并下一条</button>
+      </footer>
+    </div>
+    </div>
+    </div>
   </template>
 
   <template v-else-if="mode === 'templates'">
@@ -900,5 +995,143 @@ watch(() => route.query.id, (id, previous) => {
 .fee-totals dd { margin: 4px 0 0; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
 @media (min-width: 960px) {
   .fee-apply:not(.fee-apply-empty) { grid-template-columns: minmax(0, 1fr) minmax(230px, 31%); align-items: start; }
+}
+
+@media (min-width: 1280px) {
+  .fee-tabs { display: flex; flex-wrap: nowrap; gap: 0; align-items: center; margin: 0; border: 0; }
+  .fee-tabs > a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 43px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 0;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    background: transparent;
+    font-size: 13px;
+  }
+  .fee-tabs > a[aria-current='page'] { border-bottom-color: rgb(var(--yb-brand)); background: transparent; }
+
+  .oa-page.fee-approval-page {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 68px);
+    min-height: 0;
+    overflow: hidden;
+  }
+  .fee-approval-page .fee-queue-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .fee-approval-page .fee-queue {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0;
+  }
+  .fee-approval-page .fee-queue .oa-table-wrap {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+    border-radius: 0;
+  }
+  .fee-approval-page .fee-queue table { table-layout: fixed; min-width: 710px; }
+  .fee-approval-page .fee-queue th { position: sticky; top: 0; z-index: 2; background: rgb(var(--yb-surface-muted)); }
+  .fee-approval-page .fee-queue th:nth-child(2) { width: 88px; }
+  .fee-approval-page .fee-queue th:nth-child(3) { width: 128px; }
+  .fee-approval-page .fee-queue th:nth-child(4) { width: 100px; }
+  .fee-approval-page .fee-queue th:nth-child(5) { width: 100px; }
+  .fee-approval-page .fee-queue th:nth-child(6) { width: 110px; }
+  .fee-approval-page .fee-queue td { height: 50px; padding-block: 4px; }
+  .fee-approval-page .fee-queue td:first-child a { display: block; min-block-size: 20px; }
+  .fee-approval-page .fee-queue tr { cursor: pointer; }
+  .fee-approval-page .fee-queue tbody tr:hover { background: rgb(var(--yb-surface-hover)); }
+  .fee-approval-page .fee-queue tbody .fee-row-selected { background: rgb(var(--yb-brand-soft)); }
+  .fee-approval-page .fee-queue :is(th,td).oa-number { font-family: var(--yb-font-mono); }
+  .fee-approval-page .fee-pager {
+    margin: auto 0 0;
+    padding-inline: 10px;
+    min-height: 40px;
+    flex: 0 0 40px;
+    border-top: 1px solid rgb(var(--yb-border));
+  }
+  .fee-approval-page .fee-pager button { min-height: 30px; padding-block: 0; }
+  .fee-approval-page .fee-inspector {
+    position: fixed;
+    inset: 44px 0 0;
+    z-index: 90;
+    display: grid;
+    justify-content: end;
+    grid-template-columns: minmax(0, 400px);
+  }
+  .fee-approval-page .fee-inspector button.fee-inspector-backdrop {
+    width: 100%;
+    position: absolute;
+    inset: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgb(var(--yb-shadow) / .22);
+  }
+  .fee-approval-page .fee-inspector-body {
+    z-index: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    background: rgb(var(--yb-surface));
+    border-left: 1px solid rgb(var(--yb-border));
+  }
+  .fee-approval-page .fee-back {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    margin: 0;
+    border-bottom: 1px solid rgb(var(--yb-border));
+    background: rgb(var(--yb-surface));
+  }
+  .fee-approval-page .fee-document {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+  }
+  .fee-inspector-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 12px;
+    border-top: 1px solid rgb(var(--yb-border));
+    background: rgb(var(--yb-surface));
+  }
+  .fee-inspector .fee-document > .oa-panel { min-width: 0; }
+  .fee-approval-page .fee-document > .oa-panel { padding: 10px 12px; }
+  .fee-approval-page .fee-document :is(.oa-kv,.oa-steps) { margin-block: 6px; }
+  .fee-approval-page .fee-document .oa-kv > div { padding-block: 4px; }
+  .fee-inspector .fee-document .oa-form { gap: 8px; }
+}
+
+@media (min-width: 1920px) {
+  .fee-approval-page .fee-queue-layout.has-fee-detail {
+    grid-template-columns: minmax(0, 1fr) var(--fee-inspector-width, 420px);
+    gap: 12px;
+  }
+  .fee-approval-page .fee-inspector { position: static; inset: auto; z-index: auto; display: contents; }
+  .fee-approval-page .fee-inspector button.fee-inspector-backdrop { display: none; }
+  .fee-approval-page .fee-inspector-body { border: 1px solid rgb(var(--yb-border)); border-radius: 8px; }
+}
+
+@media (min-width: 2300px) {
+  .fee-approval-page { --fee-inspector-width: 480px; }
 }
 </style>

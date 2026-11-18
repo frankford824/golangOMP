@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, ChevronLeft, ChevronRight, ClipboardList, Copy, FileText, Package, Search, Wallet } from 'lucide-vue-next'
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText, Search } from 'lucide-vue-next'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import OAEmpty from '../components/OAEmpty.vue'
@@ -72,13 +72,28 @@ function recordScope(query: URLSearchParams) {
   }
 }
 const costAction = ref<InstanceType<typeof ProductCostAction>>()
-function openCost(row: DataRow) {
-  if (!row.shop_id || !row.sku) return
+const selectedProduct = ref<DataRow>()
+const productButtons = new Map<DataRow, HTMLButtonElement>()
+function bindProductButton(row: DataRow, element: unknown) {
+  if (element instanceof HTMLButtonElement) productButtons.set(row, element)
+  else productButtons.delete(row)
+}
+function openCost(row: DataRow, focus = true) {
+  if (!row.shop_id || !row.sku || costAction.value?.pending) return
+  selectedProduct.value = row
   const query = navigationQuery.value
-  void costAction.value?.open({
-    sku:row.sku,shop:row.shop_id,shopName:shopName(row.shop_id),
-    from:query.from,to:query.to,includeBrush:query.include_brush==='1',
-  })
+  costAction.value?.open({
+    sku: row.sku, shop: row.shop_id, shopName: shopName(row.shop_id),
+    from: query.from, to: query.to, includeBrush: query.include_brush === '1',
+  }, focus)
+}
+function openProductLink(event: MouseEvent, row: DataRow, navigate: (event?: MouseEvent) => unknown) {
+  if (props.mode !== 'products' || !row.shop_id) {
+    navigate(event)
+    return
+  }
+  event.preventDefault()
+  openCost(row)
 }
 function productLink(sku: string, shopId?: string) {
   return {
@@ -316,7 +331,66 @@ function sum(rows: DataRow[], key: MoneyKey): string | null {
 
 const summaryRows = computed(() => summary.value?.rows?.filter(Boolean) ?? [])
 const rows = computed(() => data.value?.rows?.filter(Boolean) ?? [])
-const displayRows = computed(() => props.mode === 'overview' ? rows.value.slice(0, 10) : rows.value)
+const lowCoverageOnly = ref(route.query.exception === 'coverage')
+const lowCoverage = (row: DataRow) => row.verified_coverage == null || Number(row.verified_coverage) < .9
+const displayRows = computed(() => props.mode === 'overview'
+  ? rows.value.slice(0, 10)
+  : lowCoverageOnly.value ? rows.value.filter(lowCoverage) : rows.value)
+const costNotice = ref('')
+const defaultInspector = ref(false)
+let inspectorPreferenceSet = false
+function openDefaultInspector() {
+  if (props.mode === 'products' && defaultInspector.value && !inspectorPreferenceSet && !selectedProduct.value && selectableProducts.value[0]) {
+    openCost(selectableProducts.value[0], false)
+  }
+}
+const selectableProducts = computed(() => displayRows.value.filter(row => row.sku && row.shop_id))
+function closeCost() {
+  selectedProduct.value = undefined
+}
+function userCloseCost() {
+  costAction.value?.close()
+}
+function rememberClosed(row?: DataRow) {
+  inspectorPreferenceSet = true
+  if (row) void nextTick(() => productButtons.get(row)?.focus())
+}
+function moveCost(direction: number, exceptions = false) {
+  const current = selectableProducts.value.indexOf(selectedProduct.value!)
+  if (current < 0) return false
+  const next = direction > 0
+    ? selectableProducts.value.slice(current + 1).find(row => !exceptions || lowCoverage(row))
+    : selectableProducts.value[current - 1]
+  if (!next) return false
+  productButtons.get(next)?.scrollIntoView({ block: 'nearest' })
+  openCost(next)
+  return true
+}
+function productKeys(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !selectedProduct.value) return
+  if (costAction.value?.pending) return
+  if (event.key === 'Escape') {
+    event.stopPropagation()
+    userCloseCost()
+  }
+  if ((event.target as HTMLElement)?.closest('textarea, input, select, [contenteditable]')) return
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+  event.preventDefault()
+  moveCost(event.key === 'ArrowUp' ? -1 : 1)
+}
+watch(displayRows, visible => {
+  const current = selectedProduct.value
+  if (current && !visible.includes(current)) {
+    const replacement = visible.find(row => row.sku === current.sku && row.shop_id === current.shop_id && row.shop_item_id === current.shop_item_id)
+    if (replacement) selectedProduct.value = replacement
+    else costAction.value?.dismiss()
+  }
+  openDefaultInspector()
+}, { flush: 'post' })
+watch(() => currentProfile.value?.id, () => { costNotice.value = '' })
+function savedCost(message: string) {
+  if (moveCost(1, true)) costNotice.value = message
+}
 const linkedTask = computed(() => {
   const filters = loadedDetail.value
   if (!filters || !rows.value.length || data.value?.stale) return ''
@@ -384,8 +458,23 @@ const chartDays = computed(() => {
 })
 const chartHeading = computed(() => props.mode === 'personal' ? '实际商品销售额趋势' : hourlyTrend.value ? '分时订单应付' : overviewDay.value ? '近 7 日订单应付' : '订单应付趋势')
 const chartPeriod = computed(() => hourlyTrend.value ? overviewDay.value + ' 对比 ' + trendPrevious.value : overviewDay.value ? trendWeekStart.value + ' 至 ' + overviewDay.value : periodLabel.value)
-const plot = { left: 100, right: 702, top: 12, bottom: props.mode === 'overview' ? 92 : 121 }
-const chartHeight = props.mode === 'overview' ? 120 : 149
+const chartFrame = ref<HTMLElement>()
+const chartSize = ref({ width: 720, height: 168 })
+const chartWidth = computed(() => chartSize.value.width)
+const chartHeight = computed(() => chartSize.value.height)
+const plot = computed(() => ({ left: 72, right: chartWidth.value - 24, top: 12, bottom: chartHeight.value - 26 }))
+watch(chartFrame, (element, _, onCleanup) => {
+  if (!element || typeof ResizeObserver === 'undefined') return
+  const observer = new ResizeObserver(([entry]) => {
+    const { width, height } = entry.contentRect
+    if (width > 100 && height > 60) chartSize.value = { width, height }
+  })
+  observer.observe(element)
+  onCleanup(() => observer.disconnect())
+})
+const currentChinaHour = () => Number(new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23',
+}).format(new Date()))
 const hourlySeries = computed(() => {
   const entries = (hourlyTrend.value?.rows ?? []).flatMap(row => {
     const hour = Number(row?.hour)
@@ -395,19 +484,35 @@ const hourlySeries = computed(() => {
     return [{ day: row.day, hour, amount: row.payable_amount, value }]
   })
   const isToday = overviewDay.value === today
-  const currentHour = isToday ? Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23' }).format(new Date())) : 23
+  const currentHour = isToday ? currentChinaHour() : 23
   const current = entries.filter(point => point.day === overviewDay.value && point.hour <= currentHour).sort((a, b) => a.hour - b.hour)
   const lastHour = isToday ? current.at(-1)?.hour ?? currentHour : 23
   const previous = entries.filter(point => point.day === trendPrevious.value && point.hour <= lastHour).sort((a, b) => a.hour - b.hour)
   return [{ label: '所选日', points: current }, { label: '前一日同期', points: previous }]
+})
+const hourlyComparison = computed(() => {
+  if (!hourlyTrend.value || hourlyTrend.value.stale || weekTrendUnavailable.value || stale.value ||
+    Number(hourlyTrend.value.freshness?.lag_seconds) > 600) return
+  const [current, previous] = hourlySeries.value
+  const completeBefore = overviewDay.value === today ? currentChinaHour() : 24
+  const currentComplete = current.points.filter(point => point.hour < completeBefore)
+  const lastHour = currentComplete.at(-1)?.hour
+  if (lastHour == null) return
+  const previousComplete = previous.points.filter(point => point.hour < (overviewDay.value === today ? lastHour + 1 : 24))
+  if (currentComplete.length !== previousComplete.length ||
+    currentComplete.some((point, index) => point.hour !== previousComplete[index]?.hour || point.hour === currentComplete[index - 1]?.hour)) return
+  const currentTotal = currentComplete.reduce((total, point) => total + point.value, 0)
+  const previousTotal = previousComplete.reduce((total, point) => total + point.value, 0)
+  if (previousTotal <= 0) return
+  return { current: money(currentTotal), previous: money(previousTotal), change: 100 * (currentTotal - previousTotal) / previousTotal, through: hourLabel(lastHour + 1) }
 })
 const axisValues = computed(() => hourlyTrend.value ? hourlySeries.value.flatMap(series => series.points.map(point => point.value)) : chartDays.value.map(day => day.value))
 const domain = computed(() => ({
   min: Math.min(0, ...axisValues.value),
   max: Math.max(0, ...axisValues.value),
 }))
-const plotY = (value: number) => plot.bottom - (value - domain.value.min) / (domain.value.max - domain.value.min || 1) * (plot.bottom - plot.top)
-const hourX = (hour: number) => plot.left + hour / 24 * (plot.right - plot.left)
+const plotY = (value: number) => plot.value.bottom - (value - domain.value.min) / (domain.value.max - domain.value.min || 1) * (plot.value.bottom - plot.value.top)
+const hourX = (hour: number) => plot.value.left + hour / 24 * (plot.value.right - plot.value.left)
 const hourLabel = (hour: number) => String(hour).padStart(2, '0') + ':00'
 const hourlyLines = computed(() => hourlySeries.value.map(series => ({
   label: series.label,
@@ -421,7 +526,7 @@ const points = computed(() => {
   const end = Date.parse(appliedPeriod.value?.to ?? '')
   return chartDays.value.map(day => ({
     ...day,
-    x: end > start ? plot.left + (Date.parse(day.day) - start) / (end - start) * (plot.right - plot.left) : (plot.left + plot.right) / 2,
+    x: end > start ? plot.value.left + (Date.parse(day.day) - start) / (end - start) * (plot.value.right - plot.value.left) : (plot.value.left + plot.value.right) / 2,
     y: plotY(day.value),
   }))
 })
@@ -444,6 +549,30 @@ function setActivePoint(event: PointerEvent) {
   const coordinate = new DOMPoint(event.clientX, event.clientY).matrixTransform(transform.inverse())
   activeDay.value = points.value.reduce((nearest, point) =>
     Math.abs(point.x - coordinate.x) < Math.abs(nearest.x - coordinate.x) ? point : nearest).day
+}
+const activeHour = ref<number>()
+const hourlyFocus = computed(() => {
+  const hour = activeHour.value
+  if (hour == null) return
+  const [current, baseline] = hourlyLines.value.map(series => series.points.find(point => point.hour === hour))
+  return { hour, x: hourX(hour), current, baseline }
+})
+watch(hourlyTrend, () => { activeHour.value = undefined })
+function hoverHour(event: PointerEvent) {
+  const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect()
+  if (!rect.width) return
+  const x = (event.clientX - rect.left) * chartWidth.value / rect.width
+  activeHour.value = Math.min(23, Math.max(0, Math.round(24 * (x - plot.value.left) / (plot.value.right - plot.value.left))))
+}
+function hourKeys(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    activeHour.value = undefined
+    return
+  }
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const start = activeHour.value ?? hourlyLines.value[0].points.at(-1)?.hour ?? 0
+  activeHour.value = event.key === 'Home' ? 0 : event.key === 'End' ? 23 : Math.max(0, Math.min(23, start + (event.key === 'ArrowLeft' ? -1 : 1)))
 }
 function range(daysBack: number) {
   from.value = rangeStart(daysBack)
@@ -485,7 +614,6 @@ const periodLabel = computed(() => {
 })
 const monthStart = today.slice(0, 7) + '-01'
 const fullCurrentMonth = computed(() => !!appliedPeriod.value && appliedPeriod.value.from <= monthStart && appliedPeriod.value.to === today)
-const canReview = computed(() => permissions.hasMenu('task_list') || permissions.hasMenu('cost_rules') || can('finance.apply'))
 
 async function loadShops() {
   try { shopOptions.value = (await api<OrderResult>('/oa-api/orders/shops')).rows || [] }
@@ -572,7 +700,15 @@ watch(() => [currentProfile.value?.id, mayView.value], () => {
   void loadOverview()
 })
 
+let desktopQuery: MediaQueryList | undefined
+function syncInspectorViewport() {
+  defaultInspector.value = desktopQuery?.matches ?? false
+  openDefaultInspector()
+}
 onMounted(() => {
+  desktopQuery = window.matchMedia?.('(min-width: 2300px)')
+  desktopQuery?.addEventListener('change', syncInspectorViewport)
+  syncInspectorViewport()
   if (props.mode === 'overview') {
     document.addEventListener('visibilitychange', resetRefreshTimer)
     window.addEventListener('storage', onSessionStorage)
@@ -588,6 +724,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  desktopQuery?.removeEventListener('change', syncInspectorViewport)
   latest.value++
   document.removeEventListener('visibilitychange', resetRefreshTimer)
   window.removeEventListener('storage', onSessionStorage)
@@ -596,20 +733,25 @@ onUnmounted(() => {
 </script>
 
 <template>
-<div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview' }]">
+<div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview', 'commerce-list': mode === 'products' || mode === 'ranking', 'commerce-products': mode === 'products' }]">
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
     <RouterLink v-if="mode === 'overview' && permissions.hasMenu('dashboard')" class="oa-button" :to="{ path: '/', query: { workspace: 'tasks' } }"><BarChart3 :size="15" />任务运营看板</RouterLink>
     <RouterLink v-if="mode === 'detail'" class="oa-button" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }"><ChevronLeft :size="15" />返回商品</RouterLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
-  <ProductCostAction v-if="mayView" ref="costAction" />
   <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" />
-  <div class="commerce-body" tabindex="0" role="region" aria-label="经营数据">
+  <div class="commerce-body" role="region" aria-label="经营数据" @keydown="productKeys">
   <p v-if="!mayView" class="oa-error" role="alert">当前账号没有经营查询权限。</p>
   <template v-else>
     <form class="oa-panel commerce-filter" aria-label="经营筛选" @submit.prevent="load()">
       <div class="oa-actions oa-filter workspace-filters">
+        <RouterLink v-if="mode === 'overview'" class="oa-button commerce-exception"
+          :to="{ path: '/operations/products', query: { ...navigationQuery, scope: 'overview', exception: 'coverage' } }">
+          待补成本 / 低覆盖商品
+        </RouterLink>
+        <button v-if="mode === 'products'" type="button" class="commerce-exception" :aria-pressed="lowCoverageOnly"
+          @click="lowCoverageOnly = !lowCoverageOnly">待补成本 / 低覆盖商品（本页）</button>
         <div class="commerce-period" aria-label="快捷日期">
           <CalendarDays :size="15" aria-hidden="true" />
           <button v-for="period in periods" :key="period.label" type="button" :disabled="busy"
@@ -633,6 +775,12 @@ onUnmounted(() => {
     <section v-if="mode === 'overview' && summary" class="oa-kpis commerce-metrics" aria-label="经营指标">
       <div v-for="(metric, index) in kpis" :key="metric.name" :class="['oa-kpi', { 'commerce-metric-primary': index === 0 }]">
         <span>{{ metric.name }}</span><b>{{ metric.value }}</b>
+        <small v-if="index === 0 && hourlyComparison" class="commerce-comparison">
+          <span :class="hourlyComparison.change > 0 ? 'commerce-growth-positive' : hourlyComparison.change < 0 ? 'commerce-growth-negative' : ''">
+            {{ hourlyComparison.change > 0 ? '+' : '' }}{{ hourlyComparison.change.toFixed(1) }}%
+          </span>
+          <span :title="'截至 ' + hourlyComparison.through + ' 的完整小时应付 · 所选日 ' + hourlyComparison.current">同期 {{ hourlyComparison.current }} / 前日 {{ hourlyComparison.previous }}</span>
+        </small>
         <small v-if="metric.foot" :class="['commerce-coverage', { 'commerce-coverage-low': parseFloat(metric.foot) < 90 }]">{{ parseFloat(metric.foot) < 90 ? '仅覆盖' : '覆盖' }} {{ metric.foot }}</small>
       </div>
     </section>
@@ -650,8 +798,10 @@ onUnmounted(() => {
             <strong>{{ money(activePoint.amount) }}</strong>
           </div>
         </div>
-        <div v-if="hourlyTrend" class="commerce-chart-scroll">
-          <svg class="commerce-chart" :viewBox="`0 0 720 ${chartHeight}`" role="group" aria-label="分时订单应付，按小时显示已有数据">
+        <div v-if="hourlyTrend" ref="chartFrame" class="commerce-chart-frame">
+          <svg class="commerce-chart" :viewBox="`0 0 ${chartWidth} ${chartHeight}`" role="group" tabindex="0" aria-label="分时订单应付，左右方向键切换小时"
+            @keydown="hourKeys" @pointermove="hoverHour" @pointerleave="activeHour = undefined"
+            @focus="activeHour = hourlyLines[0].points.at(-1)?.hour ?? 0" @blur="activeHour = undefined">
             <g v-for="tick in ticks" :key="tick">
               <line :x1="plot.left" :x2="plot.right" :y1="plotY(tick)" :y2="plotY(tick)" stroke="var(--oa-line)" />
               <text :x="plot.left - 12" :y="plotY(tick) + 4" text-anchor="end">{{ axisNumber.format(tick) }} 元</text>
@@ -661,29 +811,39 @@ onUnmounted(() => {
               <g v-for="(point, i) in series.points" :key="point.hour">
                 <line v-if="i > 0 && series.points[i - 1].hour + 1 === point.hour" class="commerce-hourly-segment"
                   :x1="series.points[i - 1].x" :y1="series.points[i - 1].y" :x2="point.x" :y2="point.y" />
-                <circle class="commerce-chart-dot" :cx="point.x" :cy="point.y" r="3" tabindex="0" :aria-label="point.day + ' ' + hourLabel(point.hour) + ' ' + money(point.amount)">
-                  <title>{{ point.day }} {{ hourLabel(point.hour) }} {{ money(point.amount) }}</title>
+                <circle class="commerce-chart-dot" :cx="point.x" :cy="point.y" r="3" :aria-label="point.day + ' ' + hourLabel(point.hour) + ' ' + money(point.amount)">
                 </circle>
               </g>
             </g>
+            <g v-if="hourlyFocus" aria-hidden="true">
+              <line :x1="hourlyFocus.x" :x2="hourlyFocus.x" :y1="plot.top" :y2="plot.bottom" class="commerce-chart-guide" />
+              <line v-if="hourlyFocus.current || hourlyFocus.baseline" :x1="plot.left" :x2="plot.right"
+                :y1="hourlyFocus.current?.y ?? hourlyFocus.baseline?.y" :y2="hourlyFocus.current?.y ?? hourlyFocus.baseline?.y" class="commerce-chart-guide" />
+            </g>
           </svg>
-          <p v-if="hourlyTrend.stale || weekTrendUnavailable" class="oa-muted">分时趋势显示上次查询成功的快照。</p>
+          <div v-if="hourlyFocus" role="status" class="commerce-chart-tooltip"
+            :style="{ left: Math.max(8, Math.min(chartWidth - 188, hourlyFocus.x + 10)) + 'px' }">
+            <strong>{{ hourLabel(hourlyFocus.hour) }}</strong>
+            <span>所选日 {{ hourlyFocus.current ? money(hourlyFocus.current.amount) : '—' }}</span>
+            <span>前一日 {{ hourlyFocus.baseline ? money(hourlyFocus.baseline.amount) : '—' }}</span>
+          </div>
+          <p v-if="hourlyTrend.stale || weekTrendUnavailable" class="oa-muted commerce-chart-stale">分时趋势显示上次查询成功的快照。</p>
         </div>
-        <div v-else-if="overviewDay && points.length" class="commerce-chart-scroll">
-          <svg class="commerce-chart commerce-week-chart" viewBox="0 0 720 98" role="group" :aria-label="chartHeading" @pointermove="setActivePoint">
-            <line :x1="plot.left" :x2="plot.right" :y1="plotY(0) * .7" :y2="plotY(0) * .7" stroke="var(--oa-line)" />
+        <div v-else-if="overviewDay && points.length" ref="chartFrame" class="commerce-chart-frame">
+          <svg class="commerce-chart commerce-week-chart" :viewBox="`0 0 ${chartWidth} ${chartHeight}`" role="group" :aria-label="chartHeading" @pointermove="setActivePoint">
+            <line :x1="plot.left" :x2="plot.right" :y1="plotY(0)" :y2="plotY(0)" stroke="var(--oa-line)" />
             <g v-for="point in points" :key="point.day">
-              <rect :x="point.x - 15" :y="Math.min(point.y, plotY(0)) * .7" width="30" :height="Math.max(1, Math.abs(point.y - plotY(0)) * .7)" rx="3"
+              <rect :x="point.x - 15" :y="Math.min(point.y, plotY(0))" width="30" :height="Math.max(1, Math.abs(point.y - plotY(0)))" rx="3"
                 :class="{ 'commerce-today-bar': point.day === overviewDay }" tabindex="0" :aria-label="point.day + ' ' + money(point.amount)" @focus="activeDay = point.day">
                 <title>{{ point.day }} {{ money(point.amount) }}</title>
               </rect>
-              <text :x="point.x" y="91" text-anchor="middle">{{ point.day.slice(5) }}</text>
+              <text :x="point.x" :y="chartHeight - 7" text-anchor="middle">{{ point.day.slice(5) }}</text>
             </g>
           </svg>
           <p v-if="weekTrendUnavailable || weekTrend?.stale" class="oa-muted">近 7 日趋势显示上次查询成功的快照。</p>
         </div>
-        <div v-else-if="points.length > 1" class="commerce-chart-scroll">
-          <svg class="commerce-chart" :viewBox="`0 0 720 ${chartHeight}`" role="group" :aria-label="chartHeading" @pointermove="setActivePoint">
+        <div v-else-if="points.length > 1" ref="chartFrame" class="commerce-chart-frame">
+          <svg class="commerce-chart" :viewBox="`0 0 ${chartWidth} ${chartHeight}`" role="group" :aria-label="chartHeading" @pointermove="setActivePoint">
             <defs><linearGradient id="commerce-trend-fill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="var(--oa-accent)" stop-opacity=".18" /><stop offset="1" stop-color="var(--oa-accent)" stop-opacity=".02" /></linearGradient></defs>
             <g v-for="tick in ticks" :key="tick">
               <line :x1="plot.left" :x2="plot.right" :y1="plotY(tick)" :y2="plotY(tick)" stroke="var(--oa-line)" />
@@ -722,15 +882,17 @@ onUnmounted(() => {
       </section>
     </div>
     <p v-if="productsError" class="oa-error" role="alert">商品数据暂不可用。{{ productsError }} <button type="button" @click="load(false)">重试商品数据</button></p>
+    <p v-if="costNotice" role="status" class="oa-muted">{{ costNotice }}</p>
+    <div class="commerce-results-layout" :class="{ 'has-inspector': selectedProduct && mode === 'products' }">
     <section v-if="data" class="oa-panel commerce-results">
       <div class="commerce-panel-heading">
         <div><h2>{{ mode === 'ranking' ? rankingGroups[appliedGroup] + (appliedGroup === 'growth' ? '增长' : '') + '排名' : mode === 'personal' ? '实际商品销售额' : mode === 'detail' ? 'SKU 成交与成本' : mode === 'overview' ? '热销商品 Top 10' : '商品表现' }}</h2><p class="oa-muted">{{ periodLabel }}</p></div>
         <RouterLink v-if="mode === 'overview'" class="workspace-row-action" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: 'overview' } }">查看全部商品表现 <ArrowRight :size="14" /></RouterLink>
         <span v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</span>
-        <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ rows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
+        <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ displayRows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
       </div>
-      <OAEmpty v-if="!rows.length" title="所选范围暂无数据" kind="search" />
-      <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
+      <OAEmpty v-if="!displayRows.length" :title="lowCoverageOnly ? '本页暂无待补成本或低覆盖商品' : '所选范围暂无数据'" kind="search" />
+      <div v-else class="oa-table-wrap" tabindex="0" role="region" :aria-label="title + '数据表'">
         <table v-if="mode === 'ranking' || mode === 'personal'" :class="['oa-table', { 'commerce-ranking-table': mode === 'ranking' }]">
           <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><template v-if="mode === 'ranking' && showRankingMetrics"><th class="oa-number">应付占比</th><th class="oa-number">有效订单数</th><th class="oa-number">核实毛利</th><th class="oa-number" title="核实毛利 ÷ 有核实成本的商品销售额">核实毛利率</th></template><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>
           <tbody>
@@ -766,30 +928,39 @@ onUnmounted(() => {
             </tr>
           </tbody>
         </table>
-        <table v-else class="oa-table">
+        <table v-else class="oa-table commerce-product-table">
           <thead><tr><th>商品 / SKU</th><th>店铺</th><th class="oa-number">销量</th><th class="oa-number">商品销售额</th><th class="oa-number">成交核实成本</th><th class="oa-number">核实毛利</th><th class="oa-number">核实覆盖率</th><th v-if="mode === 'detail'" class="oa-number">当前维护单价</th></tr></thead>
-          <tbody><tr v-for="(row, index) in displayRows" :key="`${row.shop_id}-${row.shop_item_id}-${row.sku}-${index}`">
+          <tbody><tr v-for="(row, index) in displayRows" :key="`${row.shop_id}-${row.shop_item_id}-${row.sku}-${index}`"
+            :class="{ 'is-selected': selectedProduct === row, 'is-selectable': mode === 'products' && row.sku && row.shop_id }"
+            @click="mode === 'products' && !($event.target as HTMLElement).closest('a,button') && openCost(row)">
             <td>
-              <RouterLink v-if="mode !== 'detail' && row.sku" class="commerce-product-name" :to="productLink(row.sku, row.shop_id)" :title="row.product_name || row.shop_item_id || row.sku">{{ row.product_name || row.shop_item_id || row.sku }}</RouterLink>
+              <RouterLink v-if="mode !== 'detail' && row.sku" :to="productLink(row.sku, row.shop_id)" custom v-slot="{ href, navigate }">
+                <a class="commerce-product-name" :href="href" :target="mode === 'products' && row.shop_id ? '_blank' : undefined"
+                  rel="noopener" :title="row.product_name || row.shop_item_id || row.sku"
+                  @click.exact="openProductLink($event, row, navigate)">{{ row.product_name || row.shop_item_id || row.sku }}</a>
+              </RouterLink>
               <b v-else class="oa-ellipsis" :title="row.product_name || row.shop_item_id || row.sku">{{ row.product_name || row.shop_item_id || row.sku || '—' }}</b>
               <small v-if="row.sku" class="commerce-sku">{{ row.sku }} <button type="button" class="workspace-copy" :aria-label="'复制 SKU ' + row.sku" title="复制 SKU" @click="copySKU(row.sku)"><Copy :size="14" /></button></small>
             </td>
-            <td>{{ shopName(row.shop_id) }}</td><td class="oa-number">{{ row.quantity ?? '—' }}</td><td class="oa-number">{{ money(row.item_pay_total) }}</td>
-            <td class="oa-number"><span>{{ money(row.cost_verified_total) }}</span> <button v-if="row.sku && row.shop_id" class="sku-check-action" type="button" :aria-label="'核对 '+row.sku+' 的成本'" @click="openCost(row)">核对</button></td><td class="oa-number">{{ money(row.verified_gross) }}</td>
-            <td class="oa-number"><span v-if="row.verified_coverage != null" :class="['oa-pill', { 'oa-pill-warn': Number(row.verified_coverage) < .9 }]">{{ Number(row.verified_coverage) < .9 ? '仅覆盖 ' : '' }}{{ (Number(row.verified_coverage) * 100).toFixed(1) }}%</span><span v-else>—</span></td>
+            <td :title="shopName(row.shop_id)">{{ shopName(row.shop_id) }}</td><td class="oa-number">{{ row.quantity ?? '—' }}</td><td class="oa-number">{{ money(row.item_pay_total) }}</td>
+            <td class="oa-number">{{ money(row.cost_verified_total) }}</td><td class="oa-number">{{ money(row.verified_gross) }}</td>
+            <td class="oa-number">
+              <button v-if="row.sku && row.shop_id" class="sku-check-action" :class="{ 'oa-pill-warn': lowCoverage(row) }"
+                :ref="(element) => bindProductButton(row, element)" type="button" :aria-label="'核对 ' + row.sku + ' 的成本'" @click="openCost(row)">
+                {{ row.verified_coverage == null ? '补录核价' : (lowCoverage(row) ? '核价 · ' : '核对 · ') + percent(Number(row.verified_coverage)) }}
+              </button>
+              <span v-else>{{ row.verified_coverage == null ? '—' : percent(Number(row.verified_coverage)) }}</span>
+            </td>
             <td v-if="mode === 'detail'" class="oa-number">{{ data.cost_context_available === false ? '成本上下文不可用' : money(data.current_cost) }}</td>
           </tr></tbody>
         </table>
       </div>
       <div v-if="mode !== 'overview' && (data.has_more || offset)" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset || busy" @click="load(false, offset - 100)"><ChevronLeft :size="15" />上一页</button><button :disabled="!data.has_more || offset >= 10000 || busy" @click="load(false, offset + 100)">下一页<ChevronRight :size="15" /></button></div>
     </section>
-    <section v-if="mode === 'overview' && summary && canReview" class="oa-panel commerce-shortcuts">
-        <div class="commerce-panel-heading"><h2>办理与复盘</h2></div>
-        <RouterLink v-if="permissions.hasMenu('task_list')" to="/tasks"><ClipboardList :size="17" /><span>任务运营与设计交付</span><ArrowUpRight :size="15" /></RouterLink>
-        <RouterLink v-if="can('pricing.view')" :to="{ path: '/operations/pricing', query: { sku: productId } }"><Package :size="17" /><span>SKU 核价</span><ArrowUpRight :size="15" /></RouterLink>
-        <RouterLink v-if="permissions.hasMenu('cost_rules')" to="/cost-rules"><Package :size="17" /><span>SKU 成本维护</span><ArrowUpRight :size="15" /></RouterLink>
-        <RouterLink v-if="can('finance.apply')" to="/fees/mine"><Wallet :size="17" /><span>我的费用申请</span><ArrowUpRight :size="15" /></RouterLink>
-    </section>
+    <ProductCostAction ref="costAction" :split="mode === 'products'"
+      :detail-link="selectedProduct?.sku ? productLink(selectedProduct.sku, selectedProduct.shop_id) : undefined"
+      @dismiss="closeCost" @closed="rememberClosed(selectedProduct)" @saved="savedCost" />
+    </div>
     <template v-if="mode === 'detail' && data">
       <div class="commerce-insights commerce-detail-layout">
         <section class="oa-panel oa-link-list">
@@ -822,7 +993,7 @@ onUnmounted(() => {
         </div>
         <p v-if="historyError" class="oa-error">{{ historyError }}</p>
         <p v-else-if="historyBusy" class="oa-empty" role="status">正在读取成本记录…</p>
-        <div v-else-if="historyOpen && history.length" class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'"><table class="oa-table"><thead><tr><th class="oa-number">下单日</th><th>店铺</th><th>订单子行</th><th class="oa-number">记录成本</th><th>成本档位</th><th>可信性</th></tr></thead><tbody><tr v-for="(row, index) in history" :key="index"><td>{{ row.order_time || '—' }}</td><td>{{ shopName(String(row.shop_id || '')) }}</td><td>{{ row.sub_order_id || '—' }}</td><td>{{ money(String(row.cost_amount ?? '')) }}</td><td>{{ row.cost_amount == null ? '未知' : costTierLabels[String(row.cost_tier)] || '未分类' }}</td><td><span v-if="implausibleCost(row.cost_implausible)" class="oa-pill oa-pill-warn">不可信 · 已排除</span><span v-else-if="row.cost_tier === 'verified' && row.cost_amount != null">计入核实毛利</span><span v-else>未计入核实毛利</span></td></tr></tbody></table></div>
+        <div v-else-if="historyOpen && history.length" class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'"><table class="oa-table"><thead><tr><th class="oa-number">下单日</th><th>店铺</th><th>订单子行</th><th class="oa-number">记录成本</th><th>成本档位</th><th>可信性</th></tr></thead><tbody><tr v-for="(row, index) in history" :key="index"><td class="oa-number">{{ row.order_time || '—' }}</td><td>{{ shopName(String(row.shop_id || '')) }}</td><td>{{ row.sub_order_id || '—' }}</td><td class="oa-number">{{ money(String(row.cost_amount ?? '')) }}</td><td>{{ row.cost_amount == null ? '未知' : costTierLabels[String(row.cost_tier)] || '未分类' }}</td><td><span v-if="implausibleCost(row.cost_implausible)" class="oa-pill oa-pill-warn">不可信 · 已排除</span><span v-else-if="row.cost_tier === 'verified' && row.cost_amount != null">计入核实毛利</span><span v-else>未计入核实毛利</span></td></tr></tbody></table></div>
         <OAEmpty v-else-if="historyOpen" compact kind="search" title="当前范围暂无历史成本记录" />
         <div v-if="historyOpen && !historyBusy && !historyError && (historyOffset || historyHasMore)" class="oa-actions workspace-pager" aria-label="历史成本分页">
           <span>第 {{ Math.floor(historyOffset / 100) + 1 }} 页</span>

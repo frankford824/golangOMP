@@ -14,11 +14,11 @@
     <template v-else-if="hasBusinessAccess">
       <div
         class="board dashboard-workbench w-full min-w-0"
-        :data-desktop-section="desktopSection"
       >
         <!-- 顶栏 -->
         <header
-          class="board-header yb-page-surface yb-page-header-row"
+          class="board-header"
+          :class="{ 'yb-page-surface yb-page-header-row': !oaEnabled }"
           data-page-header="dashboard"
         >
           <div class="board-header-content yb-page-heading-copy">
@@ -29,7 +29,9 @@
               先看今日是否正常，再判断队列积压、质量风险和下一步处理入口。
             </p>
           </div>
-          <div class="board-header-aside" aria-live="polite">
+          <div class="board-header-aside">
+            <DesktopSlot target="actions">
+              <div class="dashboard-top-actions">
             <BaseButton
               v-if="canOpenDepartmentDashboard"
               type="button"
@@ -39,9 +41,6 @@
             >
               设计部看板
             </BaseButton>
-            <span class="board-header-cadence">30 秒自动刷新</span>
-            <div class="board-header-pending"><small>设计待办</small><strong>{{ summary.todayPendingCount }}</strong></div>
-            <small class="board-header-updated">更新于 {{ lastUpdatedLabel }}</small>
             <BaseButton
               type="button"
               variant="ghost"
@@ -51,6 +50,11 @@
             >
               {{ refreshing ? '刷新中…' : '立即刷新' }}
             </BaseButton>
+              </div>
+            </DesktopSlot>
+            <DesktopSlot target="status">
+              <small class="board-header-updated" role="status" aria-live="polite" :title="lastUpdatedLabel + ' · 30 秒自动刷新'">{{ freshnessLabel }}</small>
+            </DesktopSlot>
           </div>
         </header>
 
@@ -73,6 +77,7 @@
               <span class="dashboard-health-dot" aria-hidden="true" />
               <span class="dashboard-health-label">今日结单</span>
               <strong class="dashboard-health-value">{{ summary.todayCompletedCount }}</strong>
+              <small v-if="dayComparison.completed" class="dashboard-baseline">昨日全天 {{ dayComparison.completed.previous }} <b v-if="dayComparison.completed.delta" class="dashboard-change">{{ dayComparison.completed.delta }}</b></small>
             </span>
             <span v-if="!oaEnabled" class="dashboard-health-item dashboard-health-item--quality">
               <span class="dashboard-health-dot" aria-hidden="true" />
@@ -85,23 +90,20 @@
               <strong class="dashboard-health-value">{{ summary.overdueCount }}</strong>
             </span>
           </div>
-          <BaseButton
-            class="w-full shrink-0 sm:ml-1 sm:w-auto"
-            variant="primary"
-            size="sm"
-            @click="goTaskPool"
-          >
-            查看未指派任务
-          </BaseButton>
+          <div class="dashboard-exception-links">
+            <button type="button" class="dashboard-exception-link" @click="goTaskPool">查看未指派任务</button>
+            <RouterLink v-if="summary.overdueCount" class="dashboard-exception-link" to="/tasks?operational_bucket=overdue">已逾期 {{ summary.overdueCount }}</RouterLink>
+            <RouterLink v-if="summary.pendingAuditCount" class="dashboard-exception-link" to="/tasks?operational_bucket=pending_audit">待审核 {{ summary.pendingAuditCount }}</RouterLink>
+          </div>
         </div>
 
-        <nav class="dashboard-section-nav" aria-label="看板内容">
-          <button type="button" :aria-pressed="desktopSection==='overview'" @click="desktopSection='overview'">趋势与状态</button>
-          <button type="button" :aria-pressed="desktopSection==='activity'" @click="desktopSection='activity'">任务与动态</button>
-          <button type="button" :aria-pressed="desktopSection==='risks'" @click="desktopSection='risks'">
-            风险提醒 <span v-if="risks.length">{{ risks.length }}</span>
-          </button>
-        </nav>
+        <DesktopSlot target="tabs">
+          <nav class="dashboard-section-nav" aria-label="看板内容">
+            <button type="button" @click="scrollBoard(overviewSection)">趋势与状态</button>
+            <button type="button" @click="scrollBoard(activitySection)">任务与动态</button>
+            <button type="button" @click="scrollBoard(riskSection)">风险提醒</button>
+          </nav>
+        </DesktopSlot>
 
         <!-- 任务经营指标与任务看板共用 task.view 权限。 -->
         <section
@@ -161,11 +163,17 @@
             title="今日新建"
             :value="summary.todayCreatedCount"
             route="/tasks?operational_bucket=today_created"
-          />
+          >
+            <template v-if="dayComparison.created" #comparison>
+              <span>昨日全天 {{ dayComparison.created.previous }}</span>
+              <b v-if="dayComparison.created.delta" class="dashboard-change">{{ dayComparison.created.delta }}</b>
+            </template>
+          </DashboardKpiCard>
         </section>
 
         <!-- 图表行：随屏宽单栏 → 双栏 -->
         <section
+          ref="overviewSection"
           class="dashboard-analysis-grid grid grid-cols-1 items-stretch gap-4 min-[1100px]:grid-cols-2 min-[1100px]:gap-5"
         >
           <article
@@ -252,6 +260,7 @@
 
         <!-- 表格 + 动态 -->
         <section
+          ref="activitySection"
           class="dashboard-bottom-grid grid grid-cols-1 items-stretch gap-4 min-[1100px]:grid-cols-2 min-[1100px]:gap-5"
         >
           <article
@@ -289,7 +298,7 @@
         </section>
 
         <!-- 风险提示 -->
-        <section class="dashboard-risk-zone min-w-0" aria-label="风险提醒" tabindex="0">
+        <section ref="riskSection" class="dashboard-risk-zone min-w-0" aria-label="风险提醒" tabindex="0">
           <RiskListCard :items="risks" :loading="loading" :error="error" />
         </section>
       </div>
@@ -361,7 +370,7 @@ import RecentEventStream from '@/components/dashboard/RecentEventStream.vue'
 import RiskListCard from '@/components/dashboard/RiskListCard.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 
-const desktopSection = ref<'overview' | 'activity' | 'risks'>('overview')
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import { usePermission } from '@/composables/usePermission'
 import { formatDateBeijing } from '@/utils/date'
 import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
@@ -369,6 +378,13 @@ import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
 const DashboardTrendChart = defineAsyncComponent(() => import('@/components/dashboard/DashboardTrendChart.vue'))
 
 const router = useRouter()
+const overviewSection = ref<HTMLElement>()
+const activitySection = ref<HTMLElement>()
+const riskSection = ref<HTMLElement>()
+
+function scrollBoard(section?: HTMLElement) {
+  section?.scrollIntoView({ block: 'start' })
+}
 const { can, hasRole } = usePermission()
 const loading = ref(true)
 const refreshing = ref(false)
@@ -393,6 +409,12 @@ const canOpenDepartmentDashboard = computed(() =>
 const lastUpdatedLabel = computed(() =>
   overview.value?.generated_at ? formatDateBeijing(overview.value.generated_at) : '尚未更新',
 )
+const freshnessLabel = computed(() => {
+  const generated = overview.value?.generated_at
+  if (!generated) return '尚未更新'
+  const time = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' }).format(new Date(generated))
+  return refreshWarning.value ? time + ' 上次更新' : time + ' 已更新'
+})
 const dataHealthLabel = computed(() => overview.value?.health_status === 'ok' ? '正常' : '不可用')
 
 const summary = computed<DashboardSummary>(() => {
@@ -425,6 +447,21 @@ const trendTodayStats = computed(() => {
   }
 })
 
+const dayComparison = computed(() => {
+  const data = overview.value
+  const generated = data?.generated_at
+  if (!generated) return { created: null, completed: null }
+  const dayBefore = new Date(Date.parse(generated) - 86_400_000)
+  const previousDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(dayBefore)
+  const previous = data.trend.find((point) => point.date === previousDate)
+  if (!previous) return { created: null, completed: null }
+  function describe(today: number, yesterday: number) {
+    if (!yesterday) return { previous: 0, delta: '' }
+    const change = (today - yesterday) / yesterday * 100
+    return { previous: yesterday, delta: (change > 0 ? '+' : '') + change.toFixed(1) + '%' }
+  }
+  return { created: describe(summary.value.todayCreatedCount, previous.created), completed: describe(summary.value.todayCompletedCount, previous.completed) }
+})
 const statusDistribution = computed(() => {
   const activeBucketMeta = {
 		design_ops: { tone: 'pending', hint: '设计、运营或打回后待推进' },
@@ -1648,11 +1685,7 @@ onBeforeUnmount(stopRefreshLoop)
     color: rgb(var(--yb-warning-text));
     font-variant-numeric: tabular-nums;
   }
-  .dashboard-workbench:not([data-desktop-section='overview']) .dashboard-analysis-grid,
-  .dashboard-workbench:not([data-desktop-section='overview']) .kpi--quality,
-  .dashboard-workbench:not([data-desktop-section='activity']) .dashboard-bottom-grid,
-  .dashboard-workbench:not([data-desktop-section='activity']) .kpi--queues,
-  .dashboard-workbench:not([data-desktop-section='risks']) .dashboard-risk-zone { display: none; }
+
 
   .dashboard-analysis-grid, .dashboard-bottom-grid, .dashboard-risk-zone {
     flex: 1;
@@ -1668,7 +1701,6 @@ onBeforeUnmount(stopRefreshLoop)
   .activity-scroll, .dashboard-risk-zone { overscroll-behavior: contain; }
   .board-panel--trend :deep(.trend) {
     display: flex;
-    flex: 1;
     min-height: 9rem;
   }
   .board-panel--trend :deep(.trend__chart),
@@ -1704,4 +1736,49 @@ onBeforeUnmount(stopRefreshLoop)
 .oa-task-board .dashboard-health-item--danger { order: -1; font-weight: 650; font-size: 14px; }
 .oa-task-board .trend-summary-value, .oa-task-board .board-header-pending strong { font-size: 24px; font-weight: 600; }
 .oa-task-board strong { font-weight: 600; }
+
+.dashboard-top-actions, .dashboard-exception-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.dashboard-exception-link { border: 1px solid rgb(var(--yb-warning-accent) / .35); border-radius: 999px; background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); padding: 5px 9px; font-size: 12px; white-space: nowrap; }
+.dashboard-exception-link:hover { background: rgb(var(--yb-warning-accent) / .2); }
+.dashboard-baseline { white-space: nowrap; }
+.dashboard-change { display: inline-block; margin-inline-start: 4px; padding: 0 4px; border-radius: 4px; background: rgb(var(--yb-brand-soft)); color: rgb(var(--yb-brand-strong)); font-variant-numeric: tabular-nums; }
+
+@media (min-width: 1024px) {
+  .dashboard-shell, .dashboard-workbench { height: auto; min-height: 0; max-width: none; width: 100%; margin: 0; }
+  .dashboard-analysis-grid, .dashboard-bottom-grid, .dashboard-risk-zone { flex: none; scroll-margin-top: 12px; }
+  .dashboard-risk-zone, .activity-scroll, .board-panel--trend, .board-panel--status, .board-panel--tasks, .board-panel--activity { overflow: visible; overscroll-behavior: auto; max-height: none; }
+  .board-panel--trend :deep(.trend__chart), .board-panel--trend :deep(.trend__skeleton) { height: 176px; }
+  .board-panel--tasks :deep(.task-snapshot__scroll) { overflow: visible; }
+}
+@media (min-width: 1280px) {
+  .oa-task-board .board-header, .oa-task-board .board-header-aside { display: contents; }
+  .oa-task-board .board-header-content { display: none; }
+  .dashboard-section-nav { border-bottom: 0; align-self: stretch; }
+  .dashboard-section-nav button { padding-inline: 8px; }
+  .dashboard-section-nav button:hover, .dashboard-section-nav button:focus-visible { border-bottom-color: rgb(var(--yb-brand)); color: rgb(var(--yb-brand)); }
+  .dashboard-top-actions { flex-wrap: nowrap; }
+  .dashboard-top-actions :deep(button) { min-height: 28px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+  .oa-task-board .board-header-updated { white-space: nowrap; font-size: 12px; }
+  .oa-task-board .dashboard-health-strip { min-height: 0; gap: 8px; border-radius: 6px; padding: 4px 8px; box-shadow: none; }
+  .oa-task-board .dashboard-health-metrics { flex: 0 1 auto; }
+  .oa-task-board .dashboard-health-item { border: 0; background: transparent; padding: 2px 5px; flex: none; min-height: 26px; min-width: max-content; }
+  .oa-task-board .dashboard-health-item--danger { display: none; }
+  .dashboard-health-strip .dashboard-exception-link {
+    min-height: 28px; border-radius: 999px; border-color: rgb(var(--yb-warning-accent) / .35); background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); box-shadow: none;
+  }
+  .oa-task-board .status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .oa-task-board .status-card { min-height: 0; padding: 6px 8px; }
+  .oa-task-board .trend-summary-card { min-height: 0; padding: 6px 8px; }
+  .oa-task-board .kpi { gap: 0; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; overflow: hidden; }
+  .oa-task-board :deep(.kpi-card) { min-height: 70px; gap: 2px; border: 0; border-radius: 0; box-shadow: none; padding: 6px 12px; }
+  .oa-task-board :deep(.kpi-card + .kpi-card) { border-inline-start: 1px solid rgb(var(--yb-border)); }
+  .oa-task-board :deep(.kpi-card__value) { font-size: 22px; }
+  .oa-task-board :deep(.kpi-card__hint) { font-size: 11px; }
+}
+@media (min-width: 2300px) {
+  .dashboard-workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .2fr); }
+  .dashboard-workbench > * { grid-column: 1 / -1; }
+  .dashboard-workbench > .dashboard-bottom-grid { grid-column: 1; }
+  .dashboard-workbench > .dashboard-risk-zone { grid-column: 2; }
+}
 </style>

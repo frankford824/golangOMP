@@ -257,7 +257,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
     <PageHead :title="title" :subtitle="subtitle" />
     <OperationNav :query="navigationQuery" />
 
-    <div class="order-data-body" tabindex="0" role="region" :aria-label="title + '工作区'">
+    <div class="order-data-body" role="region" :aria-label="title + '工作区'">
     <p v-if="!allowed" class="oa-error" role="alert">当前账号没有{{ title }}权限。</p>
     <template v-else>
       <form class="order-data-filters" @submit.prevent="load()">
@@ -296,17 +296,18 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
         </header>
         <OAEmpty v-if="data.scope_state === 'unassigned'" title="暂无经营归属" description="当前账号没有分配可访问店铺。" kind="list" />
         <OAEmpty v-else-if="!visibleRows.length" :title="'所选范围暂无' + title + '数据'" kind="search" />
-        <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
-          <table class="oa-table order-data-table">
+        <div v-else class="oa-table-wrap" tabindex="0" role="region" :aria-label="title + '数据表'">
+          <table class="oa-table order-data-table" :class="`order-data-table-${mode}`">
             <thead>
               <tr>
-                <th v-for="column in columns[mode]" :key="column.key" scope="col" :class="{ 'oa-number': column.money, 'order-data-wide': !mobileColumns[mode].includes(column.key) }">{{ column.label }}</th>
+                <th v-for="column in columns[mode]" :key="column.key" scope="col" :data-column="column.key" :class="{ 'oa-number': column.money, 'order-data-wide': !mobileColumns[mode].includes(column.key) }">{{ column.label }}</th>
                 <th class="oa-action-col" scope="col">操作</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(row, index) in visibleRows" :key="index">
-                <td v-for="column in columns[mode]" :key="column.key" :class="{ 'oa-number': column.money, 'order-data-wide': !mobileColumns[mode].includes(column.key) }">
+              <tr v-for="(row, index) in visibleRows" :key="index" :class="{ 'is-selected': selected === row }"
+                @click="!($event.target as HTMLElement).closest('a,button') && openDetails(row)">
+                <td v-for="column in columns[mode]" :key="column.key" :data-column="column.key" :class="{ 'oa-number': column.money, 'order-data-wide': !mobileColumns[mode].includes(column.key) }">
                   <time v-if="column.date && row[column.key]" :datetime="String(row[column.key])">{{ display(column, row) }}</time>
                   <span v-else-if="column.key === 'status' || column.key === 'state'" :class="stateClass(column, row)" :title="row[column.key] == null ? undefined : String(row[column.key])">{{ display(column, row) }}</span>
                   <span v-else :class="{ 'oa-ellipsis': ['online_order_no', 'shop_id', 'name'].includes(column.key), 'order-data-order-no': column.key === 'online_order_no' }" :title="String(display(column, row))">{{ display(column, row) }}</span>

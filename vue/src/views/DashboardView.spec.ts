@@ -110,10 +110,11 @@ describe('DashboardView authoritative refresh', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('.board-header-aside strong').text()).toBe('303')
+    expect(wrapper.get('[data-title="设计待办"]').text()).toBe('设计待办 303')
     expect(wrapper.text()).toContain('全局进行中任务 978')
     expect(wrapper.text()).toContain('本周完成率 20.0%')
     expect(wrapper.text()).toContain('今日结单')
+    expect(wrapper.get('.dashboard-baseline').text()).toBe('昨日全天 6 -16.7%')
 	const departmentBoardButton = wrapper.findAll('button').find((button) => button.text().includes('设计部看板'))
 	expect(departmentBoardButton).toBeTruthy()
 	await departmentBoardButton!.trigger('click')
@@ -143,11 +144,11 @@ describe('DashboardView authoritative refresh', () => {
     expect(refreshButton).toBeTruthy()
     await refreshButton!.trigger('click')
     await flushPromises()
-    expect(wrapper.get('.board-header-aside strong').text()).toBe('304')
+    expect(wrapper.get('[data-title="设计待办"]').text()).toBe('设计待办 304')
 
     await vi.advanceTimersByTimeAsync(30_000)
     await flushPromises()
-    expect(wrapper.get('.board-header-aside strong').text()).toBe('305')
+    expect(wrapper.get('[data-title="设计待办"]').text()).toBe('设计待办 305')
     expect(operationalOverview).toHaveBeenCalledTimes(3)
 
     wrapper.unmount()

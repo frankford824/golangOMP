@@ -1,9 +1,10 @@
 <template>
-  <div class="task-list-view" :class="{ 'oa-task-list': oaEnabled }">
+  <div class="task-list-view" :class="{ 'oa-task-list': oaEnabled }" @keydown="onPeekKeydown">
     <!-- 顶栏 + 搜索/过滤：统一卡片容器 -->
-    <div class="header-card yb-page-surface" data-page-header="task-center">
-      <div class="page-header yb-page-header-row">
+    <div class="header-card" :class="{ 'yb-page-surface': !oaEnabled }" data-page-header="task-center">
+      <div class="page-header" :class="{ 'yb-page-header-row': !oaEnabled }">
         <component :is="oaEnabled ? 'h1' : 'h2'" class="page-title task-list-page-title yb-page-title">任务中心</component>
+        <DesktopSlot target="actions">
         <div class="page-header-actions">
           <div v-if="oaEnabled" class="oa-task-views" role="group" aria-label="任务视图">
             <button type="button" :aria-pressed="taskView === 'table'" @click="taskView = 'table'">表格</button>
@@ -32,27 +33,34 @@
             v-if="can('task.create')"
             size="sm"
             variant="primary"
-            class="task-list-action-button task-list-action-button--primary"
+            class="task-list-action-button task-list-action-button--primary oa-button-primary"
             @click="goCreate"
           >
             创建任务
           </BaseButton>
         </div>
+        </DesktopSlot>
       </div>
-      <TaskCostSpecificationPanel v-if="can('task.create')" compact />
-      <div class="task-tabs" aria-label="任务中心列表范围">
+      <DesktopSlot target="tabs">
+      <nav class="task-tabs" aria-label="任务中心列表范围">
         <BaseButton
           v-for="tab in taskTabs"
           :key="tab.value"
           size="sm"
           :variant="activeTab === tab.value ? 'secondary' : 'ghost'"
           :class="{ 'task-tab-active': activeTab === tab.value }"
+          :aria-pressed="activeTab === tab.value"
           @click="setTaskTab(tab.value)"
         >
           {{ tab.label }}
         </BaseButton>
-      </div>
+      </nav>
+      </DesktopSlot>
       <div class="toolbar">
+        <div v-if="oaEnabled" class="task-exception-filters" aria-label="任务异常筛选">
+          <button type="button" :aria-pressed="activeTab === 'pool' && !filters.status.length" @click="filterUnassigned">未指派</button>
+          <button type="button" :aria-pressed="filters.overdueOnly" @click="filterOverdue">已逾期</button>
+        </div>
         <BaseInput
           v-model="quickKeyword"
           class="quick-search"
@@ -112,6 +120,7 @@
           清空全部筛选
         </BaseButton>
       </div>
+      <TaskCostSpecificationPanel v-if="can('task.create')" compact />
       <div v-if="activeFilterChips.length" class="active-filter-chips" aria-label="已应用筛选">
         <button v-for="chip in activeFilterChips" :key="chip.key" type="button" @click="removeActiveFilter(chip.key)">{{ chip.label }} <span aria-hidden="true">×</span></button>
       </div>
@@ -205,7 +214,8 @@
     <p v-if="listActionSuccess" class="list-action-success">{{ listActionSuccess }}</p>
 
     <!-- 主内容区（三态统一包裹） -->
-    <div ref="taskCardsViewport" class="task-results desktop-region-scroll" role="region" aria-label="任务列表" tabindex="0">
+    <div class="task-workspace" :class="{ 'has-inspector': peekTask, 'task-workspace--oa': oaEnabled }">
+    <div ref="taskCardsViewport" class="task-results" :class="{ 'desktop-region-scroll': !oaEnabled }" role="region" aria-label="任务列表" tabindex="0">
       <AsyncStateWrapper
         :loading="tasksStore.loading"
         :error="tasksStore.loadError"
@@ -228,24 +238,25 @@
 
         <!-- 统一卡片视图 -->
         <table v-if="oaEnabled && taskView === 'table'" class="oa-task-table">
+          <colgroup><col class="task-col-select" /><col class="task-col-number" /><col class="task-col-name" /><col class="task-col-sku" /><col class="task-col-type" /><col class="task-col-node" /><col /><col class="task-col-handler" /><col class="task-col-due" /></colgroup>
           <thead><tr>
             <th scope="col"><input type="checkbox" aria-label="选择本页任务" :checked="allPageSelected" :indeterminate="somePageSelected && !allPageSelected" @change="selectTaskPage" /></th>
             <th scope="col">任务单号</th><th scope="col">任务名称</th><th scope="col">SKU</th><th scope="col">类型与优先级</th><th scope="col">当前节点</th><th scope="col">归属</th><th scope="col">当前处理人</th><th scope="col">截止时间</th>
           </tr></thead>
-          <tbody><tr v-for="task in pagedList" :key="task.id" :class="{ 'is-selected': selectedIds.has(task.id) }">
+          <tbody><tr v-for="task in pagedList" :key="task.id" :data-task-row="task.id" :class="{ 'is-selected': selectedIds.has(task.id) || peekId === task.id }" @click="openTaskRow($event, task)">
             <td><input type="checkbox" :aria-label="`选择任务 ${task.taskNo}`" :checked="selectedIds.has(task.id)" @change="toggleSelect(task.id)" /></td>
-            <td class="oa-task-number">{{ task.taskNo }}</td>
+            <td class="oa-task-number" :title="task.taskNo">{{ task.taskNo }}</td>
             <td><RouterLink v-slot="{ href }" :to="`/tasks/${task.id}`" custom>
               <a class="oa-task-name" :href="href" @click="openTaskLink($event, task)">
                 <img v-if="task.referenceFileRefs?.[0]?.thumbnail_url" :src="task.referenceFileRefs[0].thumbnail_url" alt="" loading="lazy" />
-                {{ taskCardTitle(task) }}
+                <span :title="taskCardTitle(task)">{{ taskCardTitle(task) }}</span>
               </a>
             </RouterLink></td>
-            <td><span class="oa-task-number">{{ displaySku(task) }}</span><button v-if="canCopyTaskField(displaySku(task))" type="button" class="oa-task-copy" :aria-label="`复制 SKU ${displaySku(task)}`" @click="copyTaskCardText(displaySku(task), 'SKU')"><Copy :size="14" /></button></td>
+            <td><span class="oa-task-number task-sku-text" :title="displaySku(task)">{{ displaySku(task) }}</span><button v-if="canCopyTaskField(displaySku(task))" type="button" class="oa-task-copy" :aria-label="`复制 SKU ${displaySku(task)}`" @click="copyTaskCardText(displaySku(task), 'SKU')"><Copy :size="14" /></button></td>
             <td><TaskTypeBadge :type="task.businessType ?? task.taskType" /> {{ TASK_PRIORITY_OPTIONS.find((item) => item.value === task.priority)?.label ?? '—' }}</td>
-            <td><TaskMainStatusBadge v-if="task.mainStatus" :status="task.mainStatus" :label-override="getTaskCenterCardStatusLabel(task) ?? undefined" /><TaskStatusTag v-else :status="task.status" /></td>
-            <td>{{ ownershipPrimary(task) }}</td><td>{{ task.currentHandlerName || '—' }}</td>
-            <td :class="{ 'oa-task-overdue': isOverdue(task) }">{{ task.dueAt ? formatDate(task.dueAt) : '—' }}<small v-if="isOverdue(task)">{{ overdueLabel(task) }}</small></td>
+            <td><button v-if="task.status === 'PendingAssign'" type="button" class="task-row-action" @click.stop="openPeek(task)">{{ getTaskCenterCardStatusLabel(task) ?? '待指派' }}</button><TaskMainStatusBadge v-else-if="task.mainStatus" :status="task.mainStatus" :label-override="getTaskCenterCardStatusLabel(task) ?? undefined" /><TaskStatusTag v-else :status="task.status" /></td>
+            <td :title="ownershipPrimary(task)">{{ ownershipPrimary(task) }}</td><td :title="task.currentHandlerName ?? undefined">{{ task.currentHandlerName || '—' }}</td>
+            <td :class="{ 'oa-task-overdue': isOverdue(task) }" :title="task.dueAt ? formatDate(task.dueAt) : undefined">{{ task.dueAt ? formatDate(task.dueAt) : '—' }}<small v-if="isOverdue(task)">{{ overdueLabel(task) }}</small></td>
           </tr></tbody>
         </table>
         <div v-else class="task-cards">
@@ -292,13 +303,11 @@
       </AsyncStateWrapper>
     </div>
 
-    <Teleport v-if="oaEnabled" to="body">
-      <dialog ref="peekDialog" class="oa-task-peek" aria-labelledby="oa-task-peek-title" @close="peekId = ''" @keydown.up.prevent="stepPeek(-1)" @keydown.down.prevent="stepPeek(1)">
-        <template v-if="peekTask">
+      <aside v-if="oaEnabled && peekTask" ref="peekPanel" class="oa-task-peek" aria-labelledby="oa-task-peek-title" tabindex="-1">
           <header>
             <h2 id="oa-task-peek-title">任务速览</h2>
-            <RouterLink :to="`/tasks/${peekTask.id}`" @click="saveState">打开完整详情</RouterLink>
-            <button type="button" aria-label="关闭任务速览" @click="peekDialog?.close()">×</button>
+            <RouterLink :to="`/tasks/${peekTask.id}`" target="_blank" rel="noopener" @click="saveState">新标签页打开完整详情 ↗</RouterLink>
+            <button type="button" aria-label="关闭任务速览" @click="closePeek()">×</button>
           </header>
           <section class="oa-task-peek-body">
             <p>{{ peekTask.taskNo }}</p><h3>{{ taskCardTitle(peekTask) }}</h3>
@@ -310,7 +319,8 @@
               <dt>截止时间</dt><dd>{{ peekTask.dueAt ? formatDate(peekTask.dueAt) : '—' }}</dd>
               <dt v-if="peekRequirement">设计要求</dt><dd v-if="peekRequirement">{{ peekRequirement }}</dd>
             </dl>
-            <button v-if="canClaimTask(peekTask)" type="button" :disabled="Boolean(claimingTaskId)" @click="claimTask(peekTask)">{{ taskCenterClaimButtonLabel(peekTask, claimingTaskId === peekTask.id) }}</button>
+            <p v-if="canClaimPeek">接单后由当前账号处理任务。</p>
+            <p v-if="peekActionError" class="task-peek-error" role="alert">{{ peekActionError }}</p>
             <p v-if="peekLoading" role="status">正在读取任务资料…</p>
             <p v-if="peekError" role="status">{{ peekError }}</p>
             <img v-for="file in peekReferences" :key="file.ref_id || file.asset_id || file.thumbnail_url!" :src="file.thumbnail_url!" :alt="file.filename || '运营参考图'" />
@@ -318,10 +328,14 @@
           <footer>
             <button type="button" :disabled="peekIndex <= 0" @click="stepPeek(-1)">上一单 ↑</button>
             <button type="button" :disabled="peekIndex >= pagedList.length - 1" @click="stepPeek(1)">下一单 ↓</button>
+            <form v-if="canClaimPeek" class="task-peek-action" @submit.prevent="claimTask(peekTask, true)">
+              <button type="submit" class="task-peek-primary" :disabled="Boolean(claimingTaskId) || tasksStore.loading" title="接单并处理下一条" aria-keyshortcuts="Enter">
+                {{ claimingTaskId ? '保存中…' : '保存并下一条' }}
+              </button>
+            </form>
           </footer>
-        </template>
-      </dialog>
-    </Teleport>
+      </aside>
+    </div>
 
     <nav v-if="filteredList.length > 0" class="footer-card" aria-label="任务分页">
       <span class="text-xs text-[rgb(var(--yb-text-muted))]">共 {{ tasksStore.listTotal }} 条</span>
@@ -676,6 +690,7 @@ import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterPanel.vue'
 import TaskFilterPanel from '@/components/task/TaskFilterPanel.vue'
 import { oaEnabled, useOAAccess } from '@/oa/access'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import { errorText, send } from '@/oa/api'
 import { Copy } from 'lucide-vue-next'
 import TaskTypeBadge from '@/components/task/TaskTypeBadge.vue'
@@ -1301,10 +1316,15 @@ const pagedList = computed(() => filteredList.value)
 const taskView = ref<'table' | 'cards'>('table')
 const allPageSelected = computed(() => pagedList.value.length > 0 && pagedList.value.every((task) => selectedIds.has(task.id)))
 const somePageSelected = computed(() => pagedList.value.some((task) => selectedIds.has(task.id)))
-const peekDialog = ref<HTMLDialogElement>()
+const peekPanel = ref<HTMLElement>()
+const peekActionError = ref('')
+const peekCommittedId = ref('')
+const inspectorAutoDismissed = ref(false)
+let peekReturnFocus: HTMLElement | null = null
 const peekId = ref('')
 const peekIndex = computed(() => pagedList.value.findIndex((task) => task.id === peekId.value))
 const peekTask = computed(() => pagedList.value[peekIndex.value])
+const canClaimPeek = computed(() => Boolean(peekTask.value && peekTask.value.id !== peekCommittedId.value && canClaimTask(peekTask.value)))
 
 const peekDetail = ref<{ design_requirement?: string; reference_file_refs?: ReferenceFileRef[] }>()
 const peekLoading = ref(false)
@@ -1314,6 +1334,7 @@ const peekReferences = computed(() => (peekDetail.value?.reference_file_refs ?? 
 watch(peekId, async (id, _previous, onCleanup) => {
   peekDetail.value = undefined
   peekError.value = ''
+  peekActionError.value = ''
   peekLoading.value = Boolean(id)
   if (!id) return
   const controller = new AbortController()
@@ -1327,7 +1348,15 @@ watch(peekId, async (id, _previous, onCleanup) => {
     if (!controller.signal.aborted) peekLoading.value = false
   }
 })
-watch(peekTask, (task) => { if (!task && peekDialog.value?.open) peekDialog.value.close() })
+const wideInspector = oaEnabled ? window.matchMedia('(min-width: 2300px)') : undefined
+function syncDefaultPeek() {
+  if (!oaEnabled || tasksStore.loading || claimingTaskId.value || route.name !== 'TaskList') return
+  if (!peekTask.value) peekId.value = ''
+  if (!peekId.value && !inspectorAutoDismissed.value && wideInspector?.matches) {
+    peekId.value = pagedList.value[0]?.id ?? ''
+  }
+}
+watch([pagedList, taskView], syncDefaultPeek, { flush: 'post' })
 
 function selectTaskPage() {
   const clear = allPageSelected.value
@@ -1337,17 +1366,90 @@ function selectTaskPage() {
   }
 }
 
-async function openTaskLink(event: MouseEvent, task: Task) {
-  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !peekDialog.value) return
-  event.preventDefault()
+function filterUnassigned() {
+  operationalBucket.value = ''
+  quickStatus.value = ''
+  if (activeTab.value !== 'pool') setTaskTab('pool')
+  else removeActiveFilter('status')
+}
+
+function filterOverdue() {
+  operationalBucket.value = ''
+  const enable = !filters.value.overdueOnly
+  if (enable && (activeTab.value === 'archived' || activeTab.value === 'terminated')) {
+    setTaskTab('all')
+    quickStatus.value = ''
+    filters.value = { ...filters.value, overdueOnly: true }
+    return
+  }
+  filters.value = { ...filters.value, overdueOnly: enable }
+  page.value = 1
+  void refreshList(true)
+}
+
+async function openPeek(task: Task) {
+  if (claimingTaskId.value) return
+  const activeElement = document.activeElement
+  peekReturnFocus = taskCardsViewport.value?.contains(activeElement) ? activeElement as HTMLElement : null
+  inspectorAutoDismissed.value = false
   peekId.value = task.id
   await nextTick()
-  if (peekTask.value && peekDialog.value && !peekDialog.value.open) peekDialog.value.showModal()
+  peekPanel.value?.focus({ preventScroll: true })
+}
+
+function openTaskRow(event: MouseEvent, task: Task) {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  if ((event.target as HTMLElement).closest('input,button,a') || hasActiveTextSelection()) return
+  void openPeek(task)
+}
+
+function openTaskLink(event: MouseEvent, task: Task) {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  void openPeek(task)
+}
+
+function closePeek() {
+  if (claimingTaskId.value) return
+  inspectorAutoDismissed.value = true
+  peekId.value = ''
+  if (peekReturnFocus?.isConnected) peekReturnFocus.focus({ preventScroll: true })
+  else taskCardsViewport.value?.focus({ preventScroll: true })
 }
 
 function stepPeek(offset: number) {
+  if (claimingTaskId.value) return
   const task = pagedList.value[peekIndex.value + offset]
-  if (task) peekId.value = task.id
+  if (!task) return
+  peekId.value = task.id
+  void nextTick(scrollPeekRow)
+}
+
+function scrollPeekRow() {
+  const viewport = taskCardsViewport.value
+  const row = Array.from(viewport?.querySelectorAll<HTMLElement>('[data-task-row]') ?? [])
+    .find((element) => element.dataset.taskRow === peekId.value)
+  row?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+}
+
+function onPeekKeydown(event: KeyboardEvent) {
+  if (!peekTask.value || event.defaultPrevented || advancedFilterOpen.value ||
+      showBatchAssign.value || showBatchArchive.value || showBatchAuditHandover.value || batchItemsModalOpen.value) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closePeek()
+    return
+  }
+  if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable]')) return
+  if (event.key === 'Enter' && event.target === peekPanel.value && canClaimPeek.value) {
+    event.preventDefault()
+    void claimTask(peekTask.value, true)
+    return
+  }
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    event.preventDefault()
+    stepPeek(event.key === 'ArrowUp' ? -1 : 1)
+  }
 }
 
 function overdueLabel(task: Task) {
@@ -1885,29 +1987,64 @@ function canClaimTask(task: Task): boolean {
   return canClaimTaskFromCenter(task, can('task.design.submit'))
 }
 
-async function claimTask(task: Task) {
+async function claimTask(task: Task, advance = false) {
   if (!canClaimTask(task) || claimingTaskId.value) return
   claimingTaskId.value = task.id
   listActionError.value = ''
+  peekActionError.value = ''
+  const beforeIds = advance ? pagedList.value.slice(0, peekIndex.value).map((item) => item.id) : []
+  const nextIds = advance ? pagedList.value.slice(peekIndex.value + 1).map((item) => item.id) : []
+  const claimPage = page.value
+  let assigned = false
   try {
     const me = permissionsStore.currentUser
     if (!me) return
     const currentUserId = Number.parseInt(String(me.id ?? ''), 10)
     if (Number.isNaN(currentUserId)) {
-      listActionError.value = '当前账号信息异常，无法接单，请重新登录后重试'
+      const message = '当前账号信息异常，无法接单，请重新登录后重试'
+      if (advance) peekActionError.value = message
+      else listActionError.value = message
       return
     }
     await tasksApi.assign(task.id, {
       designer_id: currentUserId,
       designer_name: me.name,
     })
-    await router.push(`/tasks/${task.id}`)
+    assigned = true
+    if (!advance) {
+      await router.push('/tasks/' + task.id)
+      return
+    }
+    peekCommittedId.value = task.id
+    if (route.name !== 'TaskList' || claimPage !== page.value) return
+    await tasksStore.loadTaskListForView(buildListParams())
+    if (route.name !== 'TaskList' || claimPage !== page.value) return
+    const next = pagedList.value.find((item) => nextIds.includes(item.id) && canClaimTask(item))
+      ?? pagedList.value.find((item) => item.id !== task.id && !beforeIds.includes(item.id) && canClaimTask(item))
+    peekId.value = next?.id ?? ''
+    if (!next) inspectorAutoDismissed.value = true
+    flashListActionSuccess(next ? '已接单' : '已接单；本页没有下一条可接任务')
+    await nextTick()
+    if (next) {
+      peekPanel.value?.focus({ preventScroll: true })
+      scrollPeekRow()
+    } else {
+      taskCardsViewport.value?.focus({ preventScroll: true })
+    }
   } catch (error) {
-    listActionError.value = formatTaskActionDenyMessage(
+    if (advance && assigned) {
+      peekActionError.value = '已接单，但列表刷新失败。请刷新列表后继续处理。'
+      return
+    }
+    const message = formatTaskActionDenyMessage(
       error,
       '任务已被他人接单，请刷新列表后重试',
     )
-    await refreshList(true)
+    if (advance) peekActionError.value = message
+    else {
+      await refreshList(true)
+      listActionError.value = message
+    }
   } finally {
     claimingTaskId.value = null
   }
@@ -1985,11 +2122,13 @@ async function refreshList(_force?: boolean) {
 }
 
 onMounted(async () => {
+  wideInspector?.addEventListener('change', syncDefaultPeek)
   await refreshList(true)
   await loadAuditHandoverEntryCount()
 })
 
 onBeforeUnmount(() => {
+  wideInspector?.removeEventListener('change', syncDefaultPeek)
   listActionSeq += 1
   if (listActionSuccessTimer) clearTimeout(listActionSuccessTimer)
 })
@@ -3432,7 +3571,8 @@ watch(totalPages, (value) => {
     gap: 0.55rem;
   }
 
-  .task-list-view > :not(.task-results) { flex-shrink: 0; }
+  .task-list-view > :not(.task-workspace) { flex-shrink: 0; }
+  .task-workspace { display: flex; flex: 1; min-block-size: 0; }
   .task-results { flex: 1 1 auto; min-block-size: 8rem; padding: 0.125rem; }
   .task-cards { margin-block-start: 0; }
 }
@@ -3457,16 +3597,83 @@ watch(totalPages, (value) => {
 .oa-task-overdue { color: rgb(var(--yb-danger)); }
 .oa-task-overdue small { display: block; }
 .oa-task-list .batch-action-bar { position: sticky; top: 0; z-index: 3; }
-.oa-task-peek { position: fixed; inset: 0 0 0 auto; margin: 0 0 0 auto; width: min(720px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; font-size: 14px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); border-left: 1px solid rgb(var(--yb-border)); }
-.oa-task-peek[open] { display: flex; flex-direction: column; animation: oa-peek-in .2s ease-out; }
-@keyframes oa-peek-in { from { transform: translateX(100%); } }
-@media (prefers-reduced-motion: reduce) { .oa-task-peek[open] { animation: none; } }
-.oa-task-peek::backdrop { background: rgb(var(--yb-shadow) / .25); }
-.oa-task-peek header, .oa-task-peek footer { display: flex; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid rgb(var(--yb-border)); }
+.oa-task-peek {
+  display: flex; flex-direction: column; min-height: 0; outline: none;
+  position: absolute; inset: 0 0 0 auto; z-index: 6; width: min(400px, 100%);
+  font-size: 14px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text));
+  border: 1px solid rgb(var(--yb-border)); box-shadow: -8px 0 24px rgb(var(--yb-shadow) / .12);
+}
+.oa-task-peek header, .oa-task-peek footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; }
+.oa-task-peek header { border-bottom: 1px solid rgb(var(--yb-border)); }
+.oa-task-peek footer { border-top: 1px solid rgb(var(--yb-border)); }
+.task-peek-action { margin-inline-start: auto; }
+.task-peek-primary { background: rgb(var(--yb-brand)); color: rgb(var(--yb-text-inverse)); border-radius: 6px; }
+.task-peek-primary:disabled { opacity: .55; }
+.task-peek-error { color: rgb(var(--yb-danger)); }
+.task-workspace--oa { display: flex; position: relative; min-width: 0; }
+.task-workspace--oa .task-results { min-width: 0; flex: 1; overflow: auto; }
 .oa-task-peek h2 { margin-right: auto; font-size: 15px; font-weight: 600; }
 .oa-task-peek-body { padding: 18px; flex: 1; overflow: auto; }
 .oa-task-peek-body h3 { font-size: 18px; font-weight: 600; }
 .oa-task-peek-body dl { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; margin-block: 16px; }
 .oa-task-peek-body dd { white-space: pre-wrap; overflow-wrap: anywhere; }
 .oa-task-peek-body img { width: min(100%, 420px); margin-top: 12px; }
+
+.oa-task-peek-body { min-height: 0; }
+.oa-task-table { table-layout: fixed; min-width: 980px; border-collapse: separate; border-spacing: 0; background: rgb(var(--yb-surface)); }
+.oa-task-table .task-col-select { width: 36px; }
+.oa-task-table .task-col-number { width: 138px; }
+.oa-task-table .task-col-name { width: max(240px, calc((100% - 760px) * .62)); }
+.oa-task-table .task-col-sku { width: clamp(100px, 10%, 158px); }
+.oa-task-table .task-col-type { width: 115px; }
+.oa-task-table .task-col-node { width: 105px; }
+.oa-task-table .task-col-handler { width: 90px; }
+.oa-task-table .task-col-due { width: 146px; }
+.oa-task-table th, .oa-task-table td { height: 40px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.oa-task-table th { position: sticky; top: 0; z-index: 2; }
+.oa-task-table tbody tr { cursor: pointer; }
+.oa-task-table tbody tr:hover { background: rgb(var(--yb-surface-hover)); }
+.oa-task-table tbody tr.is-selected { background: rgb(var(--yb-brand-soft)); }
+.oa-task-name span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.task-sku-text { display: inline-block; max-width: calc(100% - 34px); overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.task-row-action, .task-exception-filters button { border: 1px solid rgb(var(--yb-warning-accent) / .35); border-radius: 999px; background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); padding: 3px 8px; font-size: 12px; white-space: nowrap; }
+.task-row-action:hover, .task-exception-filters button:hover, .task-exception-filters button[aria-pressed=true] { background: rgb(var(--yb-warning-accent) / .2); }
+.task-exception-filters { display: flex; align-items: center; gap: 6px; flex: none; }
+.task-exception-filters button { min-height: 32px; }
+
+@media (min-width: 1280px) {
+  .oa-task-list { block-size: 100%; min-block-size: 0; overflow: hidden; gap: 8px; }
+  .oa-task-list .header-card, .oa-task-list .footer-card { clip-path: none; box-shadow: none; }
+  .oa-task-list .header-card { padding: 0; border: 0; border-radius: 0; background: transparent; gap: 6px; }
+  .oa-task-list .page-header { display: contents; }
+  .oa-task-list .task-list-page-title { display: none; }
+  .oa-task-list .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .oa-task-list .toolbar .task-exception-filters button { border-color: rgb(var(--yb-warning-accent) / .35); background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); }
+  .oa-task-list .toolbar .task-exception-filters button:hover, .oa-task-list .toolbar .task-exception-filters button[aria-pressed=true] { background: rgb(var(--yb-warning-accent) / .2); }
+  .oa-task-list .toolbar :deep(input), .oa-task-list .toolbar :deep(button) { min-height: 32px; block-size: 32px; }
+  .oa-task-list .quick-search { min-width: min(14rem, 100%); max-width: 32rem; flex-basis: 14rem; }
+  .oa-task-list :is(.quick-status,.quick-priority) { flex-basis: 8rem; }
+  .oa-task-list .task-sort-field { flex-basis: 8.75rem; }
+  .oa-task-list .task-sort-order { flex-basis: 7rem; }
+  .oa-task-list .task-results { min-block-size: 0; max-block-size: none; padding: 0; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; scroll-padding-top: 40px; }
+  .oa-task-list .footer-card { min-block-size: 40px; padding-block: 0; border-radius: 6px; }
+  .task-tabs { align-self: stretch; gap: 0; white-space: nowrap; }
+  .task-tabs :deep(button) { min-height: 100%; padding: 0 8px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; box-shadow: none; }
+  :global(html.oa-live-ui #app .oa-bar-tabs .task-tabs .task-tab-active) {
+    border: 0; border-bottom: 2px solid rgb(var(--yb-brand)); border-radius: 0; background: transparent; color: rgb(var(--yb-brand)); box-shadow: none;
+  }
+  :global(html.oa-live-ui #app .oa-bar-tabs .task-tabs button:not(.task-tab-active):hover) { color: rgb(var(--yb-brand)); background: rgb(var(--yb-brand-soft)); border-color: transparent; }
+  .oa-task-list :is(.toolbar,.footer-card) :deep(.relative > .h-11) { height: 32px; border-radius: 6px; }
+  .oa-task-list .toolbar :deep(.base-select-trigger-button) { min-height: 0; block-size: auto; border: 0; }
+  .oa-task-list .footer-card :deep(.page-jump-input input) { min-height: 32px; block-size: 32px; }
+  .page-header-actions { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
+  .page-header-actions :deep(button) { min-height: 28px; padding: 4px 8px; white-space: nowrap; font-size: 12px; }
+}
+@media (min-width: 1920px) {
+  .task-workspace--oa.has-inspector { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 12px; }
+  .oa-task-peek { position: static; width: auto; min-width: 0; border-radius: 6px; box-shadow: none; }
+}
+@media (min-width: 2300px) {
+  .task-workspace--oa.has-inspector { grid-template-columns: minmax(0, 1fr) 480px; }
+}
 </style>

@@ -6,7 +6,7 @@
         <div class="yb-page-heading-copy">
           <component :is="oaEnabled ? 'h1' : 'h2'" class="directory-title">{{ oaEnabled ? '人员管理' : '用户与角色管理' }}</component>
         </div>
-        <div class="directory-header-action">
+        <DesktopSlot target="actions"><div class="directory-header-action">
           <RouterLink v-if="oaProfile?.super_admin" class="um-btn um-btn--ghost" :to="{ name: 'PeopleShopBindings' }">店铺人员绑定</RouterLink>
           <RouterLink v-if="canManagePeople" class="um-btn um-btn--ghost" :to="{ name: 'PeopleRoster', query: { q: appliedKeyword || undefined } }">人员花名册</RouterLink>
           <BaseButton
@@ -17,7 +17,7 @@
           >
             新增用户
           </BaseButton>
-        </div>
+        </div></DesktopSlot>
       </header>
     <div v-if="!canManage" class="mt-6">
       <BaseEmptyState title="无管理权限" description="需要用户、组织或角色管理权限才能访问本页。" />
@@ -221,7 +221,8 @@
                 :row-key="userRowKey"
                 :row-class-name="userRowClassName"
                 :scroll-x="directoryScrollWidth"
-                max-height="var(--directory-table-height)"
+                :flex-height="desktopDirectory"
+                :max-height="desktopDirectory ? undefined : 'var(--directory-table-height)'"
                 density="compact"
                 empty-title="暂无用户"
                 empty-description="未获取到用户列表。"
@@ -442,6 +443,12 @@
 </template>
 
 <script setup lang="ts">
+import { inject } from 'vue'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import { desktopChromeKey } from '@/oa/desktopChrome'
+const directoryChrome = inject(desktopChromeKey, null)
+const desktopDirectory = computed(() => Boolean(directoryChrome?.desktop.value))
+
 import { ref, computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
@@ -2352,7 +2359,28 @@ onBeforeUnmount(() => {
 </script>
 
 <!-- 弹窗共用样式:与 UserDetailModal / UserCreateModal 共享同一份 scoped 规则 -->
-<style scoped src="./userManagementModal.css"></style>
+<style scoped src="./userManagementModal.css">
+@media (min-width:1280px) {
+  .user-directory-oa,.user-directory-oa .um-shell,.user-directory-oa .content-card,.user-directory-oa .management-layout,.user-directory-oa .user-list-panel {
+    height:100%; min-height:0; min-width:0; max-height:none; box-sizing:border-box;
+  }
+  .user-directory-oa .um-shell { display:flex; flex-direction:column; padding:0; }
+  .user-directory-oa .directory-header { display:none; }
+  .user-directory-oa .content-card { flex:1; padding:0; margin:0; border:0; }
+  .user-directory-oa .management-layout { align-items:stretch; grid-template-columns:clamp(196px,16vw,300px) minmax(0,1fr); }
+  .user-directory-oa .org-filter-panel { position:static; min-height:0; max-height:none; overflow:auto; }
+  .user-directory-oa .user-list-panel { display:flex;flex-direction:column; gap:8px; overflow:hidden; }
+  .user-directory-oa .directory-table { flex:1; min-height:0; }
+  .user-directory-oa .directory-table :deep(.n-data-table) { height:100%; }
+  .user-directory-oa .user-list-panel > .base-table-pager { height:40px; box-sizing:border-box; padding:0; align-items:center; }
+  .user-directory-oa .toolbar :deep(input),.user-directory-oa .toolbar :deep(select),.user-directory-oa .toolbar :deep(button),
+  .user-directory-oa .base-table-pager :deep(select),.user-directory-oa .base-table-pager :deep(button) {
+    height:32px; min-height:32px; padding-block:0; border-radius:6px;
+  }
+  .user-directory-oa .user-list-panel > :last-child:not(.directory-table) { flex:none;min-height:40px;margin:0; }
+  .user-directory-oa .directory-table :deep(.n-data-table-td) { padding-block:4px; }
+}
+</style>
 
 <style scoped>
 .directory-actions,
@@ -2929,5 +2957,26 @@ onBeforeUnmount(() => {
 @container (max-width: 31rem) {
   .toolbar { grid-template-columns: minmax(0, 1fr) auto; }
   .toolbar-keyword { grid-column: 1 / -1; }
+}
+
+@media (min-width:1280px) {
+  .user-directory-oa,.user-directory-oa .um-shell,.user-directory-oa .content-card,.user-directory-oa .management-layout,.user-directory-oa .user-list-panel {
+    height:100%; min-height:0; min-width:0; max-height:none; box-sizing:border-box;
+  }
+  .user-directory-oa .um-shell { display:flex; flex-direction:column; padding:0; }
+  .user-directory-oa .directory-header { display:none; }
+  .user-directory-oa .content-card { flex:1; padding:0; margin:0; border:0; }
+  .user-directory-oa .management-layout { align-items:stretch; grid-template-columns:clamp(196px,16vw,300px) minmax(0,1fr); }
+  .user-directory-oa .org-filter-panel { position:static; min-height:0; max-height:none; overflow:auto; }
+  .user-directory-oa .user-list-panel { display:flex;flex-direction:column; gap:8px; overflow:hidden; }
+  .user-directory-oa .directory-table { flex:1; min-height:0; }
+  .user-directory-oa .directory-table :deep(.n-data-table) { height:100%; }
+  .user-directory-oa .user-list-panel > .base-table-pager { height:40px; box-sizing:border-box; padding:0; align-items:center; }
+  .user-directory-oa .toolbar :deep(input),.user-directory-oa .toolbar :deep(select),.user-directory-oa .toolbar :deep(button),
+  .user-directory-oa .base-table-pager :deep(select),.user-directory-oa .base-table-pager :deep(button) {
+    height:32px; min-height:32px; padding-block:0; border-radius:6px;
+  }
+  .user-directory-oa .user-list-panel > :last-child:not(.directory-table) { flex:none;min-height:40px;margin:0; }
+  .user-directory-oa .directory-table :deep(.n-data-table-td) { padding-block:4px; }
 }
 </style>

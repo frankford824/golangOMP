@@ -21,6 +21,7 @@
       :remote="remote"
       :scroll-x="scrollX"
       :max-height="maxHeight"
+      :flex-height="flexHeight"
       :virtual-scroll="virtualScroll"
       :size="naiveSize"
     >
@@ -51,6 +52,7 @@ const props = withDefaults(
     remote?: boolean
     virtualScroll?: boolean
     scrollX?: number
+    flexHeight?: boolean
     maxHeight?: number | string
     density?: 'compact' | 'comfortable'
     ariaLabel?: string

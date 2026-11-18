@@ -1,7 +1,9 @@
 <template>
-  <section class="maintenance" aria-label="编码成本维护">
+  <section class="maintenance" aria-label="编码成本维护" @keydown="navigateRows">
+    <div class="maintenance-list">
     <div class="maintenance-tools">
       <form @submit.prevent="search">
+        <button v-if="oaEnabled" class="conflict-filter" type="button" :aria-pressed="status === 'conflict'" @click="toggleConflicts">冲突待确认</button>
         <label class="sr-only" for="cost-keyword">搜索编码、名称或款式</label
         ><input
           id="cost-keyword"
@@ -26,7 +28,6 @@
       </form>
       <div>
         <RouterLink v-if="canPrice" class="pricing-link" :to="{ name: 'OperationsPricing' }">批量核价</RouterLink>
-        <button v-if="oaEnabled" type="button" :aria-pressed="status === 'conflict'" @click="toggleConflicts">冲突待确认</button>
         <button @click="openLogs"><History :size="16" :stroke-width="1.75" aria-hidden="true" />修改日志</button
         ><button :disabled="loading" @click="load()">
           <RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? "刷新中…" : "刷新" }}
@@ -50,10 +51,10 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.id">
+          <tr v-for="row in rows" :key="row.id" :data-cost-row="row.id" :class="{ 'selected-row': selected?.id === row.id }" @click="openRow($event, row)">
             <td>
-              <strong>{{ row.sku_code }}</strong
-              ><span>{{ row.product_name || "名称待补充" }}</span>
+              <RouterLink v-if="oaEnabled" class="cost-row-link" :to="costDetailLink(row)" @click.exact.prevent="inspect(row)"><strong>{{ row.sku_code }}</strong></RouterLink>
+              <strong v-else>{{ row.sku_code }}</strong><span :title="row.product_name">{{ row.product_name || "名称待补充" }}</span>
             </td>
             <td>{{ row.style_code || "待绑定" }}</td>
             <td>
@@ -80,7 +81,8 @@
               <template v-else>{{ money(row.cost_price) }}</template>
             </td>
             <td>
-              <span :class="['maintenance-state', row.status]">{{
+              <button v-if="oaEnabled && row.status === 'conflict'" type="button" class="conflict-filter" @click="inspect(row)">冲突待确认</button>
+              <span v-else :class="['maintenance-state', row.status]">{{
                 maintenanceStatuses[row.status] || "待核对"
               }}</span
               ><small v-if="!oaEnabled && row.status === 'conflict'"
@@ -138,10 +140,13 @@
         </tbody>
       </table>
     </div>
+    <DesktopSlot v-if="oaEnabled && refreshed" target="status">
+      <span class="cost-refresh-status" :title="updatedLabel"><span aria-hidden="true" />{{ refreshTime }}</span>
+    </DesktopSlot>
     <footer class="maintenance-footer">
       <span
         >{{ updatedLabel }}
-        <small v-if="selected">编辑期间暂停刷新</small></span
+        <small v-if="editing">编辑期间暂停刷新</small></span
       >
       <div>
         <label
@@ -160,44 +165,58 @@
     <p v-if="!canEdit" class="permission-note">
       查看模式；确认与修改需要成本维护和 ERP 管理权限。
     </p>
-    <Teleport to="body">
+    </div>
+    <Teleport to="body" :disabled="inlineInspector">
       <div
         v-if="selected"
-        class="maintenance-overlay"
-        @keydown.esc="closeEditor"
+        class="maintenance-overlay cost-inspector"
+        :class="{ 'inline-inspector': inlineInspector }"
+        @keydown="!inlineInspector && navigateRows($event)"
       >
         <button
+          v-if="!inlineInspector"
           class="maintenance-backdrop"
           aria-label="关闭修改侧栏"
           :disabled="saving"
-          @click="closeEditor"
+          @click="closeEditor()"
         />
         <form
           ref="editorElement"
           class="maintenance-drawer"
           role="dialog"
-          aria-modal="true"
+          :aria-modal="inlineInspector ? undefined : true"
           aria-labelledby="maintenance-edit-title"
           tabindex="-1"
           @submit.prevent="save"
-          @keydown.tab="trapFocus"
+          @keydown.tab="!inlineInspector && trapFocus($event)"
         >
           <header>
             <div>
-              <h2 id="maintenance-edit-title">修改编码</h2>
-              <p>{{ selected.sku_code }}</p>
+              <h2 id="maintenance-edit-title">{{ editing ? "修改编码" : "编码详情" }}</h2>
+              <RouterLink v-if="oaEnabled" :to="costDetailLink(selected)" target="_blank" rel="noopener" :title="'新标签页打开完整详情'">{{ selected.sku_code }} ↗</RouterLink>
+              <p v-else>{{ selected.sku_code }}</p>
             </div>
             <button
               type="button"
               aria-label="关闭"
               class="maintenance-close"
               :disabled="saving"
-              @click="closeEditor"
+              @click="closeEditor()"
             >
               <X :size="18" :stroke-width="1.75" aria-hidden="true" />
             </button>
           </header>
-          <div class="drawer-body">
+          <div v-if="!editing" class="drawer-body">
+            <dl class="cost-inspect-fields">
+              <dt>产品名称</dt><dd>{{ selected.product_name || "—" }}</dd>
+              <dt>款式编码</dt><dd>{{ selected.style_code || "—" }}</dd>
+              <dt>尺寸与面积</dt><dd>{{ dimensions(selected) }} · {{ area(selected.area_m2) }} ㎡</dd>
+              <dt>系统成本</dt><dd>{{ observedPrice(selected.cost_price, "待定") }}</dd>
+              <dt>ERP 现价</dt><dd>{{ observedPrice(selected.erp_cost) }}</dd>
+              <dt>同步状态</dt><dd>{{ maintenanceStatuses[selected.status] || "待核对" }}</dd>
+            </dl>
+          </div>
+          <div v-else class="drawer-body">
             <p v-if="editError" class="maintenance-error" role="alert">
               {{ editError }}
             </p>
@@ -257,6 +276,7 @@
             <label
               >成本价（元）<input
                 v-model.number="draft.cost_price"
+                @keydown.enter.prevent="oaEnabled ? requestNextSave() : editorElement?.requestSubmit()"
                 required
                 type="number"
                 min="0"
@@ -318,8 +338,12 @@
               修改需要至少变更一项；仅核对价格请使用列表中的“确认”。
             </p>
           </div>
-          <footer>
-            <button type="button" :disabled="saving" @click="closeEditor">
+          <footer v-if="!editing">
+            <button v-if="!selected.reviewed || selected.status === 'conflict'" type="button" :disabled="Boolean(confirmBlocker(selected))" :title="confirmBlocker(selected)" @click="confirm(selected)">确认</button>
+            <button type="button" class="primary" :disabled="!canEdit || busyID !== null || selected.revision < 1" @click="edit(selected)">修改</button>
+          </footer>
+          <footer v-else>
+            <button type="button" :disabled="saving" @click="closeEditor()">
               取消</button
             ><button
               type="submit"
@@ -328,9 +352,12 @@
             >
               {{ saving ? "保存中…" : "保存并同步" }}
             </button>
+            <button v-if="oaEnabled" ref="saveNextButton" type="submit" class="primary" data-next :disabled="saving || !changes.length || !reason || stale">保存并下一条</button>
           </footer>
         </form>
       </div>
+    </Teleport>
+    <Teleport to="body">
       <div
         v-if="logsOpen"
         class="maintenance-overlay"
@@ -449,6 +476,7 @@
 </template>
 
 <script setup lang="ts">
+import DesktopSlot from '@/oa/components/DesktopSlot.vue';
 import OAEmpty from '@/oa/components/OAEmpty.vue';
 import { RouterLink } from "vue-router";
 import { oaEnabled } from "@/oa/access";
@@ -457,6 +485,7 @@ import {
   computed,
   nextTick,
   onBeforeUnmount,
+  onDeactivated,
   onMounted,
   watch,
   reactive,
@@ -480,11 +509,11 @@ const permission = usePermission(),
   canEdit = computed(
     () => permission.can("catalog.manage") && permission.can("erp.manage"),
   );
-const props = defineProps<{ initialSku?: string }>();
+const props = defineProps<{ initialSku?: string; focus?: "cost-conflicts" | "cost-detail"; focusRevision?: string }>();
 const rows = ref<MaintenanceRow[]>([]),
   keyword = ref(props.initialSku ?? ""),
-  status = ref(""),
-  reviewState = ref<"pending" | "reviewed" | "all">(props.initialSku ? "all" : "pending"),
+  status = ref(props.focus === "cost-conflicts" ? "conflict" : ""),
+  reviewState = ref<"pending" | "reviewed" | "all">(props.initialSku && props.focus !== "cost-conflicts" ? "all" : "pending"),
   pageSize = ref(50),
   cursors = ref([0]),
   nextID = ref(0),
@@ -504,6 +533,68 @@ const selected = ref<MaintenanceRow | null>(null),
   structuredInput = ref(emptyCostInput()),
   editorElement = ref<HTMLFormElement>(),
   widthInput = ref<HTMLInputElement>();
+const inlineInspector = ref(false);
+const editing = ref(false);
+const saveNextButton = ref<HTMLButtonElement>();
+let inspectorMedia: MediaQueryList | undefined;
+let defaultMedia: MediaQueryList | undefined;
+let usedInspector = false;
+const costDetailLink = (row: MaintenanceRow) => ({ name: "CostRules", query: { sku: row.sku_code, focus: "cost-detail" } });
+function syncInspectorSize() {
+  inlineInspector.value = Boolean(inspectorMedia?.matches);
+  if (!defaultMedia?.matches && !usedInspector && !editing.value) selected.value = null;
+  openDefaultInspector();
+}
+function openDefaultInspector() {
+  if (usedInspector) return;
+  if (props.focus === "cost-detail" && props.initialSku) {
+    const row = rows.value.find(item => item.sku_code === props.initialSku);
+    if (row) inspect(row, true);
+  } else if (defaultMedia?.matches && rows.value[0]) {
+    inspect(rows.value[0], false);
+  }
+}
+function inspect(row: MaintenanceRow, userInitiated = true) {
+  if (saving.value || busyID.value !== null || (editing.value && selected.value?.id === row.id) || !maySwitch(row)) return;
+  if (userInitiated) {
+    usedInspector = true;
+    if (!selected.value) focusBefore = document.activeElement as HTMLElement;
+  }
+  editing.value = false;
+  selected.value = row;
+  if (userInitiated) void nextTick(() => editorElement.value?.focus());
+}
+function openRow(event: MouseEvent, row: MaintenanceRow) {
+  if (oaEnabled && !(event.target as HTMLElement).closest("a,button,input,select,[role=button]")) inspect(row);
+}
+function maySwitch(row?: MaintenanceRow) {
+  return !oaEnabled || !editing.value || !changes.value.length || row?.id === selected.value?.id ||
+    window.confirm("当前修改尚未保存。放弃修改？");
+}
+function navigateRows(event: KeyboardEvent) {
+  if (!selected.value || logsOpen.value || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeEditor();
+    return;
+  }
+  if (!oaEnabled || saving.value || (event.target as HTMLElement).closest("input,select,textarea,[contenteditable=true]")) return;
+  const delta = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+  if (!delta) return;
+  event.preventDefault();
+  const index = rows.value.findIndex(row => row.id === selected.value?.id);
+  const target = rows.value[index + delta];
+  if (target) {
+    inspect(target);
+    if (selected.value?.id === target.id) scrollToRow(target.id);
+  }
+}
+function scrollToRow(id: number) {
+  void nextTick(() => document.querySelector(`[data-cost-row="${id}"]`)?.scrollIntoView({ block: "nearest" }));
+}
+function requestNextSave() {
+  if (saveNextButton.value && !saveNextButton.value.disabled) editorElement.value?.requestSubmit(saveNextButton.value);
+}
 const logsOpen = ref(false),
   logs = ref<MaintenanceLog[]>([]),
   logKeyword = ref(""),
@@ -519,7 +610,7 @@ let epoch = 0,
 let savedBodyStyle = "",
   savedScroll = 0;
 watch(
-  () => !!selected.value || logsOpen.value,
+  () => (!!selected.value && !inlineInspector.value) || logsOpen.value,
   (open) => {
     if (open) {
       savedBodyStyle = document.body.style.cssText;
@@ -566,7 +657,7 @@ function needsDimensions(row: MaintenanceRow) {
 }
 function confirmBlocker(row: MaintenanceRow): string {
   if (!canEdit.value) return "需要成本维护和 ERP 管理权限";
-  if (busyID.value !== null) return "请等待当前提交完成";
+  if (busyID.value !== null || saving.value) return "请等待当前提交完成";
   if (row.revision < 1) return "当前版本不可维护，请刷新核对";
   if (row.cost_price === null) return needsDimensions(row)
     ? "当前无系统成本，请核对尺寸与计价方案"
@@ -583,13 +674,14 @@ const date = (value: string) =>
     timeZone: "Asia/Shanghai",
     hour12: false,
   });
+const refreshTime = computed(() => refreshed.value ? `${new Date(refreshed.value).toLocaleTimeString("zh-CN", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hour12: false })} 已更新` : "");
 const updatedLabel = computed(() =>
   refreshed.value ? `更新于 ${date(refreshed.value)}（北京时间）` : "",
 );
 async function load(background = false) {
   if (
     background &&
-    (selected.value ||
+    ((selected.value && (!inlineInspector.value || editing.value)) ||
       logsOpen.value ||
       busyID.value !== null ||
       document.visibilityState === "hidden")
@@ -616,6 +708,8 @@ async function load(background = false) {
     rows.value = result.data || [];
     nextID.value = result.next_before_id;
     refreshed.value = result.refreshed_at;
+    if (selected.value && !editing.value) selected.value = rows.value.find(row => row.id === selected.value?.id) ?? null;
+    openDefaultInspector();
   } catch (e) {
     if (ticket === epoch && !controller?.signal.aborted)
       error.value = e instanceof Error ? e.message : "读取失败";
@@ -628,8 +722,16 @@ function search() {
   notice.value = "";
   load();
 }
-watch(() => props.initialSku, (sku, previousSku) => {
-  if (!sku && !previousSku) return;
+watch([() => props.initialSku, () => props.focus, () => props.focusRevision], ([sku, focus], [previousSku, previousFocus]) => {
+  if (!sku && !previousSku && !focus && !previousFocus) return;
+  if (focus === "cost-detail") usedInspector = false;
+  if (focus === "cost-conflicts") {
+    keyword.value = "";
+    status.value = "conflict";
+    reviewState.value = "pending";
+    search();
+    return;
+  }
   keyword.value = sku ?? "";
   status.value = "";
   reviewState.value = sku ? "all" : "pending";
@@ -646,6 +748,7 @@ function previous() {
   load();
 }
 async function confirm(row: MaintenanceRow) {
+  if (confirmBlocker(row)) return;
   busyID.value = row.id;
   error.value = "";
   notice.value = "";
@@ -671,7 +774,10 @@ function applyCommittedRow(updated: MaintenanceRow) {
   rows.value = rows.value.flatMap((current) => current.id === updated.id ? (matches ? [updated] : []) : [current]);
 }
 function edit(row: MaintenanceRow) {
-  focusBefore = document.activeElement as HTMLElement;
+  if (saving.value || busyID.value !== null || !maySwitch(row) || (editing.value && selected.value?.id === row.id)) return;
+  usedInspector = true;
+  if (!selected.value) focusBefore = document.activeElement as HTMLElement;
+  editing.value = true;
   selected.value = JSON.parse(JSON.stringify(row));
   Object.assign(draft, {
     product_name: row.product_name,
@@ -701,8 +807,10 @@ function editDimensions(row: MaintenanceRow) {
   if (!row.cost_input && row.area_m2 == null) autoArea.value = true;
   void nextTick(() => widthInput.value?.focus());
 }
-function closeEditor() {
-  if (!saving.value) {
+function closeEditor(discard = false) {
+  if (!saving.value && (discard || maySwitch())) {
+    usedInspector = true;
+    editing.value = false;
     selected.value = null;
     nextTick(() => focusBefore?.focus());
   }
@@ -710,7 +818,7 @@ function closeEditor() {
 function trapFocus(e: KeyboardEvent) {
   const els = Array.from(
     editorElement.value?.querySelectorAll<HTMLElement>(
-      "button:not(:disabled),input:not(:disabled),select,textarea,summary",
+      "a[href],button:not(:disabled),input:not(:disabled),select,textarea,summary",
     ) || [],
   );
   if (!els.length) return;
@@ -797,8 +905,11 @@ const changes = computed(() => {
     });
   return list;
 });
-async function save() {
-  if (!selected.value || !changes.value.length) return;
+async function save(event?: SubmitEvent) {
+  if (!selected.value || !changes.value.length || !canEdit.value || saving.value || !reason.value || stale.value) return;
+  const advance = (event?.submitter as HTMLElement | null)?.hasAttribute("data-next");
+  const index = rows.value.findIndex(row => row.id === selected.value?.id);
+  const following = rows.value.slice(index + 1).map(row => row.id);
   saving.value = true;
   editError.value = "";
   try {
@@ -815,8 +926,21 @@ async function save() {
     applyCommittedRow(updated);
     notice.value = `${row.sku_code} 已保存并记录日志，等待 ERP 同步核对。`;
     saving.value = false;
-    closeEditor();
+    closeEditor(true);
     await load();
+    if (advance && !error.value) {
+      const actionable = () => following.map(id => rows.value.find(item => item.id === id)).find(item => item && item.revision >= 1 && (!item.reviewed || item.status === "conflict"));
+      let target = actionable();
+      if (!target && nextID.value) {
+        cursors.value.push(nextID.value);
+        await load();
+        if (!error.value) target = rows.value.find(item => item.revision >= 1 && (!item.reviewed || item.status === "conflict"));
+      }
+      if (target) {
+        edit(target);
+        scrollToRow(target.id);
+      }
+    }
   } catch (e) {
     editError.value = e instanceof Error ? e.message : "保存失败";
     stale.value = (e as { status?: number })?.status === 409;
@@ -862,16 +986,31 @@ function logChanges(log: MaintenanceLog) {
   return list;
 }
 onMounted(() => {
+  if (oaEnabled && typeof window.matchMedia === "function") {
+    inspectorMedia = window.matchMedia("(min-width: 1920px)");
+    defaultMedia = window.matchMedia("(min-width: 2300px)");
+    inspectorMedia.addEventListener("change", syncInspectorSize);
+    defaultMedia.addEventListener("change", syncInspectorSize);
+    syncInspectorSize();
+  }
   load();
   timer = setInterval(() => {
     if (!loading.value) load(true);
   }, 15000);
 });
+onDeactivated(() => {
+  selected.value = null;
+  editing.value = false;
+  logsOpen.value = false;
+  usedInspector = false;
+});
 onBeforeUnmount(() => {
   epoch++;
   controller?.abort();
   if (timer) clearInterval(timer);
-  if (selected.value || logsOpen.value)
+  inspectorMedia?.removeEventListener("change", syncInspectorSize);
+  defaultMedia?.removeEventListener("change", syncInspectorSize);
+  if ((selected.value && !inlineInspector.value) || logsOpen.value)
     document.body.style.cssText = savedBodyStyle;
 });
 </script>
@@ -897,4 +1036,48 @@ html.oa-live-ui .maintenance .blocked-confirm + button { margin-left: 8px; }
   text-underline-offset: 3px;
 }
 .pricing-link:focus-visible { outline: 2px solid rgb(var(--yb-brand)); outline-offset: 2px; }
+
+.cost-refresh-status { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; color: rgb(var(--yb-text-muted)); }
+.cost-refresh-status > span { width: 6px; height: 6px; border-radius: 50%; background: rgb(var(--yb-success-teal)); }
+.cost-row-link { color: rgb(var(--yb-brand)); display: block; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.conflict-filter { color: rgb(var(--yb-warning-text)); }
+.conflict-filter:hover, .conflict-filter[aria-pressed=true] { background: rgb(var(--yb-warning-soft)); }
+.cost-inspect-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; margin: 0; }
+.cost-inspect-fields dd { margin: 0; overflow-wrap: anywhere; }
+.cost-inspect-fields dt { color: rgb(var(--yb-text-muted)); }
+.maintenance-list { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+html.oa-live-ui .maintenance tr[data-cost-row] { cursor: pointer; }
+html.oa-live-ui .maintenance tr[data-cost-row]:hover { background: rgb(var(--yb-surface-hover)); }
+html.oa-live-ui .maintenance tr.selected-row { background: rgb(var(--yb-brand-soft)); }
+@media (min-width: 1280px) {
+  html.oa-live-ui .maintenance :is(.maintenance-tools,.maintenance-tools form,.maintenance-tools > div) { flex-wrap: wrap; gap: 8px; }
+  html.oa-live-ui .maintenance :is(.maintenance-tools,.maintenance-footer) :is(button,select,input) {
+    min-height: 32px;
+    height: 32px;
+    padding-block: 0;
+  }
+  html.oa-live-ui .maintenance .cost-refresh-status { display: none; }
+  html.oa-live-ui .maintenance :is(.maintenance-error,.maintenance-notice,.permission-note) { margin-block: 4px; }
+  html.oa-live-ui .maintenance table { table-layout: fixed; min-width: 890px; }
+  html.oa-live-ui .maintenance th { z-index: 2; }
+  html.oa-live-ui .maintenance td { height: 50px; padding-block: 3px; }
+  html.oa-live-ui .maintenance th:nth-child(2) { width: 140px; }
+  html.oa-live-ui .maintenance th:nth-child(3) { width: 123px; }
+  html.oa-live-ui .maintenance th:nth-child(4) { width: 154px; }
+  html.oa-live-ui .maintenance th:nth-child(5) { width: 100px; }
+  html.oa-live-ui .maintenance th:nth-child(6) { width: 175px; }
+  html.oa-live-ui .maintenance td:first-child :is(strong,span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html.oa-live-ui .maintenance th.money { font-family: var(--yb-font-mono); }
+  .cost-inspector .maintenance-drawer { width: min(400px, 100%); }
+  .cost-inspector .maintenance-drawer > :is(header,footer) { padding: 10px 12px; gap: 6px; }
+  .cost-inspector .drawer-body { padding: 12px; gap: 14px; min-height: 0; }
+  .cost-inspector .maintenance-drawer a { color: rgb(var(--yb-brand)); font-size: 13px; }
+  .cost-inspector.inline-inspector { z-index: auto; position: relative; inset: auto; min-width: 0; min-height: 0; }
+  .cost-inspector.inline-inspector .maintenance-drawer {
+    width: 100%;
+    border: 1px solid rgb(var(--yb-border));
+    border-radius: 8px;
+    box-shadow: none;
+  }
+}
 </style>

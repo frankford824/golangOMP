@@ -1,12 +1,15 @@
 <template>
+  <DesktopSlot target="tabs">
   <nav class="personal-nav" aria-label="个人中心">
     <RouterLink v-for="link in links" :key="link.name" :to="{ name: link.name }">
       {{ link.label }}
     </RouterLink>
   </nav>
+  </DesktopSlot>
 </template>
 
 <script setup lang="ts">
+import DesktopSlot from './DesktopSlot.vue'
 const links = [
   { name: 'Me', label: '基本资料' },
   { name: 'MeSecurity', label: '安全设置' },

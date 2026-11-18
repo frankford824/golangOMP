@@ -31,7 +31,8 @@
   color: var(--oa-secondary);
 }
 
-#app .order-data .order-data-filters label :is(input:not([type=checkbox]), select, :deep(.order-date-field input)) {
+#app .order-data .order-data-filters label :is(input:not([type=checkbox]), select),
+#app .order-data .order-data-filters label :deep(.order-date-field input) {
   border: 0;
   min-block-size: 30px;
   block-size: 30px;
@@ -225,6 +226,32 @@
 .order-data-filters .order-data-check { min-block-size: 32px; padding-inline: 8px; }
 
 @media (max-width: 1023px) {
-  .order-data-results .desktop-region-scroll { max-block-size: 48dvh; }
+  .order-data-results .oa-table-wrap { max-block-size: 48dvh; }
   .order-data-results th { position: sticky; inset-block-start: 0; }
+}
+
+.order-data-table :is(td, th).oa-number { text-align: end; font-family: var(--yb-font-mono); font-variant-numeric: tabular-nums; }
+.order-data-table tbody tr { cursor: pointer; }
+.order-data-table tbody tr:hover > td { background: rgb(var(--yb-surface-hover)); }
+.order-data-table tbody tr.is-selected > td { background: rgb(var(--yb-brand-soft)); }
+.order-data-dialog { position: fixed; inset: 44px 0 0 auto; inline-size: min(400px, 100vw); max-block-size: calc(100dvh - 44px); block-size: auto; margin: 0; padding: 16px; border-radius: 0; }
+@media (min-width: 1280px) {
+  .order-data-body { display: flex; flex-direction: column; flex: 1; overflow: hidden; scrollbar-gutter: auto; }
+  .order-data-filters { margin-block: 0 8px; }
+  .order-data-body > :not(.order-data-results) { flex: none; }
+  .order-data-results { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; margin: 0; }
+  .order-data-results .oa-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+  .order-data-results th { position: sticky; inset-block-start: 0; z-index: 2; }
+  .order-data-pager { flex: none; min-height: 40px; padding-block: 4px; }
+  .order-data-table :is(td, th) { padding-block: 4px; }
+  .order-data-table { table-layout: fixed; }
+  .order-data-table-detail { min-width: 1050px; }
+  .order-data-table :is(th, td).oa-number { width: 116px; }
+  .order-data-table :is(th, td)[data-column="shop_id"] { width: clamp(140px, 15vw, 300px); }
+  .order-data-table :is(th, td):is([data-column="order_time"], [data-column="computed_at"]) { width: 176px; }
+  .order-data-table :is(th, td):is([data-column="status"], [data-column="state"], [data-column="platform"], [data-column="is_valid"], [data-column="is_brush"], [data-column="period"]) { width: 90px; }
+  .order-data-table .oa-ellipsis { max-width: 100%; }
+  .order-data-table .order-data-order-no { max-width: calc(100% - 40px); }
+  .order-data-table tbody tr { height: 40px; }
+  .order-data-results-head { padding-block: 8px; }
 }

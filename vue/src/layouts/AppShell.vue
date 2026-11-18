@@ -1,5 +1,5 @@
 <template>
-  <div class="app-shell font-body flex overflow-hidden h-[100dvh]">
+  <div :class="{ 'oa-client-shell': oaEnabled }" class="app-shell font-body flex overflow-hidden h-[100dvh]">
     <!-- Light Slim Sidebar -->
     <aside
       :class="{ 'oa-sidebar': oaEnabled, 'oa-sidebar-open': sidebarPinned }"
@@ -19,9 +19,8 @@
       <nav aria-label="主导航" class="flex-1 px-4 space-y-4 overflow-y-auto custom-scrollbar">
         <template v-if="workbenchMenus.length > 0">
           <div class="nav-section-label opacity-0 group-hover:opacity-100 transition-opacity">工作台</div>
+          <div v-for="menu in workbenchMenus" :key="menu.key" class="nav-entry">
           <router-link
-            v-for="menu in workbenchMenus"
-            :key="menu.key"
             :aria-label="menuLabel(menu)"
             @pointerenter="showTip(menu, $event)"
             @focus="showTip(menu, $event)"
@@ -40,12 +39,13 @@
             <span v-if="oaEnabled && !sidebarPinned" class="oa-rail-caption" aria-hidden="true">{{ shortLabel[menu.key] || menu.label }}</span>
             <span v-if="menu.badge && menu.badge() > 0" class="nav-badge-p2">{{ menu.badge() }}</span>
           </router-link>
+          <RouterLink v-if="oaEnabled && navSignal(menu)" class="oa-nav-signal" :to="navSignal(menu)!.to" @click="repeatShortcut(menu)" :aria-label="navSignal(menu)!.label" :title="navSignal(menu)!.label">{{ navSignal(menu)!.count }}</RouterLink>
+          </div>
         </template>
         <template v-if="businessMenus.length > 0">
           <div class="nav-section-label opacity-0 group-hover:opacity-100 transition-opacity">业务处理</div>
+          <div v-for="menu in businessMenus" :key="menu.key" class="nav-entry">
           <router-link
-            v-for="menu in businessMenus"
-            :key="menu.key"
             :aria-label="menuLabel(menu)"
             @pointerenter="showTip(menu, $event)"
             @focus="showTip(menu, $event)"
@@ -62,12 +62,13 @@
             <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menuLabel(menu) }}</span>
             <span v-if="oaEnabled && !sidebarPinned" class="oa-rail-caption" aria-hidden="true">{{ shortLabel[menu.key] || menu.label }}</span>
           </router-link>
+          <RouterLink v-if="oaEnabled && navSignal(menu)" class="oa-nav-signal" :to="navSignal(menu)!.to" @click="repeatShortcut(menu)" :aria-label="navSignal(menu)!.label" :title="navSignal(menu)!.label">{{ navSignal(menu)!.count }}</RouterLink>
+          </div>
         </template>
         <template v-if="dataMenus.length > 0">
           <div class="nav-section-label opacity-0 group-hover:opacity-100 transition-opacity">数据与配置</div>
+          <div v-for="menu in dataMenus" :key="menu.key" class="nav-entry">
           <router-link
-            v-for="menu in dataMenus"
-            :key="menu.key"
             :aria-label="menuLabel(menu)"
             @pointerenter="showTip(menu, $event)"
             @focus="showTip(menu, $event)"
@@ -85,6 +86,8 @@
             <span v-if="oaEnabled && !sidebarPinned" class="oa-rail-caption" aria-hidden="true">{{ shortLabel[menu.key] || menu.label }}</span>
             <span v-if="menu.badge" class="nav-badge-p2">P2</span>
           </router-link>
+          <RouterLink v-if="oaEnabled && navSignal(menu)" class="oa-nav-signal" :to="navSignal(menu)!.to" @click="repeatShortcut(menu)" :aria-label="navSignal(menu)!.label" :title="navSignal(menu)!.label">{{ navSignal(menu)!.count }}</RouterLink>
+          </div>
         </template>
       </nav>
       <button v-if="oaEnabled" type="button" class="oa-sidebar-pin" :aria-pressed="sidebarPinned" :aria-label="sidebarPinned ? '收起导航' : '展开导航'" :title="sidebarPinned ? '收起导航' : '展开导航'" @click="toggleSidebar">
@@ -105,14 +108,18 @@
           >
             <Menu :size="18" aria-hidden="true" />
           </button>
-          <span v-if="oaEnabled" class="oa-breadcrumb"><span v-if="moduleName && moduleName !== pageTitle">{{ moduleName }} / </span>{{ pageTitle }}</span>
+          <h1 v-if="oaEnabled && desktop" class="oa-bar-title">{{ moduleName || pageTitle }}</h1>
+          <span v-else-if="oaEnabled" class="oa-breadcrumb"><span v-if="moduleName && moduleName !== pageTitle">{{ moduleName }} / </span>{{ pageTitle }}</span>
           <span v-else class="app-topbar__title" title="永箔运营管理系统">
             <span class="app-topbar__full-name">永箔运营管理系统</span>
             <span class="app-topbar__short-name">永箔运营</span>
           </span>
 
         </div>
+        <div v-if="oaEnabled" ref="desktopTabs" class="oa-bar-tabs" />
         <div class="app-topbar__actions">
+          <div v-if="oaEnabled" ref="desktopActions" class="oa-bar-page-actions" />
+          <div v-if="oaEnabled" ref="desktopStatus" class="oa-bar-status" />
           <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
             <Search :size="18" aria-hidden="true" />
             <span class="topbar-search__label">{{ oaEnabled ? '查找页面、任务、SKU' : '搜索任务、SKU、产品' }}</span><kbd v-if="oaEnabled" class="oa-search-key">Ctrl K</kbd>
@@ -123,7 +130,7 @@
         </div>
       </header>
 
-      <div ref="contentScroller" :class="{ 'oa-dashboard-viewport': oaEnabled && ($route.path === '/operations' || $route.path.startsWith('/operations/') || $route.path === '/me/performance' || $route.name === 'Dashboard') }" class="flex-1 overflow-auto custom-scrollbar isolate">
+      <div ref="contentScroller" :class="{ 'oa-dashboard-viewport': oaEnabled && ($route.path === '/operations' || $route.path.startsWith('/operations/') || $route.path === '/me/performance' || $route.name === 'Dashboard') }" class="app-page-scroll flex-1 overflow-auto custom-scrollbar isolate" :data-workspace="desktopWorkspace">
         <main class="content">
           <PersonalNav v-if="oaEnabled && ($route.path === '/me' || $route.path.startsWith('/me/')) && $route.path !== '/me/performance'" />
           <router-view v-slot="{ Component, route }">
@@ -188,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, provide, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Menu, Search, PanelLeftOpen, PanelLeftClose } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -198,6 +205,9 @@ import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import PersonalNav from '@/oa/components/PersonalNav.vue'
+import { desktopChromeKey } from '@/oa/desktopChrome'
+import { useExpenseActivity } from '@/oa/expenseActivity'
+import { useSidebarCounts } from '@/oa/sidebarCounts'
 import { oaPageTitle } from '@/oa/pageTitle'
 import oaBrandMark from '@/oa/assets/yongbo-mark.svg'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
@@ -206,16 +216,60 @@ const permissionsStore = usePermissionsStore()
 const { can } = useOAAccess()
 const router = useRouter()
 
-const sidebarPinned = ref(oaEnabled && localStorage.getItem('oa.navigation.expanded') !== '0')
+const deskQuery = window.matchMedia?.('(min-width: 1280px)')
+const wideSidebar = window.matchMedia?.('(min-width: 1440px)')
+const desktop = ref(oaEnabled && !!deskQuery?.matches)
+const large = ref(!!wideSidebar?.matches)
+const desktopTabs = ref<HTMLElement | null>(null)
+const desktopStatus = ref<HTMLElement | null>(null)
+const desktopActions = ref<HTMLElement | null>(null)
+if (oaEnabled) provide(desktopChromeKey, { desktop, tabs: desktopTabs, status: desktopStatus, actions: desktopActions })
+function syncDesktop() {
+  desktop.value = oaEnabled && !!deskQuery?.matches
+  large.value = !!wideSidebar?.matches
+}
+const sidebarPreference = ref(oaEnabled ? localStorage.getItem('oa.navigation.expanded') : null)
+const sidebarPinned = computed(() => oaEnabled && (sidebarPreference.value === null
+  ? (!desktop.value || large.value)
+  : sidebarPreference.value === '1'))
+const desktopWorkspace = computed(() => {
+  const path = router.currentRoute.value.path
+  if (['/operations','/','/design-dashboard'].includes(path)) return 'overview'
+  if (['/tasks','/operations/products','/operations/pricing','/operations/rankings','/users','/cost-rules','/fees/approval','/fees/mine'].includes(path) || path.startsWith('/operations/orders/')) return 'list'
+  return 'page'
+})
+const expenseActivity = useExpenseActivity()
+const workCounts = useSidebarCounts(computed(() => ({
+  account: desktop.value ? permissionsStore.currentUser?.id : undefined,
+  tasks: desktop.value && permissionsStore.hasMenu('task_list') && permissionsStore.hasAction('task.view'),
+  costs: desktop.value && permissionsStore.hasMenu('cost_rules') && permissionsStore.hasAction('catalog.view'),
+})))
 const tip = ref<{ label: string; top: number; left: number } | null>(null)
 function toggleSidebar() {
-  sidebarPinned.value = !sidebarPinned.value
+  sidebarPreference.value = sidebarPinned.value ? '0' : '1'
   tip.value = null
   localStorage.setItem('oa.navigation.expanded', sidebarPinned.value ? '1' : '0')
 }
 const shortLabel: Record<string, string> = {
   oa_operations: '经营', dashboard: '看板', task_list: '任务', oa_expenses: '费用',
   resource_management: '资产', cost_rules: '成本', user_admin: '人员',
+}
+function navSignal(menu: MenuConfig) {
+  if (menu.key === 'oa_expenses' && expenseActivity.todoCount) return {
+    count: expenseActivity.todoCount, label: expenseActivity.todoCount + ' 项费用待办', to: '/me/notifications?section=expense',
+  }
+  if (menu.key === 'task_list' && workCounts.audits.value) return {
+    count: workCounts.audits.value, label: workCounts.audits.value + ' 项待审任务', to: '/tasks?operational_bucket=pending_audit',
+  }
+  if (menu.key === 'cost_rules' && workCounts.conflicts.value) return {
+    count: workCounts.conflicts.value, label: '待确认成本冲突 ' + workCounts.conflicts.value, to: '/cost-rules?focus=cost-conflicts',
+  }
+  return null
+}
+function repeatShortcut(menu: MenuConfig) {
+  if (menu.key === 'cost_rules' && router.currentRoute.value.query.focus === 'cost-conflicts') {
+    window.dispatchEvent(new Event('oa-refocus-cost-conflicts'))
+  }
 }
 function menuLabel(menu: MenuConfig) {
   return menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label
@@ -230,6 +284,8 @@ const moduleName = computed(() => {
   const path = router.currentRoute.value.path
   if (path.startsWith('/operations') || path === '/me/performance') return '经营中心'
   if (path.startsWith('/fees')) return '费用中心'
+  if (path === '/cost-rules') return '成本规则'
+  if (path === '/') return '任务看板'
   if (path.startsWith('/me')) return '个人中心'
   if (path.startsWith('/tasks/')) return '任务中心'
   return ''
@@ -389,6 +445,8 @@ function onGlobalKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
+  deskQuery?.addEventListener('change', syncDesktop)
+  wideSidebar?.addEventListener('change', syncDesktop)
   window.addEventListener('keydown', onGlobalKeydown)
   removeRouteBeforeGuard = router.beforeEach((_to, from, next) => {
     if (contentScroller.value) routeScrollPositions.set(from.fullPath, contentScroller.value.scrollTop)
@@ -407,6 +465,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  deskQuery?.removeEventListener('change', syncDesktop)
+  wideSidebar?.removeEventListener('change', syncDesktop)
   window.removeEventListener('keydown', onGlobalKeydown)
   stopRouteLoading()
   removeRouteBeforeGuard?.()
@@ -1033,4 +1093,39 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 .oa-sidebar.sidebar > div:first-child { align-items: center; padding-inline: 12px; }
 .oa-sidebar.sidebar:not(.oa-sidebar-open) > div:first-child { justify-content: center; }
 .oa-sidebar.sidebar > div:first-child > div:first-child { border: 0; background: transparent; }
+
+.nav-entry { display: block; }
+.oa-sidebar .nav-entry { display: block; position: relative; }
+.oa-nav-signal { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 0 4px; min-width: 20px; text-align: center; border-radius: 6px; font: 500 12px/18px var(--yb-font-mono); color: rgb(var(--yb-warning-text)); background: rgb(var(--yb-warning-soft)); }
+.oa-sidebar:not(.oa-sidebar-open) .oa-nav-signal { right: 0; top: 0; transform: none; }
+.oa-bar-title { font: 600 15px/1.4 var(--oa-font); white-space: nowrap; }
+.oa-bar-tabs,.oa-bar-status,.oa-bar-page-actions { display:none; }
+@media (min-width:1280px) {
+  .oa-client-shell .oa-sidebar.sidebar { --sidebar-rail:56px; --sidebar-drawer:172px; margin:0; height:100%; border:0; border-right:1px solid var(--oa-chrome-divider); border-radius:0; clip-path:none; background:var(--oa-surface); box-shadow:none; }
+  .oa-client-shell .oa-sidebar::before,.oa-client-shell .oa-sidebar::after { display:none; }
+  .oa-client-shell .oa-sidebar.sidebar > div:first-child { margin:0 0 8px; min-height:44px; height:44px; padding-inline:12px; }
+  .oa-client-shell .oa-sidebar.sidebar .nav-entry { margin-block:2px; }
+  .oa-client-shell .oa-sidebar.sidebar .nav-item { flex-direction:row; height:34px; min-height:34px; padding-block:0; }
+  .oa-client-shell .oa-sidebar .oa-rail-caption { display:none; }
+  .oa-client-shell .oa-sidebar:not(.oa-sidebar-open) > nav { padding-inline:4px; }
+  .oa-client-shell .oa-sidebar.oa-sidebar-open .nav-section-label { font-size:var(--oa-nav-label-size); line-height:14px; padding-block:4px; }
+  .oa-client-shell .app-topbar { margin:0; height:44px; min-height:44px; padding:0 16px; gap:12px; border:0; border-bottom:1px solid var(--oa-chrome-divider); border-radius:0; justify-content:initial; box-shadow:none; box-sizing:border-box; --topbar-control-size:32px; }
+  .oa-client-shell .app-topbar__brand, .oa-client-shell .app-topbar__actions { flex:none; gap:6px; }
+  .oa-client-shell .app-topbar__actions { margin-left:auto; }
+  .oa-client-shell .app-topbar :deep(.topbar-icon) { border-radius:6px; }
+  .oa-client-shell .app-topbar .topbar-search:has(.oa-search-key) { width:32px; padding:0; justify-content:center; }
+  .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:none; }
+  .oa-bar-page-actions,.oa-bar-status { display:flex; align-items:center; gap:4px; min-width:0; }
+  .oa-bar-page-actions:not(:has(button,a,input,select)),.oa-bar-status:not(:has(time,[role=status])) { display:none; }
+  .oa-bar-tabs { flex:1 1 auto; min-width:0; display:flex; align-items:stretch; height:100%; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
+  .oa-client-shell .content { width:100%; inline-size:100%; max-width:none; margin:0; padding:12px 16px; box-sizing:border-box; }
+  .oa-client-shell .app-page-scroll[data-workspace] { min-height:0; overflow:auto; }
+  .oa-client-shell .app-page-scroll[data-workspace] > .content { height:auto; min-height:100%; overflow:visible; }
+  .oa-client-shell .app-page-scroll[data-workspace=list] { overflow:hidden; }
+  .oa-client-shell .app-page-scroll[data-workspace=list] > .content { height:100%; min-height:0; }
+}
+@media (min-width:1920px) {
+  .oa-client-shell .app-topbar .topbar-search:has(.oa-search-key) { width:184px; justify-content:flex-start; padding-inline:8px; }
+  .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:inline; }
+}
 </style>

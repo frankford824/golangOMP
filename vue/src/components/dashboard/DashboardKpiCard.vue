@@ -6,7 +6,7 @@
   >
     <p class="kpi-card__label">{{ title }}</p>
     <p class="kpi-card__value">{{ displayValue }}</p>
-    <p v-if="hint" class="kpi-card__hint">{{ hint }}</p>
+    <p v-if="hint || $slots.comparison" class="kpi-card__hint">{{ hint }}<slot name="comparison" /></p>
   </div>
 </template>
 
