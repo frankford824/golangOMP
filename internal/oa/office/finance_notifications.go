@@ -21,13 +21,15 @@ type financeNotice struct {
 	Type      string               `json:"notification_type"`
 	Payload   financeNoticePayload `json:"payload"`
 	CreatedAt string               `json:"created_at"`
+	Unread    bool                 `json:"unread"`
 }
 
 type financeActivity struct {
-	Todos       []financeNotice `json:"todos"`
-	Items       []financeNotice `json:"items"`
-	TodoCount   int64           `json:"todo_count"`
-	ResultCount int64           `json:"result_count"`
+	Todos             []financeNotice `json:"todos"`
+	Items             []financeNotice `json:"items"`
+	TodoCount         int64           `json:"todo_count"`
+	ResultCount       int64           `json:"result_count"`
+	UnreadResultCount int64           `json:"unread_result_count"`
 }
 
 // Called with the document row locked, in the same transaction as the state
@@ -37,7 +39,13 @@ type financeActivity struct {
 func recordFinanceResult(ctx context.Context, tx *sql.Tx, doc document) error {
 	switch doc.State {
 	case "approved", "returned", "rejected", "paid":
-		payload := financeNoticePayload{DocumentID: doc.ID, State: doc.State, Title: doc.Template.Name, Kind: "result"}
+		payload := struct {
+			financeNoticePayload
+			NotifyUnread bool `json:"notify_unread"`
+		}{
+			financeNoticePayload{DocumentID: doc.ID, State: doc.State, Title: doc.Template.Name, Kind: "result"},
+			doc.State != "returned",
+		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO oa_office_notifications(user_id,payload) VALUES(?,?)", doc.Applicant, jsonData(payload))
 		return err
 	default:
@@ -55,9 +63,15 @@ const financeTodoScope = ` FROM oa_office_documents d
 
 // Historical rows written before this projection include waiting notices and
 // approved notices for payers. Only the applicant's outcome history is shown.
-const financeResultScope = ` FROM oa_office_notifications n
-	JOIN oa_office_documents d ON d.id=JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.document_id')) AND d.applicant=n.user_id
+const financeResultJoin = ` oa_office_notifications n
+	JOIN oa_office_documents d ON d.id=JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.document_id')) AND d.applicant=n.user_id`
+const financeResultFilter = `
 	WHERE n.user_id=? AND JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.state')) IN ('approved','returned','rejected','paid')`
+const financeResultScope = " FROM" + financeResultJoin + financeResultFilter
+
+// Only results created with unread tracking qualify. Return notices appear as
+// a revision todo and stay in history without adding a second badge.
+const financeResultUnread = `n.read_at IS NULL AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.notify_unread'))='true', FALSE)`
 
 func activityParam(r *http.Request, key string, fallback, max int) (int, bool) {
 	value := r.URL.Query().Get(key)
@@ -93,14 +107,14 @@ func (app office) notifications(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*)"+financeResultScope, actor.ID).Scan(&data.ResultCount); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*), COALESCE(SUM("+financeResultUnread+"),0)"+financeResultScope, actor.ID).Scan(&data.ResultCount, &data.UnreadResultCount); err != nil {
 		internal(w)
 		return
 	}
 	if summary != "1" {
 		const todoFields = `SELECT 0, d.id, d.state, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(d.payload,'$.template.name')), ''),
 			CASE d.state WHEN 'waiting' THEN 'approve' WHEN 'returned' THEN 'revise' ELSE 'pay' END,
-			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(d.payload,'$.history[last].at')), '') AS occurred_at`
+			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(d.payload,'$.history[last].at')), '') AS occurred_at, FALSE`
 		data.Todos, err = selectFinanceNotices(ctx, tx, todoFields+financeTodoScope+" ORDER BY occurred_at DESC,d.id LIMIT ? OFFSET ?", append(todoArgs, limit, (todoPage-1)*limit)...)
 		if err != nil {
 			internal(w)
@@ -108,7 +122,7 @@ func (app office) notifications(w http.ResponseWriter, r *http.Request) {
 		}
 		const resultFields = `SELECT n.id, d.id, JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.state')),
 			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.title')), ''), 'result',
-			DATE_FORMAT(n.created_at,'%Y-%m-%d %H:%i:%s')`
+			DATE_FORMAT(n.created_at,'%Y-%m-%d %H:%i:%s'), ` + financeResultUnread
 		data.Items, err = selectFinanceNotices(ctx, tx, resultFields+financeResultScope+" ORDER BY n.id DESC LIMIT ? OFFSET ?", actor.ID, limit, (resultPage-1)*limit)
 		if err != nil {
 			internal(w)
@@ -132,10 +146,25 @@ func selectFinanceNotices(ctx context.Context, tx *sql.Tx, query string, args ..
 	for rows.Next() {
 		notice := financeNotice{Type: "oa_finance_document"}
 		p := &notice.Payload
-		if err := rows.Scan(&notice.ID, &p.DocumentID, &p.State, &p.Title, &p.Kind, &notice.CreatedAt); err != nil {
+		if err := rows.Scan(&notice.ID, &p.DocumentID, &p.State, &p.Title, &p.Kind, &notice.CreatedAt, &notice.Unread); err != nil {
 			return nil, err
 		}
 		notices = append(notices, notice)
 	}
 	return notices, rows.Err()
+}
+
+func (app office) readFinanceResult(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		bad(w, "通知编号无效")
+		return
+	}
+	const query = "UPDATE" + financeResultJoin + " SET n.read_at=CURRENT_TIMESTAMP" + financeResultFilter +
+		" AND n.id=? AND " + financeResultUnread
+	if _, err := app.db.ExecContext(r.Context(), query, platform.ActorFrom(r).ID, id); err != nil {
+		internal(w)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

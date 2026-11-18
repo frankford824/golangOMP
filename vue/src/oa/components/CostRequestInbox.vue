@@ -26,6 +26,7 @@ const busy=ref(false), acting=ref(false), error=ref(''), message=ref('')
 const hasMore=ref(false), history=ref<number[]>([0])
 const selected=ref<number>(), reply=ref('')
 let sequence=0
+let chooseLanding=route.query.costQueue!=='mine'
 async function load(before=0, change?:'next'|'prev', background=false){
  const seq=++sequence
  const token=getToken()
@@ -36,6 +37,14 @@ async function load(before=0, change?:'next'|'prev', background=false){
   if(before) params.set('before',String(before))
   const result=await api<Page>('/oa-api/orders/cost-requests?'+params)
   if(seq!==sequence || token!==getToken())return
+  if (chooseLanding) {
+    chooseLanding=false
+    if(result.reply_count && !result.pending_count && queue.value!=='replies') {
+      queue.value='replies'
+      await load()
+      return
+    }
+  }
   rows.value=result.items||[]; hasMore.value=!!result.has_more; unread.value=result.reply_count; activePending.value=result.pending_count
   if(change==='next')history.value.push(before)
   else if(change==='prev')history.value.pop()
@@ -45,6 +54,7 @@ async function load(before=0, change?:'next'|'prev', background=false){
 }
 function switchQueue(next:Queue){
  if(acting.value)return
+ chooseLanding=false
  queue.value=next;rows.value=[];history.value=[0];selected.value=undefined;reply.value='';message.value=''
  void load()
 }

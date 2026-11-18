@@ -70,6 +70,7 @@ func (app office) mountFinance(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+path+"approvers", app.approvers)
 	mux.HandleFunc("POST "+path+"approvers/search", app.searchApprovers)
 	mux.HandleFunc("GET "+path+"notifications", app.notifications)
+	mux.HandleFunc("POST "+path+"notifications/{id}/read", app.readFinanceResult)
 	mux.HandleFunc("GET "+path+"templates/{id}", app.templateDetail)
 	mux.HandleFunc("PUT "+path+"templates/{id}", app.saveTemplate)
 	mux.HandleFunc("GET "+path+"delegates", app.delegates)

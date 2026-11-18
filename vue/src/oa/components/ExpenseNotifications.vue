@@ -2,8 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue'
 import { getToken } from '@/services/http'
 import OAEmpty from './OAEmpty.vue'
-import { api, errorText } from '../api'
-import { expenseActivityURL, useExpenseActivity, type ExpenseActivityPage } from '../expenseActivity'
+import { api, errorText, send } from '../api'
+import { expenseActivityURL, useExpenseActivity, type ExpenseActivityItem, type ExpenseActivityPage } from '../expenseActivity'
 import { feeDateTime } from '../feeDisplay'
 import '../styles.css'
 
@@ -16,6 +16,8 @@ const page = ref(1)
 const data = ref<ExpenseActivityPage>()
 const error = ref('')
 const loading = ref(true)
+const readError = ref('')
+const reading = ref(new Set<number>())
 const limit = props.compact ? 6 : 12
 let request = 0
 const count = computed(() => tab.value === 'todos' ? data.value?.todo_count ?? 0 : data.value?.result_count ?? 0)
@@ -63,6 +65,25 @@ function refresh() {
   void load()
   void activity.refresh(true)
 }
+async function markRead(item: ExpenseActivityItem, navigating = false) {
+  if (!item.unread || reading.value.has(item.id)) return
+  const token = getToken()
+  reading.value.add(item.id)
+  readError.value = ''
+  try {
+    await send(expenseActivityURL + '/' + item.id + '/read', {})
+    if (token === getToken()) activity.invalidate()
+  } catch (cause) {
+    if (!navigating && token === getToken()) readError.value = errorText(cause)
+  } finally {
+    reading.value.delete(item.id)
+  }
+}
+function openItem(event: MouseEvent, item: ExpenseActivityItem) {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+  void markRead(item, true)
+  emit('navigate')
+}
 onMounted(load)
 onUnmounted(() => request++)
 watch(() => activity.revision, load)
@@ -80,19 +101,22 @@ watch(() => activity.revision, load)
       </button>
       <button type="button" :aria-pressed="tab === 'results'" @click="selectTab('results')">
         处理结果 {{ data?.result_count ?? '' }}
+        <span v-if="data?.unread_result_count"> · {{ data.unread_result_count }} 条未读</span>
       </button>
     </div>
+    <p v-if="readError" role="alert">{{ readError }}</p>
     <p v-if="loading" role="status">正在加载费用动态…</p>
     <div v-else-if="error" role="alert"><p>{{ error }}</p><button type="button" class="oa-button" @click="refresh">重新加载</button></div>
     <ul v-else-if="items.length">
       <li v-for="item in items" :key="item.payload.kind === 'result' ? item.id : item.payload.document_id">
-        <RouterLink :to="{ path: '/fees/document', query: { id: item.payload.document_id, from: 'notifications', ...(tab === 'results' ? { activity: 'results' } : {}) } }" @click="emit('navigate')">
-          <strong>{{ item.payload.title || '费用单据' }}</strong>
+        <RouterLink :to="{ path: '/fees/document', query: { id: item.payload.document_id, from: 'notifications', ...(tab === 'results' ? { activity: 'results' } : {}) } }" @click="openItem($event, item)">
+          <strong>{{ item.payload.title || '费用单据' }} <span v-if="item.unread" class="expense-unread">未读</span></strong>
           <span :class="['expense-status', 'oa-state-' + item.payload.state]">
             {{ item.payload.kind === 'result' ? (resultLabels[item.payload.state] || '状态更新') : actionLabels[item.payload.kind] }}
           </span>
           <time :datetime="item.created_at">{{ feeDateTime(item.created_at) }}</time>
         </RouterLink>
+        <button v-if="item.unread" class="oa-button expense-mark-read" type="button" :disabled="reading.has(item.id)" @click="markRead(item)">标记已读</button>
       </li>
     </ul>
     <OAEmpty v-else kind="inbox" :title="tab === 'todos' ? '暂无需要处理的费用单据' : '暂无费用处理结果'" />
@@ -111,6 +135,9 @@ watch(() => activity.revision, load)
 .expense-activity h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.4; }
 .expense-activity ul { list-style: none; padding: 0; margin: 0; }
 .expense-activity li + li { border-top: 1px solid rgb(var(--yb-border)); }
+.expense-activity li:has(.expense-mark-read) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.expense-activity .expense-unread { color: var(--oa-accent); font-weight: 600; }
+.expense-mark-read { white-space: nowrap; }
 .expense-activity a { display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; gap: 8px 16px; align-items: center; padding: 8px; min-height: 44px; border-radius: 6px; }
 .expense-activity a:hover, .expense-activity a:focus-visible { background: rgb(var(--yb-surface-hover)); }
 .expense-activity strong { min-width: 0; overflow-wrap: anywhere; }
@@ -121,6 +148,8 @@ watch(() => activity.revision, load)
 .expense-activity__tabs > button { min-height: 40px; padding-inline: 8px; font-size: 14px; border-bottom: 2px solid transparent; }
 .expense-activity__tabs > button[aria-pressed='true'] { border-color: var(--oa-accent); color: var(--oa-accent); font-weight: 600; }
 .expense-activity__pager { display: flex; align-items: center; justify-content: end; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.expense-activity--compact a { grid-template-columns: minmax(0, 1fr) max-content; }
+.expense-activity--compact time { grid-column: 1 / -1; }
 @media (max-width: 540px) {
   .expense-activity a { grid-template-columns: minmax(0, 1fr) max-content; }
   .expense-activity time { grid-column: 1 / -1; }

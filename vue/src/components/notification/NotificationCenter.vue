@@ -21,11 +21,12 @@
         <button type="button" :class="{ 'is-active': category === 'system' }" :aria-pressed="category === 'system'" @click="category = 'system'">系统通知</button>
         <button v-if="canUseExpenses" type="button" :class="{ 'is-active': category === 'expenses' }" :aria-pressed="category === 'expenses'" @click="category = 'expenses'">
           费用动态<span v-if="expenseActivity.todoCount"> · {{ expenseActivity.todoCount }} 项待办</span>
+          <span v-if="expenseActivity.unreadResultCount"> · {{ expenseActivity.unreadResultCount }} 条结果未读</span>
         </button>
         <button v-if="canUseCosts" type="button" :class="{ 'is-active': category === 'cost' }" :aria-pressed="category === 'cost'" @click="category = 'cost'">成本复核</button>
       </div>
       <div v-if="category === 'expenses' && canUseExpenses" class="notif-drawer-list">
-        <ExpenseNotifications compact @navigate="close" />
+        <ExpenseNotifications compact :initial-tab="expenseTab" @navigate="close" />
       </div>
       <div v-else-if="category === 'cost' && canUseCosts" class="notif-drawer-list">
         <CostRequestInbox compact @navigate="close" />
@@ -92,6 +93,7 @@ const router = useRouter()
 const notificationsStore = useNotificationsStore()
 const filter = ref<'all' | 'unread'>('all')
 const category = ref<'system' | 'expenses' | 'cost'>('system')
+const expenseTab = ref<'todos' | 'results'>('todos')
 const ExpenseNotifications = defineAsyncComponent(() => import('@/oa/components/ExpenseNotifications.vue'))
 const CostRequestInbox = defineAsyncComponent(() => import('@/oa/components/CostRequestInbox.vue'))
 const { can: canOA } = useOAAccess()
@@ -103,7 +105,8 @@ const costActivity = useCostActivity()
 const open = computed(() => props.open)
 watch(open, (show) => {
   if (!show) return
-  category.value = canUseExpenses.value && expenseActivity.todoCount ? 'expenses'
+  expenseTab.value = canUseExpenses.value && expenseActivity.unreadResultCount ? 'results' : 'todos'
+  category.value = canUseExpenses.value && (expenseActivity.todoCount || expenseActivity.unreadResultCount) ? 'expenses'
     : canUseCosts.value && costActivity.todoCount ? 'cost' : 'system'
   if (canUseExpenses.value) void expenseActivity.refresh()
   if (canUseCosts.value) void costActivity.refresh()

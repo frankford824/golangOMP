@@ -8,17 +8,12 @@
   >
     <Bell :size="18" aria-hidden="true" />
     <span
-      v-if="unreadCount > 0"
+      v-if="badgeCount > 0"
       class="absolute -right-1 -top-1 min-h-[1rem] min-w-[1rem] rounded-full bg-[rgb(var(--yb-danger-text))] px-0.5 text-center text-[0.625rem] font-bold leading-4 text-[rgb(var(--yb-text-inverse))]"
       aria-hidden="true"
     >
-      {{ unreadCount > 99 ? '99+' : unreadCount }}
+      {{ badgeCount > 99 ? '99+' : badgeCount }}
     </span>
-    <span
-      v-if="oaActivityCount > 0"
-      class="expense-todo-badge"
-      aria-hidden="true"
-    >{{ oaActivityCount > 99 ? '99+' : oaActivityCount }}</span>
   </button>
 </template>
 
@@ -39,12 +34,14 @@ const costActivity = useCostActivity()
 const canUseExpenses = computed(() => expenseActivityActions.some(can))
 const canUseCosts = computed(() => can('orders.view') || can('cost.request.handle'))
 const expenseTodoCount = computed(() => canUseExpenses.value ? expenseActivity.todoCount ?? 0 : 0)
+const expenseResultCount = computed(() => canUseExpenses.value ? expenseActivity.unreadResultCount : 0)
 const costActivityCount = computed(() => canUseCosts.value ? costActivity.todoCount ?? 0 : 0)
-const oaActivityCount = computed(() => expenseTodoCount.value + costActivityCount.value)
+const badgeCount = computed(() => unreadCount.value + expenseTodoCount.value + expenseResultCount.value + costActivityCount.value)
 const label = computed(() => !oaEnabled ? (unreadCount.value ? `通知，${unreadCount.value} 条未读` : '通知') : [
   '通知',
   unreadCount.value ? `${unreadCount.value} 条系统未读` : '',
   expenseTodoCount.value ? `${expenseTodoCount.value} 项费用待办` : '',
+  expenseResultCount.value ? `${expenseResultCount.value} 条费用结果未读` : '',
   costActivityCount.value ? `${costActivityCount.value} 项成本待办或回复` : '',
 ].filter(Boolean).join('，'))
 let refreshTimer: ReturnType<typeof setInterval> | undefined
@@ -93,20 +90,3 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
-
-<style scoped>
-.expense-todo-badge {
-  position: absolute;
-  inset-inline-start: -0.25rem;
-  bottom: -0.2rem;
-  min-width: 1rem;
-  border-radius: 999px;
-  padding-inline: 0.15rem;
-  background: rgb(var(--yb-warning-soft));
-  color: rgb(var(--yb-warning-text));
-  text-align: center;
-  font-size: 0.625rem;
-  font-weight: 700;
-  line-height: 1rem;
-}
-</style>

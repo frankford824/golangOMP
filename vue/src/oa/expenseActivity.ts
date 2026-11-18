@@ -7,6 +7,7 @@ export const expenseActivityURL = '/oa-api/finance/notifications'
 
 export type ExpenseActivityItem = {
   id: number
+  unread: boolean
   created_at: string
   payload: { document_id: string; state: string; title: string; kind: 'approve' | 'revise' | 'pay' | 'result' }
 }
@@ -16,9 +17,11 @@ export type ExpenseActivityPage = {
   items: ExpenseActivityItem[]
   todo_count: number
   result_count: number
+  unread_result_count: number
 }
 
 const todoCount = ref<number | null>(null)
+const unreadResultCount = ref(0)
 const revision = ref(0)
 let token: string | null = null
 let request = 0
@@ -29,6 +32,7 @@ function reset() {
   pending = false
   token = null
   todoCount.value = null
+  unreadResultCount.value = 0
 }
 
 async function refresh(force = false) {
@@ -40,9 +44,15 @@ async function refresh(force = false) {
   pending = true
   try {
     const result = await api<ExpenseActivityPage>(expenseActivityURL + '?summary=1')
-    if (current === request && requestedToken === getToken()) todoCount.value = result.todo_count ?? null
+    if (current === request && requestedToken === getToken()) {
+      todoCount.value = result.todo_count ?? null
+      unreadResultCount.value = result.unread_result_count ?? 0
+    }
   } catch {
-    if (current === request && requestedToken === getToken()) todoCount.value = null
+    if (current === request && requestedToken === getToken()) {
+      todoCount.value = null
+      unreadResultCount.value = 0
+    }
   } finally {
     if (current === request) pending = false
   }
@@ -54,5 +64,10 @@ function invalidate() {
 }
 
 export function useExpenseActivity() {
-  return { get todoCount() { return todoCount.value }, get revision() { return revision.value }, refresh, invalidate, reset }
+  return {
+    get todoCount() { return todoCount.value },
+    get unreadResultCount() { return unreadResultCount.value },
+    get revision() { return revision.value },
+    refresh, invalidate, reset,
+  }
 }

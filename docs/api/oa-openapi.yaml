@@ -1795,7 +1795,7 @@ paths:
   /oa-api/finance/notifications:
     get:
       summary: 列出费用待办和申请处理结果
-      description: 待办按当前单据状态和访问权限计算，读取通知不会清除待办。处理结果仅向申请人提供。
+      description: 待办按当前单据状态和访问权限计算，读取通知不会清除待办。处理结果仅向申请人提供。新增的终审通过、拒绝和付款结果计入未读；退回修改由待办提醒，旧历史不计入未读。
       parameters:
       - in: query
         name: todo_page
@@ -1821,7 +1821,7 @@ paths:
                 properties:
                   data:
                     type: object
-                    required: [todos, items, todo_count, result_count]
+                    required: [todos, items, todo_count, result_count, unread_result_count]
                     properties:
                       todos:
                         type: array
@@ -1833,6 +1833,7 @@ paths:
                         items: { $ref: '#/components/schemas/OAFinanceActivityItem' }
                       todo_count: { type: integer, format: int64, minimum: 0 }
                       result_count: { type: integer, format: int64, minimum: 0 }
+                      unread_result_count: { type: integer, format: int64, minimum: 0 }
                 required:
                 - data
         '400':
@@ -1841,6 +1842,25 @@ paths:
           $ref: '#/components/responses/HTTP401'
         '403':
           $ref: '#/components/responses/HTTP403'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/notifications/{id}/read:
+    post:
+      summary: 标记一条自己的费用处理结果为已读
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '204':
+          description: 幂等成功。只更新指定的一条本人费用结果；重复或不可访问的编号不改变记录。
+        '400':
+          description: 通知编号无效
+        '401':
+          $ref: '#/components/responses/HTTP401'
         '500':
           $ref: '#/components/responses/HTTP500'
         '503':
@@ -2781,13 +2801,16 @@ components:
   schemas:
     OAFinanceActivityItem:
       type: object
-      required: [id, notification_type, payload, created_at]
+      required: [id, notification_type, payload, created_at, unread]
       properties:
         id:
           type: integer
           format: int64
           description: 处理结果的事件编号。待办由单据状态生成，编号为 0，使用 payload.document_id 标识。
         notification_type: { type: string, enum: [oa_finance_document] }
+        unread:
+          type: boolean
+          description: 是否为未读处理结果。待办恒为 false。
         payload:
           type: object
           required: [document_id, state, title, kind]
