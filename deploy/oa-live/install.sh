@@ -17,6 +17,8 @@ test -r /etc/yongbo-oa-live/service.env
 install -m644 "$release/yongbo-oa-live.service" /etc/systemd/system/
 site=/etc/nginx/sites-available/oa.yongbo.cloud
 main=/etc/nginx/sites-enabled/yongbo.cloud
+known_good=$(mktemp /run/oa-live-site-XXXXXXXX)
+cp "$site" "$known_good"
 test -e /etc/letsencrypt/live/oa.yongbo.cloud/fullchain.pem
 if [[ ! -L "$base/current" ]];then
   # An emergency frontend fallback is a real main-ops static release, not a test site.
@@ -34,7 +36,8 @@ restore(){
   select_release "$prior"
   if [[ -x "$prior/oa-extension" ]]; then systemctl restart yongbo-oa-live || true; else systemctl stop yongbo-oa-live || true; fi
   render_site
-  if nginx -t;then systemctl reload nginx;fi
+  if nginx -t;then systemctl reload nginx;else cp "$known_good" "$site"; nginx -t;fi
+  rm -f "$known_good"
   echo 'OA reverted to its previous formal frontend; original sites were not switched.' >&2; exit "$code"
 }
 select_release "$release"
@@ -54,5 +57,6 @@ for ((i=0;i<25;i++));do if curl -fsS -m 3 --resolve oa.yongbo.cloud:443:127.0.0.
 [[ "$served" = 1 ]]
 for h in oa.yongbo.cloud yongbo.cloud assets.yongbo.cloud;do curl -fsS --max-time 8 --resolve "$h:443:127.0.0.1" "https://$h/" -o /dev/null;done
 trap - ERR
+rm -f "$known_good"
 printf '%s %s %s\n' "$(date -Is)" "$sha" "$digest" >> "$base/deployments.log"
 echo "OA main-ops frontend active: $sha"
