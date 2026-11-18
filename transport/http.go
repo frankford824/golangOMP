@@ -18,6 +18,8 @@ import (
 	"workflow/internal/oa/office"
 	"workflow/internal/oa/orders"
 	"workflow/internal/oa/platform"
+	"workflow/internal/oa/pricing"
+	"workflow/internal/oa/taskarchive"
 	"workflow/transport/handler"
 	transportws "workflow/transport/ws"
 )
@@ -629,6 +631,8 @@ func NewOAExtensionRouter(db, source *sql.DB, coreURL string) http.Handler {
 	api := http.NewServeMux()
 	office.Mount(api, db, source, native, orders.BaselineShops)
 	orders.Mount(api, db, native)
+	pricing.Mount(api, db, native)
+	api.Handle("POST /oa-api/tasks/batch-archive", taskarchive.New(db))
 	api.HandleFunc("GET /oa-api/me", func(w http.ResponseWriter, r *http.Request) { platform.JSON(w, 200, platform.ActorFrom(r)) })
 	public := http.NewServeMux()
 	identity := platform.NewIdentity(coreURL)
@@ -653,6 +657,11 @@ func NewOAExtensionRouter(db, source *sql.DB, coreURL string) http.Handler {
 		}
 		actor.Actions["finance.apply"] = true
 		actor.Actions["finance.approve"] = true
+		actor.Actions["pricing.view"] = pricing.CanView(actor)
+		actor.Actions["pricing.confirm"] = pricing.CanConfirm(actor)
+		if r.URL.Path == "/oa-api/me" || r.URL.Path == "/oa-api/tasks/batch-archive" {
+			actor.Actions[taskarchive.Action] = taskarchive.GlobalAllowed(r.Context(), source, actor)
+		}
 		api.ServeHTTP(w, platform.WithActor(r, actor))
 	})))
 	return public

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"workflow/internal/oa/platform"
 )
@@ -67,6 +68,7 @@ func (app office) mountFinance(mux *http.ServeMux) {
 	const path = "/oa-api/finance/"
 	mux.HandleFunc("GET "+path+"templates", app.templates)
 	mux.HandleFunc("GET "+path+"approvers", app.approvers)
+	mux.HandleFunc("POST "+path+"approvers/search", app.searchApprovers)
 	mux.HandleFunc("GET "+path+"notifications", app.notifications)
 	mux.HandleFunc("GET "+path+"templates/{id}", app.templateDetail)
 	mux.HandleFunc("PUT "+path+"templates/{id}", app.saveTemplate)
@@ -83,6 +85,14 @@ func (app office) mountFinance(mux *http.ServeMux) {
 }
 
 func (app office) approvers(w http.ResponseWriter, r *http.Request) {
+	app.findApprovers(w, r, r.URL.Query().Get("q"), r.URL.Query().Get("ids"), false)
+}
+
+func (app office) findApprovers(w http.ResponseWriter, r *http.Request, text, selectedIDs string, extended bool) {
+	if utf8.RuneCountInString(text) > 256 {
+		bad(w, "搜索词过长")
+		return
+	}
 	actor := platform.ActorFrom(r)
 	if !actor.SuperAdmin {
 		level := app.delegate(r)
@@ -93,17 +103,17 @@ func (app office) approvers(w http.ResponseWriter, r *http.Request) {
 	}
 	// A delegated template maintainer can select active approvers in their
 	// own department without receiving HR access to full personnel files.
-	q := "%" + strings.TrimSpace(r.URL.Query().Get("q")) + "%"
+	text = strings.TrimSpace(text)
 	global := actor.SuperAdmin || slices.Contains(actor.PeopleDepartments, companyPeopleScope)
 	var ids []string
-	if raw := r.URL.Query().Get("ids"); raw != "" {
+	if raw := selectedIDs; raw != "" {
 		ids = strings.SplitN(raw, ",", 17)
 		if len(ids) > 16 {
 			bad(w, "最多查询 16 名已选审批人")
 			return
 		}
 	}
-	const scope = `SELECT id,display_name,employee_no,COALESCE(department,'') FROM users WHERE status='active' AND (? OR department_id=? OR id=?)`
+	const scope = approverScope
 	args := []any{global, actor.DepartmentID, actor.ID}
 	selected := []approverOption{}
 	if len(ids) > 0 {
@@ -123,7 +133,14 @@ func (app office) approvers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	items, err := app.queryApprovers(r, scope+` AND (display_name LIKE ? OR CAST(employee_no AS CHAR) LIKE ? OR department LIKE ?) ORDER BY display_name,id LIMIT 50`, append(args, q, q, q))
+	var items []approverOption
+	var err error
+	if extended {
+		items, err = app.searchApproverRows(r.Context(), args, text)
+	} else {
+		q := "%" + text + "%"
+		items, err = app.queryApprovers(r, scope+` AND (display_name LIKE ? OR CAST(employee_no AS CHAR) LIKE ? OR department LIKE ?) ORDER BY display_name,id LIMIT 50`, append(args, q, q, q))
+	}
 	if err != nil {
 		internal(w)
 		return

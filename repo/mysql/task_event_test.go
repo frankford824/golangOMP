@@ -40,7 +40,7 @@ func TestNextTaskEventSequenceRepairsLaggingCounter(t *testing.T) {
 		WithArgs(int64(21), int64(2254)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	next, err := nextTaskEventSequence(context.Background(), tx, 2254)
+	next, err := nextTaskEventSequence(context.Background(), tx, 2254, false)
 	if err != nil {
 		t.Fatalf("nextTaskEventSequence() error = %v", err)
 	}
@@ -81,7 +81,7 @@ func TestNextTaskEventSequenceKeepsAheadCounter(t *testing.T) {
 		WithArgs(int64(9), int64(9)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	next, err := nextTaskEventSequence(context.Background(), tx, 9)
+	next, err := nextTaskEventSequence(context.Background(), tx, 9, false)
 	if err != nil {
 		t.Fatalf("nextTaskEventSequence() error = %v", err)
 	}
@@ -122,7 +122,7 @@ func TestNextTaskEventSequenceStartsAfterExistingEvents(t *testing.T) {
 		WithArgs(int64(4), int64(10)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	next, err := nextTaskEventSequence(context.Background(), tx, 10)
+	next, err := nextTaskEventSequence(context.Background(), tx, 10, false)
 	if err != nil {
 		t.Fatalf("nextTaskEventSequence() error = %v", err)
 	}

@@ -14,9 +14,19 @@ import (
 	"workflow/repo"
 )
 
-type taskEventRepo struct{ db *DB }
+type taskEventRepo struct {
+	db         *DB
+	appendOnly bool
+}
 
 func NewTaskEventRepo(db *DB) repo.TaskEventRepo { return &taskEventRepo{db: db} }
+
+// NewAppendOnlyTaskEventRepo uses a shared locking read of the existing history.
+// The sequence row still serializes appends. MySQL 8.0.22+ needs no write
+// privileges on the historical log for this shared read.
+func NewAppendOnlyTaskEventRepo(db *DB) repo.TaskEventRepo {
+	return &taskEventRepo{db: db, appendOnly: true}
+}
 
 // Append generates the next per-task sequence number, then inserts a task_event_logs row.
 // MUST be called inside an active transaction (same pattern as V6 EventRepo.Append).
@@ -30,7 +40,7 @@ func (r *taskEventRepo) Append(
 ) (*domain.TaskEvent, error) {
 	sqlTx := Unwrap(tx)
 
-	seq, err := nextTaskEventSequence(ctx, sqlTx, taskID)
+	seq, err := nextTaskEventSequence(ctx, sqlTx, taskID, r.appendOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +177,7 @@ func prefixedTaskEventWhere(where []string, alias string) []string {
 // The counter row serializes compliant writers, while the locked MAX(sequence)
 // read self-heals counters that lag behind directly inserted repair events.
 // MUST be called inside an active transaction.
-func nextTaskEventSequence(ctx context.Context, sqlTx *sql.Tx, taskID int64) (int64, error) {
+func nextTaskEventSequence(ctx context.Context, sqlTx *sql.Tx, taskID int64, appendOnly bool) (int64, error) {
 	if _, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO task_event_sequences (task_id, last_sequence)
 		VALUES (?, 0)
@@ -183,12 +193,16 @@ func nextTaskEventSequence(ctx context.Context, sqlTx *sql.Tx, taskID int64) (in
 		return 0, fmt.Errorf("task_event nextSequence select: %w", err)
 	}
 
+	lockClause := "FOR UPDATE"
+	if appendOnly {
+		lockClause = "FOR SHARE"
+	}
 	var loggedMax int64
 	if err := sqlTx.QueryRowContext(ctx, `
 		SELECT COALESCE(MAX(sequence), 0)
 		FROM task_event_logs
 		WHERE task_id = ?
-		FOR UPDATE`, taskID).Scan(&loggedMax); err != nil {
+		`+lockClause, taskID).Scan(&loggedMax); err != nil {
 		return 0, fmt.Errorf("task_event nextSequence reconcile: %w", err)
 	}
 

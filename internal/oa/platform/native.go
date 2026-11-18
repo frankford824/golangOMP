@@ -16,6 +16,7 @@ func Native(base string) http.Handler {
 		q := r.URL.Query()
 		taskSearch := path == "/v1/search" && q.Get("scope") == "tasks" && q.Get("mode") == "exact"
 		allowed := r.Method == "GET" && (taskSearch || path == "/v1/cost-management/sku-costs" || numericPath(path, "/v1/tasks/") || numericPath(path, "/v1/users/")) ||
+			r.Method == "POST" && path == "/v1/cost-rules/preview" ||
 			r.Method == "PATCH" && numericPath(path, "/v1/users/")
 		if !allowed {
 			http.Error(w, "unsupported native operation", 403)
@@ -31,7 +32,7 @@ func Native(base string) http.Handler {
 			return
 		}
 		req.Header.Set("Authorization", r.Header.Get("Authorization"))
-		if r.Method == "PATCH" {
+		if r.Method == "PATCH" || r.Method == "POST" {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		resp, err := client.Do(req)
