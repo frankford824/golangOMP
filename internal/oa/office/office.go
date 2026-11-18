@@ -1,0 +1,78 @@
+package office
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"workflow/internal/oa/platform"
+)
+
+type office struct {
+	db, source *sql.DB
+	native     http.Handler
+	baseline   func(context.Context, *int) (map[string]bool, error)
+}
+
+func CheckSchema(ctx context.Context, db *sql.DB) error {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('oa_office_templates','oa_office_template_versions','oa_office_delegates','oa_office_finance_actions','oa_office_documents','oa_office_files','oa_office_people','oa_office_notifications','oa_office_imports')`).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count != 9 {
+		return fmt.Errorf("OA office schema incomplete: found %d of 9 tables", count)
+	}
+	return nil
+}
+
+func Mount(mux *http.ServeMux, db, source *sql.DB, native http.Handler, readers ...func(context.Context, *int) (map[string]bool, error)) {
+	app := office{db: db, source: source, native: native}
+	if len(readers) > 0 {
+		app.baseline = readers[0]
+	}
+	app.mountFinance(mux)
+	app.mountPeople(mux)
+}
+
+func permit(actor platform.Actor, action string) bool {
+	if action == "finance.pay" || action == "finance.report" {
+		return actor.Actions[action]
+	}
+	return actor.SuperAdmin || actor.Actions[action]
+}
+func identifier() string {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(id[:])
+}
+func number(value string) int64 { id, _ := strconv.ParseInt(value, 10, 64); return id }
+func decode(w http.ResponseWriter, r *http.Request, value any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 512<<10)
+	if err := json.NewDecoder(r.Body).Decode(value); err != nil {
+		platform.Error(w, 400, "请求格式无效")
+		return false
+	}
+	return true
+}
+func internal(w http.ResponseWriter)            { platform.Error(w, 500, "暂时无法完成操作") }
+func deny(w http.ResponseWriter)                { platform.Error(w, 403, "当前账号无权办理") }
+func bad(w http.ResponseWriter, message string) { platform.Error(w, 400, message) }
+func missing(w http.ResponseWriter)             { platform.Error(w, 404, "记录不存在") }
+func conflict(w http.ResponseWriter)            { platform.Error(w, 409, "记录已变化，请刷新后重试") }
+func jsonData(value any) string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+func textOK(value string, max int) bool { return strings.TrimSpace(value) != "" && len(value) <= max }

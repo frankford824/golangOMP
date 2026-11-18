@@ -1,0 +1,25 @@
+[Unit]
+Description=Main operations platform OA extensions
+After=network-online.target
+[Service]
+User=yongbo-oa-live
+Group=yongbo-oa-live
+WorkingDirectory=/srv/yongbo-oa-live/current
+ExecStart=/srv/yongbo-oa-live/current/oa-extension
+EnvironmentFile=/etc/yongbo-oa-live/service.env
+StateDirectory=yongbo-oa-live
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+IPAddressDeny=any
+IPAddressAllow=localhost
+IPAddressAllow=100.97.209.121/32
+MemoryMax=640M
+CPUQuota=140%
+[Install]
+WantedBy=multi-user.target

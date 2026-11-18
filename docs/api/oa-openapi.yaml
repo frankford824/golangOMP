@@ -1,0 +1,2653 @@
+openapi: 3.0.3
+info:
+  title: Yongbo OA 扩展 API
+  version: 1.0.0
+  description: 仅描述 cmd/oa-extension 挂载的 OA 扩展接口。使用既有主站用户 Bearer，业务权限由服务端按账号与范围判定。任务、成本、库存及资产业务仍使用原生 /v1 合同。
+servers:
+- url: /
+externalDocs:
+  description: 主站与资产工作台原生业务合同
+  url: openapi.yaml
+security:
+- MainBearer: []
+paths:
+  /oa-api/health:
+    get:
+      summary: 扩展库健康状态
+      security: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                      mode:
+                        type: string
+                      identity:
+                        type: string
+                required:
+                - data
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/me:
+    get:
+      summary: 读取主站身份与 OA 有效权限
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Actor'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/orders/summary:
+    get:
+      summary: 经营汇总
+      description: 默认按店日使用 v_shop_day；纳入刷单改读有效订单。无明确核实成本时金额可为空。
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              day:
+                                type: string
+                                format: date
+                              shop_id:
+                                type: string
+                              platform:
+                                type: string
+                              order_count: &id001
+                                type: string
+                                pattern: ^[0-9]+$
+                                description: ClickHouse JSON UInt64 decimal string
+                              payable_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              item_pay_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              item_pay_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              cost_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_gross:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_coverage:
+                                type: number
+                                nullable: true
+                              verified_status:
+                                type: string
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/products:
+    get:
+      summary: 分页商品经营
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      - in: query
+        name: sku
+        schema:
+          type: string
+      - in: query
+        name: product
+        schema:
+          type: string
+      - in: query
+        name: mine
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        description: 每页最多 100 条；has_more 指示后续页
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              shop_id:
+                                type: string
+                              sku:
+                                type: string
+                              product_name:
+                                type: string
+                              shop_item_id:
+                                type: string
+                                nullable: true
+                              quantity:
+                                type: string
+                              item_pay_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              item_pay_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              cost_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_gross:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_coverage:
+                                type: number
+                                nullable: true
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/rankings:
+    get:
+      summary: 经营排行
+      description: 人员排行限超级管理员，增长基期为等长紧邻区间，零基期不计算增长率。
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      - in: query
+        name: group
+        schema:
+          type: string
+          enum:
+          - shop
+          - platform
+          - product
+          - person
+          - growth
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        description: 每页最多 100 条；has_more 指示后续页
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              key:
+                                type: string
+                              shop_id:
+                                type: string
+                              growth_status:
+                                type: string
+                              item_pay_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              payable_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              baseline_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              growth_rate:
+                                type: number
+                                nullable: true
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/personal:
+    get:
+      summary: 个人业绩
+      description: 默认从本月首日查询。预测缺少完整输入时为空。
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              day:
+                                type: string
+                                format: date
+                              item_pay_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                        month_actual:
+                          type: string
+                          pattern: ^-?[0-9]+(\.[0-9]+)?$
+                          description: 精确十进制金额字符串
+                        forecast:
+                          type: string
+                          pattern: ^-?[0-9]+(\.[0-9]+)?$
+                          description: 精确十进制金额字符串
+                          nullable: true
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/sku:
+    get:
+      summary: SKU 经营与当前维护价
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      - in: query
+        name: sku
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        description: 每页最多 100 条；has_more 指示后续页
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              shop_id:
+                                type: string
+                              sku:
+                                type: string
+                              product_name:
+                                type: string
+                              shop_item_id:
+                                type: string
+                                nullable: true
+                              quantity:
+                                type: string
+                              item_pay_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              item_pay_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              cost_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_gross:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_coverage:
+                                type: number
+                                nullable: true
+                        current_cost:
+                          type: string
+                          pattern: ^-?[0-9]+(\.[0-9]+)?$
+                          description: 精确十进制金额字符串
+                          nullable: true
+                        cost_context_available:
+                          type: boolean
+                        tasks:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/TaskLink'
+                        feedback:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/Feedback'
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/shops:
+    get:
+      summary: 可访问店铺
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              shop_id:
+                                type: string
+                              shop_name:
+                                type: string
+                              platform:
+                                type: string
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/cost-history:
+    get:
+      summary: SKU 历史成本
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      - in: query
+        name: sku
+        schema:
+          type: string
+        required: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              sub_order_id:
+                                type: string
+                              sku:
+                                type: string
+                              shop_id:
+                                type: string
+                              order_time:
+                                type: string
+                              cost_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              unit_cost:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              cost_source:
+                                type: string
+                                nullable: true
+                              cost_tier:
+                                type: string
+                                nullable: true
+                              cost_status:
+                                type: string
+                                nullable: true
+                              cost_as_of:
+                                type: string
+                                nullable: true
+                              cost_frozen:
+                                type: integer
+                              cost_implausible:
+                                type: integer
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/refunds:
+    get:
+      summary: 按确认售后申请日汇总退款
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              day:
+                                type: string
+                                format: date
+                              shop_id:
+                                type: string
+                              refund_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              valid_refund_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              unmatched_refund_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              outlier_refund_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/ledger:
+    get:
+      summary: 台账镜像
+      description: 超级管理员可查看。镜像金额与订单应付分开。
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        description: 每页最多 100 条；has_more 指示后续页
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              shop_id:
+                                type: string
+                              period:
+                                type: string
+                              state:
+                                type: string
+                              computed_at:
+                                type: string
+                              line_id:
+                                type: string
+                              name:
+                                type: string
+                              value:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/detail:
+    get:
+      summary: 分页订单明细
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        description: 含起日，北京时间；不得早于 2026-06-01
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        description: 含止日，北京时间；不得晚于今天
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        description: 每页最多 100 条；has_more 指示后续页
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              order_id:
+                                type: string
+                              online_order_no:
+                                type: string
+                              shop_id:
+                                type: string
+                              platform:
+                                type: string
+                              order_time:
+                                type: string
+                              status:
+                                type: string
+                              is_valid:
+                                type: integer
+                              is_origin:
+                                type: integer
+                              is_brush:
+                                type: integer
+                              payable_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              collected_amount:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/compare:
+    get:
+      summary: 调整前后同长度完整日比较
+      parameters:
+      - in: query
+        name: shop_id
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: sku
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: adjusted_on
+        schema:
+          type: string
+          format: date
+        required: true
+      - in: query
+        name: days
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 90
+        required: true
+      - in: query
+        name: platform
+        schema:
+          type: string
+        description: 省略时仅默认电商范围，排除线下店铺和其它平台
+      - in: query
+        name: include_brush
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+        description: 1 表示纳入刷单
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                    - $ref: '#/components/schemas/OrderResult'
+                    - type: object
+                      properties:
+                        rows:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              phase:
+                                type: string
+                                enum:
+                                - before
+                                - after
+                              line_count: *id001
+                              quantity:
+                                type: string
+                              item_pay_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              item_pay_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                              cost_verified_total:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_gross:
+                                type: string
+                                pattern: ^-?[0-9]+(\.[0-9]+)?$
+                                description: 精确十进制金额字符串
+                                nullable: true
+                              verified_coverage:
+                                type: number
+                                nullable: true
+                required:
+                - data
+          headers:
+            X-OA-Order-Cache:
+              description: OA 应用查询缓存状态。范围为空时可省略，与 ClickHouse 查询缓存独立。
+              schema:
+                type: string
+                enum:
+                - hit
+                - miss
+                - coalesced
+                - stale
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/feedback:
+    post:
+      summary: 登记 SKU 调整反馈
+      description: 指定任务时须已有相同店铺及 SKU 的关联，并通过原生任务读取验权。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shop_id:
+                  type: string
+                sku:
+                  type: string
+                note:
+                  type: string
+                adjusted_on:
+                  type: string
+                  format: date
+                task_id:
+                  type: integer
+                  format: int64
+                  nullable: true
+              required:
+              - shop_id
+              - sku
+              - note
+              - adjusted_on
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Feedback'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/orders/task-links:
+    post:
+      summary: 关联已创建的原生任务
+      description: 按店铺、SKU、任务 ID 幂等。新建任务由 /v1/tasks 办理。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shop_id:
+                  type: string
+                sku:
+                  type: string
+                from:
+                  type: string
+                  format: date
+                to:
+                  type: string
+                  format: date
+                task_id:
+                  type: integer
+                  format: int64
+              required:
+              - shop_id
+              - sku
+              - from
+              - to
+              - task_id
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      task_id:
+                        type: integer
+                        format: int64
+                required:
+                - data
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      task_id:
+                        type: integer
+                        format: int64
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+        '504':
+          $ref: '#/components/responses/HTTP504'
+  /oa-api/finance/templates:
+    get:
+      summary: 列出已发布模板
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Template'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/approvers:
+    get:
+      summary: 列出审批候选
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              format: int64
+                            name:
+                              type: string
+                            employee_no:
+                              type: integer
+                              nullable: true
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/notifications:
+    get:
+      summary: 列出财务通知
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              format: int64
+                            notification_type:
+                              type: string
+                              enum:
+                              - oa_finance_document
+                            payload:
+                              type: object
+                              additionalProperties: true
+                            created_at:
+                              type: string
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/templates/{id}:
+    get:
+      summary: 读取模板
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: draft
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Template'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+    put:
+      summary: 保存或发布模板
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/Template'
+              - type: object
+                properties:
+                  publish:
+                    type: boolean
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Template'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/delegates:
+    get:
+      summary: 读取财务委派
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      level:
+                        type: string
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              format: int64
+                            level:
+                              type: string
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/delegates/{id}:
+    put:
+      summary: 保存财务委派
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                level:
+                  type: string
+              required:
+              - level
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      level:
+                        type: string
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/actions/{id}:
+    put:
+      summary: 保存付款与报表授权
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pay:
+                  type: boolean
+                report:
+                  type: boolean
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      pay:
+                        type: boolean
+                      report:
+                        type: boolean
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/documents:
+    get:
+      summary: 列出财务单据
+      parameters:
+      - in: query
+        name: queue
+        schema:
+          type: string
+          enum:
+          - mine
+          - todo
+          - pay
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Document'
+                      amount_cents:
+                        type: integer
+                        format: int64
+                      count:
+                        type: integer
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+    post:
+      summary: 提交财务单据
+      description: 同申请人同 request_id 可安全重试。金额单位为分。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Application'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Document'
+                required:
+                - data
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Document'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/documents/{id}:
+    get:
+      summary: 读取授权范围内单据
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: reveal
+        schema:
+          type: string
+          enum:
+          - '0'
+          - '1'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Document'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/documents/{id}/{operation}:
+    post:
+      summary: 重提、审批或登记付款
+      description: 操作决定请求结构。付款日期为北京时间自然日，amount_cents 为分。
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: operation
+        required: true
+        schema:
+          type: string
+          enum:
+          - resubmit
+          - decision
+          - payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: '#/components/schemas/Application'
+              - $ref: '#/components/schemas/Payment'
+              - type: object
+                properties:
+                  decision:
+                    type: string
+                    enum:
+                    - approve
+                    - return
+                    - reject
+                  comment:
+                    type: string
+                  current:
+                    type: integer
+                  version:
+                    type: integer
+                required:
+                - decision
+                - current
+                - version
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Document'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/report:
+    get:
+      summary: 按实付期间查询付款
+      parameters:
+      - in: query
+        name: period
+        schema:
+          type: string
+        description: YYYY、YYYY-MM 或 YYYY-MM-DD
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Document'
+                      amount_cents:
+                        type: integer
+                        format: int64
+                      count:
+                        type: integer
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/files:
+    post:
+      summary: 上传财务附件
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+              - file
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/files/{id}:
+    get:
+      summary: 下载已授权财务附件
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/pdf: &id002
+              schema:
+                type: string
+                format: binary
+            image/png: *id002
+            image/jpeg: *id002
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/list:
+    get:
+      summary: 搜索授权范围人员
+      parameters:
+      - in: query
+        name: q
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Person'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/{id}:
+    get:
+      summary: 读取人员档案
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Person'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/{id}/handover:
+    get:
+      summary: 读取人员交接事项
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: true
+                      shops:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: true
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/{id}/change:
+    post:
+      summary: 登记人员变更
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonChange'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Person'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/export:
+    get:
+      summary: 导出授权人员名册
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/preview:
+    post:
+      summary: 预览人员名册导入
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+              - file
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RosterRow'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/confirm:
+    post:
+      summary: 确认预览名册导入
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+              - token
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      count:
+                        type: integer
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RosterRow'
+                required:
+                - data
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+components:
+  securitySchemes:
+    MainBearer:
+      type: http
+      scheme: bearer
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+      - error
+    Actor:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        department_id:
+          type: integer
+          format: int64
+        team_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        department:
+          type: string
+        team:
+          type: string
+        employee_no:
+          type: integer
+          nullable: true
+        activated:
+          type: boolean
+        super_admin:
+          type: boolean
+        roles:
+          type: array
+          items:
+            type: string
+        actions:
+          type: object
+          additionalProperties:
+            type: boolean
+        people_departments:
+          type: array
+          items:
+            type: integer
+            format: int64
+        people_teams:
+          type: array
+          items:
+            type: integer
+            format: int64
+    Freshness:
+      type: object
+      properties:
+        source_committed_at:
+          type: string
+          description: 北京时间，YYYY-MM-DD HH:mm:ss
+          example: '2026-11-18 10:30:15'
+        lag_seconds:
+          type: integer
+      nullable: true
+    Feedback:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        shop_id:
+          type: string
+        sku:
+          type: string
+        note:
+          type: string
+        adjusted_on:
+          type: string
+          format: date
+        task_id:
+          type: integer
+          format: int64
+          nullable: true
+    TaskLink:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        task_no:
+          type: string
+        status:
+          type: string
+    OrderResult:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        freshness:
+          $ref: '#/components/schemas/Freshness'
+        stale:
+          type: boolean
+        has_more:
+          type: boolean
+    Person:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        department_id:
+          type: integer
+          format: int64
+        team_id:
+          type: integer
+          format: int64
+        manager_id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        department:
+          type: string
+        team:
+          type: string
+        status:
+          type: string
+        employment_type:
+          type: string
+        joined:
+          type: string
+        left:
+          type: string
+        management:
+          type: string
+        employee_no:
+          type: integer
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersonChange'
+        terms:
+          type: array
+          items:
+            type: object
+            properties:
+              shop_id:
+                type: string
+              from:
+                type: string
+                format: date
+              to:
+                type: string
+              pending_handover:
+                type: boolean
+    PersonChange:
+      type: object
+      properties:
+        kind:
+          type: string
+        shop_id:
+          type: string
+        from_shop_id:
+          type: string
+        management:
+          type: string
+        employment_type:
+          type: string
+        effective_date:
+          type: string
+          format: date
+        department_id:
+          type: integer
+          format: int64
+        team_id:
+          type: integer
+          format: int64
+        target_id:
+          type: integer
+          format: int64
+        manager_id:
+          type: integer
+          format: int64
+        actor_id:
+          type: integer
+          format: int64
+        roles:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+    RosterRow:
+      type: object
+      properties:
+        sheet:
+          type: string
+        name:
+          type: string
+        error:
+          type: string
+        employment_type:
+          type: string
+        previous_name:
+          type: string
+        new_name:
+          type: string
+        result:
+          type: string
+        failure:
+          type: string
+        shop_id:
+          type: string
+        from:
+          type: string
+        row:
+          type: integer
+        version:
+          type: integer
+        employee_no:
+          type: integer
+        previous_employee_no:
+          type: integer
+        id:
+          type: integer
+          format: int64
+    Template:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        evidence:
+          type: string
+        extra:
+          type: string
+        channels:
+          type: array
+          items:
+            type: string
+        fields:
+          type: array
+          items:
+            type: string
+        required:
+          type: array
+          items:
+            type: string
+        nodes:
+          type: array
+          items:
+            type: string
+        threshold_cents:
+          type: integer
+          format: int64
+        version:
+          type: integer
+    Application:
+      type: object
+      properties:
+        request_id:
+          type: string
+        template_id:
+          type: string
+        reason:
+          type: string
+        channel:
+          type: string
+        holder:
+          type: string
+        account:
+          type: string
+        bank:
+          type: string
+        site:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+        extra:
+          type: object
+          additionalProperties:
+            type: string
+        files:
+          type: array
+          items:
+            type: string
+      required:
+      - request_id
+      - template_id
+      - amount_cents
+      - reason
+      - channel
+    Payment:
+      type: object
+      properties:
+        amount_cents:
+          type: integer
+          format: int64
+        date:
+          type: string
+          format: date
+        receipt:
+          type: string
+      required:
+      - amount_cents
+      - date
+      - receipt
+    Document:
+      allOf:
+      - $ref: '#/components/schemas/Application'
+      - type: object
+        properties:
+          id:
+            type: string
+          applicant_id:
+            type: integer
+            format: int64
+          template:
+            $ref: '#/components/schemas/Template'
+          state:
+            type: string
+          route:
+            type: array
+            items:
+              type: integer
+              format: int64
+          current:
+            type: integer
+          version:
+            type: integer
+          history:
+            type: array
+            items:
+              type: object
+              properties:
+                actor_id:
+                  type: integer
+                  format: int64
+                action:
+                  type: string
+                comment:
+                  type: string
+                at:
+                  type: string
+                  format: date-time
+          payment:
+            type: object
+            properties:
+              amount_cents:
+                type: integer
+                format: int64
+              date:
+                type: string
+                format: date
+              receipt:
+                type: string
+            nullable: true
+  responses:
+    HTTP503:
+      description: 数据、授权或扩展服务暂不可用
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HTTP401:
+      description: 主站会话缺失或失效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HTTP403:
+      description: 当前账号或数据范围无权访问
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HTTP400:
+      description: 参数、文件或请求状态不合法
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HTTP504:
+      description: 订单源查询超时
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HTTP404:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HTTP409:
+      description: 版本、状态或幂等冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    HTTP500:
+      description: 扩展操作失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

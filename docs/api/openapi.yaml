@@ -12,6 +12,9 @@ info:
     organization names are display-only. Business resources are resolved exclusively through resource
     groups. Retired workflow families and independent compatibility routes are not part of this
     contract and are not exposed through aliases.
+externalDocs:
+  description: OA extension service API (separate runtime)
+  url: oa-openapi.yaml
 servers:
   - url: /
 tags:
