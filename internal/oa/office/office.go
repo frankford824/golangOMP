@@ -18,6 +18,7 @@ type office struct {
 	db, source *sql.DB
 	native     http.Handler
 	baseline   func(context.Context, *int) (map[string]bool, error)
+	bindings   ShopBindingDirectory
 }
 
 func CheckSchema(ctx context.Context, db *sql.DB) error {
@@ -32,11 +33,8 @@ func CheckSchema(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func Mount(mux *http.ServeMux, db, source *sql.DB, native http.Handler, readers ...func(context.Context, *int) (map[string]bool, error)) {
-	app := office{db: db, source: source, native: native}
-	if len(readers) > 0 {
-		app.baseline = readers[0]
-	}
+func Mount(mux *http.ServeMux, db, source *sql.DB, native http.Handler, baseline func(context.Context, *int) (map[string]bool, error), bindings ShopBindingDirectory) {
+	app := office{db: db, source: source, native: native, baseline: baseline, bindings: bindings}
 	app.mountFinance(mux)
 	app.mountPeople(mux)
 }

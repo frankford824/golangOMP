@@ -179,7 +179,7 @@ func ApplyIdentity(ctx context.Context, db, source *sql.DB, actor platform.Actor
 	if report {
 		actor.Actions["finance.report"] = true
 	}
-	if templates {
+	if templates || financeAdmin(actor) {
 		actor.Actions["finance.templates"] = true
 	}
 	if actor.SuperAdmin {
@@ -193,6 +193,8 @@ func (app office) mountPeople(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+path+"list", app.peopleList)
 	mux.HandleFunc("GET "+path+"{id}", app.personDetail)
 	mux.HandleFunc("GET "+path+"{id}/handover", app.handoverItems)
+	mux.HandleFunc("GET "+path+"{id}/shop-bindings", app.readShopBindings)
+	mux.HandleFunc("POST "+path+"{id}/shop-bindings", app.changeShopBindings)
 	mux.HandleFunc("POST "+path+"{id}/change", app.changePerson)
 	mux.HandleFunc("GET "+path+"export", app.exportPeople)
 	mux.HandleFunc("POST "+path+"preview", app.previewPeople)

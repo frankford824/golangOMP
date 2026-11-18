@@ -89,7 +89,7 @@ func TestApplicationEnforcesLockedTemplate(t *testing.T) {
 }
 
 func TestRoutePatternsMountWithoutConflict(t *testing.T) {
-	Mount(http.NewServeMux(), nil, nil, nil)
+	Mount(http.NewServeMux(), nil, nil, nil, nil, nil)
 }
 
 func TestShopOverridesEffectivePerShop(t *testing.T) {

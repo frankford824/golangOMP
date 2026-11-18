@@ -59,6 +59,10 @@ func Mount(mux *http.ServeMux, db *sql.DB, native http.Handler) {
 	for _, name := range []string{"hourly", "summary", "products", "rankings", "personal", "sku", "shops", "cost-history", "refunds", "ledger", "detail", "compare"} {
 		mux.HandleFunc("GET /oa-api/orders/"+name, func(w http.ResponseWriter, r *http.Request) { s.read(w, r, name) })
 	}
+	mux.HandleFunc("POST /oa-api/orders/cost-requests", s.requestCostCheck)
+	mux.HandleFunc("GET /oa-api/orders/cost-requests", s.costMessages)
+	mux.HandleFunc("POST /oa-api/orders/cost-requests/{id}/resolve", s.resolveCostMessage)
+	mux.HandleFunc("POST /oa-api/orders/cost-requests/{id}/read", s.readCostMessage)
 	mux.HandleFunc("POST /oa-api/orders/feedback", s.saveFeedback)
 	mux.HandleFunc("POST /oa-api/orders/task-links", s.saveTaskLink)
 }
@@ -144,6 +148,31 @@ func (s *server) baselineScope(ctx context.Context, employee *int) (map[string]b
 func BaselineShops(ctx context.Context, employee *int) (map[string]bool, error) {
 	shops, _, err := baselineScope(ctx, sharedClient(), employee)
 	return shops, err
+}
+
+// ShopBindingDirectory resolves the same personnel baseline used by order reads
+// together with the official store directory for administrative changes.
+func ShopBindingDirectory(ctx context.Context, employee *int) (map[string]bool, string, []office.BindingShop, error) {
+	ch := sharedClient()
+	baseline, person, err := baselineScope(ctx, ch, employee)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	rows, err := ch.rows(ctx, "SELECT shop_id,shop_name,platform,enabled FROM jst.v_shops ORDER BY shop_name,shop_id", nil)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	shops := make([]office.BindingShop, 0, len(rows))
+	for _, row := range rows {
+		var shop office.BindingShop
+		if json.Unmarshal(row["shop_id"], &shop.ID) != nil || json.Unmarshal(row["platform"], &shop.Platform) != nil {
+			return nil, "", nil, errUnavailable
+		}
+		_ = json.Unmarshal(row["shop_name"], &shop.Name)
+		shop.Selectable = string(row["enabled"]) == "1" && shop.ID != "" && shop.Platform != "线下店铺" && shop.Platform != "其它平台"
+		shops = append(shops, shop)
+	}
+	return baseline, person, shops, nil
 }
 
 func baselineScope(ctx context.Context, ch *client, employee *int) (map[string]bool, string, error) {

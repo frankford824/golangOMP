@@ -629,7 +629,7 @@ func httpTracePayload(c *gin.Context) json.RawMessage {
 func NewOAExtensionRouter(db, source *sql.DB, coreURL string) http.Handler {
 	native := platform.Native(coreURL)
 	api := http.NewServeMux()
-	office.Mount(api, db, source, native, orders.BaselineShops)
+	office.Mount(api, db, source, native, orders.BaselineShops, orders.ShopBindingDirectory)
 	orders.Mount(api, db, native)
 	pricing.Mount(api, native)
 	api.Handle("POST /oa-api/tasks/batch-archive", taskarchive.New(db))
@@ -658,6 +658,7 @@ func NewOAExtensionRouter(db, source *sql.DB, coreURL string) http.Handler {
 		actor.Actions["finance.apply"] = true
 		actor.Actions["finance.approve"] = true
 		actor.Actions["pricing.view"] = pricing.CanView(actor)
+		actor.Actions["cost.request.handle"] = orders.CanHandleCostRequest(actor)
 		if r.URL.Path == "/oa-api/me" || r.URL.Path == "/oa-api/tasks/batch-archive" {
 			actor.Actions[taskarchive.Action] = taskarchive.GlobalAllowed(r.Context(), source, actor)
 		}

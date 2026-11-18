@@ -28,9 +28,9 @@ func TestAuthorizedPhoneAndPinyinSearch(t *testing.T) {
 		m.ExpectQuery("SELECT level").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"level"}).AddRow("draft"))
 		mock := m.ExpectQuery("SELECT id,display_name,employee_no,.* FROM users WHERE status='active' AND")
 		if q == "lht" {
-			mock.WithArgs(false, int64(9), int64(7))
+			mock.WithArgs(false, int64(9), int64(7), int64(0))
 		} else {
-			mock.WithArgs(false, int64(9), int64(7), "13800001234", "+8613800001234", "8613800001234", "008613800001234")
+			mock.WithArgs(false, int64(9), int64(7), int64(0), "13800001234", "+8613800001234", "8613800001234", "008613800001234")
 		}
 		rows := sqlmock.NewRows([]string{"id", "display_name", "employee_no", "department"})
 		if q == "lht" {

@@ -3,23 +3,26 @@ package office
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"unicode"
 
 	"github.com/mozillazg/go-pinyin"
 	"golang.org/x/text/unicode/norm"
+	"workflow/internal/oa/platform"
 )
 
 // New clients put names and phone numbers in a request body rather than access-log URLs.
 func (app office) searchApprovers(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Query string `json:"q"`
-		IDs   string `json:"ids"`
+		AfterID int64  `json:"after_id"`
+		Query   string `json:"q"`
+		IDs     string `json:"ids"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	app.findApprovers(w, r, in.Query, in.IDs, true)
+	app.findApprovers(w, r, in.Query, in.IDs, in.AfterID, true)
 }
 
 func phoneDigits(text string) string {
@@ -103,29 +106,52 @@ func nameMatches(name, query string) bool {
 	return false
 }
 
-const approverScope = `SELECT id,display_name,employee_no,COALESCE(department,'') FROM users WHERE status='active' AND (? OR department_id=NULLIF(?,0) OR id=?)`
+const approverScope = `SELECT id,display_name,employee_no,COALESCE(department,'') FROM users WHERE status='active' AND (? OR department_id=NULLIF(?,0) OR id=?`
 
-func (app office) searchApproverRows(ctx context.Context, scopeArgs []any, text string) ([]approverOption, error) {
-	args := append([]any(nil), scopeArgs...)
-	const ordering = " ORDER BY display_name,id"
+func financeCandidateScope(actor platform.Actor) (string, []any) {
+	global := financeAdmin(actor) || slices.Contains(actor.PeopleDepartments, companyPeopleScope)
+	args := []any{global, actor.DepartmentID, actor.ID}
+	scope := approverScope
+	if !global {
+		for _, departmentID := range actor.PeopleDepartments {
+			if departmentID > 0 && departmentID != actor.DepartmentID {
+				scope += " OR department_id=?"
+				args = append(args, departmentID)
+			}
+		}
+		for _, teamID := range actor.PeopleTeams {
+			if teamID > 0 {
+				scope += " OR team_id=?"
+				args = append(args, teamID)
+			}
+		}
+	}
+	return scope + ")", args
+}
+
+const approverPageSize = 50
+
+func (app office) searchApproverRows(ctx context.Context, scope string, scopeArgs []any, text string, afterID int64) ([]approverOption, error) {
+	args := append(append([]any(nil), scopeArgs...), afterID)
+	const ordering = " ORDER BY id"
 	var filter string
 	roman := romanQuery(text)
 	switch {
 	case text == "":
-		filter = ordering + " LIMIT 50"
+		filter = ordering + " LIMIT 51"
 	case phoneDigits(text) != "":
 		phone := phoneDigits(text)
 		// Match complete stored numbers, including the common country-prefix and presentation forms.
-		filter = ` AND REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(mobile,''),' ',''),'-',''),'(',''),')','') IN (?,?,?,?)` + ordering + " LIMIT 50"
+		filter = ` AND REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(mobile,''),' ',''),'-',''),'(',''),')','') IN (?,?,?,?)` + ordering + " LIMIT 51"
 		args = append(args, phone, "+86"+phone, "86"+phone, "0086"+phone)
 	case roman != "":
-		// The SQL scope is applied before transliteration. Stop after 50 matching authorized candidates.
+		// The SQL scope is applied before transliteration. Scan only the authorized suffix until this page plus one match has been found.
 		filter = ordering
 	default:
-		filter = " AND (INSTR(display_name,?)>0 OR INSTR(CAST(employee_no AS CHAR),?)>0 OR INSTR(department,?)>0)" + ordering + " LIMIT 50"
+		filter = " AND (INSTR(display_name,?)>0 OR INSTR(CAST(employee_no AS CHAR),?)>0 OR INSTR(department,?)>0)" + ordering + " LIMIT 51"
 		args = append(args, text, text, text)
 	}
-	rows, err := app.source.QueryContext(ctx, approverScope+filter, args...)
+	rows, err := app.source.QueryContext(ctx, scope+" AND id>?"+filter, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +167,7 @@ func (app office) searchApproverRows(ctx context.Context, scopeArgs []any, text 
 			continue
 		}
 		out = append(out, item)
-		if len(out) == 50 {
+		if len(out) > approverPageSize {
 			break
 		}
 	}

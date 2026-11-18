@@ -73,6 +73,7 @@ func (app office) mountFinance(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+path+"templates/{id}", app.templateDetail)
 	mux.HandleFunc("PUT "+path+"templates/{id}", app.saveTemplate)
 	mux.HandleFunc("GET "+path+"delegates", app.delegates)
+	mux.HandleFunc("GET "+path+"grants", app.financeGrants)
 	mux.HandleFunc("PUT "+path+"delegates/{id}", app.saveDelegate)
 	mux.HandleFunc("PUT "+path+"actions/{id}", app.saveFinanceActions)
 	mux.HandleFunc("GET "+path+"documents", app.documents)
@@ -85,26 +86,39 @@ func (app office) mountFinance(mux *http.ServeMux) {
 }
 
 func (app office) approvers(w http.ResponseWriter, r *http.Request) {
-	app.findApprovers(w, r, r.URL.Query().Get("q"), r.URL.Query().Get("ids"), false)
+	cursor := r.URL.Query().Get("after_id")
+	if cursor == "" {
+		cursor = "0"
+	}
+	afterID, err := strconv.ParseInt(cursor, 10, 64)
+	if err != nil {
+		bad(w, "候选分页位置无效")
+		return
+	}
+	app.findApprovers(w, r, r.URL.Query().Get("q"), r.URL.Query().Get("ids"), afterID, false)
 }
 
-func (app office) findApprovers(w http.ResponseWriter, r *http.Request, text, selectedIDs string, extended bool) {
+func (app office) findApprovers(w http.ResponseWriter, r *http.Request, text, selectedIDs string, afterID int64, extended bool) {
+	if afterID < 0 {
+		bad(w, "候选分页位置无效")
+		return
+	}
 	if utf8.RuneCountInString(text) > 256 {
 		bad(w, "搜索词过长")
 		return
 	}
 	actor := platform.ActorFrom(r)
-	if !actor.SuperAdmin {
+	if !financeAdmin(actor) {
 		level := app.delegate(r)
 		if level != "draft" && level != "publish" {
 			deny(w)
 			return
 		}
 	}
-	// A delegated template maintainer can select active approvers in their
-	// own department without receiving HR access to full personnel files.
+	// Delegated maintainers keep their own department and any personnel scopes
+	// they already hold. This search exposes directory labels only.
 	text = strings.TrimSpace(text)
-	global := actor.SuperAdmin || slices.Contains(actor.PeopleDepartments, companyPeopleScope)
+	scope, args := financeCandidateScope(actor)
 	var ids []string
 	if raw := selectedIDs; raw != "" {
 		ids = strings.SplitN(raw, ",", 17)
@@ -113,8 +127,6 @@ func (app office) findApprovers(w http.ResponseWriter, r *http.Request, text, se
 			return
 		}
 	}
-	const scope = approverScope
-	args := []any{global, actor.DepartmentID, actor.ID}
 	selected := []approverOption{}
 	if len(ids) > 0 {
 		selectedArgs := slices.Clone(args)
@@ -136,16 +148,21 @@ func (app office) findApprovers(w http.ResponseWriter, r *http.Request, text, se
 	var items []approverOption
 	var err error
 	if extended {
-		items, err = app.searchApproverRows(r.Context(), args, text)
+		items, err = app.searchApproverRows(r.Context(), scope, args, text, afterID)
 	} else {
 		q := "%" + text + "%"
-		items, err = app.queryApprovers(r, scope+` AND (display_name LIKE ? OR CAST(employee_no AS CHAR) LIKE ? OR department LIKE ?) ORDER BY display_name,id LIMIT 50`, append(args, q, q, q))
+		items, err = app.queryApprovers(r, scope+` AND id>? AND (display_name LIKE ? OR CAST(employee_no AS CHAR) LIKE ? OR department LIKE ?) ORDER BY id LIMIT 51`, append(args, afterID, q, q, q))
 	}
 	if err != nil {
 		internal(w)
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"items": items, "selected": selected})
+	var next int64
+	if len(items) > approverPageSize {
+		items = items[:approverPageSize]
+		next = items[len(items)-1].ID
+	}
+	platform.JSON(w, 200, map[string]any{"items": items, "selected": selected, "next_after_id": next})
 }
 
 type approverOption struct {
@@ -173,28 +190,44 @@ func (app office) queryApprovers(r *http.Request, query string, args []any) ([]a
 }
 
 func (app office) saveFinanceActions(w http.ResponseWriter, r *http.Request) {
-	if !platform.ActorFrom(r).SuperAdmin {
+	if !financeAdmin(platform.ActorFrom(r)) {
 		deny(w)
 		return
 	}
 	var input struct {
-		Pay    bool `json:"pay"`
-		Report bool `json:"report"`
+		Pay    *bool `json:"pay"`
+		Report *bool `json:"report"`
 	}
 	if !decode(w, r, &input) {
 		return
 	}
 	id := number(r.PathValue("id"))
-	if !app.active(r, id) {
-		bad(w, "授权对象未启用")
+	if id <= 0 || input.Pay == nil || input.Report == nil {
+		bad(w, "请提供有效账号及付款、报表权限")
 		return
 	}
-	_, err := app.db.ExecContext(r.Context(), "INSERT INTO oa_office_finance_actions(user_id,can_pay,can_report) VALUES(?,?,?) ON DUPLICATE KEY UPDATE can_pay=?,can_report=?", id, input.Pay, input.Report, input.Pay, input.Report)
+	var err error
+	if !*input.Pay && !*input.Report {
+		_, err = app.db.ExecContext(r.Context(), "UPDATE oa_office_finance_actions SET can_pay=FALSE,can_report=FALSE WHERE user_id=?", id)
+	} else {
+		if !app.active(r, id) {
+			bad(w, "启用付款或报表权限须选择在职人员")
+			return
+		}
+		_, err = app.db.ExecContext(r.Context(), "INSERT INTO oa_office_finance_actions(user_id,can_pay,can_report) VALUES(?,?,?) ON DUPLICATE KEY UPDATE can_pay=?,can_report=?", id, *input.Pay, *input.Report, *input.Pay, *input.Report)
+	}
 	if err != nil {
 		internal(w)
 		return
 	}
 	platform.JSON(w, 200, input)
+}
+
+func (app office) templateLevel(r *http.Request) string {
+	if financeAdmin(platform.ActorFrom(r)) {
+		return "publish"
+	}
+	return app.delegate(r)
 }
 
 func (app office) delegate(r *http.Request) string {
@@ -205,8 +238,8 @@ func (app office) delegate(r *http.Request) string {
 }
 func (app office) delegates(w http.ResponseWriter, r *http.Request) {
 	actor := platform.ActorFrom(r)
-	if !actor.SuperAdmin {
-		platform.JSON(w, 200, map[string]any{"level": app.delegate(r)})
+	if !financeAdmin(actor) {
+		platform.JSON(w, 200, map[string]any{"level": app.templateLevel(r)})
 		return
 	}
 	rows, err := app.db.QueryContext(r.Context(), "SELECT user_id,level FROM oa_office_delegates ORDER BY user_id")
@@ -229,10 +262,10 @@ func (app office) delegates(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"items": items, "level": app.delegate(r)})
+	platform.JSON(w, 200, map[string]any{"items": items, "level": app.templateLevel(r)})
 }
 func (app office) saveDelegate(w http.ResponseWriter, r *http.Request) {
-	if !platform.ActorFrom(r).SuperAdmin {
+	if !financeAdmin(platform.ActorFrom(r)) {
 		deny(w)
 		return
 	}
@@ -247,11 +280,16 @@ func (app office) saveDelegate(w http.ResponseWriter, r *http.Request) {
 		bad(w, "委托对象或级别无效")
 		return
 	}
-	if !app.active(r, id) {
-		bad(w, "委托对象未启用")
-		return
+	var err error
+	if input.Level == "none" {
+		_, err = app.db.ExecContext(r.Context(), "UPDATE oa_office_delegates SET level='none' WHERE user_id=?", id)
+	} else {
+		if !app.active(r, id) {
+			bad(w, "授予模板维护权限须选择在职人员")
+			return
+		}
+		_, err = app.db.ExecContext(r.Context(), "INSERT INTO oa_office_delegates(user_id,level) VALUES(?,?) ON DUPLICATE KEY UPDATE level=?", id, input.Level, input.Level)
 	}
-	_, err := app.db.ExecContext(r.Context(), "INSERT INTO oa_office_delegates(user_id,level) VALUES(?,?) ON DUPLICATE KEY UPDATE level=?", id, input.Level, input.Level)
 	if err != nil {
 		internal(w)
 		return
@@ -260,7 +298,8 @@ func (app office) saveDelegate(w http.ResponseWriter, r *http.Request) {
 }
 func (app office) templates(w http.ResponseWriter, r *http.Request) {
 	expression := "published"
-	if r.URL.Query().Get("draft") == "1" && app.delegate(r) != "" && app.delegate(r) != "none" {
+	level := app.templateLevel(r)
+	if r.URL.Query().Get("draft") == "1" && (level == "draft" || level == "publish") {
 		expression = "COALESCE(draft,published)"
 	}
 	rows, err := app.db.QueryContext(r.Context(), "SELECT "+expression+" FROM oa_office_templates WHERE "+expression+" IS NOT NULL ORDER BY id")
@@ -283,10 +322,10 @@ func (app office) templates(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"items": items, "level": app.delegate(r)})
+	platform.JSON(w, 200, map[string]any{"items": items, "level": level})
 }
 func (app office) templateDetail(w http.ResponseWriter, r *http.Request) {
-	if level := app.delegate(r); level == "" || level == "none" {
+	if level := app.templateLevel(r); level != "draft" && level != "publish" {
 		deny(w)
 		return
 	}
@@ -346,7 +385,7 @@ func (app office) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	{
+	if !financeAdmin(actor) {
 		var level string
 		err = tx.QueryRowContext(ctx, "SELECT level FROM oa_office_delegates WHERE user_id=? FOR UPDATE", actor.ID).Scan(&level)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -387,31 +426,6 @@ func (app office) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.JSON(w, 200, input.template)
-}
-
-func (app office) notifications(w http.ResponseWriter, r *http.Request) {
-	rows, err := app.db.QueryContext(r.Context(), "SELECT id,payload,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM oa_office_notifications WHERE user_id=? ORDER BY id DESC LIMIT 100", platform.ActorFrom(r).ID)
-	if err != nil {
-		internal(w)
-		return
-	}
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		var id int64
-		var payload []byte
-		var created string
-		if err = rows.Scan(&id, &payload, &created); err != nil {
-			internal(w)
-			return
-		}
-		items = append(items, map[string]any{"id": id, "notification_type": "oa_finance_document", "payload": json.RawMessage(payload), "created_at": created})
-	}
-	if rows.Err() != nil {
-		internal(w)
-		return
-	}
-	platform.JSON(w, 200, map[string]any{"items": items})
 }
 
 func (app office) active(r *http.Request, id int64) bool {
@@ -527,7 +541,7 @@ func (app office) documents(w http.ResponseWriter, r *http.Request) {
 	app.selectDocuments(w, r, where, args, false)
 }
 func (app office) report(w http.ResponseWriter, r *http.Request) {
-	if !permit(platform.ActorFrom(r), "finance.report") && !permit(platform.ActorFrom(r), "finance.pay") {
+	if !permit(platform.ActorFrom(r), "finance.report") {
 		deny(w)
 		return
 	}
@@ -654,7 +668,7 @@ func (app office) submit(w http.ResponseWriter, r *http.Request) {
 		bad(w, "附件无效或已用于其他单据")
 		return
 	}
-	if persistDocument(r, tx, doc) != nil || notifyDocument(r, tx, doc, actor.ID) != nil || tx.Commit() != nil {
+	if persistDocument(r, tx, doc) != nil || tx.Commit() != nil {
 		internal(w)
 		return
 	}
@@ -672,44 +686,6 @@ func persistDocument(r *http.Request, tx *sql.Tx, doc document) error {
 	return err
 }
 
-func notifyDocument(r *http.Request, tx *sql.Tx, doc document, actor int64) error {
-	recipients := []int64{}
-	switch doc.State {
-	case "waiting":
-		recipients = append(recipients, doc.Route[doc.Current])
-	case "approved":
-		rows, err := tx.QueryContext(r.Context(), "SELECT user_id FROM oa_office_finance_actions WHERE can_pay=TRUE AND user_id<>?", doc.Applicant)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var id int64
-			if err = rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			recipients = append(recipients, id)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		recipients = append(recipients, doc.Applicant)
-	default:
-		recipients = append(recipients, doc.Applicant)
-	}
-	for _, recipient := range recipients {
-		if recipient == actor {
-			continue
-		}
-		payload := map[string]any{"document_id": doc.ID, "state": doc.State, "site": doc.Site, "title": doc.Template.Name}
-		if _, err := tx.ExecContext(r.Context(), "INSERT INTO oa_office_notifications(user_id,payload) VALUES(?,?)", recipient, jsonData(payload)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 	actor := platform.ActorFrom(r)
 	ctx := r.Context()
@@ -839,7 +815,7 @@ func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	doc.Version++
 	doc.History = append(doc.History, entry)
-	if persistDocument(r, tx, doc) != nil || notifyDocument(r, tx, doc, actor.ID) != nil || tx.Commit() != nil {
+	if persistDocument(r, tx, doc) != nil || recordFinanceResult(ctx, tx, doc) != nil || tx.Commit() != nil {
 		internal(w)
 		return
 	}
