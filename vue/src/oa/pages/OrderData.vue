@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { ChevronLeft, ChevronRight, Copy, Search, X } from 'lucide-vue-next'
+import { useRoute } from 'vue-router'
+import OperationNav from '../components/OperationNav.vue'
+import type { HttpAppError } from '@/services/http'
 import PageHead from '../components/PageHead.vue'
 import FreshnessStatus from '../components/FreshnessStatus.vue'
 import { api, dateInChina, errorText, money } from '../api'
@@ -7,6 +11,7 @@ import { useOAAccess } from '../access'
 import '../styles.css'
 
 const { currentProfile } = useOAAccess()
+const route = useRoute()
 
 const props = defineProps<{ mode: 'detail' | 'refunds' | 'ledger' }>()
 type Cell = string | boolean | number | null
@@ -29,39 +34,164 @@ const columns: Record<typeof props.mode, Column[]> = {
     { key: 'value', label: '金额', money: true }, { key: 'computed_at', date: true, label: '核算时间' },
   ],
 }
+const detailColumns: Record<typeof props.mode, Column[]> = {
+  detail: [...columns.detail, { key: 'order_id', label: '订单 ID' }],
+  refunds: columns.refunds,
+  ledger: [...columns.ledger, { key: 'line_id', label: '科目 ID' }],
+}
 const today = dateInChina()
-const from = ref(props.mode === 'ledger' ? today.slice(0, 7) + '-01' : today)
+const pageSize = 100
+const firstDay = '2026-06-01'
+const from = ref(today)
 const to = ref(today)
 const shop = ref('')
 const platform = ref('')
 const offset = ref(0)
-let appliedQuery = ''
-const data = ref<{ rows: Row[]; has_more?: boolean; stale?: boolean; freshness?: { source_committed_at?: string; lag_seconds?: number } }>()
+const applied = ref('')
+type OrderData = { rows: Row[]; has_more?: boolean; stale?: boolean; freshness?: { source_committed_at?: string; lag_seconds?: number } }
+const data = ref<OrderData>()
 const shopNames = ref<{ shop_id: string; shop_name: string }[]>([])
 const busy = ref(false)
 const error = ref('')
-const allowed = computed(() => props.mode !== 'ledger' || !!currentProfile.value?.super_admin)
+const failedRequest = ref<{ offset: number; query: string }>()
+const scope = computed(() => currentProfile.value?.id)
+const allowed = computed(() => scope.value != null && (props.mode !== 'ledger' || !!currentProfile.value?.super_admin))
 const copyStatus = ref('')
+const selected = ref<Row>()
+const dialog = ref<HTMLDialogElement>()
+const resultHeader = ref<HTMLElement>()
+const visibleRows = computed(() => {
+  const rows = data.value?.rows ?? []
+  return props.mode === 'refunds' ? rows.slice(offset.value, offset.value + pageSize) : rows
+})
+const hasNext = computed(() => props.mode === 'refunds'
+  ? offset.value + pageSize < (data.value?.rows?.length ?? 0)
+  : !!data.value?.has_more)
+const page = computed(() => Math.floor(offset.value / pageSize) + 1)
+const title = computed(() => ({ detail: '订单明细', refunds: '售后退款', ledger: '经营台账' }[props.mode]))
+const subtitle = computed(() => ({
+  detail: '按下单时间倒序',
+  refunds: '按确认售后的申请日期汇总',
+  ledger: '按店铺、核算月份与核算状态展示',
+}[props.mode]))
+const detailTitle = computed(() => ({ detail: '订单详情', refunds: '退款汇总详情', ledger: '台账科目详情' }[props.mode]))
+const mobileColumns: Record<typeof props.mode, string[]> = {
+  detail: ['online_order_no', 'collected_amount'],
+  refunds: ['day', 'shop_id', 'refund_amount'],
+  ledger: ['period', 'name', 'value'],
+}
+let requestId = 0
+let scopeId = 0
+
+function filterQuery() {
+  return new URLSearchParams({ from: from.value, to: to.value, shop_id: shop.value, platform: platform.value }).toString()
+}
+
+function resetFilters() {
+  from.value = props.mode === 'ledger' ? today.slice(0, 7) + '-01' : today
+  to.value = today
+  shop.value = ''
+  platform.value = ''
+}
+
+function restoreRouteFilters() {
+  const { from: start, to: end, shop_id: shopId, platform: platformCode } = route.query
+  const validDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && value >= firstDay && value <= today && new Date(value).toJSON()?.slice(0, 10) === value
+  if (validDate(start) && validDate(end) && start <= end) {
+    from.value = start
+    to.value = end
+  }
+  shop.value = typeof shopId === 'string' ? shopId : ''
+  platform.value = props.mode === 'detail' && typeof platformCode === 'string' ? platformCode : ''
+}
+
+const navigationQuery = computed(() => {
+  const params = new URLSearchParams(applied.value)
+  const query: Record<string, string> = {}
+  for (const key of ['from', 'to', 'shop_id']) {
+    const value = params.get(key)
+    if (value) query[key] = value
+  }
+  return query
+})
+
+function resetAndLoad() {
+  resetFilters()
+  void load()
+}
+
+async function load(next = 0, filters = filterQuery()) {
+  if (!allowed.value || busy.value) return
+  const currentRequest = ++requestId
+  const mode = props.mode
+  busy.value = true
+  error.value = ''
+  failedRequest.value = undefined
+  try {
+    const query = new URLSearchParams(filters)
+    query.set('offset', String(next))
+    const result = await api<OrderData>('/oa-api/orders/' + mode + '?' + query)
+    if (requestId !== currentRequest) return
+    data.value = result
+    offset.value = next
+    applied.value = filters
+  } catch (cause) {
+    if (requestId !== currentRequest) return
+    const failure = cause as HttpAppError
+    if (failure.status === 401 || failure.status === 403 || filters !== applied.value) {
+      closeDetails()
+      data.value = undefined
+      applied.value = ''
+      offset.value = 0
+    }
+    error.value = errorText(cause)
+    failedRequest.value = { offset: next, query: filters }
+  } finally {
+    if (requestId === currentRequest) busy.value = false
+  }
+}
+
+async function changePage(next: number) {
+  if (props.mode === 'refunds') offset.value = next
+  else await load(next, applied.value)
+  if (!error.value) resultHeader.value?.focus()
+}
+
+async function openDetails(row: Row) {
+  selected.value = row
+  copyStatus.value = ''
+  await nextTick()
+  if (selected.value && !dialog.value?.open) dialog.value?.showModal()
+}
+
+function clearDetails() {
+  if (!dialog.value?.open) {
+    selected.value = undefined
+    copyStatus.value = ''
+  }
+}
+
+function closeDetails() {
+  dialog.value?.close()
+  clearDetails()
+}
+
 async function copyOrder(id: string) {
   try { await navigator.clipboard.writeText(id); copyStatus.value = '已复制订单号' }
   catch { copyStatus.value = '无法复制订单号，请手动复制' }
 }
-const title = computed(() => ({ detail: '订单明细', refunds: '售后退款', ledger: '经营台账' }[props.mode]))
 
-async function load(next = 0, useApplied = false) {
-  if (!allowed.value || busy.value) return
-  busy.value = true
-  data.value = undefined
-  error.value = ''
-  try {
-    if (!useApplied || !appliedQuery) appliedQuery = new URLSearchParams({ from: from.value, to: to.value, shop_id: shop.value, platform: platform.value }).toString()
-    const query = new URLSearchParams(appliedQuery)
-    query.set('offset', String(next))
-    data.value = await api('/oa-api/orders/' + props.mode + '?' + query)
-    offset.value = next
-  } catch (cause) { error.value = errorText(cause) }
-  finally { busy.value = false }
-}
+const appliedRange = computed(() => {
+  const params = new URLSearchParams(applied.value)
+  const start = params.get('from')
+  const end = params.get('to')
+  const shopId = params.get('shop_id')
+  return [
+    start === end ? start : [start, end].filter(Boolean).join(' 至 '),
+    shopId && (shopNames.value.find(item => item.shop_id === shopId)?.shop_name || shopId),
+    params.get('platform'),
+  ].filter(Boolean).join(' · ')
+})
 function display(column: Column, row: Row) {
   const value = row[column.key]
   if (value == null || value === '') return '—'
@@ -75,40 +205,120 @@ function display(column: Column, row: Row) {
   if (column.key.startsWith('is_')) return value === true || value === 1 || value === '1' ? '是' : '否'
   return value
 }
-onMounted(() => {
+watch([scope, allowed], async () => {
+  const currentScope = ++scopeId
+  shopNames.value = []
+  if (!allowed.value) return
+  try {
+    const result = await api<{ rows: { shop_id: string; shop_name: string }[] }>('/oa-api/orders/shops')
+    if (scopeId === currentScope) shopNames.value = result.rows || []
+  } catch {
+    // Keep the shop code input available when the store list cannot be read.
+  }
+}, { immediate: true, flush: 'sync' })
+
+watch([() => props.mode, () => route.query, scope, allowed], () => {
+  ++requestId
+  closeDetails()
+  busy.value = false
+  data.value = undefined
+  error.value = ''
+  failedRequest.value = undefined
+  applied.value = ''
+  offset.value = 0
+  resetFilters()
+  restoreRouteFilters()
   void load()
-  if (allowed.value) void api<{ rows: { shop_id: string; shop_name: string }[] }>('/oa-api/orders/shops').then(response => { shopNames.value = response.rows || [] }).catch(() => undefined)
-})
+}, { immediate: true })
 </script>
 
 <template>
-<div class="oa-page commerce-workspace">
-  <PageHead :title="title" :subtitle="mode === 'refunds' ? '按确认售后的申请日期' : mode === 'detail' ? '按下单时间与订单号倒序' : '按店铺、核算月份与核算状态'">
-    <RouterLink class="oa-button" to="/operations/rankings">返回经营分析</RouterLink>
-  </PageHead>
-  <p v-if="!allowed" class="oa-error" role="alert">当前账号没有经营台账权限。</p>
-  <template v-else>
-    <form class="oa-actions oa-filter workspace-filters" @submit.prevent="load()">
-      <label>店铺<select v-if="shopNames.length" v-model="shop" aria-label="店铺"><option value="">全部可见店铺</option><option v-for="item in shopNames" :value="item.shop_id" :key="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
-      <details v-if="mode === 'detail'" class="workspace-more"><summary>更多筛选{{ platform ? ' · 1' : '' }}</summary><label>平台<input v-model.trim="platform" placeholder="平台编码" /></label></details>
-      <label>开始日期<input v-model="from" type="date" :max="to" min="2026-06-01" required /></label>
-      <label>结束日期<input v-model="to" type="date" :min="from" :max="today" required /></label>
-      <button class="oa-button-primary" :disabled="busy">查询</button>
-    </form>
-    <FreshnessStatus :freshness="data?.freshness" :stale="data?.stale" />
-    <p v-if="error" class="oa-error" role="alert">{{ error }} <button @click="load()">重试</button></p>
-    <p v-else-if="busy" class="oa-panel oa-empty" role="status">正在读取{{ title }}…</p>
-    <section v-else-if="data" class="oa-panel"><p v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</p>
-      <p v-if="!data.rows?.length" class="oa-empty">所选范围暂无{{ title }}数据</p>
-      <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
-        <table class="oa-table"><thead><tr><th v-for="column in columns[mode]" :key="column.key" :class="{ 'oa-number': column.money || column.date }">{{ column.label }}</th></tr></thead><tbody>
-          <tr v-for="(row, index) in data.rows" :key="index"><td v-for="column in columns[mode]" :key="column.key" :class="{ 'oa-number': column.money || column.date }"><time v-if="column.date && row[column.key]" :datetime="String(row[column.key])">{{ display(column, row) }}</time><span v-else-if="['shop_id', 'name'].includes(column.key)" class="oa-ellipsis" :title="String(display(column, row))">{{ display(column, row) }}</span><template v-else>{{ display(column, row) }}<button v-if="column.key === 'online_order_no' && row[column.key]" type="button" class="workspace-copy" aria-label="复制平台订单号" @click="copyOrder(String(row[column.key]))">复制</button></template></td></tr>
-        </tbody></table>
-      </div>
-      <div v-if="offset || data.has_more" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset" @click="load(Math.max(0, offset - 100), true)">上一页</button><button :disabled="!data.has_more" @click="load(offset + 100, true)">下一页</button></div>
-    </section>
-  </template>
-</div>
+  <div class="oa-page order-data">
+    <PageHead :title="title" :subtitle="subtitle" />
+    <OperationNav :query="navigationQuery" />
+
+    <p v-if="!allowed" class="oa-error" role="alert">当前账号没有{{ title }}权限。</p>
+    <template v-else>
+      <form class="order-data-filters" @submit.prevent="load()">
+        <label>
+          店铺
+          <select v-if="shopNames.length" v-model="shop">
+            <option value="">全部可见店铺</option>
+            <option v-if="shop && !shopNames.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option>
+            <option v-for="item in shopNames" :value="item.shop_id" :key="item.shop_id">{{ item.shop_name || item.shop_id }}</option>
+          </select>
+          <input v-else v-model.trim="shop" placeholder="全部可见店铺" />
+        </label>
+        <label v-if="mode === 'detail'">平台<input v-model.trim="platform" placeholder="默认平台范围" /></label>
+        <label>开始日期<input v-model="from" type="date" :max="to" :min="firstDay" required /></label>
+        <label>结束日期<input v-model="to" type="date" :min="from" :max="today" required /></label>
+        <div class="order-data-filter-actions">
+          <button class="oa-button-primary" type="submit" :disabled="busy"><Search :size="16" aria-hidden="true" />查询</button>
+          <button type="button" :disabled="busy" @click="resetAndLoad">重置</button>
+        </div>
+      </form>
+
+      <p v-if="error" class="oa-error order-data-error" role="alert">
+        <span>{{ error }}</span>
+        <button v-if="failedRequest" type="button" @click="load(failedRequest.offset, failedRequest.query)">重试</button>
+      </p>
+      <p v-if="busy" class="order-data-loading oa-muted" role="status">正在读取{{ title }}…</p>
+      <section v-if="data" class="order-data-results" :aria-busy="busy" aria-labelledby="order-data-results">
+        <header class="order-data-results-head">
+          <h2 id="order-data-results" ref="resultHeader" tabindex="-1">查询结果</h2>
+          <p class="oa-muted">{{ appliedRange }}</p>
+          <FreshnessStatus :freshness="data.freshness" :stale="data.stale" />
+          <p v-if="copyStatus && !selected" class="oa-muted" role="status">{{ copyStatus }}</p>
+        </header>
+        <p v-if="!visibleRows.length" class="oa-empty">所选范围暂无{{ title }}数据</p>
+        <div v-else class="oa-table-wrap desktop-region-scroll" tabindex="0" role="region" :aria-label="title + '数据表'">
+          <table class="oa-table order-data-table">
+            <thead>
+              <tr>
+                <th v-for="column in columns[mode]" :key="column.key" scope="col" :class="{ 'oa-number': column.money, 'order-data-wide': !mobileColumns[mode].includes(column.key) }">{{ column.label }}</th>
+                <th class="oa-action-col" scope="col">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, index) in visibleRows" :key="index">
+                <td v-for="column in columns[mode]" :key="column.key" :class="{ 'oa-number': column.money, 'order-data-wide': !mobileColumns[mode].includes(column.key) }">
+                  <time v-if="column.date && row[column.key]" :datetime="String(row[column.key])">{{ display(column, row) }}</time>
+                  <span v-else :class="{ 'oa-ellipsis': ['online_order_no', 'shop_id', 'name'].includes(column.key), 'order-data-order-no': column.key === 'online_order_no' }" :title="String(display(column, row))">{{ display(column, row) }}</span>
+                  <button v-if="column.key === 'online_order_no' && row[column.key]" class="order-data-copy order-data-inline-copy" type="button" aria-label="复制平台订单号" @click="copyOrder(String(row.online_order_no))"><Copy :size="14" aria-hidden="true" /></button>
+                </td>
+                <td class="oa-action-col"><button class="order-data-view" type="button" aria-haspopup="dialog" @click="openDetails(row)">详情</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="offset || visibleRows.length || hasNext" class="order-data-pager" aria-label="列表分页">
+          <span class="oa-muted">第 {{ page }} 页<span v-if="visibleRows.length"> · 本页 {{ visibleRows.length }} 条</span></span>
+          <div>
+            <button type="button" :disabled="busy || !offset" @click="changePage(Math.max(0, offset - pageSize))"><ChevronLeft :size="16" aria-hidden="true" />上一页</button>
+            <button type="button" :disabled="busy || !hasNext" @click="changePage(offset + pageSize)">下一页<ChevronRight :size="16" aria-hidden="true" /></button>
+          </div>
+        </div>
+      </section>
+
+      <dialog ref="dialog" class="oa-dialog order-data-dialog" aria-labelledby="order-data-detail" @close="clearDetails">
+        <header>
+          <h2 id="order-data-detail">{{ detailTitle }}</h2>
+          <button autofocus type="button" aria-label="关闭详情" @click="closeDetails"><X :size="18" aria-hidden="true" /></button>
+        </header>
+        <dl v-if="selected" class="order-data-fields">
+          <div v-for="column in detailColumns[mode]" :key="column.key">
+            <dt>{{ column.label }}</dt>
+            <dd>
+              <time v-if="column.date && selected[column.key]" :datetime="String(selected[column.key])">{{ display(column, selected) }}</time>
+              <template v-else>{{ display(column, selected) }}</template>
+              <button v-if="column.key === 'online_order_no' && selected[column.key]" class="order-data-copy" type="button" @click="copyOrder(String(selected.online_order_no))"><Copy :size="14" aria-hidden="true" />复制</button>
+            </dd>
+          </div>
+        </dl>
+        <p v-if="copyStatus" class="oa-muted order-data-copy-status" role="status">{{ copyStatus }}</p>
+      </dialog>
+    </template>
+  </div>
 </template>
 
-<style scoped src="./order-workspace.css" />
+<style scoped src="./order-data.css" />

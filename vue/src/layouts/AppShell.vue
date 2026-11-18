@@ -82,7 +82,7 @@
             <span class="app-topbar__full-name">永箔运营管理系统</span>
             <span class="app-topbar__short-name">永箔运营</span>
           </span>
-          <span v-if="oaEnabled" class="oa-formal-badge" title="这里提交的业务操作会写入正式系统">新版 · 正式数据</span>
+          <span v-if="oaEnabled" class="oa-formal-badge" title="这里提交的业务操作会写入正式系统"><span class="oa-badge-prefix">新版 · </span>正式数据</span>
         </div>
         <div class="app-topbar__actions">
           <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
@@ -920,6 +920,24 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
     gap: 0.35rem;
   }
 
+  .oa-badge-prefix { display: none; }
+  .app-topbar__brand:has(.oa-formal-badge) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 8px;
+    row-gap: 0;
+  }
+  .app-topbar__brand:has(.oa-formal-badge) .mobile-menu-button {
+    grid-row: span 2;
+  }
+  .app-topbar__brand .oa-formal-badge {
+    width: fit-content;
+    padding: 0;
+    color: var(--oa-secondary);
+    background: transparent;
+    font-size: 12px;
+    line-height: 1.4;
+  }
   .app-topbar__full-name { display: none; }
   .app-topbar__short-name { display: inline; }
 }
