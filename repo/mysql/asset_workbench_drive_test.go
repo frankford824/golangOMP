@@ -76,6 +76,7 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 		case "drive-list-files-count", "drive-list-files-select":
 			checks := []string{
 				"f.owner_user_id = ?",
+				"AND (f.upload_directory_id IN (?, ?) OR f.upload_directory_id IS NULL)",
 				"f.original_filename LIKE ?",
 				"COALESCE(p.real_name, '') LIKE ?",
 				"COALESCE(u.display_name, '') LIKE ?",
@@ -103,7 +104,7 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 	createdFrom := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	createdTo := time.Date(2026, 7, 3, 23, 59, 59, 0, time.UTC)
 	args := []driver.Value{
-		ownerID,
+		ownerID, int64(31), int64(32),
 		"%海报%",
 		"%海报%",
 		"%海报%",
@@ -138,14 +139,16 @@ func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
 
 	workbenchRepo := NewAssetWorkbenchRepo(New(db))
 	_, total, err := workbenchRepo.DriveListFiles(context.Background(), repo.AssetWorkbenchDriveFilter{
-		OwnerUserID:     &ownerID,
-		Keyword:         " 海报 ",
-		OwnerKeyword:    " 张三 ",
-		OperationSource: "supplement",
-		CreatedFrom:     &createdFrom,
-		CreatedTo:       &createdTo,
-		Page:            2,
-		PageSize:        25,
+		OwnerUserID:        &ownerID,
+		UploadDirectoryIDs: []int64{31, 32},
+		Unassigned:         true,
+		Keyword:            " 海报 ",
+		OwnerKeyword:       " 张三 ",
+		OperationSource:    "supplement",
+		CreatedFrom:        &createdFrom,
+		CreatedTo:          &createdTo,
+		Page:               2,
+		PageSize:           25,
 	})
 	if err != nil {
 		t.Fatalf("DriveListFiles() error = %v", err)
@@ -292,22 +295,22 @@ func TestBuildDriveSearchBaseUsesFullTextWhenPreferred(t *testing.T) {
 
 func TestBuildDriveSearchBaseKeepsUploadOverviewFiltersOnFullTextPath(t *testing.T) {
 	ownerID := int64(7)
-	dirID := int64(33)
+	firstDir, secondDir := int64(33), int64(35)
 	createdFrom := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	createdTo := time.Date(2026, 7, 3, 23, 59, 59, 0, time.UTC)
 	base, args := buildDriveSearchBase(repo.AssetWorkbenchDriveFilter{
-		OwnerUserID:       &ownerID,
-		UploadDirectoryID: &dirID,
-		Keyword:           "海报",
-		OwnerKeyword:      "张三",
-		CreatedFrom:       &createdFrom,
-		CreatedTo:         &createdTo,
+		OwnerUserID:        &ownerID,
+		UploadDirectoryIDs: []int64{firstDir, secondDir},
+		Keyword:            "海报",
+		OwnerKeyword:       "张三",
+		CreatedFrom:        &createdFrom,
+		CreatedTo:          &createdTo,
 	}, true)
 
 	checks := []string{
 		"WHERE f.id IN (",
 		"f.owner_user_id = ?",
-		"f.upload_directory_id = ?",
+		"f.upload_directory_id IN (?, ?)",
 		"COALESCE(p.real_name, '') LIKE ?",
 		"f.created_at >= ?",
 		"f.created_at <= ?",
@@ -321,9 +324,9 @@ func TestBuildDriveSearchBaseKeepsUploadOverviewFiltersOnFullTextPath(t *testing
 		}
 	}
 	wantArgs := []interface{}{
-		ownerID, dirID, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
-		ownerID, dirID, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
-		ownerID, dirID, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
+		ownerID, firstDir, secondDir, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
+		ownerID, firstDir, secondDir, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
+		ownerID, firstDir, secondDir, "%张三%", "%张三%", "%张三%", createdFrom, createdTo, "+海报*",
 	}
 	if len(args) != len(wantArgs) {
 		t.Fatalf("args len = %d (%#v), want %d", len(args), args, len(wantArgs))

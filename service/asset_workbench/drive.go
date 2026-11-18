@@ -136,29 +136,20 @@ func (s *Service) ListDriveUploadDays(ctx context.Context, actor domain.RequestA
 	return days, nil
 }
 
-func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, keyword string, ownerKeyword string, operationSource string, createdFrom *time.Time, createdTo *time.Time, sortBy string, sortDir string, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
+func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchDriveFilter) (*DriveFilesResult, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	page, pageSize = normalizeDrivePage(page, pageSize)
-	if appErr := validateDriveOperationSource(operationSource); appErr != nil {
+	filter.Page, filter.PageSize = normalizeDrivePage(filter.Page, filter.PageSize)
+	if appErr := validateDriveOperationSource(filter.OperationSource); appErr != nil {
 		return nil, appErr
 	}
-	filter := repo.AssetWorkbenchDriveFilter{
-		OwnerUserID:       s.driveOwnerFilter(actor),
-		UploadDirectoryID: directoryID,
-		Unassigned:        unassigned,
-		OrderNo:           orderNo,
-		Keyword:           strings.TrimSpace(keyword),
-		OwnerKeyword:      strings.TrimSpace(ownerKeyword),
-		OperationSource:   strings.TrimSpace(operationSource),
-		CreatedFrom:       createdFrom,
-		CreatedTo:         createdTo,
-		SortBy:            strings.TrimSpace(sortBy),
-		SortDir:           strings.TrimSpace(sortDir),
-		Page:              page,
-		PageSize:          pageSize,
-	}
+	filter.OwnerUserID = s.driveOwnerFilter(actor)
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	filter.OwnerKeyword = strings.TrimSpace(filter.OwnerKeyword)
+	filter.OperationSource = strings.TrimSpace(filter.OperationSource)
+	filter.SortBy = strings.TrimSpace(filter.SortBy)
+	filter.SortDir = strings.TrimSpace(filter.SortDir)
 	var items []*domain.AssetWorkbenchDriveFile
 	var total int64
 	var err error
@@ -174,7 +165,7 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 	if appErr != nil {
 		return nil, appErr
 	}
-	return &DriveFilesResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
+	return &DriveFilesResult{Items: items, Total: total, Page: filter.Page, Size: filter.PageSize}, nil
 }
 
 func (s *Service) BrowseDriveFolder(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, folderPath string, page, pageSize int) (*DriveFolderBrowseResult, *domain.AppError) {

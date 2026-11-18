@@ -397,19 +397,20 @@ type AssetWorkbenchOverviewSearchFilter struct {
 }
 
 type AssetWorkbenchDriveFilter struct {
-	OwnerUserID       *int64
-	UploadDirectoryID *int64
-	Unassigned        bool
-	OrderNo           string
-	Keyword           string
-	OwnerKeyword      string
-	OperationSource   string
-	CreatedFrom       *time.Time
-	CreatedTo         *time.Time
-	SortBy            string
-	SortDir           string
-	Page              int
-	PageSize          int
+	OwnerUserID        *int64
+	UploadDirectoryID  *int64
+	UploadDirectoryIDs []int64
+	Unassigned         bool
+	OrderNo            string
+	Keyword            string
+	OwnerKeyword       string
+	OperationSource    string
+	CreatedFrom        *time.Time
+	CreatedTo          *time.Time
+	SortBy             string
+	SortDir            string
+	Page               int
+	PageSize           int
 }
 
 type AssetWorkbenchPreviewClaim struct {

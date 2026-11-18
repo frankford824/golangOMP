@@ -43,7 +43,7 @@ func TestDriveIncomeVisibilityAcrossReadPaths(t *testing.T) {
 					var file *domain.AssetWorkbenchDriveFile
 					switch path {
 					case "list":
-						result, err := s.ListDriveFiles(context.Background(), actor, nil, false, "", "", "", "", nil, nil, "", "", 1, 50)
+						result, err := s.ListDriveFiles(context.Background(), actor, repo.AssetWorkbenchDriveFilter{Page: 1, PageSize: 50})
 						if err != nil {
 							t.Fatal(err)
 						}

@@ -23,6 +23,19 @@ func driveOwnerClause(filter repo.AssetWorkbenchDriveFilter) (string, []interfac
 // driveDirectoryClause scopes queries to a specific virtual folder (upload directory)
 // or to the "unassigned" bucket (files without an upload directory).
 func driveDirectoryClause(filter repo.AssetWorkbenchDriveFilter) (string, []interface{}) {
+	if len(filter.UploadDirectoryIDs) > 0 {
+		placeholders := make([]string, len(filter.UploadDirectoryIDs))
+		args := make([]interface{}, len(filter.UploadDirectoryIDs))
+		for i, id := range filter.UploadDirectoryIDs {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		match := "f.upload_directory_id IN (" + strings.Join(placeholders, ", ") + ")"
+		if filter.Unassigned {
+			match = "(" + match + " OR f.upload_directory_id IS NULL)"
+		}
+		return " AND " + match, args
+	}
 	if filter.Unassigned {
 		return " AND f.upload_directory_id IS NULL", nil
 	}

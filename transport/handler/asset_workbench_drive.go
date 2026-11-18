@@ -26,6 +26,36 @@ func parseDriveDirectory(c *gin.Context) (*int64, bool) {
 	return nil, false
 }
 
+func parseUploadLedgerFilters(c *gin.Context) (repo.AssetWorkbenchDriveFilter, *domain.AppError) {
+	dirID, unassigned := parseDriveDirectory(c)
+	filter := repo.AssetWorkbenchDriveFilter{
+		UploadDirectoryID: dirID,
+		Unassigned:        unassigned,
+		Keyword:           c.Query("q"),
+		OwnerKeyword:      c.Query("owner"),
+		OperationSource:   strings.TrimSpace(c.Query("operation_source")),
+	}
+	raw := c.Query("dir_ids")
+	if raw == "" {
+		return filter, nil
+	}
+	if strings.TrimSpace(c.Query("dir_id")) != "" {
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "dir_id and dir_ids cannot be used together.", nil)
+	}
+	seen := make(map[int64]bool)
+	for _, value := range strings.Split(raw, ",") {
+		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || id <= 0 {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "dir_ids must contain positive directory IDs.", nil)
+		}
+		if !seen[id] {
+			filter.UploadDirectoryIDs = append(filter.UploadDirectoryIDs, id)
+			seen[id] = true
+		}
+	}
+	return filter, nil
+}
+
 func parseDriveTimeQuery(c *gin.Context, name string, endOfDay bool) (*time.Time, *domain.AppError) {
 	raw := strings.TrimSpace(c.Query(name))
 	if raw == "" {
@@ -80,20 +110,27 @@ func (h *AssetWorkbenchHandler) DriveListFiles(c *gin.Context) {
 	if !ok {
 		return
 	}
-	dirID, unassigned := parseDriveDirectory(c)
-	page, _ := strconv.Atoi(c.Query("page"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-	createdFrom, appErr := parseDriveTimeQuery(c, "created_from", false)
+	filter, appErr := parseUploadLedgerFilters(c)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
-	createdTo, appErr := parseDriveTimeQuery(c, "created_to", true)
+	filter.Page, _ = strconv.Atoi(c.Query("page"))
+	filter.PageSize, _ = strconv.Atoi(c.Query("page_size"))
+	filter.OrderNo = c.Query("order_no")
+	filter.SortBy = c.Query("sort_by")
+	filter.SortDir = c.Query("sort_dir")
+	filter.CreatedFrom, appErr = parseDriveTimeQuery(c, "created_from", false)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
-	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, dirID, unassigned, c.Query("order_no"), c.Query("q"), c.Query("owner"), c.Query("operation_source"), createdFrom, createdTo, c.Query("sort_by"), c.Query("sort_dir"), page, pageSize)
+	filter.CreatedTo, appErr = parseDriveTimeQuery(c, "created_to", true)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, filter)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -106,14 +143,12 @@ func (h *AssetWorkbenchHandler) DriveUploadDays(c *gin.Context) {
 	if !ok {
 		return
 	}
-	dirID, unassigned := parseDriveDirectory(c)
-	days, appErr := h.svc.ListDriveUploadDays(c.Request.Context(), actor, strings.TrimSpace(c.Query("month")), repo.AssetWorkbenchDriveFilter{
-		UploadDirectoryID: dirID,
-		Unassigned:        unassigned,
-		Keyword:           c.Query("q"),
-		OwnerKeyword:      c.Query("owner"),
-		OperationSource:   strings.TrimSpace(c.Query("operation_source")),
-	})
+	filter, appErr := parseUploadLedgerFilters(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	days, appErr := h.svc.ListDriveUploadDays(c.Request.Context(), actor, strings.TrimSpace(c.Query("month")), filter)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

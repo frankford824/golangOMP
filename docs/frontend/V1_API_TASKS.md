@@ -11463,6 +11463,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/orders \
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
 | `dir_id` | query | integer | 否 | - |
+| `dir_ids` | query | array<integer> | 否 | Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory. |
 | `unassigned` | query | boolean | 否 | - |
 | `order_no` | query | string | 否 | - |
 | `q` | query | string | 否 | Keyword filter across filename, relative path, format, upload directory, uploader, order number, and submission number. |
@@ -11543,6 +11544,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/files \
 |---|---|---|---|---|
 | `month` | query | string | 是 | - |
 | `dir_id` | query | integer | 否 | - |
+| `dir_ids` | query | array<integer> | 否 | Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory. |
 | `unassigned` | query | boolean | 否 | - |
 | `q` | query | string | 否 | - |
 | `owner` | query | string | 否 | - |

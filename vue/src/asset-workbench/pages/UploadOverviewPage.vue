@@ -13,6 +13,7 @@ import {
   type DriveFileRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
+import UploadLedgerCategoryFilter from '@aw/features/upload/UploadLedgerCategoryFilter.vue'
 import UploadLedgerDateField from '@aw/features/upload/UploadLedgerDateField.vue'
 import { chipClass, pricingStatusMeta, qcStatusMeta } from '@aw/shared/format/status'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
@@ -75,7 +76,7 @@ const owner = ref('')
 const currentUploadDay = () => formatShanghaiDateTime(new Date()).slice(0, 10)
 const createdFrom = ref(personalLedger.value ? currentUploadDay() : '')
 const createdTo = ref(personalLedger.value ? currentUploadDay() : '')
-const directory = ref('all')
+const selectedDirectories = ref<(number | 'unassigned')[]>([])
 const operationSource = ref<OperationSourceFilter>('all')
 const sortBy = ref<SortBy>('created_at')
 const sortDir = ref<SortDir>('desc')
@@ -133,11 +134,11 @@ const appliedFilterLabels = computed(() => {
   const labels: Array<{ key: string; label: string }> = []
   if (filters.q) labels.push({ key: 'q', label: `关键词：${filters.q}` })
   if (filters.owner && canViewAllUploads.value) labels.push({ key: 'owner', label: `创建人：${filters.owner}` })
-  if (filters.unassigned || filters.dir_id) {
-    const directoryName = filters.unassigned ? '未分类' :
-      directories.value.find(dir => dir.directory_id === filters.dir_id)?.name || '指定分类'
-    labels.push({ key: 'directory', label: `分类：${directoryName}` })
-  }
+  const directoryLabels = (filters.dir_ids ?? []).map(id =>
+    directoryOptions.value.find(dir => dir.directory_id === id)?.name || '分类 ' + id,
+  )
+  if (filters.unassigned) directoryLabels.unshift('未分类')
+  if (directoryLabels.length) labels.push({ key: 'directory', label: `分类：${directoryLabels.join('、')}` })
   if (filters.operation_source) labels.push({ key: 'source', label: `来源：${sourceLabels[filters.operation_source]}` })
   if (filters.created_from || filters.created_to) {
     const from = filters.created_from
@@ -176,11 +177,16 @@ const activeFilterCount = computed(() =>
     owner.value.trim(),
     createdFrom.value,
     createdTo.value,
-    directory.value !== 'all' ? directory.value : '',
+    selectedDirectories.value.length,
     operationSource.value !== 'all' ? operationSource.value : '',
   ].filter(Boolean).length,
 )
 const directoryOptions = computed(() => directories.value.filter((dir) => Number(dir.directory_id || 0) > 0))
+const categoryOptions = computed(() => [
+  { value: 'unassigned' as const, label: '未分类' },
+  ...directoryOptions.value.map(dir => ({ value: Number(dir.directory_id), label: dir.name })),
+])
+
 const archiveBreadcrumbs = computed(() => {
   const crumbs = [{ label: '根目录', path: '' }]
   const segments = archivePath.value.split('/').filter(Boolean)
@@ -193,10 +199,13 @@ const archiveBreadcrumbs = computed(() => {
 })
 
 function directoryParams() {
-  if (directory.value === 'unassigned') return { unassigned: true }
-  const id = Number(directory.value)
-  if (id > 0) return { dir_id: id }
-  return {}
+  const ids = selectedDirectories.value
+    .filter((value): value is number => typeof value === 'number')
+    .sort((a, b) => a - b)
+  return {
+    dir_ids: ids.length ? ids : undefined,
+    unassigned: selectedDirectories.value.includes('unassigned') || undefined,
+  }
 }
 
 function formatDateTime(value?: string) {
@@ -510,6 +519,7 @@ async function applyFilters() {
     return
   }
   clearSelection()
+  notice.value = ''
   await loadFiles(1)
 }
 
@@ -518,7 +528,7 @@ async function resetFilters() {
   owner.value = ''
   createdFrom.value = personalLedger.value ? currentUploadDay() : ''
   createdTo.value = personalLedger.value ? currentUploadDay() : ''
-  directory.value = 'all'
+  selectedDirectories.value = []
   operationSource.value = 'all'
   await applyFilters()
 }
@@ -988,16 +998,7 @@ onBeforeUnmount(() => {
           <span>创建人</span>
           <input v-model.trim="owner" placeholder="姓名或账号" />
         </label>
-        <label>
-          <span>分类</span>
-          <select v-model="directory">
-            <option value="all">全部分类</option>
-            <option value="unassigned">未分类</option>
-            <option v-for="dir in directoryOptions" :key="dir.directory_id ?? dir.name" :value="String(dir.directory_id)">
-              {{ dir.name }}
-            </option>
-          </select>
-        </label>
+        <UploadLedgerCategoryFilter v-model="selectedDirectories" :options="categoryOptions" />
         <label>
           <span>操作来源</span>
           <select v-model="operationSource" aria-label="操作来源筛选">

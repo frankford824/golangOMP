@@ -15396,6 +15396,8 @@ export interface paths {
             parameters: {
                 query?: {
                     dir_id?: number;
+                    /** @description Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory. */
+                    dir_ids?: number[];
                     unassigned?: boolean;
                     order_no?: string;
                     /** @description Keyword filter across filename, relative path, format, upload directory, uploader, order number, and submission number. */
@@ -15517,6 +15519,8 @@ export interface paths {
                 query: {
                     month: string;
                     dir_id?: number;
+                    /** @description Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory. */
+                    dir_ids?: number[];
                     unassigned?: boolean;
                     q?: string;
                     owner?: string;

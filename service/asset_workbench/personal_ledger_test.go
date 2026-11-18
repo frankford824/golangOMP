@@ -57,12 +57,19 @@ func TestPersonalLedgerAlwaysScopesDatesAndOwnerKeywordsToAuthenticatedSubmitter
 			s := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
 			from := time.Date(2026, 10, 13, 0, 0, 0, 0, time.FixedZone("CST", 8*3600))
 			to := from.Add(24*time.Hour - time.Nanosecond)
-			_, appErr := s.ListDriveFiles(context.Background(), domain.RequestActor{ID: 22, Roles: []domain.Role{domain.RoleAssetSubmitter}}, nil, false, "", keyword, "other-user", "normal_upload", &from, &to, "created_at", "desc", 1, 50)
+			_, appErr := s.ListDriveFiles(context.Background(), domain.RequestActor{ID: 22, Roles: []domain.Role{domain.RoleAssetSubmitter}}, repo.AssetWorkbenchDriveFilter{
+				Keyword: keyword, OwnerKeyword: "other-user", OperationSource: "normal_upload",
+				UploadDirectoryIDs: []int64{2, 3}, CreatedFrom: &from, CreatedTo: &to,
+				SortBy: "created_at", SortDir: "desc", Page: 1, PageSize: 50,
+			})
 			if appErr != nil {
 				t.Fatal(appErr)
 			}
 			if r.filter.OwnerUserID == nil || *r.filter.OwnerUserID != 22 {
 				t.Fatal("creator keyword must never override authenticated owner scope")
+			}
+			if len(r.filter.UploadDirectoryIDs) != 2 {
+				t.Fatal("selected categories were lost")
 			}
 			if r.filter.CreatedFrom == nil || !r.filter.CreatedFrom.Equal(from) || r.filter.CreatedTo == nil || !r.filter.CreatedTo.Equal(to) {
 				t.Fatal("personal ledger date scope was lost")

@@ -2045,14 +2045,18 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async driveUploadDays(params: { month: string; dir_id?: number; unassigned?: boolean; q?: string; owner?: string; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
-    const res = await http.get<ApiEnvelope<string[]>>('/v1/asset-workbench/drive/upload-days', { params, signal })
+  async driveUploadDays(params: { month: string; dir_id?: number; dir_ids?: number[]; unassigned?: boolean; q?: string; owner?: string; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
+    const res = await http.get<ApiEnvelope<string[]>>('/v1/asset-workbench/drive/upload-days', {
+      params: { ...params, dir_ids: params.dir_ids?.length ? params.dir_ids.join(',') : undefined },
+      signal,
+    })
     return unwrap(res.data)
   },
 
   async driveFiles(
     params: {
       dir_id?: number
+      dir_ids?: number[]
       unassigned?: boolean
       order_no?: string
       q?: string
@@ -2077,7 +2081,8 @@ export const assetWorkbenchApi = {
     if (params.sort_by) query.sort_by = params.sort_by
     if (params.sort_dir) query.sort_dir = params.sort_dir
     if (params.unassigned) query.unassigned = 1
-    else if (params.dir_id) query.dir_id = params.dir_id
+    if (params.dir_ids?.length) query.dir_ids = params.dir_ids.join(',')
+    else if (!params.unassigned && params.dir_id) query.dir_id = params.dir_id
     if (params.page) query.page = params.page
     if (params.page_size) query.page_size = params.page_size
     const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/files', { params: query, signal })

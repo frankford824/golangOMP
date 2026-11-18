@@ -16789,6 +16789,14 @@ paths:
           name: dir_id
           schema: { type: integer }
         - in: query
+          name: dir_ids
+          description: Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { type: integer, format: int64, minimum: 1 }
+        - in: query
           name: unassigned
           schema: { type: boolean }
         - in: query
@@ -16907,6 +16915,14 @@ paths:
         - in: query
           name: dir_id
           schema: { type: integer }
+        - in: query
+          name: dir_ids
+          description: Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { type: integer, format: int64, minimum: 1 }
         - in: query
           name: unassigned
           schema: { type: boolean }
