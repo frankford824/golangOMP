@@ -96,6 +96,9 @@ func (c *client) request(ctx context.Context, query string, values url.Values) (
 			return nil, errUnavailable
 		}
 		body, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
+		if err == nil && len(body) > 8<<20 {
+			_, _ = io.Copy(io.Discard, response.Body)
+		}
 		response.Body.Close()
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, errTimeout

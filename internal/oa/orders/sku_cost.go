@@ -18,7 +18,7 @@ var costAmount = regexp.MustCompile(`^(0|[1-9][0-9]{0,9})\.[0-9]{2}$`)
 
 const skuCostSchema = `CREATE TABLE IF NOT EXISTS oa_sku_cost_audit (
  id BIGINT AUTO_INCREMENT PRIMARY KEY, sku_item_id BIGINT NOT NULL, actor_id BIGINT NOT NULL,
- before_cost DECIMAL(12,2) NULL, after_cost DECIMAL(12,2) NOT NULL,
+ before_cost DECIMAL(14,4) NULL, after_cost DECIMAL(14,4) NOT NULL,
  reason VARCHAR(255) NOT NULL, created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
  KEY sku_revision (sku_item_id,id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
@@ -68,7 +68,7 @@ func (s *server) skuCost(w http.ResponseWriter, r *http.Request) {
 	version := costVersion(itemID, latest, before, modified)
 	var amount any
 	if before.Valid {
-		amount = before.String
+		amount = displayUnitCost(before.String)
 	}
 	if r.Method == http.MethodPatch {
 		var request struct {
@@ -104,12 +104,12 @@ func (s *server) skuCost(w http.ResponseWriter, r *http.Request) {
 			platform.Error(w, 503, "成本审计暂时无法保存")
 			return
 		}
-		if err = tx.QueryRowContext(ctx, `SELECT CAST(updated_at AS CHAR) FROM task_sku_items WHERE id=?`, itemID).Scan(&modified); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT CAST(cost_price AS CHAR),CAST(updated_at AS CHAR) FROM task_sku_items WHERE id=?`, itemID).Scan(&before, &modified); err != nil {
 			platform.Error(w, 503, "成本版本暂时不可用")
 			return
 		}
-		version = costVersion(itemID, latest, sql.NullString{String: request.Cost, Valid: true}, modified)
-		amount = request.Cost
+		version = costVersion(itemID, latest, before, modified)
+		amount = displayUnitCost(before.String)
 	}
 	if err = tx.Commit(); err != nil {
 		platform.Error(w, 503, "成本事务暂时无法完成")
@@ -120,4 +120,14 @@ func (s *server) skuCost(w http.ResponseWriter, r *http.Request) {
 
 func costVersion(item, latest int64, price sql.NullString, modified string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%t:%s:%s", item, latest, price.Valid, price.String, modified))))
+}
+
+func displayUnitCost(stored string) string {
+	dot := strings.IndexByte(stored, '.')
+	if dot >= 0 {
+		for len(stored)-dot > 3 && strings.HasSuffix(stored, "0") {
+			stored = stored[:len(stored)-1]
+		}
+	}
+	return stored
 }

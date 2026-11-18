@@ -183,6 +183,8 @@ async function loadHistory() {
     history.value = (await api<{ rows: Record<string, unknown>[] }>('/oa-api/orders/cost-history?' + query)).rows
   } catch (cause) { historyError.value = errorText(cause) }
 }
+const costTierLabels: Record<string, string> = { verified: '核实', reference: '参考', none: '未知' }
+const implausibleCost = (value: unknown) => value === true || value === 1 || value === '1'
 const shopName = (id?: string) => shopOptions.value.find(item => item.shop_id === id)?.shop_name || id || '—'
 onMounted(() => {
   if (mayView.value && props.mode !== 'personal') void loadShops()
@@ -306,7 +308,7 @@ onMounted(() => {
         <h2>历史成交成本</h2>
         <button :disabled="busy || !rows.length" @click="loadHistory">读取成本记录</button>
         <p v-if="historyError" class="oa-error">{{ historyError }}</p>
-        <div v-else-if="historyOpen && history.length" class="oa-table-wrap"><table class="oa-table"><thead><tr><th>下单日</th><th>店铺</th><th>订单子行</th><th>核实成本</th></tr></thead><tbody><tr v-for="(row, index) in history" :key="index"><td>{{ row.order_time || '—' }}</td><td>{{ shopName(String(row.shop_id || '')) }}</td><td>{{ row.sub_order_id || '—' }}</td><td>{{ money(String(row.cost_amount ?? '')) }}</td></tr></tbody></table></div>
+        <div v-else-if="historyOpen && history.length" class="oa-table-wrap"><table class="oa-table"><thead><tr><th>下单日</th><th>店铺</th><th>订单子行</th><th>记录成本</th><th>成本档位</th><th>可信性</th></tr></thead><tbody><tr v-for="(row, index) in history" :key="index"><td>{{ row.order_time || '—' }}</td><td>{{ shopName(String(row.shop_id || '')) }}</td><td>{{ row.sub_order_id || '—' }}</td><td>{{ money(String(row.cost_amount ?? '')) }}</td><td>{{ row.cost_amount == null ? '未知' : costTierLabels[String(row.cost_tier)] || '未分类' }}</td><td><span v-if="implausibleCost(row.cost_implausible)" class="oa-pill oa-pill-warn">不可信 · 已排除</span><span v-else-if="row.cost_tier === 'verified' && row.cost_amount != null">计入核实毛利</span><span v-else>未计入核实毛利</span></td></tr></tbody></table></div>
         <p v-else-if="historyOpen" class="oa-empty">当前范围暂无历史成本记录</p>
       </section>
     </template>

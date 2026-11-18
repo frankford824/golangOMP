@@ -3,11 +3,14 @@ package platform
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -64,48 +67,84 @@ func NewIdentity(base string) Identity {
 	}}
 }
 
-// Authenticate checks the existing platform session on each OA request. Never trust
-// client-supplied identity, roles, department IDs or forwarded user headers.
+// Authenticate coalesces simultaneous checks of the same bearer without caching
+// completed authorizations. Each business request gets its own mutable capability map.
 func (i Identity) Authenticate(next http.Handler) http.Handler {
+	type pending struct {
+		done   chan struct{}
+		actor  Actor
+		status int
+	}
+	var mu sync.Mutex
+	flights := make(map[[32]byte]*pending)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := strings.Fields(r.Header.Get("Authorization"))
 		if len(auth) != 2 || !strings.EqualFold(auth[0], "Bearer") || len(auth[1]) > 8192 {
 			Error(w, 401, "请登录运营平台")
 			return
 		}
-		req, err := http.NewRequestWithContext(r.Context(), "GET", i.Base+"/v1/auth/me", nil)
-		if err != nil {
-			Error(w, 503, "账号服务暂时不可用")
-			return
+		key := sha256.Sum256([]byte(auth[1]))
+		mu.Lock()
+		f := flights[key]
+		if f == nil {
+			f = &pending{done: make(chan struct{})}
+			flights[key] = f
+			go func(call *pending, token string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				call.actor, call.status = i.resolve(ctx, token)
+				mu.Lock()
+				delete(flights, key)
+				close(call.done)
+				mu.Unlock()
+			}(f, auth[1])
 		}
-		req.Header.Set("Authorization", "Bearer "+auth[1])
-		resp, err := i.Client.Do(req)
-		if err != nil {
-			Error(w, 503, "账号服务暂时不可用")
+		mu.Unlock()
+		select {
+		case <-r.Context().Done():
 			return
+		case <-f.done:
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 65536))
-			switch resp.StatusCode {
-			case 401, 403:
-				Error(w, resp.StatusCode, "登录已失效或账号未启用")
-			default:
-				Error(w, 503, "账号服务暂时不可用")
+		if f.status != 200 {
+			msg := "账号服务暂时不可用"
+			if f.status == 401 || f.status == 403 {
+				msg = "登录已失效或账号未启用"
 			}
+			Error(w, f.status, msg)
 			return
 		}
-		actor, err := decodeActor(io.LimitReader(resp.Body, 1<<20))
-		if err != nil {
-			Error(w, 503, "未能读取账号授权")
-			return
-		}
-		if actor.ID <= 0 {
-			Error(w, 403, "账号未启用")
-			return
-		}
+		actor := f.actor
+		actor.Actions = maps.Clone(actor.Actions)
 		next.ServeHTTP(w, WithActor(r, actor))
 	})
+}
+
+func (i Identity) resolve(ctx context.Context, token string) (Actor, int) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, i.Base+"/v1/auth/me", nil)
+	if err != nil {
+		return Actor{}, 503
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := i.Client.Do(req)
+	if err != nil {
+		return Actor{}, 503
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 65536))
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return Actor{}, resp.StatusCode
+		}
+		return Actor{}, 503
+	}
+	actor, err := decodeActor(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return Actor{}, 503
+	}
+	if actor.ID <= 0 {
+		return Actor{}, 403
+	}
+	return actor, 200
 }
 
 func decodeActor(reader io.Reader) (Actor, error) {

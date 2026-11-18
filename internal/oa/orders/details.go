@@ -78,7 +78,13 @@ func (s *server) skuDetails(w http.ResponseWriter, r *http.Request, actor platfo
 			output["current_cost"] = cost.String
 		}
 		if actor.SuperAdmin || actor.Actions["task.view"] {
-			rows, err := s.source.QueryContext(r.Context(), `SELECT DISTINCT t.id,t.task_no,t.task_status FROM tasks t LEFT JOIN task_sku_items i ON i.task_id=t.id AND i.sku_code=? AND BINARY i.sku_code=BINARY ? WHERE ((t.sku_code=? AND BINARY t.sku_code=BINARY ?) OR i.task_id IS NOT NULL) AND (?=1 OR t.creator_id=? OR t.designer_id=? OR t.current_handler_id=?) ORDER BY t.id DESC LIMIT 100`, sku, sku, sku, sku, actor.SuperAdmin, actor.ID, actor.ID, actor.ID)
+			rows, err := s.source.QueryContext(r.Context(), `SELECT DISTINCT t.id,t.task_no,t.task_status FROM tasks t
+				LEFT JOIN task_sku_items i ON i.task_id=t.id AND i.sku_code=? AND BINARY i.sku_code=BINARY ?
+				WHERE ((t.sku_code=? AND BINARY t.sku_code=BINARY ?) OR i.task_id IS NOT NULL OR EXISTS
+				(SELECT 1 FROM oa_order_task_sources src WHERE src.task_id=t.id AND BINARY src.sku=BINARY ?
+				 AND (src.shop_id=? OR src.actor_id=? OR ?=1)))
+				AND (?=1 OR t.creator_id=? OR t.designer_id=? OR t.current_handler_id=?) ORDER BY t.id DESC LIMIT 100`,
+				sku, sku, sku, sku, sku, r.URL.Query().Get("shop_id"), actor.ID, actor.SuperAdmin, actor.SuperAdmin, actor.ID, actor.ID, actor.ID)
 			if err == nil {
 				links := []taskLink{}
 				for rows.Next() {
@@ -162,7 +168,11 @@ func (s *server) saveFeedback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var taskID int64
-		err = s.source.QueryRowContext(r.Context(), `SELECT t.id FROM tasks t WHERE t.id=? AND ((t.sku_code=? AND BINARY t.sku_code=BINARY ?) OR EXISTS(SELECT 1 FROM task_sku_items i WHERE i.task_id=t.id AND i.sku_code=? AND BINARY i.sku_code=BINARY ?)) AND (?=1 OR t.creator_id=? OR t.designer_id=? OR t.current_handler_id=?)`, *item.TaskID, item.SKU, item.SKU, item.SKU, item.SKU, actor.SuperAdmin, actor.ID, actor.ID, actor.ID).Scan(&taskID)
+		err = s.source.QueryRowContext(r.Context(), `SELECT t.id FROM tasks t WHERE t.id=?
+			AND ((t.sku_code=? AND BINARY t.sku_code=BINARY ?) OR EXISTS(SELECT 1 FROM task_sku_items i WHERE i.task_id=t.id AND i.sku_code=? AND BINARY i.sku_code=BINARY ?)
+			OR EXISTS (SELECT 1 FROM oa_order_task_sources src WHERE src.task_id=t.id AND src.shop_id=? AND BINARY src.sku=BINARY ?))
+			AND (?=1 OR t.creator_id=? OR t.designer_id=? OR t.current_handler_id=?)`,
+			*item.TaskID, item.SKU, item.SKU, item.SKU, item.SKU, item.Shop, item.SKU, actor.SuperAdmin, actor.ID, actor.ID, actor.ID).Scan(&taskID)
 		if err != nil {
 			platform.Error(w, 403, "任务不可访问或 SKU 不匹配")
 			return
