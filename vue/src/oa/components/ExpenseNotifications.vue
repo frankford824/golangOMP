@@ -1,55 +1,126 @@
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue'
+import { getToken } from '@/services/http'
 import OAEmpty from './OAEmpty.vue'
-import { onMounted, ref } from 'vue'
 import { api, errorText } from '../api'
-import { feeDateTime, feeStatus } from '../feeDisplay'
+import { expenseActivityURL, useExpenseActivity, type ExpenseActivityPage } from '../expenseActivity'
+import { feeDateTime } from '../feeDisplay'
 import '../styles.css'
 
-type Activity = { id: number; created_at: string; payload: { document_id: string; state: string; title: string } }
-const items = ref<Activity[]>([])
+const props = defineProps<{ compact?: boolean; initialTab?: 'todos' | 'results' }>()
+const emit = defineEmits<{ navigate: [] }>()
+const headingId = useId()
+const activity = useExpenseActivity()
+const tab = ref<'todos' | 'results'>(props.initialTab ?? 'todos')
+const page = ref(1)
+const data = ref<ExpenseActivityPage>()
 const error = ref('')
 const loading = ref(true)
+const limit = props.compact ? 6 : 12
+let request = 0
+const count = computed(() => tab.value === 'todos' ? data.value?.todo_count ?? 0 : data.value?.result_count ?? 0)
+const totalPages = computed(() => Math.max(1, Math.ceil(count.value / limit)))
+const items = computed(() => tab.value === 'todos' ? data.value?.todos ?? [] : data.value?.items ?? [])
+const resultLabels: Record<string, string> = {
+  approved: '审批通过', returned: '退回修改', rejected: '申请已拒绝', paid: '付款已登记',
+}
+const actionLabels = { approve: '办理审批', pay: '登记付款', revise: '修改申请' }
 
 async function load() {
+  const current = ++request
+  const token = getToken()
   loading.value = true
   error.value = ''
+  const params = new URLSearchParams({ limit: String(limit), [tab.value === 'todos' ? 'todo_page' : 'result_page']: String(page.value) })
   try {
-    const result = await api<{ items: Activity[] }>('/oa-api/finance/notifications')
-    items.value = result.items ?? []
-  } catch (cause) { error.value = errorText(cause) }
-  finally { loading.value = false }
+    const result = await api<ExpenseActivityPage>(expenseActivityURL + '?' + params)
+    if (current !== request || token !== getToken()) return
+    data.value = result
+    if (page.value > totalPages.value) {
+      page.value = totalPages.value
+      await load()
+    }
+  } catch (cause) {
+    if (current === request && token === getToken()) {
+      data.value = undefined
+      error.value = errorText(cause)
+    }
+  } finally {
+    if (current === request) loading.value = false
+  }
+}
+function selectTab(value: typeof tab.value) {
+  if (value === tab.value) return
+  tab.value = value
+  page.value = 1
+  void load()
+}
+function turnPage(value: number) {
+  page.value = value
+  void load()
+}
+function refresh() {
+  void load()
+  void activity.refresh(true)
 }
 onMounted(load)
+onUnmounted(() => request++)
+watch(() => activity.revision, load)
 </script>
 
 <template>
-  <section class="expense-activity" aria-labelledby="expense-activity-title">
-    <h2 id="expense-activity-title">费用动态</h2>
+  <section class="expense-activity" :class="{ 'expense-activity--compact': compact }" :aria-labelledby="headingId">
+    <header>
+      <h2 :id="headingId">费用动态</h2>
+      <button type="button" class="oa-button" :disabled="loading" @click="refresh">刷新费用动态</button>
+    </header>
+    <div class="expense-activity__tabs" role="group" aria-label="费用动态类型">
+      <button type="button" :aria-pressed="tab === 'todos'" @click="selectTab('todos')">
+        需要我处理 {{ data?.todo_count ?? '' }}
+      </button>
+      <button type="button" :aria-pressed="tab === 'results'" @click="selectTab('results')">
+        处理结果 {{ data?.result_count ?? '' }}
+      </button>
+    </div>
     <p v-if="loading" role="status">正在加载费用动态…</p>
-    <div v-else-if="error"><p role="alert">{{ error }}</p><button type="button" @click="load">重新加载费用动态</button></div>
+    <div v-else-if="error" role="alert"><p>{{ error }}</p><button type="button" class="oa-button" @click="refresh">重新加载</button></div>
     <ul v-else-if="items.length">
-      <li v-for="item in items" :key="item.id">
-        <RouterLink :to="{ path: '/fees/document', query: { id: item.payload.document_id } }">
+      <li v-for="item in items" :key="item.payload.kind === 'result' ? item.id : item.payload.document_id">
+        <RouterLink :to="{ path: '/fees/document', query: { id: item.payload.document_id, from: 'notifications', ...(tab === 'results' ? { activity: 'results' } : {}) } }" @click="emit('navigate')">
           <strong>{{ item.payload.title || '费用单据' }}</strong>
-          <span :class="['expense-status', 'oa-state-' + item.payload.state]">{{ feeStatus(item.payload.state) }}</span>
+          <span :class="['expense-status', 'oa-state-' + item.payload.state]">
+            {{ item.payload.kind === 'result' ? (resultLabels[item.payload.state] || '状态更新') : actionLabels[item.payload.kind] }}
+          </span>
           <time :datetime="item.created_at">{{ feeDateTime(item.created_at) }}</time>
         </RouterLink>
       </li>
     </ul>
-    <OAEmpty v-else kind="inbox" title="暂无费用动态" description="单据经审批、退回或登记付款后，可在这里查看进展。" />
+    <OAEmpty v-else kind="inbox" :title="tab === 'todos' ? '暂无需要处理的费用单据' : '暂无费用处理结果'" />
+    <nav v-if="!loading && totalPages > 1" class="expense-activity__pager" aria-label="费用动态分页">
+      <span>第 {{ page }} / {{ totalPages }} 页</span>
+      <button type="button" class="oa-button" :disabled="page <= 1" @click="turnPage(page - 1)">上一页</button>
+      <button type="button" class="oa-button" :disabled="page >= totalPages" @click="turnPage(page + 1)">下一页</button>
+    </nav>
   </section>
 </template>
 
 <style scoped>
 .expense-activity { padding: 16px; margin-bottom: 12px; border: 1px solid var(--oa-line); border-radius: 8px; background: var(--oa-surface); }
-.expense-activity h2 { margin-bottom: 8px; font-size: 16px; font-weight: 600; line-height: 1.4; }
+.expense-activity--compact { padding: 0; margin: 0; border: 0; }
+.expense-activity header { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.expense-activity h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.4; }
 .expense-activity ul { list-style: none; padding: 0; margin: 0; }
 .expense-activity li + li { border-top: 1px solid rgb(var(--yb-border)); }
-.expense-activity a { display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; gap: 8px 16px; align-items: center; padding: 8px 0; min-height: 42px; }
+.expense-activity a { display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; gap: 8px 16px; align-items: center; padding: 8px; min-height: 44px; border-radius: 6px; }
+.expense-activity a:hover, .expense-activity a:focus-visible { background: rgb(var(--yb-surface-hover)); }
 .expense-activity strong { min-width: 0; overflow-wrap: anywhere; }
 .expense-activity p, .expense-activity span, .expense-activity time { color: rgb(var(--yb-text-muted)); font-size: 12px; }
-.expense-activity .expense-status { padding: 4px 8px; border-radius: 4px; color: var(--oa-ink); }
-.expense-activity time { font-variant-numeric: tabular-nums; }
+.expense-activity .expense-status { padding: 4px 8px; border-radius: 4px; color: var(--oa-ink); font-weight: 600; }
+.expense-activity time, .expense-activity__tabs button, .expense-activity__pager span { font-variant-numeric: tabular-nums; }
+.expense-activity__tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 8px; border-bottom: 1px solid var(--oa-line); }
+.expense-activity__tabs > button { min-height: 40px; padding-inline: 8px; font-size: 14px; border-bottom: 2px solid transparent; }
+.expense-activity__tabs > button[aria-pressed='true'] { border-color: var(--oa-accent); color: var(--oa-accent); font-weight: 600; }
+.expense-activity__pager { display: flex; align-items: center; justify-content: end; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 @media (max-width: 540px) {
   .expense-activity a { grid-template-columns: minmax(0, 1fr) max-content; }
   .expense-activity time { grid-column: 1 / -1; }

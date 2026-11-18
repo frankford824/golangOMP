@@ -3,9 +3,9 @@
     <header class="notif-hero">
       <div>
         <h1>通知中心</h1>
-        <p>共 {{ items.length }} 条 · {{ unreadCount }} 条未读</p>
+        <p v-if="section === 'system'">共 {{ items.length }} 条 · {{ unreadCount }} 条未读</p>
       </div>
-      <div class="notif-hero-actions">
+      <div v-if="section === 'system'" class="notif-hero-actions">
         <div class="notif-segment">
           <button
             v-for="option in filterOptions"
@@ -29,8 +29,16 @@
       </div>
     </header>
 
-    <ExpenseNotifications v-if="showExpenseActivity" />
-    <div class="notif-layout">
+    <nav v-if="showExpenseActivity || showCostActivity" class="notif-oa-segment" aria-label="通知分类">
+      <RouterLink :to="{ name: 'MeNotifications' }" :aria-current="section === 'system' ? 'page' : undefined">系统通知</RouterLink>
+      <RouterLink v-if="showExpenseActivity" :to="{ name: 'MeNotifications', query: { section: 'expense' } }"
+        :aria-current="section === 'expense' ? 'page' : undefined">费用动态</RouterLink>
+      <RouterLink v-if="showCostActivity" :to="{ name: 'MeNotifications', query: { section: 'cost' } }"
+        :aria-current="section === 'cost' ? 'page' : undefined">成本复核</RouterLink>
+    </nav>
+    <ExpenseNotifications v-if="section === 'expense'" :key="expenseTab" :initial-tab="expenseTab" />
+    <CostRequestInbox v-else-if="section === 'cost'" />
+    <div v-else class="notif-layout">
       <section class="notif-list-panel">
         <div class="notif-section-head">
           <div>
@@ -246,6 +254,7 @@ import { formatNotification } from '@/domain/notification-text'
 import { defineAsyncComponent } from 'vue'
 import type { TaskSKUSyncFailedPayload } from '@/services/v1Types'
 import { oaEnabled, useOAAccess } from '@/oa/access'
+import { expenseActivityActions } from '@/oa/expenseActivity'
 import { notificationsApi } from '@/services/api/notificationsApi'
 import { usersApi } from '@/services/api/usersApi'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
@@ -269,8 +278,17 @@ interface DirectoryUser {
 
 const router = useRouter()
 const { can: canOA } = useOAAccess()
-const showExpenseActivity = computed(() => ['finance.apply', 'finance.approve', 'finance.pay'].some(canOA))
+const showExpenseActivity = computed(() => expenseActivityActions.some(canOA))
+const showCostActivity = computed(() => canOA('orders.view') || canOA('cost.request.handle'))
+const section = computed(() => {
+  const requested = router.currentRoute.value.query.section
+  if (requested === 'expense' && showExpenseActivity.value) return 'expense'
+  if (requested === 'cost' && showCostActivity.value) return 'cost'
+  return 'system'
+})
+const expenseTab = computed(() => router.currentRoute.value.query.activity === 'results' ? 'results' : 'todos')
 const ExpenseNotifications = defineAsyncComponent(() => import('@/oa/components/ExpenseNotifications.vue'))
+const CostRequestInbox = defineAsyncComponent(() => import('@/oa/components/CostRequestInbox.vue'))
 const notificationsStore = useNotificationsStore()
 const permissionsStore = usePermissionsStore()
 const webPushStore = useWebPushStore()
@@ -564,6 +582,9 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.notif-oa-segment { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 8px; }
+.notif-oa-segment a { display: inline-flex; align-items: center; min-height: 40px; padding-inline: 12px; border-bottom: 2px solid transparent; }
+.notif-oa-segment a[aria-current='page'] { border-color: var(--oa-accent); color: var(--oa-accent); font-weight: 600; }
 .notif-page {
   min-height: calc(100vh - 5rem);
   padding: 1.25rem;

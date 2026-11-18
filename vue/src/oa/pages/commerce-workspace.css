@@ -237,3 +237,12 @@
   .commerce-overview .commerce-shortcuts h2 { font-size: var(--oa-meta-size); color: var(--oa-secondary); }
   .commerce-overview .commerce-shortcuts a { min-height: 32px; padding: 0; border: 0; margin: 0; width: auto; }
 }
+
+.commerce-workspace .oa-table .sku-check-action {
+  padding: 0 4px;
+  color: var(--oa-accent);
+  background: transparent;
+  border: 0;
+  min-width: 32px;
+  font: 500 12px/1.45 var(--oa-font);
+}

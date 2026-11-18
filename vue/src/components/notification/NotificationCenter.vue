@@ -7,16 +7,30 @@
             <Bell class="h-4 w-4" />
             通知中心
           </div>
-          <p>未读 {{ unreadCount }} 条 · 全部 {{ items.length }} 条</p>
+          <p v-if="category === 'system'">未读 {{ unreadCount }} 条 · 全部 {{ items.length }} 条</p>
         </div>
         <div class="notif-drawer-actions">
-          <button type="button" class="notif-drawer-btn notif-drawer-btn--brand" :disabled="unreadCount === 0" @click="markAllRead">
+          <button v-if="category === 'system'" type="button" class="notif-drawer-btn notif-drawer-btn--brand" :disabled="unreadCount === 0" @click="markAllRead">
             全部已读
           </button>
           <button type="button" class="notif-drawer-btn" @click="close">关闭</button>
         </div>
       </header>
 
+      <div v-if="canUseExpenses || canUseCosts" class="notif-drawer-segment" role="group" aria-label="通知分类">
+        <button type="button" :class="{ 'is-active': category === 'system' }" :aria-pressed="category === 'system'" @click="category = 'system'">系统通知</button>
+        <button v-if="canUseExpenses" type="button" :class="{ 'is-active': category === 'expenses' }" :aria-pressed="category === 'expenses'" @click="category = 'expenses'">
+          费用动态<span v-if="expenseActivity.todoCount"> · {{ expenseActivity.todoCount }} 项待办</span>
+        </button>
+        <button v-if="canUseCosts" type="button" :class="{ 'is-active': category === 'cost' }" :aria-pressed="category === 'cost'" @click="category = 'cost'">成本复核</button>
+      </div>
+      <div v-if="category === 'expenses' && canUseExpenses" class="notif-drawer-list">
+        <ExpenseNotifications compact @navigate="close" />
+      </div>
+      <div v-else-if="category === 'cost' && canUseCosts" class="notif-drawer-list">
+        <CostRequestInbox compact @navigate="close" />
+      </div>
+      <template v-else>
       <div class="notif-drawer-segment">
         <button type="button" :class="{ 'is-active': filter === 'all' }" @click="filter = 'all'">全部</button>
         <button type="button" :class="{ 'is-active': filter === 'unread' }" @click="filter = 'unread'">未读</button>
@@ -56,25 +70,50 @@
         <Inbox class="h-7 w-7" />
         <p>{{ emptyText }}</p>
       </div>
+      </template>
     </aside>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell, Inbox } from 'lucide-vue-next'
 import { formatNotification } from '@/domain/notification-text'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
 import { formatDateTimeBeijing, taskInstantMs } from '@/utils/date'
+import { useOAAccess } from '@/oa/access'
+import { useCostActivity } from '@/oa/costActivity'
+import { expenseActivityActions, useExpenseActivity } from '@/oa/expenseActivity'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [boolean] }>()
 const router = useRouter()
 const notificationsStore = useNotificationsStore()
 const filter = ref<'all' | 'unread'>('all')
+const category = ref<'system' | 'expenses' | 'cost'>('system')
+const ExpenseNotifications = defineAsyncComponent(() => import('@/oa/components/ExpenseNotifications.vue'))
+const CostRequestInbox = defineAsyncComponent(() => import('@/oa/components/CostRequestInbox.vue'))
+const { can: canOA } = useOAAccess()
+const canUseExpenses = computed(() => expenseActivityActions.some(canOA))
+const canUseCosts = computed(() => canOA('orders.view') || canOA('cost.request.handle'))
+const expenseActivity = useExpenseActivity()
+const costActivity = useCostActivity()
 
 const open = computed(() => props.open)
+watch(open, (show) => {
+  if (!show) return
+  category.value = canUseExpenses.value && expenseActivity.todoCount ? 'expenses'
+    : canUseCosts.value && costActivity.todoCount ? 'cost' : 'system'
+  if (canUseExpenses.value) void expenseActivity.refresh()
+  if (canUseCosts.value) void costActivity.refresh()
+})
+watch(canUseExpenses, (allowed) => {
+  if (!allowed && category.value === 'expenses') category.value = 'system'
+})
+watch(canUseCosts, (allowed) => {
+  if (!allowed && category.value === 'cost') category.value = 'system'
+})
 const items = computed(() => notificationsStore.items)
 const unreadCount = computed(() => notificationsStore.unreadCount)
 const filteredItems = computed(() =>

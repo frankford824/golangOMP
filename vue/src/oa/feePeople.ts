@@ -7,6 +7,6 @@ export function approverLabel(person: FeePerson) {
   return [person.name, person.department, number].filter(Boolean).join(' · ')
 }
 
-export function searchFeePeople(q: string, ids: string[] = []) {
-  return send<{ items: FeePerson[]; selected?: FeePerson[] }>('/oa-api/finance/approvers/search', { q: q.trim(), ids: ids.join(',') })
+export function searchFeePeople(q: string, ids: string[] = [], afterId = 0) {
+  return send<{ items: FeePerson[]; selected?: FeePerson[]; next_after_id?: number }>('/oa-api/finance/approvers/search', { q: q.trim(), ids: ids.join(','), after_id: afterId })
 }

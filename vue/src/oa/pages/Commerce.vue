@@ -5,6 +5,7 @@ import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, Chev
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import OAEmpty from '../components/OAEmpty.vue'
+import ProductCostAction from '../components/ProductCostAction.vue'
 import PageHead from '../components/PageHead.vue'
 import FreshnessStatus from '../components/FreshnessStatus.vue'
 import { getToken, TOKEN_STORAGE_KEY, type HttpAppError } from '@/services/http'
@@ -69,6 +70,15 @@ function recordScope(query: URLSearchParams) {
     ...(shopID ? { shop_id: shopID } : {}),
     include_brush: query.get('include_brush') === '1' ? '1' : '0',
   }
+}
+const costAction = ref<InstanceType<typeof ProductCostAction>>()
+function openCost(row: DataRow) {
+  if (!row.shop_id || !row.sku) return
+  const query = navigationQuery.value
+  void costAction.value?.open({
+    sku:row.sku,shop:row.shop_id,shopName:shopName(row.shop_id),
+    from:query.from,to:query.to,includeBrush:query.include_brush==='1',
+  })
 }
 function productLink(sku: string, shopId?: string) {
   return {
@@ -593,6 +603,7 @@ onUnmounted(() => {
     <RouterLink v-if="mode === 'detail'" class="oa-button" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }"><ChevronLeft :size="15" />返回商品</RouterLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
+  <ProductCostAction v-if="mayView" ref="costAction" />
   <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" />
   <div class="commerce-body" tabindex="0" role="region" aria-label="经营数据">
   <p v-if="!mayView" class="oa-error" role="alert">当前账号没有经营查询权限。</p>
@@ -764,7 +775,7 @@ onUnmounted(() => {
               <small v-if="row.sku" class="commerce-sku">{{ row.sku }} <button type="button" class="workspace-copy" :aria-label="'复制 SKU ' + row.sku" title="复制 SKU" @click="copySKU(row.sku)"><Copy :size="14" /></button></small>
             </td>
             <td>{{ shopName(row.shop_id) }}</td><td class="oa-number">{{ row.quantity ?? '—' }}</td><td class="oa-number">{{ money(row.item_pay_total) }}</td>
-            <td class="oa-number">{{ money(row.cost_verified_total) }}</td><td class="oa-number">{{ money(row.verified_gross) }}</td>
+            <td class="oa-number"><span>{{ money(row.cost_verified_total) }}</span> <button v-if="row.sku && row.shop_id" class="sku-check-action" type="button" :aria-label="'核对 '+row.sku+' 的成本'" @click="openCost(row)">核对</button></td><td class="oa-number">{{ money(row.verified_gross) }}</td>
             <td class="oa-number"><span v-if="row.verified_coverage != null" :class="['oa-pill', { 'oa-pill-warn': Number(row.verified_coverage) < .9 }]">{{ Number(row.verified_coverage) < .9 ? '仅覆盖 ' : '' }}{{ (Number(row.verified_coverage) * 100).toFixed(1) }}%</span><span v-else>—</span></td>
             <td v-if="mode === 'detail'" class="oa-number">{{ data.cost_context_available === false ? '成本上下文不可用' : money(data.current_cost) }}</td>
           </tr></tbody>

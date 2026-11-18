@@ -17,10 +17,13 @@ import { feeTabs } from '../routes'
 import PageHead from '../components/PageHead.vue'
 import { api, dateInChina, download, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
+import { expenseActivityActions, useExpenseActivity } from '../expenseActivity'
 import { feeDateTime, feeStatus as status } from '../feeDisplay'
 import '../styles.css'
 
 const { can, currentProfile } = useOAAccess()
+const expenseActivity = useExpenseActivity()
+const canUseExpenseActivity = computed(() => expenseActivityActions.some(can))
 
 type FeeTemplate = { id: string; name: string; type: string; channels: string[]; fields: string[]; required: string[]; evidence: string; nodes: string[]; threshold_cents: number; extra: string; version: number }
 type Evidence = { id: string; name: string }
@@ -108,7 +111,14 @@ const form = ref({ request_id: '', template_id: '', amount: '', reason: '', chan
 const returned = ref<string>()
 const returnedTemplate = ref<FeeTemplate>()
 const level = ref('')
-const delegates = ref<{ id: number; level: string }[]>([])
+type FinanceGrant = Approver & { status: string; level: string; pay: boolean; report: boolean }
+const grantedPeople = ref<FinanceGrant[]>([])
+const grantsLoaded = ref(false)
+const grantPage = ref(1)
+const grantPages = computed(() => Math.max(1, Math.ceil(grantedPeople.value.length / 15)))
+const visibleGrants = computed(() => grantedPeople.value.slice((grantPage.value - 1) * 15, grantPage.value * 15))
+const grantStatuses: Record<string, string> = { active: '在职', inactive: '停用或离职', deleted: '已删除', missing: '账号已不可用' }
+const grantName = (item: Approver) => item.name ? approverLabel(item) : '账号 #' + item.id
 const revealed = ref(false)
 const approval = ref({ decision: 'approve', comment: '' })
 const payment = ref({ date: dateInChina(), receipt: '', receiptName: '' })
@@ -130,10 +140,27 @@ const knownApprovers = ref<Record<number, Approver>>({})
 const approverBusy = ref(false)
 const approverError = ref('')
 let approverSearch = 0
+const approverNext = ref(0)
+let requestedApproverQuery = ''
 const grants = ref({ pay: false, report: false })
 const delegate = ref({ level: 'draft' })
 const grantTarget = ref<Approver>()
 const delegateTarget = ref<Approver>()
+const inactiveGrant = (target: Approver | undefined) => !!target && grantedPeople.value.some(item => item.id === target.id && item.status !== 'active')
+function selectGrantTarget(target: Approver | undefined, kind: 'template' | 'finance') {
+  const current = grantedPeople.value.find(item => item.id === target?.id)
+  if (kind === 'template') {
+    delegateTarget.value = target
+    delegate.value.level = current?.status === 'active' ? current.level : (current ? 'none' : 'publish')
+  } else {
+    grantTarget.value = target
+    grants.value = current?.status === 'active' ? { pay: current.pay, report: current.report } : { pay: false, report: false }
+  }
+}
+function editGrant(item: FinanceGrant, kind: 'template' | 'finance') {
+  selectGrantTarget(item, kind)
+  openGrantPanel(kind === 'template' ? delegatePanel.value : financeGrantPanel.value)
+}
 const delegateLevels: Record<string, string> = { none: '撤销模板维护权', draft: '编辑草稿', publish: '编辑并发布' }
 const canEditTemplate = computed(() => level.value === 'draft' || level.value === 'publish')
 const canManageTemplates = computed(() => canEditTemplate.value || isAdmin.value)
@@ -152,6 +179,9 @@ const decisions: Record<string, string> = { approve: '同意', return: '退回�
 const active = computed(() => returnedTemplate.value || templates.value.find(item => item.id === form.value.template_id))
 const own = computed(() => String(detail.value?.applicant_id) === String(currentProfile.value?.id))
 const documentReturn = computed(() => {
+  if (route.query.from === 'notifications' && canUseExpenseActivity.value) {
+    return { name: 'MeNotifications', query: { section: 'expense', ...(route.query.activity === 'results' ? { activity: 'results' } : {}) } }
+  }
   if (route.query.from === 'report' && can('finance.report')) {
     return { path: '/fees/report', query: { period: route.query.period, page: route.query.page } }
   }
@@ -225,7 +255,12 @@ function approvalChoices(value: string) {
   if (value.startsWith('fixed:') && !results.some(option => option.value === value)) results.unshift({ value, label: nodeLabel(value) })
   return [{ value: 'manager', label: '申请人直属负责人' }, ...results]
 }
-async function findApprovers() {
+async function findApprovers(afterId = 0) {
+  if (!afterId) {
+    requestedApproverQuery = approverQuery.value
+    approverNext.value = 0
+    approverOptions.value = []
+  }
   const search = ++approverSearch
   approverBusy.value = true
   approverError.value = ''
@@ -233,9 +268,10 @@ async function findApprovers() {
     const selected = [...new Set([...(draft.value?.nodes ?? []), draft.value?.extra ?? ''])]
       .filter(value => value.startsWith('fixed:'))
       .map(value => value.slice(6))
-    const { items, selected: resolved } = await searchFeePeople(approverQuery.value, selected)
+    const { items, selected: resolved, next_after_id } = await searchFeePeople(requestedApproverQuery, selected, afterId)
     if (search !== approverSearch) return
-    approverOptions.value = items || []
+    approverOptions.value = afterId ? [...approverOptions.value, ...(items || [])] : (items || [])
+    approverNext.value = next_after_id || 0
     for (const person of [...approverOptions.value, ...(resolved ?? [])]) knownApprovers.value[person.id] = person
   } catch (cause) {
     if (search === approverSearch) approverError.value = errorText(cause)
@@ -413,6 +449,7 @@ async function submit() {
     ...fields, reason: fields.reason.trim(), holder: fields.holder.trim(), account: fields.account.trim(),
     bank: fields.bank.trim(), amount_cents: amountCents, files: evidence.map(file => file.id),
   })
+  expenseActivity.invalidate()
   edited.value = false
   if (returned.value && result?.id) {
     returned.value = undefined
@@ -450,6 +487,7 @@ async function act() {
     if (!window.confirm(reject ? `拒绝${subject}？拒绝将结束本次审批。` : `退回${subject}？申请人修改后可重新提交。`)) return
   }
   detail.value = await send<FeeDoc>(`/oa-api/finance/documents/${encodeURIComponent(id)}/decision`, { ...approval.value, current: detail.value.current, version: detail.value.version })
+  expenseActivity.invalidate()
   approvalsChanged.value = true
   notice.value = ({
     waiting: '已同意，申请已转交下一位审批人',
@@ -465,6 +503,7 @@ async function pay() {
   detail.value = await send<FeeDoc>(`/oa-api/finance/documents/${encodeURIComponent(id)}/payment`, {
     date: payment.value.date, receipt: payment.value.receipt, amount_cents: detail.value.amount_cents,
   })
+  expenseActivity.invalidate()
   revealed.value = false
   approvalsChanged.value = true
   notice.value = '付款已登记，回单已归档'
@@ -509,28 +548,37 @@ async function saveTemplate(publish: boolean) {
   draft.value = undefined
   notice.value = publish ? '模板已发布' : '草稿已保存'
 }
+async function loadGrants() {
+  grantsLoaded.value = false
+  grantedPeople.value = (await api<{ items: FinanceGrant[] }>('/oa-api/finance/grants')).items || []
+  grantPage.value = Math.min(grantPage.value, grantPages.value)
+  grantsLoaded.value = true
+}
 async function saveFinanceAccess() {
   const { pay, report } = grants.value
   if (!grantTarget.value) throw new Error('请选择经办人')
   const { id } = grantTarget.value
-  if (!window.confirm(`为 ${approverLabel(grantTarget.value)}（账号 #${id}）保存财务授权？付款登记：${pay ? '允许' : '不允许'}；支出统计：${report ? '允许' : '不允许'}。`)) return
+  if (!window.confirm(`为 ${grantName(grantTarget.value)}（账号 #${id}）保存财务授权？付款登记：${pay ? '允许' : '不允许'}；支出统计：${report ? '允许' : '不允许'}。`)) return
   await send('/oa-api/finance/actions/' + encodeURIComponent(id), { pay, report }, 'PUT')
-  notice.value = '财务经办权限已保存'
+  grantTarget.value = undefined
+  await loadGrants()
+  notice.value = pay || report ? '财务经办权限已保存' : '财务经办权限已撤销'
 }
 async function saveDelegate() {
   if (!delegateTarget.value) throw new Error('请选择受托人')
   const { id } = delegateTarget.value
-  if (!window.confirm(`为 ${approverLabel(delegateTarget.value)}（账号 #${id}）保存模板委托？${delegateLevels[delegate.value.level]}。`)) return
+  if (!window.confirm(`为 ${grantName(delegateTarget.value)}（账号 #${id}）保存模板委托？${delegateLevels[delegate.value.level]}。`)) return
   await send('/oa-api/finance/delegates/' + encodeURIComponent(id), { level: delegate.value.level }, 'PUT')
-  delegates.value = (await api<{ items: { id: number; level: string }[] }>('/oa-api/finance/delegates')).items || []
-  notice.value = '模板维护委托已保存'
+  delegateTarget.value = undefined
+  await loadGrants()
+  notice.value = delegate.value.level === 'none' ? '模板维护委托已撤销' : '模板维护委托已保存'
 }
 
 onMounted(() => void run(async () => {
   if (!allowed.value) return
   if (props.mode === 'apply' || props.mode === 'templates') await loadTemplates()
   if (props.mode === 'templates' && isAdmin.value && route.query.manage === 'publish') openGrantPanel(delegatePanel.value)
-  if (props.mode === 'templates' && isAdmin.value) delegates.value = (await api<{ items: { id: number; level: string }[] }>('/oa-api/finance/delegates')).items || []
+  if (props.mode === 'templates' && isAdmin.value) await loadGrants()
   if (['mine', 'approval', 'document'].includes(props.mode) && typeof route.query.id === 'string') {
     await open(route.query.id)
     if (props.mode === 'mine' && route.query.submitted === '1' && own.value) notice.value = '申请已提交，等待审批'
@@ -555,6 +603,9 @@ watch(() => route.query.id, (id, previous) => {
   <nav class="fee-tabs" aria-label="费用中心">
     <RouterLink v-for="tab in feeTabs.filter(item => item.actions.some(can))" :key="tab.mode" :to="'/fees/' + tab.mode"
       :aria-current="mode === tab.mode ? 'page' : undefined">{{ tab.mode === 'approval' && !can('finance.approve') ? '待付款' : tab.label }}</RouterLink>
+    <RouterLink v-if="canUseExpenseActivity" :to="{ name: 'MeNotifications', query: { section: 'expense' } }">
+      费用动态<span v-if="expenseActivity.todoCount"> · {{ expenseActivity.todoCount }} 项待办</span>
+    </RouterLink>
   </nav>
   <section v-if="!allowed" class="oa-panel">
     <OAEmpty kind="inbox" title="当前页面不可用" :description="accessMessage" />
@@ -632,7 +683,7 @@ watch(() => route.query.id, (id, previous) => {
         :title="mode === 'document' ? '未选中费用单据' : queueEmpty"
         :description="mode === 'document' ? '请从费用列表或通知打开一张单据。' : queueGuide">
         <RouterLink v-if="mode === 'mine'" class="oa-button oa-button-primary" to="/fees/apply">发起费用申请</RouterLink>
-        <RouterLink v-else-if="mode === 'document'" class="oa-button" :to="documentReturn">返回费用列表</RouterLink>
+        <RouterLink v-else-if="mode === 'document'" class="oa-button" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : '返回费用列表' }}</RouterLink>
       </OAEmpty>
       <div v-if="!busy && !error && docs.length" class="oa-table-wrap">
         <table class="oa-table"><thead><tr><th>申请 / 单号</th><th>申请人</th><th class="oa-number">金额</th><th>来源</th><th>状态</th><th class="oa-action-col">操作</th></tr></thead><tbody>
@@ -647,7 +698,7 @@ watch(() => route.query.id, (id, previous) => {
     </section>
     <template v-else>
       <div class="oa-actions fee-back">
-        <RouterLink v-if="mode === 'document'" class="oa-button" :to="documentReturn"><ArrowLeft :size="15" aria-hidden="true" /> 返回列表</RouterLink>
+        <RouterLink v-if="mode === 'document'" class="oa-button" :to="documentReturn"><ArrowLeft :size="15" aria-hidden="true" /> {{ route.query.from === 'notifications' ? '返回费用动态' : '返回列表' }}</RouterLink>
         <button v-else type="button" :disabled="busy" @click="run(returnToQueue)"><ArrowLeft :size="15" aria-hidden="true" /> 返回{{ returnLabel }}</button>
         <button v-if="own && detail.state === 'returned'" class="oa-button-primary" :disabled="busy" @click="editReturned">修改并重提</button>
       </div>
@@ -704,7 +755,7 @@ watch(() => route.query.id, (id, previous) => {
         <OAEmpty v-if="loadedTemplates && !templates.length" kind="files" title="当前暂无费用模板"
           :description="canEditTemplate ? '新建模板，配置支付方式、凭证和审批节点。发布后员工可以发起申请。' : templateGuide">
           <button v-if="canEditTemplate && !draft" class="oa-button-primary" @click="beginTemplate()">创建第一个费用模板</button>
-          <button v-if="isAdmin && level !== 'publish'" :class="{ 'oa-button-primary': !canEditTemplate }" @click="openGrantPanel(delegatePanel)">指定模板发布人</button>
+          <button v-if="isAdmin && !draft" @click="openGrantPanel(delegatePanel)">指定模板发布人</button>
           <button v-if="isAdmin" @click="openGrantPanel(financeGrantPanel)">设置付款经办人</button>
         </OAEmpty>
         <button v-if="loadedTemplates && templates.length && canEditTemplate" :class="{ 'oa-button-primary': !draft }" @click="beginTemplate()">新建费用模板</button>
@@ -722,9 +773,10 @@ watch(() => route.query.id, (id, previous) => {
           <fieldset class="oa-fieldset"><legend>支付方式</legend><div class="oa-checks"><label v-for="(label, key) in channels" :key="key"><input v-model="draft.channels" type="checkbox" :value="key" />{{ label }}</label></div></fieldset>
           <fieldset v-if="list(templateFields.fields).length" class="oa-fieldset"><legend>必填字段</legend><div class="oa-checks"><label v-for="field in list(templateFields.fields)" :key="field"><input v-model="draft.required" type="checkbox" :value="field" />{{ field }}</label></div></fieldset>
           <fieldset class="oa-fieldset oa-form"><legend>审批节点</legend>
-            <div class="oa-actions oa-filter"><label>搜索审批人<input v-model="approverQuery" placeholder="姓名 / 拼音 / 部门 / 工号 / 完整手机号" @keydown.enter.prevent="findApprovers" /></label><button type="button" :disabled="approverBusy" @click="findApprovers">{{ approverBusy ? '搜索中…' : '搜索' }}</button></div>
+            <div class="oa-actions oa-filter"><label>搜索审批人<input v-model="approverQuery" placeholder="姓名 / 拼音 / 部门 / 工号 / 完整手机号" @keydown.enter.prevent="findApprovers()" /></label><button type="button" :disabled="approverBusy" @click="findApprovers()">{{ approverBusy ? '搜索中…' : '搜索' }}</button></div>
             <p v-if="approverError" class="oa-error" role="alert">{{ approverError }}</p>
-            <p v-else-if="!approverBusy && approverQuery && !approverOptions.length" class="oa-muted" role="status">没有匹配的在职人员。</p>
+            <p v-else-if="!approverBusy && !approverOptions.length" class="oa-muted" role="status">没有匹配的在职人员。</p>
+            <div v-if="approverNext" class="oa-actions"><small role="status">已加载 {{ approverOptions.length }} 名候选</small><button type="button" :disabled="approverBusy" @click="findApprovers(approverNext)">加载更多候选</button></div>
             <div v-for="(item, index) in draft.nodes" :key="index" class="oa-actions">
               <label>第 {{ index + 1 }} 步<select v-model="draft.nodes[index]" :aria-label="'第 ' + (index + 1) + ' 步'" required><option value="" disabled>选择审批人</option><option v-for="option in approvalChoices(item)" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
               <button type="button" :disabled="index === 0" @click="movingNode(index, -1)">上移</button>
@@ -741,20 +793,55 @@ watch(() => route.query.id, (id, previous) => {
         </form>
       </section>
     </div>
+    <section v-if="isAdmin" class="oa-panel">
+      <div class="oa-actions fee-grants-heading"><h2>已授权人员</h2>
+        <button type="button" @click="selectGrantTarget(undefined, 'template'); openGrantPanel(delegatePanel)">新增模板维护授权</button>
+        <button type="button" @click="selectGrantTarget(undefined, 'finance'); openGrantPanel(financeGrantPanel)">新增财务经办授权</button>
+      </div>
+      <p class="oa-muted">查看显式授权。超级管理员和具备公司级费用管理权限的账号可直接维护、发布模板。付款登记和报表各自授权。</p>
+      <p v-if="!grantsLoaded && busy" role="status" class="oa-muted">正在读取已授权人员…</p>
+      <button v-else-if="!grantsLoaded" type="button" @click="run(loadGrants)">重新读取已授权人员</button>
+      <OAEmpty v-else-if="!grantedPeople.length" kind="list" title="暂无显式授权" description="可为模板维护人员或财务经办人员新增授权。" />
+      <div v-else class="oa-table-wrap">
+        <table class="oa-table">
+          <thead><tr><th>人员 / 部门 / 工号</th><th>账号状态</th><th>模板维护</th><th>付款登记</th><th>费用报表</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="item in visibleGrants" :key="item.id">
+              <td>{{ grantName(item) }}</td><td>{{ grantStatuses[item.status] || item.status }}</td>
+              <td>{{ item.level === 'none' ? '—' : delegateLevels[item.level] }}</td>
+              <td>{{ item.pay ? '已授权' : '—' }}</td><td>{{ item.report ? '已授权' : '—' }}</td>
+              <td><div class="oa-actions">
+                <button v-if="item.status === 'active' || item.level !== 'none'" type="button" :disabled="busy" @click="editGrant(item, 'template')">{{ item.status === 'active' ? '修改模板维护' : '撤销模板维护' }}</button>
+                <button v-if="item.status === 'active' || item.pay || item.report" type="button" :disabled="busy" @click="editGrant(item, 'finance')">{{ item.status === 'active' ? '修改财务经办' : '撤销财务经办' }}</button>
+              </div></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <nav v-if="grantPages > 1" class="oa-actions fee-pager" aria-label="已授权人员分页">
+        <span>共 {{ grantedPeople.length }} 人 · {{ grantPage }} / {{ grantPages }} 页</span>
+        <button :disabled="grantPage <= 1" @click="grantPage--">上一页</button>
+        <button :disabled="grantPage >= grantPages" @click="grantPage++">下一页</button>
+      </nav>
+    </section>
     <details v-if="isAdmin" ref="delegatePanel" class="oa-panel fee-disclosure">
       <summary>模板维护委托</summary>
-      <dl v-if="delegates.length" class="oa-kv"><div v-for="item in delegates" :key="item.id"><dt>账号 #{{ item.id }}</dt><dd>{{ { none: '无模板维护权', draft: '编辑草稿', publish: '编辑并发布' }[item.level] || item.level }}</dd></div></dl>
       <form class="oa-form" @submit.prevent="run(saveDelegate)">
-        <div class="oa-form-row"><FeePersonSelect v-model="delegateTarget" label="受托人" :disabled="busy" @update:model-value="delegate.level = 'draft'" /><label>维护权限<select v-model="delegate.level"><option value="none">无模板维护权</option><option value="draft">编辑草稿</option><option value="publish">编辑并发布</option></select></label></div>
-        <div class="oa-actions"><button :disabled="busy || !delegateTarget">保存委托</button></div>
+        <div class="oa-form-row">
+          <p v-if="inactiveGrant(delegateTarget)" class="oa-muted">{{ delegateTarget && grantName(delegateTarget) }} · 只可撤销历史授权</p>
+          <FeePersonSelect v-else :model-value="delegateTarget" label="受托人" :disabled="busy || !grantsLoaded" @update:model-value="person => selectGrantTarget(person, 'template')" />
+          <label>维护权限<select v-model="delegate.level" :disabled="inactiveGrant(delegateTarget)"><option value="none">无模板维护权</option><option value="draft">编辑草稿</option><option value="publish">编辑并发布</option></select></label>
+        </div>
+        <div class="oa-actions"><button type="button" :disabled="busy || !delegateTarget" @click="selectGrantTarget(undefined, 'template')">取消选择</button><button :disabled="busy || !delegateTarget || !grantsLoaded">{{ inactiveGrant(delegateTarget) ? '确认撤销模板维护' : '保存委托' }}</button></div>
       </form>
     </details>
     <details v-if="isAdmin" ref="financeGrantPanel" class="oa-panel fee-disclosure">
-      <summary>财务经办授权</summary><p class="oa-subtitle">付款登记与支出统计可以分别授权。保存时将以本次选择替换经办人的两项权限。</p>
+      <summary>财务经办授权</summary><p class="oa-subtitle">付款登记和费用报表分别授权。保存时会应用这里选择的两项权限。</p>
       <form class="oa-form oa-person-tabs" @submit.prevent="run(saveFinanceAccess)">
-        <FeePersonSelect v-model="grantTarget" label="经办人" :disabled="busy" @update:model-value="grants = { pay: false, report: false }" />
-        <div class="oa-checks"><label><input v-model="grants.pay" type="checkbox" />付款登记</label><label><input v-model="grants.report" type="checkbox" />支出统计</label></div>
-        <div class="oa-actions"><button :disabled="busy || !grantTarget">保存财务授权</button></div>
+        <p v-if="inactiveGrant(grantTarget)" class="oa-muted">{{ grantTarget && grantName(grantTarget) }} · 只可撤销历史授权</p>
+        <FeePersonSelect v-else :model-value="grantTarget" label="经办人" :disabled="busy || !grantsLoaded" @update:model-value="person => selectGrantTarget(person, 'finance')" />
+        <div class="oa-checks"><label><input v-model="grants.pay" type="checkbox" :disabled="inactiveGrant(grantTarget)" />付款登记</label><label><input v-model="grants.report" type="checkbox" :disabled="inactiveGrant(grantTarget)" />费用报表</label></div>
+        <div class="oa-actions"><button type="button" :disabled="busy || !grantTarget" @click="selectGrantTarget(undefined, 'finance')">取消选择</button><button :disabled="busy || !grantTarget || !grantsLoaded">{{ inactiveGrant(grantTarget) ? '确认撤销财务经办' : '保存财务授权' }}</button></div>
       </form>
     </details>
   </template>
@@ -795,6 +882,8 @@ watch(() => route.query.id, (id, previous) => {
 .fee-document { align-items: start; }
 .fee-timeline li { padding-block: 5px; }
 .fee-step-current { color: var(--oa-accent); font-weight: 600; }
+.fee-grants-heading { margin-bottom: 8px; }
+.fee-grants-heading h2 { margin: 0 auto 0 0; }
 .fee-form-actions { padding-top: 10px; border-top: 1px solid var(--oa-line); justify-content: flex-end; }
 .fee-pager { justify-content: flex-end; margin-top: 12px; color: var(--oa-muted); }
 .fee-disclosure { margin-top: 12px; scroll-margin-top: 12px; }

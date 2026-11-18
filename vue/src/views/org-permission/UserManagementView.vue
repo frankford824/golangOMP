@@ -7,6 +7,7 @@
           <component :is="oaEnabled ? 'h1' : 'h2'" class="directory-title">{{ oaEnabled ? '人员管理' : '用户与角色管理' }}</component>
         </div>
         <div class="directory-header-action">
+          <RouterLink v-if="oaProfile?.super_admin" class="um-btn um-btn--ghost" :to="{ name: 'PeopleShopBindings' }">店铺人员绑定</RouterLink>
           <RouterLink v-if="canManagePeople" class="um-btn um-btn--ghost" :to="{ name: 'PeopleRoster', query: { q: appliedKeyword || undefined } }">人员花名册</RouterLink>
           <BaseButton
             v-if="canCreateUser"
@@ -498,7 +499,7 @@ import BaseTablePager from '@/components/base/BaseTablePager.vue'
 const permissionsStore = usePermissionsStore()
 const oaRoute = oaEnabled ? useRoute() : undefined
 const oaRouter = oaEnabled ? useRouter() : undefined
-const { can: canOA } = useOAAccess()
+const { can: canOA, currentProfile: oaProfile } = useOAAccess()
 const canManagePeople = computed(() => canOA('people.manage'))
 const RestrictedPeople = defineAsyncComponent(() => import('@/oa/pages/People.vue'))
 const { can } = usePermission()

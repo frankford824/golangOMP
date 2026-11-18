@@ -10,20 +10,37 @@ const people = ref<FeePerson[]>([])
 const options = computed(() => people.value.map(item => ({ value: item.id, label: approverLabel(item) })))
 const selected = computed(() => person.value?.id ?? null)
 const busy = ref(false)
+const nextAfterId = ref(0)
+const initialized = ref(false)
+const pageCursors = ref<number[]>([0])
+const pageIndex = ref(0)
+let searchQuery = ''
 const error = ref('')
 let timer: number | undefined
 let request = 0
 
-function search(query: string) {
+function search(query: string, afterId = 0, requestedPage = 0) {
   window.clearTimeout(timer)
   const currentRequest = ++request
   busy.value = true
-  people.value = []
+  if (!afterId && requestedPage === 0 && query !== searchQuery) {
+    people.value = []
+    nextAfterId.value = 0
+    pageCursors.value = [0]
+    pageIndex.value = 0
+    searchQuery = query
+  }
   error.value = ''
   timer = window.setTimeout(async () => {
     try {
-      const { items } = await searchFeePeople(query)
-      if (currentRequest === request) people.value = items ?? []
+      const { items, next_after_id } = await searchFeePeople(query, [], afterId)
+      if (currentRequest === request) {
+        people.value = items ?? []
+        pageIndex.value = requestedPage
+        pageCursors.value[requestedPage] = afterId
+        nextAfterId.value = next_after_id || 0
+        initialized.value = true
+      }
     } catch (cause) {
       if (currentRequest === request) error.value = errorText(cause)
     } finally {
@@ -56,11 +73,18 @@ onUnmounted(() => {
       filterable
       remote
       clearable
-      @update:show="show => { if (show) search('') }"
+      @update:show="show => { if (show && !initialized && !busy) search('') }"
       @search="search"
       @update:value="choose"
     >
       <template #empty>{{ busy ? '正在搜索…' : '没有匹配的在职人员' }}</template>
+      <template v-if="nextAfterId || pageIndex" #action>
+        <div class="oa-actions">
+          <button type="button" :disabled="disabled || busy || !pageIndex" @click="search(searchQuery, pageCursors[pageIndex - 1], pageIndex - 1)">上一页候选</button>
+          <small role="status">第 {{ pageIndex + 1 }} 页</small>
+          <button type="button" :disabled="disabled || busy || !nextAfterId" @click="search(searchQuery, nextAfterId, pageIndex + 1)">下一页候选</button>
+        </div>
+      </template>
     </NSelect>
     <small v-if="error" class="oa-error" role="alert">{{ error }}</small>
   </div>

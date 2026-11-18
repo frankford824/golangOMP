@@ -9,7 +9,7 @@ import { api, download, errorText, saveFile, send } from '../api'
 import { useOAAccess } from '../access'
 import '../styles.css'
 
-const { can } = useOAAccess()
+const { can, currentProfile } = useOAAccess()
 const route = useRoute()
 
 type Person = { id: number; name: string; employee_no?: number | null; department?: string; team?: string }
@@ -114,6 +114,7 @@ onMounted(() => { if (props.mode === 'people' && !selected.value) void run(refre
     <RouterLink v-if="mode === 'roster'" class="oa-button" :to="{ path: '/users', query: backQuery }">返回人员管理</RouterLink>
     <RouterLink v-else-if="selected" class="oa-button" :to="{ path: '/users', query: { q: applied || undefined } }">返回目录</RouterLink>
     <RouterLink v-else class="oa-button" :to="{ path: '/users/roster', query: { q: applied || undefined } }">人员花名册</RouterLink>
+    <RouterLink v-if="currentProfile?.super_admin" class="oa-button" :to="{ name: 'PeopleShopBindings', query: { user_id: selected || undefined } }">店铺人员绑定</RouterLink>
   </PageHead>
   <p v-if="!allowed" class="oa-error" role="alert">当前账号没有人员管理权限。</p>
   <template v-else>

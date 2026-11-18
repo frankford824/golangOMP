@@ -2,6 +2,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import { oaEnabled } from './access'
 
 const Commerce = () => import('./pages/Commerce.vue')
+const ShopBindings = () => import('./pages/ShopBindings.vue')
 const People = () => import('./pages/People.vue')
 const Fees = () => import('./pages/Fees.vue')
 const Pricing = () => import('./pages/Pricing.vue')
@@ -23,6 +24,7 @@ export const oaRoutes: RouteRecordRaw[] = oaEnabled ? [
   { path: 'operations/rankings', component: Commerce, props: { mode: 'ranking' }, meta: ordersMeta },
   { path: 'operations/orders/:mode(detail|refunds|ledger)', component: OrderData, props: true, meta: ordersMeta },
   { path: 'me/performance', component: Commerce, props: { mode: 'personal' }, meta: ordersMeta },
+  { path: 'users/shop-bindings', name: 'PeopleShopBindings', component: ShopBindings, meta: peopleMeta },
   { path: 'users/roster', name: 'PeopleRoster', component: People, props: { mode: 'roster' }, meta: peopleMeta },
   { path: 'people', redirect: to => ({ name: 'UserManagement', query: to.query, hash: to.hash }) },
   { path: 'people/roster', redirect: to => ({ name: 'PeopleRoster', query: to.query, hash: to.hash }) },
