@@ -110,16 +110,12 @@ let refreshTimer: number | undefined
 const mayView = computed(() => can('orders.view'))
 const title = computed(() => ({ overview: '我的经营', products: '商品经营', detail: '商品详情与经营反馈', ranking: '经营分析与排名', personal: '我的业绩' }[props.mode]))
 
-function queryParams(endpoint: string, options: Record<string, string> = {}) {
+function queryParams(options: Record<string, string> = {}) {
   const query = new URLSearchParams({ from: from.value, to: to.value, ...options })
-  if (includeBrush.value && options.group !== 'growth' && endpoint !== 'shops') query.set('include_brush', '1')
+  if (includeBrush.value && options.group !== 'growth') query.set('include_brush', '1')
   if (shop.value.trim()) query.set('shop_id', shop.value.trim())
   return query.toString()
 }
-function withQuery(endpoint: string, options: Record<string, string> = {}) {
-  return api<OrderResult>(`/oa-api/orders/${endpoint}?${queryParams(endpoint, options)}`)
-}
-
 function clearOverview() {
   data.value = undefined
   summary.value = undefined
@@ -133,7 +129,7 @@ async function loadOverview(refresh = false, pageChange = false) {
   if (!mayView.value || !account || !token) return
   const scope = refresh ? appliedOverview : {
     account, token, offset: offset.value,
-    query: pageChange && appliedOverview ? appliedOverview.query : queryParams('summary'),
+    query: pageChange && appliedOverview ? appliedOverview.query : queryParams(),
   }
   if (!scope || scope.account !== account || scope.token !== token) return
   const sequence = ++latest.value
@@ -204,7 +200,7 @@ async function load(resetPage = true) {
     if (props.mode === 'detail') options.sku = selectedSku.value.trim()
     if (resetPage || !appliedQuery) {
       appliedGroup.value = group.value
-      appliedQuery = queryParams(endpoint, options)
+      appliedQuery = queryParams(options)
       recordScope(new URLSearchParams(appliedQuery))
     }
     const applied = new URLSearchParams(appliedQuery)
@@ -369,7 +365,7 @@ const fullCurrentMonth = computed(() => !!appliedPeriod.value && appliedPeriod.v
 const canReview = computed(() => permissions.hasMenu('task_list') || permissions.hasMenu('cost_rules') || can('finance.apply'))
 
 async function loadShops() {
-  try { shopOptions.value = (await withQuery('shops')).rows || [] }
+  try { shopOptions.value = (await api<OrderResult>('/oa-api/orders/shops')).rows || [] }
   catch { shopError.value = '店铺列表暂不可用，可手动输入店铺 ID。' }
 }
 async function saveFeedback() {
