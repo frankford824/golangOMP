@@ -29,6 +29,7 @@
       </div>
     </header>
 
+    <ExpenseNotifications v-if="showExpenseActivity" />
     <div class="notif-layout">
       <section class="notif-list-panel">
         <div class="notif-section-head">
@@ -241,6 +242,8 @@ import {
   Users,
 } from 'lucide-vue-next'
 import { formatNotification } from '@/domain/notification-text'
+import { defineAsyncComponent } from 'vue'
+import { useOAAccess } from '@/oa/access'
 import { notificationsApi } from '@/services/api/notificationsApi'
 import { usersApi } from '@/services/api/usersApi'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
@@ -263,6 +266,9 @@ interface DirectoryUser {
 }
 
 const router = useRouter()
+const { can: canOA } = useOAAccess()
+const showExpenseActivity = computed(() => ['finance.apply', 'finance.approve', 'finance.pay'].some(canOA))
+const ExpenseNotifications = defineAsyncComponent(() => import('@/oa/components/ExpenseNotifications.vue'))
 const notificationsStore = useNotificationsStore()
 const permissionsStore = usePermissionsStore()
 const webPushStore = useWebPushStore()

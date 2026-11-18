@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import http, { getToken } from '@/services/http'
+import http, { getToken, TOKEN_STORAGE_KEY } from '@/services/http'
 
 export type MediaState = 'ready' | 'queued' | 'processing' | 'failed' | 'unsupported' | 'missing' | 'source_disabled' | 'temporarily_unavailable'
 export interface MediaAccess {
@@ -52,7 +52,7 @@ if (typeof window !== 'undefined') {
   ;(navigator as Navigator & { connection?: EventTarget }).connection?.addEventListener('change', resetProbe)
   window.addEventListener('asset-media-session-reset', resetSession)
   window.addEventListener('storage', (event) => {
-    if (event.key === 'access_token') window.dispatchEvent(new Event('asset-media-session-reset'))
+    if (event.key === TOKEN_STORAGE_KEY) window.dispatchEvent(new Event('asset-media-session-reset'))
     if (event.key === ENABLED_KEY) { lanMediaEnabled.value = event.newValue === '1'; resetProbe() }
   })
 }

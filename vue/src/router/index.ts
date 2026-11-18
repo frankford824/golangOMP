@@ -9,6 +9,8 @@ import {
   resolveFirstAccessibleHomeRoute,
 } from '@/router/home-fallback'
 import { installUsageTelemetry } from '@/shared/telemetry/usage'
+import { ensureOAAccess, oaEnabled, useOAAccess } from '@/oa/access'
+import { oaRoutes } from '@/oa/routes'
 
 /**
  * 路由门禁：以后端 `frontend_access.menus` 为 SoT（Single Source of Truth）。
@@ -33,6 +35,7 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     component: AppShell,
     children: [
+      ...oaRoutes,
       {
         path: '',
         name: 'Dashboard',
@@ -192,6 +195,23 @@ router.beforeEach(async (to, _from, next) => {
   if (requiresAuth && !currentUser) {
     next({ path: '/login', query: { redirect: to.fullPath } })
     return
+  }
+
+  if (oaEnabled && currentUser) {
+    await ensureOAAccess()
+    const { can } = useOAAccess()
+    const oaAction = to.meta.oaAction
+    const required = Array.isArray(oaAction) ? oaAction : typeof oaAction === 'string' ? [oaAction] : []
+    if (required.length && !required.some(key => can(String(key)))) {
+      const fallback = typeof to.meta.oaFallback === 'string' ? to.meta.oaFallback : 'Dashboard'
+      if (fallback === 'UserManagement' && !permissionsStore.hasMenu('user_admin')) next({ name: 'Dashboard', query: { workspace: 'tasks' } })
+      else next({ name: fallback, ...(fallback === 'Dashboard' ? { query: { workspace: 'tasks' } } : {}) })
+      return
+    }
+    if (to.name === 'Dashboard' && to.query.workspace !== 'tasks' && can('orders.view')) {
+      next({ name: 'OperationsOverview' })
+      return
+    }
   }
 
   const requiredPermissions = (to.meta?.requiredPermissions ?? []) as PermissionEnumValue[]

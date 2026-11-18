@@ -12,6 +12,7 @@
       </div>
     </header>
 
+    <p v-if="sourceOrder" class="erp-pending-note">商品来源 {{ sourceOrder.sku }} · 店铺 {{ sourceOrder.shop_id }} · {{ sourceOrder.from }} 至 {{ sourceOrder.to }}</p>
     <section class="intent-grid" aria-label="选择创建意图">
       <button
         v-for="option in intentOptions"
@@ -65,6 +66,10 @@
           <button class="primary-button" type="button" @click="startAnother">继续创建</button>
         </div>
       </div>
+      <p v-if="failedSourceLinks.size" class="erp-pending-note" role="alert">
+        任务已创建，{{ failedSourceLinks.size }} 条经营来源尚未关联。
+        <button type="button" class="secondary-button" :disabled="linkingSources" @click="retryOrderSources">重试关联</button>
+      </p>
       <template v-if="planningResult">
         <div class="generated-sku-banner" role="status">
           <div>
@@ -233,6 +238,8 @@
 
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { linkOrderTask, orderTaskSource } from '@/oa/orderTask'
+import { useOAAccess } from '@/oa/access'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { AlertTriangle, Barcode, CheckCircle2, FileArchive, FileImage, ImagePlus, PackageSearch, Paintbrush, Paperclip, Plus, Save, Scissors, Trash2, X } from 'lucide-vue-next'
 
@@ -270,6 +277,10 @@ import { usePermission } from '@/composables/usePermission'
 import { generateActionId } from '@/utils/uuid'
 
 const route = useRoute()
+const { can: canOA } = useOAAccess()
+const sourceOrder = computed(() => canOA('orders.view') ? orderTaskSource(route.query) : undefined)
+const failedSourceLinks = ref(new Set<string>())
+const linkingSources = ref(false)
 const router = useRouter()
 const tasksStore = useTasksStore()
 const { can } = usePermission()
@@ -389,6 +400,7 @@ watch(erpSearchCode, (value) => {
 
 onMounted(async () => {
   if (currentDraftId.value) await restoreDraft(currentDraftId.value)
+  else if (sourceOrder.value && intent.value === 'retouch' && rows.value[0]) rows.value[0].erp_sku = sourceOrder.value.sku
   hydrating.value = false
 })
 onBeforeUnmount(() => {
@@ -797,6 +809,24 @@ function locateViolation(issue: ComposeViolation) {
   document.querySelector('.common-ribbon')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
+async function recordOrderSource(id: string | number) {
+  const source = sourceOrder.value
+  if (!source) return
+  try {
+    await linkOrderTask(source, id)
+    failedSourceLinks.value.delete(String(id))
+  } catch {
+    failedSourceLinks.value.add(String(id))
+  }
+}
+
+async function retryOrderSources() {
+  if (linkingSources.value) return
+  linkingSources.value = true
+  try { await Promise.all([...failedSourceLinks.value].map(recordOrderSource)) }
+  finally { linkingSources.value = false }
+}
+
 async function submit(retryOnly: boolean) {
   await gridRef.value?.flushRowsFromWorkbook?.()
   await Promise.resolve()
@@ -831,6 +861,7 @@ async function submit(retryOnly: boolean) {
           planningResult.value = null
           return
         }
+        void recordOrderSource(planningResult.value.task_id)
         selectedPlanningIds.value = new Set(planningResult.value.items.map((item) => item.task_sku_item_id))
         candidates.forEach((row, index) => { row.status = 'created'; row.result_task_id = String(planningResult.value?.task_id || ''); row.result_sku_code = planningResult.value?.items[index]?.sku_code })
         result.value = true
@@ -852,6 +883,7 @@ async function submit(retryOnly: boolean) {
       unitRows.forEach((row) => { row.status = 'submitting'; row.error = '' })
       try {
         const created = await tasksStore.addTask(unit.task, composeIdempotencyKey(clientCreateId.value, unit.row_ids))
+        void recordOrderSource(created.id)
         unitRows.forEach((row) => { row.status = 'created'; row.result_task_id = created.id })
         if (intent.value === 'retouch') {
           const loaded = tasksStore.getById(created.id) ?? created

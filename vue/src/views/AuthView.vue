@@ -24,6 +24,10 @@
         <p class="auth-subtitle text-xs text-[rgb(var(--yb-text-faint))] tracking-widest uppercase text-center whitespace-nowrap">
           请使用账号密码登录或注册新账号
         </p>
+        <template v-if="oaEnabled">
+          <p class="mt-4 inline-block rounded-md bg-[rgb(var(--yb-surface-muted))] px-2 py-1 text-xs text-[rgb(var(--yb-text-muted))]">新版 · 正式数据</p>
+          <p class="mt-2 text-xs text-[rgb(var(--yb-text-muted))]">使用正式账号登录。提交、审批与资料变更会写入正式系统。</p>
+        </template>
       </div>
 
       <!-- 错误提示 -->
@@ -200,6 +204,7 @@
 </template>
 
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePermissionsStore } from '@/stores/permissions'

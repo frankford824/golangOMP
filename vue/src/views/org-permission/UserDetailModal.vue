@@ -95,6 +95,7 @@
               </div>
             </header>
             <p class="detail-note">当前角色 · {{ currentRoleNames }}</p>
+            <p v-if="roleRestriction" class="role-readonly-hint" role="status">{{ roleRestriction }}</p>
             <div v-if="lockedRoleOptions.length" class="legacy-role-box">
               <span class="legacy-role-title">由部门或小组自动应用</span>
               <span
@@ -107,7 +108,7 @@
               </span>
             </div>
             <div v-if="editableRoleGroups.length" class="role-groups" :class="{ 'roles-grid-readonly': !canAssignRoles }">
-              <section v-for="group in editableRoleGroups" :key="group.category" class="role-group">
+              <section v-for="group in editableRoleGroups.filter(item => item.category !== 'other')" :key="group.category" class="role-group">
                 <h4 class="role-group-title">{{ group.title }}</h4>
                 <div class="roles-grid">
                   <label v-for="role in group.roles" :key="role.code" class="role-check">
@@ -115,7 +116,7 @@
                       v-model="selectedRoles"
                       type="checkbox"
                       :value="role.code"
-                      :disabled="busy || !canAssignRoles || role.code === 'member'"
+                      :disabled="busy || !canAssignRoles || (otherAuthorizationRows !== undefined && !role.assignableByCurrentActor) || role.code === 'member'"
                     />
                     <span>{{ role.display }}</span>
                     <em v-if="role.code === 'member'">基础身份，不能移除</em>
@@ -125,6 +126,16 @@
               </section>
             </div>
             <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
+            <details v-if="otherAuthorizationRows?.length || editableRoleGroups.some(group => group.category === 'other')" class="legacy-role-box detail-other-authorizations">
+              <summary>其他现有授权</summary>
+              <dl v-if="otherAuthorizationRows?.length" class="detail-note"><div v-for="row in otherAuthorizationRows" :key="row.id"><dt>{{ row.name }}</dt><dd>{{ row.source }} · {{ row.scope }}</dd></div></dl>
+              <div v-for="group in editableRoleGroups.filter(item => item.category === 'other')" :key="group.category" class="roles-grid">
+                <label v-for="role in group.roles" :key="role.code" class="role-check">
+                  <input v-model="selectedRoles" type="checkbox" :value="role.code" :disabled="busy || !canAssignRoles || !role.assignableByCurrentActor" />
+                  <span>{{ role.display }}</span><em v-if="role.hint">{{ role.hint }}</em>
+                </label>
+              </div>
+            </details>
           </section>
         </div>
 
@@ -208,6 +219,8 @@ const props = defineProps<{
   isMembershipDirty: boolean
   editableRoleGroups: RoleOptionGroup[]
   lockedRoleOptions: RoleOption[]
+  roleRestriction?: string
+  otherAuthorizationRows?: { id: number; name: string; scope: string; source: string }[]
   basicSubmitting: boolean
   membershipSubmitting: boolean
   roleSubmitting: boolean
@@ -291,3 +304,8 @@ useModalA11y(ref(true), panel, { onEsc: () => confirmDelete.value ? void cancelD
 
 <style scoped src="./userManagementModal.css"></style>
 <style scoped src="./userDetailModal.css"></style>
+<style scoped>
+.detail-other-authorizations summary { cursor: pointer; font-weight: 650; }
+.detail-other-authorizations dl { margin: 10px 0; }
+.detail-other-authorizations dl div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+</style>

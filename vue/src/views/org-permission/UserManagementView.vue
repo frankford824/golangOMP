@@ -305,7 +305,9 @@
         :is-membership-dirty="isMembershipDirty"
         :is-basic-dirty="isBasicDirty"
         :is-roles-dirty="isRolesDirty"
-        :editable-role-groups="accessRoleGroups"
+        :editable-role-groups="detailRoleGroups"
+        :other-authorization-rows="detailOtherAuthorizations"
+        :role-restriction="oaRolePlan?.blocked"
         :locked-role-options="inheritedAccessRoleOptions"
         :basic-submitting="basicSubmitting"
         :membership-submitting="membershipSubmitting"
@@ -475,6 +477,9 @@ import {
   type UserRow,
 } from './userManagementTypes'
 import { usePermissionsStore } from '@/stores/permissions'
+import { useRoute } from 'vue-router'
+import { oaEnabled } from '@/oa/access'
+import { coreUserRoleGroups, planOARoleReplacement } from '@/oa/userRoles'
 import { usePermission } from '@/composables/usePermission'
 import { patchUserMembership, clearUserMembership } from '@/composables/useOrgPermissionData'
 import BaseButton from '@/components/base/BaseButton.vue'
@@ -487,6 +492,7 @@ import BaseDataTable from '@/components/base/BaseDataTable.vue'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
 
 const permissionsStore = usePermissionsStore()
+const oaRoute = oaEnabled ? useRoute() : undefined
 const { can } = usePermission()
 
 // v1.8 对齐：用户与角色页面同时向 HRAdmin / SuperAdmin 与 DepartmentAdmin 开放。
@@ -871,6 +877,39 @@ const accessRoleGroups = computed<RoleOptionGroup[]>(() => groupRoleOptions(
     hint: accessScopeLabel(detailDirectScopeByRoleID.value.get(role.id) ?? defaultAccessScope(role.code)),
   })),
 ))
+const oaCoreRoleCodes = new Set(coreUserRoleGroups.flatMap(group => group.codes))
+const detailRoleGroups = computed<RoleOptionGroup[]>(() => {
+  if (!oaEnabled) return accessRoleGroups.value
+  const options = accessRoleGroups.value.flatMap(group => group.roles)
+  const byCode = new Map(options.map(role => [role.code, role]))
+  const detailGroups = coreUserRoleGroups.map(group => ({
+    category: group.category, title: group.title,
+    roles: group.codes.flatMap(code => {
+      const role = byCode.get(code)
+      if (!role) return []
+      return [{ ...role, assignableByCurrentActor: code !== 'super_admin' || permissionsStore.currentUser?.role === 'super_admin' }]
+    }),
+  })).filter(group => group.roles.length)
+  const special = options.filter(role => !oaCoreRoleCodes.has(role.code) && role.code !== 'member')
+  if (special.length) detailGroups.push({ category: 'other', title: '其他现有授权', roles: special })
+  return detailGroups
+})
+const detailOtherAuthorizations = computed(() => {
+  if (!oaEnabled) return undefined
+  return (detailEffectiveAccess.value?.assignments ?? []).flatMap((assignment, index) => {
+    const role = accessRoleByID.value.get(assignment.role_id)
+    const code = role?.code || assignment.role_code || ''
+    if (oaCoreRoleCodes.has(code) && !oaRolePlan.value?.blocked) return []
+    const names = (assignment.subjects ?? []).map(subject => subject.subject_name || (subject.subject_type === 'department' ? '部门 ' : '团队 ') + subject.subject_id)
+    const source = assignment.source_type === 'org_policy' ? '组织继承' : assignment.source_type === 'migration' ? '历史迁移' : assignment.source_type === 'direct' ? '直接授权' : '其他来源'
+    return [{ id: assignment.id || index, name: accessRoleDisplayName(code, role?.name || assignment.role_name || '角色 #' + assignment.role_id), scope: names.join('、') || accessScopeLabel(assignment.scope_mode), source }]
+  })
+})
+const oaRolePlan = computed(() => {
+  if (!oaEnabled || !detailEffectiveAccess.value) return undefined
+  const editable = new Set(detailRoleGroups.value.flatMap(group => group.roles).filter(role => role.assignableByCurrentActor).map(role => role.code))
+  return planOARoleReplacement(detailEffectiveAccess.value.assignments, accessRoles.value, new Set(selectedAccessRoleCodes.value), editable, defaultAccessScope)
+})
 const orgPolicyRoleGroups = computed<RoleOptionGroup[]>(() => accessRoleGroups.value
   .map((group) => ({
     ...group,
@@ -879,7 +918,7 @@ const orgPolicyRoleGroups = computed<RoleOptionGroup[]>(() => accessRoleGroups.v
       .map((role) => ({ ...role, hint: '本组织' })),
   }))
   .filter((group) => group.roles.length > 0))
-const canAssignAccessRoles = computed(() => canManageAccess.value && !!detailEffectiveAccess.value && accessRoles.value.length > 0)
+const canAssignAccessRoles = computed(() => canManageAccess.value && !!detailEffectiveAccess.value && accessRoles.value.length > 0 && !oaRolePlan.value?.blocked)
 const canDeleteUser = computed(() =>
   canManageAccess.value
   && !!detailUser.value
@@ -896,7 +935,7 @@ const isRolesDirty = computed(() => {
 })
 const inheritedAccessRoleOptions = computed<RoleOption[]>(() => detailInheritedAssignments.value
   .map((assignment) => accessRoleByID.value.get(assignment.role_id))
-  .filter((role): role is AccessRole => !!role && role.code !== 'member' && visibleAssignableRoleCodes.has(role.code))
+  .filter((role): role is AccessRole => !!role && role.code !== 'member' && visibleAssignableRoleCodes.has(role.code) && (!oaEnabled || oaCoreRoleCodes.has(role.code)))
   .filter((role, index, roles) => roles.findIndex((candidate) => candidate.code === role.code) === index)
   .map((role) => ({
     code: role.code,
@@ -912,7 +951,7 @@ const detailAccessRoleNames = computed(() => {
   const names = new Set<string>()
   for (const assignment of [...detailDirectAssignments.value, ...detailInheritedAssignments.value]) {
     const role = accessRoleByID.value.get(assignment.role_id)
-    if (role && role.code !== 'member' && visibleAssignableRoleCodes.has(role.code)) {
+    if (role && role.code !== 'member' && visibleAssignableRoleCodes.has(role.code) && (!oaEnabled || oaCoreRoleCodes.has(role.code))) {
       names.add(accessRoleDisplayName(role.code, role.name))
     }
   }
@@ -1607,9 +1646,10 @@ async function readUserDetail(id: string) {
   return mapRawUser(body)
 }
 
-async function openDetail(u: UserRow) {
+async function openDetail(u: UserRow | string) {
+  const userId = typeof u === 'string' ? u : u.id
   const sequence = ++detailSequence
-  detailUser.value = u
+  detailUser.value = typeof u === 'string' ? null : u
   detailFailed.value = false
   detailActionMessage.value = ''
   resetPasswordValue.value = ''
@@ -1619,7 +1659,7 @@ async function openDetail(u: UserRow) {
   detailInheritedAssignments.value = []
   detailLoading.value = true
   try {
-    const user = await readUserDetail(u.id)
+    const user = await readUserDetail(userId)
     if (sequence !== detailSequence) return
     detailUser.value = user
     basicForm.value = {
@@ -1633,7 +1673,7 @@ async function openDetail(u: UserRow) {
     if (canViewAccess.value) {
       try {
         if (!accessRoles.value.length) await loadAccessRoles()
-        const effective = await accessPolicyApi.effective(Number(u.id))
+        const effective = await accessPolicyApi.effective(Number(userId))
         if (sequence === detailSequence) hydrateDetailAccess(effective)
       } catch (cause) {
         if (sequence === detailSequence) detailActionMessage.value = cause instanceof Error ? cause.message : '角色权限读取失败'
@@ -1643,6 +1683,7 @@ async function openDetail(u: UserRow) {
     if (sequence === detailSequence) {
       detailFailed.value = true
       detailActionMessage.value = e instanceof Error ? e.message : '加载用户详情失败'
+      if (typeof u === 'string') listError.value = detailActionMessage.value
     }
   } finally {
     if (sequence === detailSequence) detailLoading.value = false
@@ -1757,6 +1798,10 @@ async function submitBatchDelete() {
 
 async function submitRoleReplace() {
   if (!detailUser.value || !canManageAccess.value || !detailEffectiveAccess.value) return
+  if (oaRolePlan.value?.blocked) {
+    detailActionMessage.value = oaRolePlan.value.blocked
+    return
+  }
   roleSubmitting.value = true
   detailActionMessage.value = ''
   try {
@@ -1767,7 +1812,7 @@ async function submitRoleReplace() {
       const current = existingByRoleID.get(assignment.role_id)
       if (!current || assignment.source_type === 'direct') existingByRoleID.set(assignment.role_id, assignment)
     }
-    const assignments: AccessAssignment[] = accessRoles.value
+    const assignments: AccessAssignment[] = oaRolePlan.value?.assignments ?? accessRoles.value
       .filter((role) => selected.has(role.code))
       .map((role) => {
         const existing = existingByRoleID.get(role.id)
@@ -1789,7 +1834,8 @@ async function submitRoleReplace() {
     await loadUsers()
     detailActionMessage.value = '角色更新成功'
   } catch (cause) {
-    const status = Number((cause as { response?: { status?: number } })?.response?.status || 0)
+    const err = cause as { status?: number; response?: { status?: number } }
+    const status = Number(err.response?.status || (oaEnabled ? err.status : 0) || 0)
     if (status === 409 && detailUser.value) {
       hydrateDetailAccess(await accessPolicyApi.effective(Number(detailUser.value.id)))
       detailActionMessage.value = '角色设置已被其他管理员更新，已刷新为最新结果，请重新确认。'
@@ -2267,7 +2313,10 @@ onMounted(() => {
   const startup = [loadOrgOptions()]
   if (canViewAccess.value) startup.push(loadAccessRoles().catch(() => undefined))
   void Promise.all(startup).then(() => {
-    void loadUsers()
+    void loadUsers().then(() => {
+      const focus = oaRoute?.query.user_id
+      if (typeof focus === 'string' && /^[1-9]\d*$/.test(focus)) void openDetail(focus)
+    })
   })
 })
 

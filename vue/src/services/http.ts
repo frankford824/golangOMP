@@ -13,19 +13,19 @@ import axios, { type AxiosResponse, type AxiosError } from 'axios'
 import { parseApiErrorPayload, resolveApiUserMessage } from '@/utils/api-message-zh'
 import { createMockAdapter, isMockEnabled } from '@/mocks'
 
-const TOKEN_KEY = 'access_token'
+export const TOKEN_STORAGE_KEY = import.meta.env.VITE_OA_FEATURES === 'true' ? 'yb.oa.formal.token.v1' : 'access_token'
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return localStorage.getItem(TOKEN_STORAGE_KEY)
 }
 
 export function setToken(token: string): void {
   if (getToken() !== token && typeof window !== 'undefined') window.dispatchEvent(new Event('asset-media-session-reset'))
-  localStorage.setItem(TOKEN_KEY, token)
+  localStorage.setItem(TOKEN_STORAGE_KEY, token)
 }
 
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(TOKEN_STORAGE_KEY)
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('asset-media-session-reset'))
 }
 

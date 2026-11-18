@@ -27,7 +27,7 @@
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
-            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.label }}</span>
+            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
             <span v-if="menu.badge && menu.badge() > 0" class="nav-badge-p2">{{ menu.badge() }}</span>
           </router-link>
         </template>
@@ -43,7 +43,7 @@
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
-            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.label }}</span>
+            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
           </router-link>
         </template>
         <template v-if="dataMenus.length > 0">
@@ -58,7 +58,7 @@
             <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
               <span class="material-symbols-outlined">{{ menu.icon }}</span>
             </div>
-            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.label }}</span>
+            <span class="text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
             <span v-if="menu.badge" class="nav-badge-p2">P2</span>
           </router-link>
         </template>
@@ -81,6 +81,7 @@
             <span class="app-topbar__full-name">永箔运营管理系统</span>
             <span class="app-topbar__short-name">永箔运营</span>
           </span>
+          <span v-if="oaEnabled" class="oa-formal-badge" title="这里提交的业务操作会写入正式系统">新版 · 正式数据</span>
         </div>
         <div class="app-topbar__actions">
           <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
@@ -142,7 +143,7 @@
                   @click="closeMobileSidebar"
                 >
                   <span class="material-symbols-outlined">{{ menu.icon }}</span>
-                  <span>{{ menu.label }}</span>
+                  <span>{{ menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label }}</span>
                   <span v-if="menu.badge && menu.badge() > 0" class="mobile-nav-badge">{{ menu.badge() }}</span>
                 </router-link>
               </template>
@@ -159,6 +160,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Menu, Search } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
+import { oaEnabled, useOAAccess } from '@/oa/access'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
@@ -166,6 +168,7 @@ import NotificationCenter from '@/components/notification/NotificationCenter.vue
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
 
 const permissionsStore = usePermissionsStore()
+const { can } = useOAAccess()
 const router = useRouter()
 
 const searchOpen = ref(false)
@@ -187,12 +190,18 @@ interface MenuConfig {
   section: 'workbench' | 'business' | 'data'
   icon: string
   badge?: () => number
+  oaActions?: string[]
 }
 
 // 侧边栏完全以后端 `frontend_access.menus` 为 SoT；
-// 这里的 `MENU_CONFIG` 只保留显示元数据（label/icon/to/section），
-// 不再做 page/module 二次门禁。
+// 原菜单使用正式 frontend_access.menus；OA 增补菜单使用同会话返回的业务动作。
 const MENU_CONFIG: MenuConfig[] = [
+  { key: 'oa_operations', label: '经营首页', to: '/operations', exact: true, section: 'workbench', icon: 'monitoring', oaActions: ['orders.view'] },
+  { key: 'oa_personnel', label: '人员管理', to: '/people', section: 'data', icon: 'groups', oaActions: ['people.manage'] },
+  { key: 'oa_expenses', label: '我的费用申请', to: '/fees/mine', section: 'business', icon: 'receipt_long', oaActions: ['finance.apply'] },
+  { key: 'oa_approval', label: '审批与付款', to: '/fees/approval', section: 'business', icon: 'payments', oaActions: ['finance.approve', 'finance.pay'] },
+  { key: 'oa_finance_templates', label: '费用模板与授权', to: '/fees/templates', section: 'data', icon: 'assignment', oaActions: ['finance.templates', 'finance.admin'] },
+  { key: 'oa_finance_report', label: '费用统计', to: '/fees/report', section: 'data', icon: 'analytics', oaActions: ['finance.report'] },
   // v4.2 修复：老板要求 + Dashboard 使用精确高亮，避免 '/' 前缀匹配导致所有页面都高亮
   {
     key: 'dashboard',
@@ -247,7 +256,7 @@ const visibleMenus = computed(() => {
   if (!permissionsStore.currentUser) return []
   const userMenus = permissionsStore.menus
   return MENU_CONFIG.filter((menu) =>
-    userMenus.includes(menu.key),
+    menu.oaActions ? menu.oaActions.some(can) : userMenus.includes(menu.key),
   )
 })
 
@@ -263,6 +272,7 @@ const menuSections = computed(() =>
 )
 
 function resolveMenuTo(menu: MenuConfig) {
+  if (menu.key === 'dashboard' && can('orders.view')) return { path: '/', query: { workspace: 'tasks' } }
   return menu.to
 }
 
@@ -633,6 +643,7 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 
 .app-topbar__brand { min-width: 0; }
+.oa-formal-badge { flex: none; font-size: 10px; line-height: 1.4; white-space: nowrap; padding: 3px 5px; border-radius: 5px; color: rgb(var(--yb-text-muted)); background: rgb(var(--yb-surface-muted)); }
 .app-topbar__actions { flex: 0 0 auto; }
 
 .app-topbar__title {
