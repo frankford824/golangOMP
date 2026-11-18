@@ -1338,7 +1338,7 @@ paths:
   /oa-api/finance/approvers:
     get:
       summary: 列出审批候选
-      description: 返回在职且位于当前模板维护人候选范围内的人员。已选回查使用同一范围，独立于搜索结果及其 50 条上限。
+      description: 模板维护人按现有授权范围查询在职候选；超级管理员也可在委托模板和分配财务权限时核对目标账号。已选回查使用同一范围，独立于搜索结果及其 50 条上限。返回账号 ID、姓名和工号。
       parameters:
       - in: query
         name: q

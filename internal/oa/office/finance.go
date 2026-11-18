@@ -84,9 +84,12 @@ func (app office) mountFinance(mux *http.ServeMux) {
 
 func (app office) approvers(w http.ResponseWriter, r *http.Request) {
 	actor := platform.ActorFrom(r)
-	if level := app.delegate(r); level != "draft" && level != "publish" {
-		deny(w)
-		return
+	if !actor.SuperAdmin {
+		level := app.delegate(r)
+		if level != "draft" && level != "publish" {
+			deny(w)
+			return
+		}
 	}
 	// A delegated template maintainer can select active approvers in their
 	// own department without receiving HR access to full personnel files.
