@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import { ArrowUpRight } from 'lucide-vue-next'
 import PageHead from '../components/PageHead.vue'
 import FreshnessStatus from '../components/FreshnessStatus.vue'
-import { getToken, type HttpAppError } from '@/services/http'
+import { getToken, TOKEN_STORAGE_KEY, type HttpAppError } from '@/services/http'
 import { api, dateInChina, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -77,6 +77,7 @@ function clearOverview() {
 async function loadOverview(refresh = false) {
   const account = currentProfile.value?.id
   const token = getToken()
+  if (appliedOverview && (appliedOverview.account !== account || appliedOverview.token !== token)) resetOverviewSession()
   if (!mayView.value || !account || !token) return
   const scope = refresh ? appliedOverview : { account, token, query: queryParams('summary') }
   if (!scope || scope.account !== account || scope.token !== token) return
@@ -271,18 +272,25 @@ function resetRefreshTimer() {
   }, 30_000)
 }
 
-watch(() => [currentProfile.value?.id, mayView.value], () => {
-  if (props.mode !== 'overview') return
+function resetOverviewSession() {
   latest.value++
   appliedOverview = undefined
   busy.value = false
   clearOverview()
+}
+function onSessionStorage(event: StorageEvent) {
+  if (event.key === TOKEN_STORAGE_KEY || event.key === null) resetOverviewSession()
+}
+watch(() => [currentProfile.value?.id, mayView.value], () => {
+  if (props.mode !== 'overview') return
+  resetOverviewSession()
   void loadOverview()
 })
 
 onMounted(() => {
   if (props.mode === 'overview') {
     document.addEventListener('visibilitychange', resetRefreshTimer)
+    window.addEventListener('storage', onSessionStorage)
     resetRefreshTimer()
   }
   if (mayView.value && props.mode !== 'personal') void loadShops()
@@ -299,6 +307,7 @@ onMounted(() => {
 onUnmounted(() => {
   latest.value++
   document.removeEventListener('visibilitychange', resetRefreshTimer)
+  window.removeEventListener('storage', onSessionStorage)
   window.clearInterval(refreshTimer)
 })
 </script>
