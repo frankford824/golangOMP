@@ -2441,7 +2441,7 @@ onBeforeUnmount(() => {
 :global(html.oa-live-ui #app .user-directory-oa .directory-title) { font-size: 20px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
 :global(html.oa-live-ui #app .user-directory-oa .list-heading .section-title) { font-size: 16px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
 :global(html.oa-live-ui #app .user-directory-oa :is(.directory-header-action a, .org-filter-item, .org-item-name)) { font-size: 14px; font-weight: 400; line-height: 1.6; }
-:global(html.oa-live-ui #app .user-directory-oa :is(.org-action-btn, .org-icon-btn, .directory-header-action a, .link-btn)) { min-width: 32px; min-height: 32px; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.org-action-btn, .org-icon-btn, .directory-header-action a, .link-btn, .org-link-btn)) { min-width: 32px; min-height: 32px; }
 :global(html.oa-live-ui #app .user-directory-oa :is(.org-tree-toggle, .org-policy-shortcut)) { width: 32px; min-width: 32px; min-height: 32px; }
 :global(html.oa-live-ui #app .user-directory-oa :is(.org-filter-item, .org-tree-section-toggle)) { min-width: 32px; min-height: 32px; }
 :global(html.oa-live-ui #app .user-directory-oa :is(.org-action-btn, .org-icon-btn)) { border-radius: 6px; font-size: 12px; }
