@@ -10,6 +10,7 @@ import sys
 directory=Path('/etc/yongbo-oa-live')
 tables=['oa_office_templates','oa_office_template_versions','oa_office_delegates','oa_office_finance_actions','oa_office_documents','oa_office_files','oa_office_people','oa_office_notifications','oa_office_imports','oa_order_feedback','oa_order_task_links']
 reader={
+    'auth_permissions':'code,enabled',
     'users': 'id,display_name,employee_no,department_id,team_id,department,team,status,employment_type,is_config_super_admin',
     'tasks': 'id,task_no,product_name_snapshot,task_status,current_handler_id,designer_id',
     'user_roles':'user_id,role',

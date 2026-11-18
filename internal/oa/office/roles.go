@@ -7,11 +7,12 @@ import (
 )
 
 const grantsQuery = `WITH grants AS (
- SELECT a.id,u.id AS user_id,r.code,a.scope_mode,u.department_id,u.team_id
+ SELECT a.id,u.id AS user_id,r.code,a.scope_mode,u.department_id,u.team_id,
+ NULL AS policy_type,NULL AS policy_id
  FROM users u JOIN auth_user_role_assignments a ON a.user_id=u.id
  JOIN auth_roles r ON r.id=a.role_id AND r.archived_at IS NULL WHERE u.id=?
  UNION ALL
- SELECT 0,u.id,r.code,p.scope_mode,u.department_id,u.team_id
+ SELECT 0,u.id,r.code,p.scope_mode,u.department_id,u.team_id,p.subject_type,p.subject_id
  FROM users u JOIN auth_org_role_policies p ON p.enabled=1 AND
  ((p.subject_type='department' AND p.subject_id=u.department_id) OR (p.subject_type='team' AND p.subject_id=u.team_id))
  JOIN auth_roles r ON r.id=p.role_id AND r.archived_at IS NULL WHERE u.id=?
@@ -22,8 +23,9 @@ const companyPeopleScope int64 = -1
 func effectivePeopleAccess(ctx context.Context, db *sql.DB, id int64) (roles []string, departments, teams []int64, err error) {
 	rows, err := db.QueryContext(ctx, grantsQuery+`
  SELECT DISTINCT g.code,g.scope_mode,COALESCE(g.department_id,0),COALESCE(g.team_id,0),
- COALESCE(s.subject_type,''),COALESCE(s.subject_id,0),EXISTS(
+ COALESCE(s.subject_type,g.policy_type,''),COALESCE(s.subject_id,g.policy_id,0),EXISTS(
  SELECT 1 FROM auth_roles r JOIN auth_role_permissions p ON p.role_id=r.id
+ JOIN auth_permissions op ON op.code=p.permission_code AND op.enabled=1
  WHERE r.code=g.code AND p.permission_code='access.manage')
  FROM grants g LEFT JOIN auth_assignment_scope_subjects s ON g.id>0 AND g.id=s.assignment_id AND g.scope_mode='selected_org'`, id, id)
 	if err != nil {
