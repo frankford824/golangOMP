@@ -1,0 +1,6 @@
+[Unit]
+Description=OA validation object storage loopback ingress
+[Socket]
+ListenStream=127.0.0.1:18089
+[Install]
+WantedBy=sockets.target

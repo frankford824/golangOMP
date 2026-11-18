@@ -1,0 +1,25 @@
+[Unit]
+Description=Yongbo OA validation service
+After=network-online.target yongbo-oa-gateway.socket
+Requires=yongbo-oa-gateway.socket
+[Service]
+User=yongbo-oa
+Group=yongbo-oa
+EnvironmentFile=/etc/yongbo-oa/oa.env
+WorkingDirectory=/srv/yongbo-oa/current
+ExecStart=/srv/yongbo-oa/current/oa
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yongbo-oa
+IPAddressDeny=any
+IPAddressAllow=localhost
+IPAddressAllow=100.97.209.121/32
+UMask=0077
+MemoryMax=600M
+CPUQuota=120%
+[Install]
+WantedBy=multi-user.target

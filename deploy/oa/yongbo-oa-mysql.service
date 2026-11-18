@@ -1,0 +1,10 @@
+[Unit]
+Description=OA Unix socket to local MySQL
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:3306
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+IPAddressDeny=any
+IPAddressAllow=localhost

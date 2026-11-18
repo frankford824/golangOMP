@@ -1,0 +1,18 @@
+.oa-return {
+  z-index: 61;
+  position: fixed;
+  right: 18px;
+  bottom: 13px;
+  padding: 7px 12px;
+  border: 1px solid #bbd9c6;
+  border-radius: 6px;
+  background: #f4fbf5;
+  color: #124c3c;
+  font: 650 12px/1.5 system-ui, sans-serif;
+  text-decoration: none;
+  box-shadow: 0 2px 12px #16392a18;
+}
+ .oa-asset-shortcuts { display: flex; gap: 12px; flex-wrap: wrap; }
+.oa-asset-shortcuts a { color: inherit; }
+.oa-return:hover, .oa-return:focus-visible { background: #dceee0; }
+.oa-order-context { position: fixed; z-index: 60; left: 18px; bottom: 13px; padding: 7px 12px; margin: 0; border: 1px solid #bbd9c6; border-radius: 6px; background: #f4fbf5; color: #124c3c; font: 650 12px/1.5 system-ui, sans-serif; pointer-events: none; }

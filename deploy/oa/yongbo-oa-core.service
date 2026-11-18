@@ -1,0 +1,26 @@
+[Unit]
+Description=Yongbo OA validation workflow API
+Requires=yongbo-oa-mysql.socket
+After=yongbo-oa-mysql.socket
+
+[Service]
+User=yongbo-oa
+Group=yongbo-oa
+WorkingDirectory=/srv/yongbo-oa/current
+EnvironmentFile=/etc/yongbo-oa/core.env
+LoadCredential=identity.json:/etc/yongbo-oa/identity.json
+ExecStart=/bin/bash /srv/yongbo-oa/current/start-core.sh
+Restart=on-failure
+RestartSec=3
+PrivateNetwork=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/yongbo-oa
+UMask=0077
+MemoryMax=750M
+CPUQuota=120%
+
+[Install]
+WantedBy=multi-user.target

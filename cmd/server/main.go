@@ -296,7 +296,7 @@ func main() {
 		taskEventRepo,
 		mdb,
 	)
-	ossDirectSvc := service.NewOSSDirectService(service.OSSDirectConfig{
+	ossConfig := service.OSSDirectConfig{
 		Enabled:             cfg.OSSDirect.Enabled,
 		Endpoint:            cfg.OSSDirect.Endpoint,
 		Bucket:              cfg.OSSDirect.Bucket,
@@ -307,7 +307,22 @@ func main() {
 		HTTPTimeout:         cfg.OSSDirect.HTTPTimeout,
 		PublicEndpoint:      cfg.OSSDirect.PublicEndpoint,
 		PartSize:            cfg.OSSDirect.PartSize,
-	})
+	}
+	if envFlag("OA_OBJECT_STORE") {
+		secret := os.Getenv("OA_OBJECT_SECRET")
+		if len(secret) < 32 {
+			logger.Fatal("OA_OBJECT_SECRET must contain at least 32 characters")
+		}
+		ossConfig.Enabled = true
+		ossConfig.Endpoint = "127.0.0.1:18088"
+		ossConfig.PublicEndpoint = "oa.yongbo.cloud"
+		ossConfig.Bucket = "oa-objects"
+		ossConfig.AccessKeyID = "oa-validation"
+		ossConfig.AccessKeySecret = secret
+		ossConfig.BucketURL = "http://127.0.0.1:18088/oa-objects"
+		ossConfig.PublicBucketURL = "https://oa.yongbo.cloud/oa-objects"
+	}
+	ossDirectSvc := service.NewOSSDirectService(ossConfig)
 	if ossDirectSvc.Enabled() {
 		logger.Info("OSS direct presign service enabled",
 			zap.String("bucket", cfg.OSSDirect.Bucket),

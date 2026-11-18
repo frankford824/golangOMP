@@ -28,7 +28,9 @@
     "visual:compare": "node scripts/visual-baseline.mjs compare",
     "gen:api-types": "node --import tsx scripts/gen_api_types.ts",
     "gen:api-types:check": "node --import tsx scripts/gen_api_types.ts --check",
-    "lint:object-key": "npx tsx scripts/check_object_key_usage.ts"
+    "lint:object-key": "npx tsx scripts/check_object_key_usage.ts",
+    "dev:oa": "vite --config vite.oa.config.ts",
+    "build:oa": "vue-tsc --noEmit && vite build --config vite.oa.config.ts"
   },
   "dependencies": {
     "@fontsource/geist-mono": "^5.2.8",

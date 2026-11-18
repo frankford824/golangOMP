@@ -34,6 +34,8 @@ type OSSDirectConfig struct {
 	UploadPresignExpiry time.Duration
 	HTTPTimeout         time.Duration
 	PublicEndpoint      string
+	BucketURL           string
+	PublicBucketURL     string
 	PartSize            int64
 }
 
@@ -827,10 +829,16 @@ func canonicalOSSHeaders(headers map[string]string) string {
 }
 
 func (s *OSSDirectService) bucketURL() string {
+	if s.cfg.BucketURL != "" {
+		return strings.TrimRight(s.cfg.BucketURL, "/")
+	}
 	return "https://" + s.cfg.Bucket + "." + strings.TrimSpace(s.cfg.Endpoint)
 }
 
 func (s *OSSDirectService) publicBucketURL() string {
+	if s.cfg.PublicBucketURL != "" {
+		return strings.TrimRight(s.cfg.PublicBucketURL, "/")
+	}
 	endpoint := strings.TrimSpace(s.cfg.PublicEndpoint)
 	if endpoint == "" {
 		endpoint = strings.TrimSpace(s.cfg.Endpoint)
