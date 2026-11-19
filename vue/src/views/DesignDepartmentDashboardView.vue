@@ -256,4 +256,9 @@ onBeforeUnmount(() => controller?.abort())
 .design-empty p { margin: 0 0 10px; color: rgb(var(--yb-text-muted)); font-size: 13px; }
 :global(html.oa-live-ui #app .content .oa-design-board :is(.panel-head,.design-empty) h2) { font-size: 13px; font-weight: 500; }
 :global(html.oa-live-ui #app .content .oa-design-board :is(strong,b,th)) { font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-design-board :is(button,input:not([type=checkbox],[type=file]))) { border-radius: 6px; }
+.oa-design-board :deep(button.inline-flex > span:last-child) { display: contents; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .header-actions button) { border-radius: 6px; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .header-actions button > span) { display: contents; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .header-actions button svg) { width: 16px; height: 16px; }
 </style>

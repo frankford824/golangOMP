@@ -94,7 +94,7 @@
                   class="org-icon-btn"
                   @click.stop="openMergeDepartment(selectedOrgDepartment)"
                 >
-                  合并到…
+                  合并部门
                 </button>
                 <button
                   v-if="!isSystemDepartment(selectedOrgDepartment)"
@@ -124,7 +124,7 @@
                   class="org-icon-btn"
                   @click.stop="openMergeTeam(selectedOrgTeam)"
                 >
-                  合并到…
+                  合并小组
                 </button>
                 <button
                   v-if="!isSystemDepartment(selectedOrgDepartment)"
@@ -2470,7 +2470,7 @@ onBeforeUnmount(() => {
 
 :global(html.oa-live-ui #app .user-directory-oa .directory-title) { font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
 :global(html.oa-live-ui #app .user-directory-oa .list-heading .section-title) { font-size: 15px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
-:global(html.oa-live-ui #app .user-directory-oa :is(.directory-header-action a, .org-filter-item, .org-item-name)) { font-size: 14px; font-weight: 400; line-height: 1.6; }
+:global(html.oa-live-ui #app .user-directory-oa :is(.directory-header-action a, .org-filter-item, .org-item-name)) { font-size: 14px; font-weight: 400; line-height: normal; }
 :global(html.oa-live-ui #app .user-directory-oa :is(.org-action-btn, .org-icon-btn, .directory-header-action a, .link-btn, .org-link-btn)) { min-width: 32px; min-height: 32px; }
 :global(html.oa-live-ui #app .user-directory-oa :is(.org-tree-toggle, .org-policy-shortcut)) { width: 32px; min-width: 32px; min-height: 32px; }
 :global(html.oa-live-ui #app .user-directory-oa :is(.org-filter-item, .org-tree-section-toggle)) { min-width: 32px; min-height: 32px; }
@@ -2992,4 +2992,10 @@ onBeforeUnmount(() => {
   .user-directory-oa :is(.base-table-pager,.toolbar) :deep(div:has(> .base-select-trigger-button)) { height:32px; min-height:32px; box-sizing:border-box; }
   .user-directory-oa :is(.base-table-pager,.toolbar) :deep(button.base-select-trigger-button) { height:auto; min-height:0; align-self:stretch; }
 }
+
+.user-directory-oa .org-filter-panel { padding-inline:12px; }
+.user-directory-oa .org-filter-content > :is(.org-filter-header,.org-selected-actions,.org-tree-panel) { margin-inline:0; }
+.user-directory-oa .org-selected-buttons { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+.user-directory-oa .org-selected-buttons button { justify-content:center; }
+.user-directory-oa .org-scope-clear { border:1px solid var(--yb-line-control); height:28px; line-height:1; padding:0 8px; border-radius:6px; }
 </style>

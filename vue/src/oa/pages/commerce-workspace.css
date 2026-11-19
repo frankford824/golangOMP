@@ -24,7 +24,7 @@
   min-height: 26px;
   height: 26px;
   padding: 0 6px;
-  border-color: transparent;
+  border: 0;
   background: transparent;
   font-size: 13px;
 }
@@ -37,21 +37,28 @@
 .commerce-workspace .workspace-filters > label {
   display: inline-flex;
   align-items: center;
+  height: 32px;
   min-height: 32px;
-  padding-inline-start: 8px;
-  gap: 6px;
+  gap: 0;
   border: 1px solid var(--oa-line);
   border-radius: 6px;
+  overflow: hidden;
   white-space: nowrap;
   font-size: 13px;
 }
-.commerce-workspace .workspace-filters .oa-check-inline { padding-inline: 8px; }
+.commerce-workspace .workspace-filters .oa-check-inline { padding-inline: 8px; gap: 6px; }
+.filter-prefix { flex: none; padding-inline: 8px 4px; }
+.commerce-workspace .workspace-filters > label:focus-within {
+  border-color: var(--oa-accent); box-shadow: 0 0 0 2px rgb(var(--yb-brand) / .2);
+}
 #app .commerce-workspace .workspace-filters :is(input:not([type=checkbox]), select),
 #app .commerce-workspace .workspace-filters :deep(.order-date-field input) {
   min-height: 30px;
   height: 30px;
   padding: 0 6px;
   border: 0;
+  border-radius: 0;
+  outline: 0;
   min-width: 0;
 }
 .commerce-workspace .workspace-filters input[type=checkbox] { accent-color: var(--oa-accent); }
@@ -126,7 +133,7 @@
 .commerce-workspace .commerce-product-name { font-weight: 500; text-decoration: none; min-block-size: 20px; line-height: 20px; }
 .commerce-product-name:hover { text-decoration: underline; }
 .commerce-sku { display: inline-flex; align-items: center; gap: 4px; }
-#app .commerce-results .workspace-copy { padding: 0; min-width: 24px; min-height: 20px; height: 20px; border-color: transparent; background: transparent; color: var(--oa-muted); }
+#app .commerce-results .workspace-copy { padding: 0; min-width: 24px; min-height: 20px; height: 20px; border: 0; background: transparent; color: var(--oa-muted); }
 .commerce-results .workspace-copy:hover { background: var(--oa-active); color: var(--oa-accent); }
 .workspace-row-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding-inline: 8px; border-radius: 6px; white-space: nowrap; text-decoration: none; }
 .workspace-row-action:hover { background: var(--oa-active); }

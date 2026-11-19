@@ -21,24 +21,33 @@
 .order-data-filters label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  height: 32px;
+  gap: 0;
   min-inline-size: 0;
-  padding-inline-start: 8px;
   border: 1px solid var(--oa-line);
   border-radius: 6px;
+  overflow: hidden;
   white-space: nowrap;
   font-size: 13px;
   color: var(--oa-secondary);
 }
 
+.filter-prefix { flex: none; padding-inline: 8px 4px; }
+.order-data-filters label:focus-within {
+  border-color: var(--oa-accent); box-shadow: 0 0 0 2px rgb(var(--yb-brand) / .2);
+}
 #app .order-data .order-data-filters label :is(input:not([type=checkbox]), select),
 #app .order-data .order-data-filters label :deep(.order-date-field input) {
   border: 0;
+  border-radius: 0;
+  outline: 0;
   min-block-size: 30px;
   block-size: 30px;
   padding-block: 0;
   inline-size: min(140px, 36vw);
 }
+
+#app .order-data .order-data-filters label :deep(.order-date-field input) { padding-inline: 6px; }
 
 .order-data .order-data-filters button {
   min-block-size: 32px;
@@ -106,7 +115,7 @@
 
 .order-data-table .order-data-view,
 .order-data-copy {
-  border-color: transparent;
+  border: 0;
   background: transparent;
   color: var(--oa-accent);
   font-size: 14px;
@@ -223,7 +232,7 @@
   .order-data-body { min-block-size: 0; min-inline-size: 0; overflow: auto; scrollbar-gutter: stable; }
 }
 
-.order-data-filters .order-data-check { min-block-size: 32px; padding-inline: 8px; }
+.order-data-filters .order-data-check { min-block-size: 32px; padding-inline: 8px; gap: 6px; }
 
 @media (max-width: 1023px) {
   .order-data-results .oa-table-wrap { max-block-size: 48dvh; }
@@ -259,4 +268,10 @@
   .order-data-table .order-data-order-no { max-width: calc(100% - 40px); }
   .order-data-table tbody tr { height: 40px; }
   .order-data-results-head { padding-block: 8px; }
+}
+
+.order-data-table td[data-column="shop_id"] .oa-ellipsis {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

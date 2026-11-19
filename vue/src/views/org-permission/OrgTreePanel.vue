@@ -480,14 +480,19 @@ watch(searchKeyword, () => {
 }
 html.oa-live-ui .org-filter-item.is-active {
   background: rgb(var(--yb-brand-soft));
-  border-left: 3px solid var(--oa-accent);
-  border-top-color: transparent;
-  border-right-color: transparent;
-  border-bottom-color: transparent;
+  position:relative;
+  border:1px solid rgb(var(--yb-brand-soft));
   color: var(--oa-accent);
+}
+html.oa-live-ui .org-filter-item.is-active::before {
+  content:''; position:absolute; left:0; top:6px; bottom:6px; width:3px;
+  border-radius:2px; background:var(--oa-accent); pointer-events:none;
 }
 html.oa-live-ui .org-filter-item.is-active .org-count-badge {
   background: rgb(var(--yb-brand-soft));
   color: var(--oa-accent);
 }
+
+html.oa-live-ui .org-filter-item:not(.is-active) { border-color:var(--oa-surface); }
+html.oa-live-ui .org-filter-item .org-item-name { line-height:normal; }
 </style>

@@ -9,7 +9,7 @@
         <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button v-if="failedThumbnails.size" type="button" @click="retryThumbnails">重试缩略图</button><button type="button" @click="openAllReferences">参考资料总览</button></div>
         <div v-if="resourceReferences.length" class="media-strip">
           <div v-for="(file,index) in resourceReferences.slice(0,4)" :key="referenceKey(file,index)" class="rail-media-cell">
-          <button type="button" class="rail-media-button" @click="openReference(file)">
+          <div class="rail-media-button">
             <AssetPreviewMedia
               v-if="referencePreviewable(file) && referencePreview(file) && taskAssetID(file)"
               class="resource-preview"
@@ -24,9 +24,9 @@
               <span v-else class="reference-thumbnail-error">缩略图暂不可用</span>
             </template>
             <FileText v-else :size="23" aria-hidden="true" />
-            <span :title="referenceName(file)">{{ referenceName(file) }}</span>
+            <button type="button" class="rail-media-name" :title="referenceName(file)" @click="openReference(file)">{{ referenceName(file) }}</button>
             <small v-if="oaEnabled && file.file_size">{{ fileSize(file.file_size) }}</small>
-          </button>
+          </div>
           <OriginalImageDimensions :name="referenceName(file)" :mime-type="file.mime_type" :download-url="file.download_url" :thumbnail-url="referenceThumbnail(file)" :task-asset-id="taskAssetID(file)" />
           </div>
         </div>
@@ -49,7 +49,7 @@
         <div class="column-head"><span>03</span><div><strong>最终成品图</strong><small>{{ finalCount }} 张{{ waivedCount ? ` · ${waivedCount} 个 SKU 无需成品图` : setCount ? ` · ${setCount} 个套装` : ' · 单图成品' }}</small></div><LockKeyhole v-if="finalLocked" :size="16" aria-label="设计阶段暂不可上传" /></div>
         <div v-if="finals.length" class="media-strip">
           <div v-for="item in finals.slice(0,4)" :key="item.id" class="rail-media-cell">
-          <button type="button" class="rail-media-button" @click="$emit('openResources')">
+          <div class="rail-media-button">
             <AssetPreviewMedia
               v-if="finalPreviewable(item) && finalPreview(item)"
               class="resource-preview"
@@ -60,9 +60,9 @@
               inner-img-class="resource-preview-img"
             />
             <Images v-else :size="23" aria-hidden="true" />
-            <span>{{ item.item_name || item.file?.file_name || `成品 ${item.sort_order + 1}` }}</span>
+            <button type="button" class="rail-media-name" @click="$emit('openResources')">{{ item.item_name || item.file?.file_name || ('成品 ' + (item.sort_order + 1)) }}</button>
             <small v-if="oaEnabled && item.file?.file_size">{{ fileSize(item.file.file_size) }}</small>
-          </button>
+          </div>
           <OriginalImageDimensions :name="item.file?.file_name" :mime-type="item.file?.mime_type" :download-url="item.file?.download_url" :task-asset-id="item.task_asset_id" />
           </div>
         </div>
@@ -220,4 +220,10 @@ function sourceStageLabel(stage: string) { return stage === 'audit' ? '审核确
 .oa-resource-rail .media-strip .rail-media-button { grid-template-rows: clamp(88px, 11vw, 172px) auto; }
 .oa-resource-rail .media-strip :deep(.resource-preview-shell), .oa-resource-rail .media-strip .rail-media-button > svg { height: 100%; }
 .oa-resource-rail .media-strip :deep(.resource-preview-img) { object-fit: contain; }
+.resource-rail > header button > svg { width: 18px; height: 18px; }
+.rail-media-button { position: relative; }
+.rail-media-name { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
+.rail-media-name::after { content: ''; position: absolute; inset: 0; }
+.rail-media-cell :deep(.original-dimensions) { position: relative; }
+.oa-resource-rail .media-strip .rail-media-button > svg { height: 100%; min-height: 0; }
 </style>

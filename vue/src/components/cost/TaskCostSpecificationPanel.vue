@@ -1,8 +1,8 @@
 <template>
   <section class="task-cost-specification" :class="{ 'specification--compact': compact }" aria-label="计价资料待办">
     <button type="button" class="spec-heading" :aria-expanded="expanded" @click="expanded=!expanded">
-      <span><Ruler :size="16" :stroke-width="1.75" aria-hidden="true" /><strong>{{taskId?'计价资料':'我的待补计价资料'}}</strong><b v-if="taskId?missingCount>0:total>0">{{taskId?`本页 ${missingCount}`:total}}</b></span>
-      <span>{{loading?'读取中…':error?'读取失败':taskId?missingCount?'缺面积 · 结单后仍可补录':'查看 / 补录':total?'待补面积':'暂无待补面积'}}<ChevronDown :size="16" :stroke-width="1.75" aria-hidden="true" /></span>
+      {{ taskId ? '计价资料' : '我的待补计价资料' }}{{ taskId ? (missingCount ? ' · 本页 ' + missingCount : '') : (total ? ' · ' + total : '') }}
+      {{ loading ? ' · 读取中…' : error ? ' · 读取失败' : taskId ? (missingCount ? ' · 缺面积，结单后仍可补录' : ' · 查看 / 补录') : (total ? ' · 待补面积' : ' · 暂无待补面积') }}
     </button>
     <p v-if="error && (!compact || expanded)" class="spec-error" role="alert">{{error}}<button type="button" @click="load">重试读取</button></p>
     <p v-if="notice" class="spec-notice" role="status">{{notice}}</p>
@@ -38,7 +38,7 @@
 </template>
 <script setup lang="ts">
 import {computed,nextTick,onBeforeUnmount,onMounted,ref,watch} from 'vue'
-import {Ruler,ChevronDown,X} from 'lucide-vue-next'
+import {X} from 'lucide-vue-next'
 import CostInputFields from './CostInputFields.vue'
 import {emptyCostInput} from '@/domain/cost-model'
 import {taskCostSpecificationsApi,type TaskCostSpecification} from '@/services/api/taskCostSpecificationsApi'
@@ -60,6 +60,9 @@ onBeforeUnmount(()=>{request++;if(timer)clearInterval(timer);if(selected.value)d
 </script>
 <style scoped>
 .task-cost-specification{border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface));overflow:hidden;min-width:0}.spec-heading{display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;text-align:left;background:transparent;border:0;color:rgb(var(--yb-text));cursor:pointer}.spec-heading>span{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px;line-height:20px}.spec-heading strong{font-size:14px;font-weight:600}.spec-heading b{font-size:12px;color:rgb(var(--yb-warning-text));background:rgb(var(--yb-surface-soft));border-radius:6px;padding:1px 6px}.spec-content{padding:0 16px 12px}.spec-content>p,.spec-empty{font-size:12px;line-height:20px;color:rgb(var(--yb-text-secondary))}.spec-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid rgb(var(--yb-border))}.spec-row>div{min-width:0;display:grid;gap:4px}.spec-row strong{font-size:14px;font-weight:600}.spec-row small,.spec-readonly{font-size:12px;line-height:18px;color:rgb(var(--yb-text-secondary))}.spec-error,.spec-notice{padding:10px 16px;margin:0;font-size:13px;line-height:20px}.spec-error{color:rgb(var(--yb-danger))}.spec-notice{color:rgb(var(--yb-success))}.spec-row button,.spec-error button,.spec-content footer button,.spec-dialog button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;gap:6px;border:1px solid rgb(var(--yb-border));border-radius:8px;padding:7px 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand));font:500 13px/20px var(--yb-font-text);cursor:pointer;flex-shrink:0}.spec-content footer,.spec-dialog footer{display:flex;align-items:center;justify-content:flex-end;gap:10px}.spec-modal{position:fixed;inset:0;z-index:2200;display:grid;place-items:center;padding:16px}.spec-backdrop{position:absolute;inset:0;border:0;background:rgb(var(--yb-shadow)/.45)}.spec-dialog{position:relative;width:min(660px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;min-height:0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:14px;background:rgb(var(--yb-surface));box-shadow:0 18px 60px rgb(var(--yb-shadow)/.2);outline:none}.spec-dialog header{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:16px 20px;border-bottom:1px solid rgb(var(--yb-border))}.spec-dialog h2{margin:0;font:600 18px/26px var(--yb-font-text)}.spec-dialog header p{margin:4px 0 0;font:400 13px/20px var(--yb-font-text);color:rgb(var(--yb-text-secondary))}.spec-editor{overflow:auto;padding:16px 20px;display:grid;gap:12px}.spec-editor>p{font:400 13px/20px var(--yb-font-text);margin:0;color:rgb(var(--yb-text-secondary))}.spec-editor label{display:grid;gap:6px;font:500 13px/20px var(--yb-font-text)}.spec-editor input{width:100%;min-height:38px;border:1px solid rgb(var(--yb-border));border-radius:8px;padding:8px 10px;font:400 14px/20px var(--yb-font-text);box-sizing:border-box;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.spec-dialog footer{padding:12px 20px;border-top:1px solid rgb(var(--yb-border))}.spec-dialog .spec-primary{background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));border-color:rgb(var(--yb-brand))}.spec-dialog button:disabled{opacity:.5;cursor:default}@media(max-width:600px){.spec-heading,.spec-row{align-items:start;flex-wrap:wrap}.spec-heading>span:last-child{font-size:12px}.spec-editor{padding:12px}.spec-dialog header,.spec-dialog footer{padding:12px}.spec-dialog footer{flex-wrap:wrap}}
+.spec-heading { justify-content: flex-start; min-width: 0; }
+.spec-heading::after { content: ''; width: 7px; height: 7px; margin-inline-start: auto; margin-inline-end: 4px; border-right: 1px solid; border-bottom: 1px solid; transform: rotate(45deg); flex: none; }
+.spec-heading[aria-expanded=true]::after { transform: rotate(225deg); }
 </style>
 <style scoped>
 .spec-editor :deep(.cost-inputs label){font:500 13px/20px var(--yb-font-text)}.spec-editor :deep(.cost-inputs input),.spec-editor :deep(.cost-inputs select){font:400 14px/20px var(--yb-font-text);min-height:38px}

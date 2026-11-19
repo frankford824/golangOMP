@@ -24,13 +24,13 @@
           >
             {{ label }}
           </option></select
-        ><button type="submit"><Search :size="16" :stroke-width="1.75" aria-hidden="true" />查询</button>
+        ><button type="submit">查询</button>
       </form>
       <div>
         <RouterLink v-if="canPrice" class="pricing-link bulk-pricing-link" :to="{ name: 'OperationsPricing' }">批量核价</RouterLink>
-        <button @click="openLogs"><History :size="16" :stroke-width="1.75" aria-hidden="true" />修改日志</button
+        <button @click="openLogs">修改日志</button
         ><button :disabled="loading" @click="load()">
-          <RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? "刷新中…" : "刷新" }}
+          {{ loading ? "刷新中…" : "刷新" }}
         </button>
       </div>
     </div>
@@ -58,17 +58,17 @@
             </td>
             <td>{{ row.style_code || "待绑定" }}</td>
             <td>
-              <template v-if="oaEnabled">
+              <div v-if="oaEnabled" class="cost-cell-stack">
                 <button
                   v-if="needsDimensions(row) && canEdit && busyID === null && row.revision >= 1"
                   type="button"
                   class="missing-dimensions"
                   @click="editDimensions(row)"
-                >待补尺寸</button>
-                <span v-else-if="needsDimensions(row)" class="missing-dimensions">待补尺寸</span>
+                >{{ dimensionActionLabel(row) }}</button>
+                <span v-else-if="needsDimensions(row)" class="missing-dimensions">{{ dimensionActionLabel(row) }}</span>
                 <span v-else>{{ dimensions(row) }}</span>
                 <small v-if="row.area_m2 != null">{{ area(row.area_m2) }} ㎡</small>
-              </template>
+              </div>
               <template v-else>
                 <span>{{ dimensions(row) }}</span><small>{{ area(row.area_m2) }} ㎡</small>
               </template>
@@ -81,6 +81,7 @@
               <template v-else>{{ money(row.cost_price) }}</template>
             </td>
             <td>
+              <div :class="{ 'cost-cell-stack': oaEnabled }">
               <button v-if="oaEnabled && row.status === 'conflict'" type="button" class="conflict-filter" @click="inspect(row)">冲突待确认</button>
               <span v-else :class="['maintenance-state', row.status]">{{
                 maintenanceStatuses[row.status] || "待核对"
@@ -95,6 +96,7 @@
                   row.base_sync_error ? "资料同步失败" : "资料待同步"
                 }}</small
               >
+              </div>
             </td>
             <td class="row-actions"><div class="row-action-group">
               <span
@@ -491,7 +493,7 @@ import {
   reactive,
   ref,
 } from "vue";
-import { Search, History, RefreshCw, X, ChevronLeft, ChevronRight } from "lucide-vue-next";
+import { Search, X, ChevronLeft, ChevronRight } from "lucide-vue-next";
 import { usePermission } from "@/composables/usePermission";
 import CostInputFields from "./CostInputFields.vue";
 import { emptyCostInput } from "@/domain/cost-model";
@@ -654,6 +656,9 @@ const dimensions = (r: MaintenanceRow) =>
 function needsDimensions(row: MaintenanceRow) {
   return !(row.width_cm && row.height_cm) && !row.size_text?.trim() &&
     row.cost_input?.area_mode !== "faces" && row.cost_input?.area_mode !== "total";
+}
+function dimensionActionLabel(row: MaintenanceRow) {
+  return row.area_m2 == null ? "待补尺寸" : "待补长宽";
 }
 function confirmBlocker(row: MaintenanceRow): string {
   if (!canEdit.value) return "需要成本维护和 ERP 管理权限";
@@ -1016,7 +1021,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-html.oa-live-ui .maintenance .missing-dimensions { min-height: 32px; background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
+html.oa-live-ui .maintenance .missing-dimensions { background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
 html.oa-live-ui .maintenance .blocked-confirm small { display: none; }
 html.oa-live-ui .maintenance .blocked-confirm:is(:hover, :focus-visible) small { display: block; }
 html.oa-live-ui .maintenance table { font-size: 13px; line-height: 1.5; }
@@ -1052,6 +1057,22 @@ html.oa-live-ui .maintenance .blocked-confirm + button { margin-left: 8px; }
 .cost-row-link { color: rgb(var(--yb-brand)); display: block; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .conflict-filter { color: rgb(var(--yb-warning-text)); }
 .conflict-filter:hover, .conflict-filter[aria-pressed=true] { background: rgb(var(--yb-warning-soft)); }
+.cost-cell-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.maintenance .cost-cell-stack > :is(span, small) {
+  margin: 0;
+  max-width: 100%;
+  line-height: 16px;
+  padding-inline-start: 5px;
+}
+html.oa-live-ui #app .maintenance .cost-cell-stack > button {
+  height: 24px;
+  min-height: 24px;
+  max-inline-size: 100%;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .cost-inspect-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; margin: 0; }
 .cost-inspect-fields dd { margin: 0; overflow-wrap: anywhere; }
 .cost-inspect-fields dt { color: rgb(var(--yb-text-muted)); }

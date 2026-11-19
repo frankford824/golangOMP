@@ -1779,4 +1779,8 @@ onBeforeUnmount(stopRefreshLoop)
 }
 :global(html.oa-live-ui #app .content .oa-task-board .dashboard-panel-heading) { font-size: 13px; font-weight: 500; }
 :global(html.oa-live-ui #app .content .oa-task-board :is(strong,b)) { font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-task-board :is(button,input:not([type=checkbox],[type=file]))) { border-radius: 6px; }
+:global(html.oa-live-ui #app .oa-bar-tabs .dashboard-section-nav button) { border-radius: 0; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .dashboard-top-actions button) { border-radius: 6px; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .dashboard-top-actions button > span) { display: contents; }
 </style>

@@ -1214,4 +1214,9 @@ function startAnother() { resetComposeState() }
 }
 :global(html.oa-live-ui #app .content .oa-task-create h2) { font-size: 13px; font-weight: 500; }
 :global(html.oa-live-ui #app .content .oa-task-create :is(strong,b)) { font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-task-create :is(button,input:not([type=checkbox],[type=file]))) { border-radius: 6px; }
+.oa-task-create .toolbar-actions button { white-space: nowrap; }
+.oa-task-create .toolbar-actions button > svg { width: 18px; height: 18px; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .hero-actions button),
+:global(html.oa-live-ui #app .oa-bar-page-actions .compose-submit) { border-radius: 6px; }
 </style>

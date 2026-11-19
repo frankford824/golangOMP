@@ -1089,7 +1089,7 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 .oa-breadcrumb { font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .oa-breadcrumb > span { color: var(--oa-secondary); font-weight: 400; }
 .oa-search-key { display:none; }
-@media (min-width: 1100px) { .app-topbar .topbar-search:has(.oa-search-key) { width: 260px; } .oa-search-key { display: inline-block; margin-left:auto; color: var(--oa-secondary); font: 12px var(--yb-font-mono); } }
+.oa-search-key { margin-left:auto; color:var(--oa-secondary); font:13px/normal var(--yb-font-mono); }
 @media (max-width: 600px) { .oa-breadcrumb > span { display:none; } }
 
 .oa-sidebar:not(.oa-sidebar-open) .nav-item { flex-direction: column; justify-content: center; gap: 0; padding: 4px; }
@@ -1110,6 +1110,7 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 
 .nav-entry { display: block; }
 .oa-sidebar .nav-entry { display: block; position: relative; }
+.oa-sidebar .nav-item:not(.active) { border-color:var(--oa-surface); }
 .oa-nav-signal { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 0 4px; min-width: 20px; text-align: center; border-radius: 6px; font: 500 12px/18px var(--yb-font-mono); color: rgb(var(--yb-warning-text)); background: rgb(var(--yb-warning-soft)); }
 .oa-sidebar:not(.oa-sidebar-open) .oa-nav-signal { right: 0; top: 0; transform: none; }
 .oa-bar-title { font: 600 15px/1.4 var(--oa-font); white-space: nowrap; }
@@ -1127,8 +1128,10 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   .oa-client-shell .app-topbar__brand, .oa-client-shell .app-topbar__actions { flex:none; gap:6px; }
   .oa-client-shell .app-topbar__actions { margin-left:auto; }
   .oa-client-shell .app-topbar :deep(.topbar-icon) { border-radius:6px; }
-  .oa-client-shell .app-topbar .topbar-search:has(.oa-search-key) { width:32px; padding:0; justify-content:center; }
-  .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:none; }
+  .oa-client-shell .app-topbar button.topbar-search { display:inline-flex; align-items:center; justify-content:flex-start; width:auto; min-width:220px; height:32px; flex:0 0 auto; gap:8px; padding:0 10px; border:1px solid var(--yb-line-control); border-radius:6px; }
+  .oa-client-shell .app-topbar .topbar-search > svg { flex-shrink:0; display:block; }
+  .oa-client-shell .app-topbar .topbar-search__label { white-space:nowrap; }
+
   .oa-bar-page-actions,.oa-bar-status { display:flex; align-items:center; gap:4px; min-width:0; }
   .oa-bar-page-actions:not(:has(button,a,input,select)),.oa-bar-status:not(:has(time,[role=status])) { display:none; }
   .oa-bar-tabs { flex:1 1 auto; min-width:0; display:flex; align-items:stretch; height:100%; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
@@ -1138,16 +1141,17 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   .oa-client-shell .app-page-scroll[data-workspace=list] { overflow:hidden; }
   .oa-client-shell .app-page-scroll[data-workspace=list] > .content { height:100%; min-height:0; }
 }
-@media (min-width:1920px) {
-  .oa-client-shell .app-topbar .topbar-search:has(.oa-search-key) { width:184px; justify-content:flex-start; padding-inline:8px; }
-  .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:inline; }
+@media (min-width:1440px) {
+  .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:inline; line-height:16px; font-size:13px; }
 }
-
+@media (max-width:1439px) {
+  .oa-client-shell .app-topbar button.topbar-search { width:32px; min-width:32px; height:32px; flex:0 0 32px; padding:0; gap:0; justify-content:center; border:1px solid var(--yb-line-control); border-radius:6px; }
+  #app .oa-client-shell .app-topbar button.topbar-search > :is(.topbar-search__label,.oa-search-key) { display:none; }
+}
 /* Give compact menu names and their queue shortcuts separate pointer targets. */
 @media (min-width:1280px) {
-  .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-entry:has(.oa-nav-signal) {
-    display:block;
-  }
+  .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-entry { height:44px; display:flex; align-items:flex-end; }
+  .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-item { width:100%; height:28px; min-height:28px; }
   .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-entry .oa-nav-signal {
     position:absolute; top:2px; right:2px; transform:none; min-width:0;
     font-size:var(--oa-rail-badge-size); line-height:14px; padding:0 4px;
@@ -1165,4 +1169,10 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 
 .oa-context-title:empty,.oa-context-title:has(+ .oa-breadcrumb),.oa-context-title:not(:empty) + .oa-bar-title { display:none; }
 .oa-context-title { white-space:nowrap; }
+
+@media (min-width:1440px) {
+  #app .oa-client-shell .app-topbar button.topbar-search { width:auto; min-width:220px; }
+  #app .oa-client-shell .app-topbar button.topbar-search > :is(.topbar-search__label,.oa-search-key) { font-size:13px; line-height:normal; }
+  #app .oa-client-shell .app-topbar button.topbar-search > svg { width:16px; height:16px; }
+}
 </style>

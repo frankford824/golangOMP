@@ -1436,4 +1436,9 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .oa-task-detail .hero-progress :deep(.step-connector), .oa-task-detail .hero-progress :deep(.step-connector i) { background: rgb(var(--yb-border)); }
 :global(html.oa-live-ui #app .content .oa-task-detail :is(.stage-copy,.brief-card,.resource-story) h2) { font-size: 13px; font-weight: 500; }
 :global(html.oa-live-ui #app .content .oa-task-detail :is(.stage-copy,.brief-card,.resource-story,.hero-progress) :is(strong,b)) { font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-task-detail :is(button,input:not([type=checkbox],[type=file]))) { border-radius: 6px; }
+.oa-task-detail .collaboration-card header button,
+.oa-task-detail .command-strip button { white-space: nowrap; }
+.oa-task-detail .collaboration-card header button > svg,
+.oa-task-detail .command-strip button > svg { width: 18px; height: 18px; }
 </style>

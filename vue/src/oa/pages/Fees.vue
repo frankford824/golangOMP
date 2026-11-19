@@ -981,6 +981,15 @@ watch(() => route.query.id, (id, previous) => {
 .fee-grants-heading h2 { margin: 0 auto 0 0; }
 .fee-form-actions { padding-top: 10px; border-top: 1px solid var(--oa-line); justify-content: flex-end; }
 .fee-pager { justify-content: flex-end; margin-top: 12px; color: var(--oa-muted); }
+.oa-form input[type='file']::file-selector-button {
+  margin-inline-end: 8px;
+  padding: 2px 8px;
+  border: 1px solid rgb(var(--yb-border-strong));
+  border-radius: 6px;
+  background: rgb(var(--yb-surface));
+  color: inherit;
+  font: inherit;
+}
 .fee-disclosure { margin-top: 12px; scroll-margin-top: 12px; }
 .fee-disclosure summary { cursor: pointer; font-weight: 600; min-height: 32px; line-height: 32px; }
 .fee-row-action { display: inline-flex; align-items: center; min-height: 32px; min-width: 32px; }

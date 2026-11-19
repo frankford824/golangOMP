@@ -51,14 +51,14 @@
           <NFormItem label="关键词" class="wide"><NInput :value="draftKeyword" clearable placeholder="任务号、SKU、任务名称" @update:value="draftKeyword = $event || ''" /></NFormItem>
         </section>
       </div>
-      <footer class="filter-actions"><NButton @click="reset">重置</NButton><NButton type="primary" @click="apply">应用筛选</NButton></footer>
+      <footer class="filter-actions"><button type="button" @click="reset">重置</button><button type="button" class="apply-filter" @click="apply">应用筛选</button></footer>
     </NForm>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { NButton, NCheckbox, NDatePicker, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
+import { NCheckbox, NDatePicker, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
 import type { ActiveTaskStatus as TaskStatus } from '@/domain/types/task'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import { TASK_PRIORITY_OPTIONS } from '@/domain/task-priority'
@@ -112,4 +112,7 @@ function reset() { const next = emptyFilters(); Object.assign(draft, next); draf
 <style scoped>
 .filter-panel{height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-heading{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-heading p{margin:0;color:rgb(var(--yb-brand));font-size:11px;font-weight:850;letter-spacing:.1em}.filter-heading h2{margin:3px 0 0;font-size:22px}.filter-heading button{width:40px;height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:24px;cursor:pointer}.filter-form{min-height:0;display:grid;grid-template-rows:1fr auto}.filter-scroll{min-height:0;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr 1fr;gap:4px 13px;padding:18px 22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-section h3{grid-column:1/-1;margin:0 0 7px;font-size:13px}.wide{grid-column:1/-1}.status-options{display:flex;flex-wrap:wrap;gap:7px}.status-option{min-height:32px;padding:0 11px;border:1px solid rgb(var(--yb-border));border-radius:999px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));font-size:12px;cursor:pointer}.status-option.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:750}.options-status{display:flex;flex-wrap:wrap;align-items:center;gap:9px;padding:12px 22px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-secondary));font-size:12px;line-height:1.55}.options-status.is-error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.options-status button{min-height:30px;padding:0 11px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;font-size:12px;font-weight:700;cursor:pointer}
 .filter-actions{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:15px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.w-full{width:100%}@media(max-width:520px){.filter-section{grid-template-columns:1fr}.filter-section h3,.wide{grid-column:auto}.filter-heading{padding:16px}.filter-section{padding:16px}}
+.filter-panel :is(.filter-heading button,.status-option) { border-radius: 6px; }
+.filter-actions button { min-height: 32px; padding: 0 12px; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); white-space: nowrap; }
+.filter-actions .apply-filter { border-color: rgb(var(--yb-brand)); background: rgb(var(--yb-brand)); color: rgb(var(--yb-text-inverse)); }
 </style>

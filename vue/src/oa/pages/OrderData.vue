@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { orderFilters, rememberOrderFilters } from '../orderFilterMemory'
 import { computed, nextTick, ref, watch } from 'vue'
-import { ChevronLeft, ChevronRight, Copy, Search, X } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Copy, X } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { orderState } from '../ordersDisplay'
 import OrderDateField from '../components/OrderDateField.vue'
@@ -269,7 +269,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
     <template v-else>
       <form class="order-data-filters" @submit.prevent="load()">
         <label>
-          店铺
+          <span class="filter-prefix">店铺</span>
           <select v-if="shopNames.length" v-model="shop">
             <option value="">全部可见店铺</option>
             <option v-if="shop && !shopNames.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option>
@@ -277,13 +277,13 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
           </select>
           <input v-else v-model.trim="shop" placeholder="全部可见店铺" />
         </label>
-        <label v-if="mode === 'detail'">平台订单号<input v-model.trim="orderNo" maxlength="128" placeholder="精确查单" /></label>
-        <label>平台<input v-model.trim="platform" placeholder="默认平台范围" /></label>
-        <label>日期<OrderDateField v-model="from" label="开始日期" :max="to" :min="firstDay" /></label>
-        <label>至<OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
+        <label v-if="mode === 'detail'"><span class="filter-prefix">平台订单号</span><input v-model.trim="orderNo" maxlength="128" placeholder="精确查单" /></label>
+        <label><span class="filter-prefix">平台</span><input v-model.trim="platform" placeholder="默认平台范围" /></label>
+        <label><span class="filter-prefix">日期</span><OrderDateField v-model="from" label="开始日期" :max="to" :min="firstDay" /></label>
+        <label><span class="filter-prefix">至</span><OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
         <label v-if="mode === 'detail'" class="order-data-check"><input v-model="includeBrush" type="checkbox" />包含刷单</label>
         <div class="order-data-filter-actions">
-          <button class="oa-button-primary" type="submit" :disabled="busy"><Search :size="16" aria-hidden="true" />查询</button>
+          <button class="oa-button-primary" type="submit" :disabled="busy">查询</button>
           <button type="button" :disabled="busy" @click="resetAndLoad">重置</button>
         </div>
       </form>
@@ -346,7 +346,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
               <time v-if="column.date && selected[column.key]" :datetime="String(selected[column.key])">{{ display(column, selected) }}</time>
               <span v-else-if="column.key === 'status' || column.key === 'state'" :class="stateClass(column, selected)" :title="selected[column.key] == null ? undefined : String(selected[column.key])">{{ display(column, selected) }}</span>
               <template v-else>{{ display(column, selected) }}</template>
-              <button v-if="column.key === 'online_order_no' && selected[column.key]" class="order-data-copy" type="button" @click="copyOrder(String(selected.online_order_no))"><Copy :size="14" aria-hidden="true" />复制</button>
+              <button v-if="column.key === 'online_order_no' && selected[column.key]" class="order-data-copy" type="button" @click="copyOrder(String(selected.online_order_no))">复制</button>
             </dd>
           </div>
         </dl>

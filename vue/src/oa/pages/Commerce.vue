@@ -2,7 +2,7 @@
 import { orderFilters, rememberOrderFilters } from '../orderFilterMemory'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText, Search } from 'lucide-vue-next'
+import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText } from 'lucide-vue-next'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import OAEmpty from '../components/OAEmpty.vue'
@@ -803,14 +803,14 @@ onUnmounted(() => {
           <button v-for="period in periods" :key="period.label" type="button" :disabled="busy"
             :aria-pressed="from === rangeStart(period.daysBack) && to === today" @click="range(period.daysBack)">{{ period.label }}</button>
         </div>
-      <label v-if="mode === 'ranking'">排名维度 <select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
-      <label v-if="mode === 'products'">商品范围 <select v-model="productScope" name="product-scope"><option value="mine">归属我的商品</option><option value="overview">全部可见商品</option></select></label>
-      <label v-if="mode === 'detail'">SKU <input v-model="selectedSku" required /></label>
-      <label v-if="mode !== 'personal'">店铺 <select v-if="shopOptions.length" v-model="shop" class="commerce-shop-select" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
-      <label>日期 <OrderDateField v-model="from" label="开始日期" :max="to" :min="earliest" /></label>
-      <label>至 <OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
+      <label v-if="mode === 'ranking'"><span class="filter-prefix">排名维度</span><select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
+      <label v-if="mode === 'products'"><span class="filter-prefix">商品范围</span><select v-model="productScope" name="product-scope"><option value="mine">归属我的商品</option><option value="overview">全部可见商品</option></select></label>
+      <label v-if="mode === 'detail'"><span class="filter-prefix">SKU</span><input v-model="selectedSku" required /></label>
+      <label v-if="mode !== 'personal'"><span class="filter-prefix">店铺</span><select v-if="shopOptions.length" v-model="shop" class="commerce-shop-select" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
+      <label><span class="filter-prefix">日期</span><OrderDateField v-model="from" label="开始日期" :max="to" :min="earliest" /></label>
+      <label><span class="filter-prefix">至</span><OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
       <label v-if="mode !== 'ranking' || group !== 'growth'" class="oa-check-inline"><input v-model="includeBrush" type="checkbox" />包含刷单</label>
-      <button class="oa-button-primary" :disabled="busy"><Search :size="15" />{{ busy ? '查询中…' : '查询' }}</button>
+      <button class="oa-button-primary" :disabled="busy">{{ busy ? '查询中…' : '查询' }}</button>
       </div>
     </form>
     <p v-if="shopError" class="oa-watermark">{{ shopError }}</p>
@@ -910,7 +910,7 @@ onUnmounted(() => {
         <div v-else-if="activePoint" class="commerce-single-day">
           <span><time :datetime="activePoint.day">{{ activePoint.day }}</time> · {{ mode === 'personal' ? '实际商品销售额' : '订单应付' }}</span>
           <strong>{{ money(activePoint.amount) }}</strong>
-          <button type="button" :disabled="busy" @click="range(6)">查看近 7 日趋势 <ArrowRight :size="15" /></button>
+          <button type="button" :disabled="busy" @click="range(6)">查看近 7 日趋势</button>
         </div>
         <OAEmpty v-else-if="weekTrendUnavailable" compact kind="chart" title="近 7 日趋势暂不可用"><button type="button" :disabled="busy" @click="load()">重新查询</button></OAEmpty>
         <OAEmpty v-else compact kind="chart" title="所选范围暂无趋势数据" />

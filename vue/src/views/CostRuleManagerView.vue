@@ -56,16 +56,16 @@
         <div class="scheme-rail-list desktop-region-scroll" role="region" aria-label="计价方案列表" tabindex="0">
         <template v-for="family in groupedSchemes" :key="family.code">
         <h3 class="scheme-family-heading">{{family.name}}<span>{{family.groups.length}}</span></h3>
-        <button
-          v-for="group in family.groups"
-          :key="group.code"
-          type="button"
-          :class="{ active: selectedGroupCode === group.code }"
-          :aria-pressed="selectedGroupCode === group.code"
-          @click="selectedGroupCode = group.code"
-        >
-          <span><strong :title="group.name">{{ group.name }}</strong><small>{{ activeBindingCount(group.code) }} 个款式</small></span>
-        </button>
+        <div v-for="group in family.groups" :key="group.code" class="scheme-rail-entry" :class="{ active: selectedGroupCode === group.code }">
+          <button
+            type="button"
+            :title="group.name"
+            :aria-pressed="selectedGroupCode === group.code"
+            :aria-describedby="`scheme-count-${group.code}`"
+            @click="selectedGroupCode = group.code"
+          >{{ group.name }}</button>
+          <small :id="`scheme-count-${group.code}`">{{ activeBindingCount(group.code) }} 个款式</small>
+        </div>
         </template>
         <div v-if="!loading && !filteredGroups.length" class="empty-small">没有匹配的方案。可切换“全部方案”查看未绑定项。</div>
         </div>
@@ -182,7 +182,7 @@
       </header>
       <div class="exact-run-builder">
         <label><span>指定 SKU 生成影响预览</span><textarea v-model="explicitSKUText" rows="2" placeholder="输入 SKU，支持空格、逗号或换行分隔" /></label>
-        <button class="secondary" :disabled="creatingExplicitRun || !explicitSKUCodes.length" @click="createExplicitRun">{{ creatingExplicitRun ? '生成中…' : `预览 ${explicitSKUCodes.length || ''} 个 SKU` }}</button>
+        <button class="secondary" :disabled="creatingExplicitRun || !explicitSKUCodes.length" @click="createExplicitRun">{{ creatingExplicitRun ? '生成中…' : explicitSKUCodes.length ? `预览 ${explicitSKUCodes.length} 个 SKU` : '预览影响' }}</button>
       </div>
       <div v-if="!runs.length" class="empty-large">尚未生成成本影响预览。</div>
       <div v-else class="run-list">
