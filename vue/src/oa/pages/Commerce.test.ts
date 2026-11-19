@@ -13,7 +13,7 @@ vi.mock('@/services/http', () => ({ getToken: () => 'test-session-' + session.nu
 vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: () => false }) }))
 vi.mock('@/stores/permissions', () => ({ usePermissionsStore: () => ({ hasMenu: () => false }) }))
 vi.mock('../access', () => ({
-  useOAAccess: () => ({ can: (action: string) => action === 'orders.view', currentProfile: { value: { id: '7' } } }),
+  useOAAccess: () => ({ can: (action: string) => action === 'orders.view', currentProfile: { value: { id: '7', super_admin: true } } }),
 }))
 vi.mock('../api', async (importOriginal) => ({
   ...await importOriginal<typeof import('../api')>(),
@@ -23,108 +23,115 @@ vi.mock('../api', async (importOriginal) => ({
 
 beforeEach(() => {
   session.number++
+  orderAPI.mockReset()
+  for (const key of Object.keys(routeQuery)) delete routeQuery[key]
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-11-18T08:30:00Z'))
 })
 afterEach(() => vi.useRealTimers())
 
-it('sorts all available ranking rows precisely and keeps equal amounts in source order with missing values last', async () => {
-  orderAPI.mockImplementation(async (path: string) => {
-    if (path.includes('/rankings?')) return { rows: [
-      { key: 'large', payable_amount: '9007199254740992.02' },
-      { key: 'empty' },
-      { key: 'smaller', payable_amount: '9007199254740992.01' },
-      { key: 'equal', payable_amount: '9007199254740992.010' },
-    ] }
-    if (path.includes('/summary?')) return { rows: [
-      { shop_id: 'large', order_count: 1, verified_gross: '1.01', item_pay_verified_total: '10' },
-      { shop_id: 'smaller', order_count: 99, verified_gross: '1.02', item_pay_verified_total: '50' },
-    ] }
-    return { rows: [] }
-  })
+function rankingRequests() {
+  return orderAPI.mock.calls.map(([path]) => new URL(path, 'https://oa.test'))
+    .filter(url => url.pathname === '/oa-api/orders/rankings')
+    .map(url => Object.fromEntries(url.searchParams))
+}
+
+it('uses global service order and ranks on later pages, and starts a new sort from the first row', async () => {
+  Object.assign(routeQuery, { group: 'product', rankMetric: 'amount', rankDirection: 'asc', offset: '10100' })
+  orderAPI.mockImplementation(async (path: string) => path.includes('/rankings?') ? {
+    has_more: true, total_rows: 10201, rows: [
+      { shop_id: 's1', shop_item_id: 'p1', title: '宝贝标题', product_name: 'SKU 名称', item_pay_total: '60' },
+      { shop_id: 's2', key: 'p2', product_name: '另一个 SKU 名称', item_pay_total: '20' },
+    ],
+  } : { rows: [] })
   const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
   await flushPromises()
-  const ranks = () => wrapper.findAll('tbody tr').map(row => row.findAll('td').slice(0, 2).map(cell => cell.text()))
-  expect(wrapper.text()).toContain('所选范围全量排序')
-  await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('asc')
-  expect(ranks()).toEqual([['1', 'smaller'], ['2', 'equal'], ['3', 'large'], ['4', 'empty']])
+  expect(rankingRequests()).toEqual([expect.objectContaining({ group: 'product', sort: 'amount', order: 'asc', offset: '10100' })])
+  expect(wrapper.text()).toContain('共 10,201 条')
+  expect(wrapper.findAll('tbody .commerce-rank').map(cell => cell.text())).toEqual(['10101', '10102'])
+  expect(wrapper.findAll('tbody tr').map(row => row.findAll('td')[1].text())).toEqual(['宝贝标题商品 ID p1', 'p2'])
+  expect(orderAPI.mock.calls.some(([path]) => path.includes('/products?'))).toBe(false)
+  await wrapper.find('.workspace-pager button:last-child').trigger('click')
+  await flushPromises()
+  expect(rankingRequests().at(-1)?.offset).toBe('10200')
+  await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('desc')
+  await flushPromises()
+  expect(rankingRequests().at(-1)).toMatchObject({ offset: '0', order: 'desc' })
+  expect(wrapper.findAll('tbody .commerce-rank').map(cell => cell.text())).toEqual(['1', '2'])
+  wrapper.unmount()
+})
+
+it('keeps the latest ranking request during fast sort changes and retries a failed selection', async () => {
+  const pending: { resolve: (value: { rows: { key: string }[] }) => void; reject: (error: Error) => void }[] = []
+  orderAPI.mockImplementation((path: string) => path.includes('/rankings?')
+    ? new Promise((resolve, reject) => pending.push({ resolve, reject }))
+    : Promise.resolve({ rows: [] }))
+  const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
+  await flushPromises()
   await wrapper.find('.commerce-ranking-sort label:nth-child(1) select').setValue('grossRate')
-  expect(ranks()).toEqual([['1', 'smaller'], ['2', 'large'], ['3', 'empty'], ['4', 'equal']])
-  wrapper.unmount()
-})
-
-it('keeps paged product ranks, joins names by shop and ID, and looks up a missing label on demand', async () => {
-  orderAPI.mockClear()
-  orderAPI.mockImplementation(async (path: string) => {
-    if (path.includes('/rankings?')) return { has_more: true, rows: [
-      { key: 'same-id', shop_id: 's1', item_pay_total: '50' },
-      { key: 'same-id', shop_id: 's2', item_pay_total: '20' },
-    ] }
-    if (path.includes('/products?')) {
-      const query = new URL(path, 'https://oa.test').searchParams
-      return { rows: query.has('product')
-        ? [{ shop_id: 's2', shop_item_id: 'same-id', product_name: '第二家商品' }]
-        : [
-          { shop_id: 's1', shop_item_id: 'same-id', product_name: '第一家商品' },
-          { shop_id: 's1', shop_item_id: 'same-id', product_name: '第一家另一商品名' },
-        ] }
-    }
-    return { rows: [] }
-  })
-  const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
-  await flushPromises()
-  await wrapper.find('form select').setValue('product')
-  await wrapper.find('form').trigger('submit')
-  await flushPromises()
-  expect(wrapper.text()).toContain('仅排序本页，保留原榜名次')
-  expect(wrapper.text()).toContain('第一家商品')
-  expect(wrapper.text()).toContain('SKU 明细有多个名称')
-  expect(wrapper.text()).toContain('商品名称未返回')
   await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('asc')
-  expect(wrapper.findAll('tbody .commerce-rank').map(cell => cell.text())).toEqual(['2', '1'])
-  const productRequests = () => orderAPI.mock.calls.map(([path]) => String(path)).filter(path => path.includes('/products?'))
-  expect(productRequests()).toHaveLength(1)
-  await wrapper.find('tbody button').trigger('click')
+  expect(rankingRequests().at(-1)).toMatchObject({ sort: 'grossRate', order: 'asc', offset: '0' })
+  pending[2].reject(new Error('当前查询失败'))
+  pending[0].resolve({ rows: [{ key: '旧列表' }] })
+  pending[1].resolve({ rows: [{ key: '过期排序' }] })
   await flushPromises()
-  expect(wrapper.text()).toContain('第二家商品')
-  expect(productRequests()).toHaveLength(2)
-  expect(new URL(productRequests()[1], 'https://oa.test').searchParams.get('shop_id')).toBe('s2')
-  expect(new URL(productRequests()[1], 'https://oa.test').searchParams.get('product')).toBe('same-id')
+  expect(wrapper.get('[role=alert]').text()).toContain('当前查询失败')
+  expect(wrapper.find('tbody').exists()).toBe(false)
+  await wrapper.get('[role=alert] button').trigger('click')
+  expect(rankingRequests().at(-1)).toEqual(rankingRequests().at(-2))
+  pending[3].resolve({ rows: [{ key: '新排名' }] })
+  await flushPromises()
+  expect(wrapper.find('tbody').text()).toContain('新排名')
+  expect(wrapper.find('[role=alert]').exists()).toBe(false)
   wrapper.unmount()
 })
 
-it('loads shop-product-SKU rows with the applied filters and remembers the SKU sort on return', async () => {
+it('loads shop-SKU rows and restores the submitted SKU sort and page on browser return', async () => {
   const priorState = window.history.state
   window.history.replaceState({ position: 1 }, '')
-  Object.assign(routeQuery, { group: 'sku', shop_id: 's1', from: '2026-11-17', to: '2026-11-18', include_brush: '1' })
-  orderAPI.mockClear()
-  orderAPI.mockImplementation(async (path: string) => path.includes('/products?') ? { has_more: path.endsWith('offset=0'), rows: [
-    { shop_id: 's1', shop_item_id: 'p1', sku: 'same-sku', product_name: '商品一', quantity: '18', item_pay_total: '99' },
-    { shop_id: 's1', shop_item_id: 'p2', sku: 'same-sku', product_name: '商品二', quantity: '2', item_pay_total: '9' },
+  Object.assign(routeQuery, { group: 'sku', shop_id: 's1', from: '2026-11-17', to: '2026-11-18', include_brush: '1', sort: 'quantity', order: 'asc' })
+  orderAPI.mockImplementation(async (path: string) => path.includes('/rankings?') ? { has_more: new URL(path, 'https://oa.test').searchParams.get('offset') === '0', rows: [
+    { shop_id: 's1', sku: 'sku-1', product_name: '实际 SKU 名称', quantity: '18', item_pay_total: '99' },
   ] } : { rows: [] })
   const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
   await flushPromises()
-  const request = orderAPI.mock.calls.map(([path]) => String(path)).find(path => path.includes('/products?'))
-  expect(request).toBeDefined()
-  expect(Object.fromEntries(new URL(request!, 'https://oa.test').searchParams)).toEqual({
-    from: '2026-11-17', to: '2026-11-18', shop_id: 's1', include_brush: '1', offset: '0',
+  expect(rankingRequests()[0]).toEqual({
+    from: '2026-11-17', to: '2026-11-18', shop_id: 's1', include_brush: '1', offset: '0', group: 'sku', sort: 'quantity', order: 'asc',
   })
-  await wrapper.find('.commerce-ranking-sort label:nth-child(1) select').setValue('quantity')
-  await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('asc')
-  expect(wrapper.findAll('tbody tr').map(row => row.find('strong, a').text())).toEqual(['商品二', '商品一'])
+  expect(wrapper.get('tbody').text()).toContain('实际 SKU 名称')
+  expect(wrapper.get('tbody').text()).toContain('SKU sku-1')
+  expect(wrapper.get('tbody').text()).toContain('18')
+  expect(wrapper.get('tbody').text()).not.toContain('商品 ID')
+  await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('desc')
+  await flushPromises()
   await wrapper.find('.workspace-pager button:last-child').trigger('click')
   await flushPromises()
-  expect(wrapper.findAll('tbody .commerce-rank').map(cell => cell.text())).toEqual(['102', '101'])
   wrapper.unmount()
 
   const returned = mount(Commerce, { props: { mode: 'ranking' } })
   await flushPromises()
-  expect((returned.find('.commerce-ranking-sort label:nth-child(1) select').element as HTMLSelectElement).value).toBe('quantity')
-  expect((returned.find('.commerce-ranking-sort label:nth-child(2) select').element as HTMLSelectElement).value).toBe('asc')
+  expect(rankingRequests().at(-1)).toMatchObject({ group: 'sku', sort: 'quantity', order: 'desc', offset: '100' })
   expect(returned.find('.workspace-pager').text()).toContain('第 2 页')
+  expect(returned.find('tbody .commerce-rank').text()).toBe('101')
   returned.unmount()
-  for (const key of Object.keys(routeQuery)) delete routeQuery[key]
   window.history.replaceState(priorState, '')
+})
+
+it('displays roster names, archived status, and missing-name IDs in the personnel ranking', async () => {
+  routeQuery.group = 'person'
+  orderAPI.mockImplementation(async (path: string) => path.includes('/rankings?') ? { rows: [
+    { key: 'old-key', person_id: 'PI-1', name: '归档人员', archived: 1 },
+    { key: 'old-key-2', person_id: 'PI-2', name: ' ', archived: 0 },
+  ] } : { rows: [] })
+  const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
+  await flushPromises()
+  const people = wrapper.findAll('tbody tr')
+  expect(people[0].text()).toContain('归档人员')
+  expect(people[0].text()).toContain('PI-1')
+  expect(people[0].text()).toContain('已归档')
+  expect(people[1].text()).toContain('PI-2')
+  expect(people[1].text()).not.toContain('已归档')
+  wrapper.unmount()
 })
 
 it('keeps the overview usable with null freshness and renders a scoped Top 10 and hourly comparison', async () => {

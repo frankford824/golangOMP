@@ -21,10 +21,3 @@ export function rankingRatio(numerator: string | null, denominator: string | nul
     ? { value: left.value * right.unit, unit: left.unit * right.value }
     : null
 }
-
-export function compareRankingNumbers(left: RankingNumber | null, right: RankingNumber | null, direction: 'asc' | 'desc') {
-  if (!left || !right) return left ? -1 : right ? 1 : 0
-  const difference = left.value * right.unit - right.value * left.unit
-  if (difference === 0n) return 0
-  return (difference < 0n ? -1 : 1) * (direction === 'asc' ? 1 : -1)
-}

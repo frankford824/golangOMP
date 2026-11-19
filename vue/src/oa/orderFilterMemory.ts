@@ -62,9 +62,9 @@ export function orderVisit<T>(name: string) {
   }
 }
 
-export function orderOffset(value: unknown) {
+export function orderOffset(value: unknown, maximum = 10000) {
   const n = typeof value === 'string' ? Number(value) : value
-  return typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 10000 && n % 100 === 0 ? n : 0
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= maximum && n % 100 === 0 ? n : 0
 }
 
 export function orderReturnQuery(router: Router, path: string, query: Record<string, string>, source: string) {
