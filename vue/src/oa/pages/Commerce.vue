@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { orderFilters, orderOffset, orderReturnQuery, orderReturnSource, orderReturnTarget, orderVisit, rememberOrderFilters } from '../orderFilterMemory'
+import { compareRankingNumbers, rankingNumber, rankingRatio } from '../rankingOrder'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText } from 'lucide-vue-next'
+import { costCoverageDefinition, lineCoverage, salesCoverage } from '../costCoverage'
 import { oaReturnLabel } from '@/oa/pageTitle'
 import DetailBreadcrumb from '../components/DetailBreadcrumb.vue'
 import { detailReturnTarget } from '../returnNavigation'
@@ -29,7 +31,7 @@ const props = defineProps<{ mode: Mode; productId?: string }>()
 type DataRow = {
   day?: string; hour?: number | string; shop_id?: string; platform?: string; shop_item_id?: string; sku?: string; product_name?: string
   quantity?: string; order_count?: number; payable_amount?: string; item_pay_total?: string
-  cost_verified_total?: string | null; item_pay_verified_total?: string | null; verified_gross?: string | null; verified_coverage?: string | null
+  cost_verified_total?: string | null; item_pay_verified_total?: string | null; verified_gross?: string | null; verified_coverage?: number | string | null
   key?: string; tasks?: { id?: number; task_id?: number; task_no?: string; title?: string }[]
   feedback?: { id: number; note?: string; live_date?: string; task_id?: number }[]
   shop_name?: string; growth_status?: string; growth_rate?: number
@@ -110,7 +112,7 @@ function openCost(row: DataRow, focus = true) {
     from: query.from, to: query.to, includeBrush: query.include_brush === '1',
     productName: row.product_name || row.shop_item_id || row.sku,
     quantity: row.quantity, sales: row.item_pay_total,
-    coverage: row.verified_coverage == null ? undefined : percent(Number(row.verified_coverage)),
+    coverage: lineCoverage(row.verified_coverage).value,
     today: query.from === today && query.to === today,
   }, focus)
 }
@@ -118,7 +120,7 @@ function returnQuery() {
   return orderReturnQuery(router, route.path, {
     ...navigationQuery.value,
     ...(props.mode === 'products' ? { scope: appliedMine.value ? 'mine' : 'overview', exception: lowCoverageOnly.value ? 'coverage' : '' } : {}),
-    ...(props.mode === 'ranking' ? { group: appliedGroup.value } : {}),
+    ...(props.mode === 'ranking' ? { group: appliedGroup.value, rankMetric: rankingMetric.value, rankDirection: rankingDirection.value } : {}),
     ...(offset.value ? { offset: String(offset.value) } : {}),
     ...(props.mode === 'detail' ? Object.fromEntries(Object.entries(route.query).filter(([key, value]) =>
       ['scope', 'returnTo', 'returnFallback'].includes(key) && typeof value === 'string')) as Record<string, string> : {}),
@@ -139,7 +141,10 @@ function productLink(sku: string, shopId?: string) {
   }
 }
 const selectedSku = ref(props.productId ?? '')
-const group = ref(typeof restored.group === 'string' && ['shop', 'platform', 'product', 'growth', ...(currentProfile.value?.super_admin ? ['person'] : [])].includes(restored.group) ? restored.group : 'shop')
+function readRankingGroup(value: unknown) {
+  return typeof value === 'string' && ['shop', 'platform', 'product', 'sku', 'growth', ...(currentProfile.value?.super_admin ? ['person'] : [])].includes(value) ? value : 'shop'
+}
+const group = ref(readRankingGroup(restored.group))
 const appliedGroup = ref('shop')
 let appliedQuery = ''
 const productScope = ref(restored.scope === 'overview' ? 'overview' : 'mine')
@@ -173,6 +178,8 @@ const hourlyTrend = ref<OrderResult>()
 const weekTrend = ref<OrderResult>()
 const weekTrendUnavailable = ref(false)
 const rankingSummary = ref<OrderResult>()
+type RankProductName = { name?: string; multiple?: boolean; status?: 'loading' | 'missing' | 'error' }
+const rankingProductNames = ref(new Map<string, RankProductName>())
 const overviewDay = computed(() => props.mode === 'overview' && appliedPeriod.value?.from === appliedPeriod.value?.to ? appliedPeriod.value?.to : undefined)
 function earlierDay(day: string, days: number) {
   const date = new Date(day + 'T12:00:00Z')
@@ -302,10 +309,13 @@ async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
   if (resetPage) data.value = undefined
   summary.value = undefined
   if (resetPage) rankingSummary.value = undefined
+  if (resetPage) rankingProductNames.value = new Map()
+  else for (const [key, state] of rankingProductNames.value) {
+    if (state.status === 'loading') rankingProductNames.value.delete(key)
+  }
   error.value = ''
   failedPage.value = undefined
   try {
-    const endpoint = { products: 'products', ranking: 'rankings', detail: 'sku', personal: 'personal' }[props.mode]
     const options: Record<string, string> = {}
     if (props.mode === 'ranking') options.group = group.value
     if (props.mode === 'products' && productScope.value === 'mine') options.mine = '1'
@@ -316,6 +326,9 @@ async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
       recordScope(new URLSearchParams(appliedQuery))
     }
     const applied = new URLSearchParams(appliedQuery)
+    const skuRanking = props.mode === 'ranking' && appliedGroup.value === 'sku'
+    const endpoint = { products: 'products', ranking: skuRanking ? 'products' : 'rankings', detail: 'sku', personal: 'personal' }[props.mode]
+    if (skuRanking) applied.delete('group')
     applied.set('offset', String(next))
     const summaryQuery = new URLSearchParams(applied)
     summaryQuery.delete('offset')
@@ -341,6 +354,10 @@ async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
       data.value = result
       offset.value = next
       rankingSummary.value = supplemental?.stale ? undefined : supplemental
+      if (props.mode === 'ranking' && appliedGroup.value === 'product') {
+        rankingProductNames.value = new Map()
+        if (result.rows?.length) void loadRankingProductNames(summaryQuery, next, sequence)
+      }
       if (props.mode === 'detail') {
         loadedDetail.value = detailFilters
         feedback.value.shop_id = detailFilters.shop || result.rows?.[0]?.shop_id || ''
@@ -404,6 +421,7 @@ function saveVisit() {
     filters: {
       ...navigationQuery.value,
       group: appliedGroup.value,
+      ...(props.mode === 'ranking' ? { rankMetric: rankingMetric.value, rankDirection: rankingDirection.value } : {}),
       scope: appliedMine.value ? 'mine' : 'overview',
       exception: lowCoverageOnly.value ? 'coverage' : '',
     },
@@ -483,11 +501,7 @@ const freshness = computed(() => {
 })
 const cached = computed(() => locallyStale.value || summary.value?.stale || data.value?.stale)
 const stale = computed(() => cached.value || Number(freshness.value?.lag_seconds) > 600)
-const coverage = computed(() => {
-  const payable = Number(sum(summaryRows.value, 'item_pay_total'))
-  const verified = sum(summaryRows.value, 'item_pay_verified_total')
-  return payable > 0 && verified !== null ? (100 * Number(verified) / payable).toFixed(1) + '%' : null
-})
+const coverage = computed(() => salesCoverage(sum(summaryRows.value, 'item_pay_verified_total'), sum(summaryRows.value, 'item_pay_total')))
 const kpis = computed(() => [
   { name: '订单销售额 · 应付', value: money(sum(summaryRows.value, 'payable_amount')) },
   { name: '有效订单', value: summaryRows.value.length ? summaryRows.value.reduce((result, row) => result + Number(row.order_count || 0), 0).toLocaleString('zh-CN') : '—' },
@@ -683,19 +697,140 @@ const rankingMetrics = computed(() => {
   return new Map([...groups].map(([key, entries]) => {
     const payable = Number(sum(entries, 'payable_amount'))
     const gross = sum(entries, 'verified_gross')
-    const verifiedSales = Number(sum(entries, 'item_pay_verified_total'))
+    const verifiedSales = sum(entries, 'item_pay_verified_total')
     const share = total > 0 && payable >= 0 && payable <= total ? payable / total : null
     return [key, {
       count: entries.every(row => row.order_count != null) ? entries.reduce((value, row) => value + Number(row.order_count), 0) : null,
       gross,
-      grossRate: gross != null && verifiedSales > 0 ? Number(gross) / verifiedSales : null,
+      verifiedSales,
+      coverage: salesCoverage(verifiedSales, sum(entries, 'item_pay_total')),
+      grossRate: gross != null && Number(verifiedSales) > 0 ? Number(gross) / Number(verifiedSales) : null,
       share,
     }]
   }))
 })
 const showRankingMetrics = computed(() => ['shop', 'platform', 'growth'].includes(appliedGroup.value))
 const percent = (value?: number | null) => value == null ? '—' : (value * 100).toFixed(1) + '%'
-const rankingGroups: Record<string, string> = { shop: '店铺', growth: '店铺', person: '人员', platform: '平台', product: '商品' }
+const rankingGroups: Record<string, string> = { shop: '店铺', growth: '店铺', person: '人员', platform: '平台', product: '商品', sku: '店铺商品 SKU' }
+type RankingMetric = 'amount' | 'count' | 'gross' | 'grossRate' | 'growth' | 'quantity'
+const rankingMetric = ref<RankingMetric>('amount')
+const rankingDirection = ref<'asc' | 'desc'>('desc')
+const rankingIsComplete = computed(() => offset.value === 0 && data.value?.has_more !== true)
+const rankingSortOptions = computed(() => {
+  const options: { id: RankingMetric; label: string }[] = [
+    { id: 'amount', label: rankingUsesPayable.value ? '订单应付' : '商品销售额' },
+  ]
+  if (showRankingMetrics.value) {
+    options.push({ id: 'count', label: '有效订单数' }, { id: 'gross', label: '核实毛利' }, { id: 'grossRate', label: '核实毛利率' })
+  }
+  if (appliedGroup.value === 'growth') options.push({ id: 'growth', label: '增长率' })
+  if (appliedGroup.value === 'sku') options.push({ id: 'quantity', label: '销量' })
+  return options
+})
+watch(appliedGroup, value => {
+  rankingMetric.value = value === 'growth' ? 'growth' : 'amount'
+  rankingDirection.value = 'desc'
+}, { flush: 'sync' })
+function restoreRankingSort(filters: Record<string, unknown>) {
+  if (props.mode !== 'ranking') return
+  rankingMetric.value = rankingSortOptions.value.find(option => option.id === filters.rankMetric)?.id
+    ?? (appliedGroup.value === 'growth' ? 'growth' : 'amount')
+  rankingDirection.value = filters.rankDirection === 'asc' ? 'asc' : 'desc'
+}
+watch([rankingMetric, rankingDirection], saveVisit, { flush: 'post' })
+
+function rankingIdentity(row: DataRow) {
+  switch (appliedGroup.value) {
+    case 'shop':
+    case 'growth': return row.shop_id || row.key
+    case 'platform': return row.platform || row.key
+    case 'product': return row.shop_item_id || row.key
+    default: return row.key
+  }
+}
+const rankingRowMetrics = (row: DataRow) => rankingMetrics.value.get(rankingIdentity(row) || '')
+function rankingMetricValue(row: DataRow) {
+  const metrics = rankingRowMetrics(row)
+  switch (rankingMetric.value) {
+    case 'count': return rankingNumber(metrics?.count)
+    case 'gross': return rankingNumber(metrics?.gross)
+    case 'grossRate': return rankingRatio(metrics?.gross ?? null, metrics?.verifiedSales ?? null)
+    case 'growth': return row.growth_status === 'zero_baseline' ? null : rankingNumber(row.growth_rate)
+    case 'quantity': return rankingNumber(row.quantity)
+    default: return rankingNumber(rankingValue(row))
+  }
+}
+const sortedRankingRows = computed(() => rows.value.map((row, index) => ({
+  row, sourceRank: offset.value + index + 1, value: rankingMetricValue(row),
+})).sort((left, right) =>
+  compareRankingNumbers(left.value, right.value, rankingDirection.value) || left.sourceRank - right.sourceRank,
+))
+
+const productRankingKey = (shopID: string, productID: string) => JSON.stringify([shopID, productID])
+function rankingProductKey(row: DataRow) {
+  const productID = rankingIdentity(row)
+  return row.shop_id && productID ? productRankingKey(row.shop_id, productID) : ''
+}
+function collectRankingProductNames(rows: DataRow[]) {
+  const names = new Map<string, Set<string>>()
+  for (const row of rows) {
+    const name = row?.product_name?.trim()
+    if (!row?.shop_id || !row.shop_item_id || !name) continue
+    const key = productRankingKey(row.shop_id, row.shop_item_id)
+    const labels = names.get(key) ?? new Set<string>()
+    labels.add(name)
+    names.set(key, labels)
+  }
+  return names
+}
+function rankingNameQuery(applied: URLSearchParams) {
+  const query = new URLSearchParams(applied)
+  query.delete('group')
+  return query
+}
+async function loadRankingProductNames(applied: URLSearchParams, pageOffset: number, sequence: number) {
+  const query = rankingNameQuery(applied)
+  query.set('offset', String(pageOffset))
+  const account = currentProfile.value?.id
+  const token = getToken()
+  try {
+    const result = await api<OrderResult>('/oa-api/orders/products?' + query)
+    if (sequence !== latest.value || account !== currentProfile.value?.id || token !== getToken() || !mayView.value) return
+    for (const [key, names] of collectRankingProductNames(result.rows ?? [])) {
+      if (!rankingProductNames.value.has(key)) {
+        rankingProductNames.value.set(key, { name: [...names][0], multiple: names.size > 1 })
+      }
+    }
+  } catch { /* The visible per-product lookup can retry independently. */ }
+}
+function rankingProductLabel(row: DataRow) {
+  return row.product_name?.trim() || rankingProductNames.value.get(rankingProductKey(row))?.name
+}
+async function lookupRankingProduct(row: DataRow) {
+  const key = rankingProductKey(row)
+  if (!key || !row.shop_id || rankingProductNames.value.get(key)?.status === 'loading' || busy.value) return
+  const sequence = latest.value
+  const account = currentProfile.value?.id
+  const token = getToken()
+  const isCurrent = () => sequence === latest.value && account === currentProfile.value?.id && token === getToken() && mayView.value
+  const query = rankingNameQuery(new URLSearchParams(appliedQuery))
+  query.set('shop_id', row.shop_id)
+  query.set('product', rankingIdentity(row)!)
+  query.set('offset', '0')
+  rankingProductNames.value.set(key, { status: 'loading' })
+  try {
+    const result = await api<OrderResult>('/oa-api/orders/products?' + query)
+    if (!isCurrent()) return
+    const names = collectRankingProductNames(result.rows ?? []).get(key)
+    rankingProductNames.value.set(key, names?.size ? { name: [...names][0], multiple: names.size > 1 } : { status: 'missing' })
+  } catch {
+    if (isCurrent()) rankingProductNames.value.set(key, { status: 'error' })
+  }
+}
+async function copyRankingPerson(id: string) {
+  try { await navigator.clipboard.writeText(id); copyStatus.value = '已复制人员标识' }
+  catch { copyStatus.value = '无法复制人员标识，请手动复制' }
+}
 const periodLabel = computed(() => {
   const value = appliedPeriod.value
   return value ? value.from === value.to ? value.from : value.from + ' 至 ' + value.to : ''
@@ -792,13 +927,14 @@ watch(() => route.fullPath, async () => {
   automaticProductScope = !saved && route.query.scope == null
   productScope.value = filters.scope === 'overview' ? 'overview' : 'mine'
   lowCoverageOnly.value = filters.exception === 'coverage'
-  if (typeof filters.group === 'string' && ['shop', 'platform', 'product', 'growth', ...(currentProfile.value?.super_admin ? ['person'] : [])].includes(filters.group)) group.value = filters.group
-  else group.value = 'shop'
+  group.value = readRankingGroup(filters.group)
   restoringVisit = Boolean(saved)
   inspectorPreferenceSet = saved?.closed ?? false
   costAction.value?.dismiss()
   const activeVisit = visit
-  await load(true, saved?.offset ?? orderOffset(route.query.offset))
+  const loaded = load(true, saved?.offset ?? orderOffset(route.query.offset))
+  restoreRankingSort(filters)
+  await loaded
   if (activeVisit === visit && route.path === visitPath) await restoreResultVisit(saved)
 })
 async function restoreResultVisit(saved?: Visit) {
@@ -840,7 +976,9 @@ onMounted(() => {
   } else if (!useIncomingPeriod && props.mode === 'detail') {
     from.value = rangeStart(6)
   }
-  void load(true, offset.value).then(() => restoreResultVisit(previousVisit))
+  const loaded = load(true, offset.value)
+  restoreRankingSort(restored)
+  void loaded.then(() => restoreResultVisit(previousVisit))
 })
 
 onUnmounted(() => {
@@ -877,7 +1015,7 @@ onUnmounted(() => {
           <button v-for="period in periods" :key="period.label" type="button" :disabled="busy"
             :aria-pressed="from === rangeStart(period.daysBack) && to === today" @click="range(period.daysBack)">{{ period.label }}</button>
         </div>
-      <label v-if="mode === 'ranking'"><span class="filter-prefix">排名维度</span><select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
+      <label v-if="mode === 'ranking'"><span class="filter-prefix">排名维度</span><select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option><option value="sku">店铺商品 SKU</option></select></label>
       <label v-if="mode === 'products'"><span class="filter-prefix">商品范围</span><select v-model="productScope" name="product-scope" @change="automaticProductScope = false"><option value="mine">归属我的商品</option><option value="overview">全部可见范围</option></select></label>
       <label v-if="mode === 'detail'"><span class="filter-prefix">SKU</span><input v-model="selectedSku" required /></label>
       <label v-if="mode !== 'personal'"><span class="filter-prefix">店铺</span><select v-if="shopOptions.length" v-model="shop" class="commerce-shop-select" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
@@ -904,7 +1042,7 @@ onUnmounted(() => {
             {{ hourlyComparison.change > 0 ? '+' : '' }}{{ hourlyComparison.change.toFixed(1) }}%
           </strong>
         </small>
-        <small v-if="metric.foot" :class="['commerce-coverage', { 'commerce-coverage-low': parseFloat(metric.foot) < 90 }]">{{ parseFloat(metric.foot) < 90 ? '仅覆盖' : '覆盖' }} {{ metric.foot }}</small>
+        <small v-if="metric.foot" :title="costCoverageDefinition" :class="['commerce-coverage', { 'commerce-coverage-low': metric.foot.low }]">{{ metric.foot.note }}</small>
       </div>
     </section>
     <section v-if="mode === 'personal' && data && fullCurrentMonth" class="oa-kpis commerce-metrics commerce-personal" aria-label="本月业绩">
@@ -1014,37 +1152,81 @@ onUnmounted(() => {
         <span v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</span>
         <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ displayRows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
       </div>
+      <div v-if="mode === 'ranking' && rows.length" class="oa-actions commerce-ranking-sort">
+        <label>排序指标 <select v-model="rankingMetric" :disabled="busy"><option v-for="option in rankingSortOptions" :key="option.id" :value="option.id">{{ option.label }}</option></select></label>
+        <label>排序方向 <select v-model="rankingDirection" :disabled="busy"><option value="desc">降序</option><option value="asc">升序</option></select></label>
+        <span class="oa-muted" role="status">{{ rankingIsComplete ? '所选范围全量排序' : '仅排序本页，保留原榜名次' }} · 缺值排在末尾</span>
+        <span v-if="appliedGroup === 'sku'" class="oa-muted">按店铺、商品和 SKU 分组，同一 SKU 可出现在多行。</span>
+        <span v-else-if="appliedGroup === 'product'" class="oa-muted">补充名称来自同店商品的 SKU 明细。有多个名称时展示其中一个实际名称。</span>
+        <span v-else-if="appliedGroup === 'person'" class="oa-muted">人员按名册标识展示，接口未返回姓名。同一商品行可归属多人，人员销售额不能直接相加。</span>
+      </div>
       <OAEmpty v-if="!displayRows.length" :title="rows.length && lowCoverageOnly ? '本页暂无待补成本或低覆盖商品' : '所选范围暂无数据'" kind="search">
         <button v-if="mode === 'products' && !rows.length && appliedMine && !data.has_more" type="button" :disabled="busy" @click="showAllProducts">切换为全部可见范围</button>
       </OAEmpty>
       <div v-else ref="resultRegion" class="oa-table-wrap" tabindex="0" @scroll="saveVisit" role="region" :aria-label="title + '数据表'">
-        <table v-if="mode === 'ranking' || mode === 'personal'" :class="['oa-table', { 'commerce-ranking-table': mode === 'ranking' }]">
-          <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><template v-if="mode === 'ranking' && showRankingMetrics"><th class="oa-number">应付占比</th><th class="oa-number">有效订单数</th><th class="oa-number">核实毛利</th><th class="oa-number" title="核实毛利 ÷ 有核实成本的商品销售额">核实毛利率</th></template><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>
+        <table v-if="mode === 'ranking'" class="oa-table commerce-ranking-table" :class="{ 'commerce-ranking-sku': appliedGroup === 'sku' }">
+          <thead><tr>
+            <th class="oa-number">{{ rankingIsComplete ? '名次' : '原榜名次' }}</th><th>{{ appliedGroup === 'person' ? '名册人员标识' : rankingGroups[appliedGroup] }}</th>
+            <th v-if="['product', 'sku'].includes(appliedGroup)">店铺</th>
+            <th v-if="appliedGroup === 'sku'" class="oa-number">销量</th>
+            <th class="oa-number">{{ rankingUsesPayable ? '订单应付' : '商品销售额' }}</th>
+            <template v-if="showRankingMetrics"><th class="oa-number" title="来自经营汇总">应付占比</th><th class="oa-number" title="来自经营汇总">有效订单数</th><th class="oa-number" title="来自经营汇总">核实毛利</th><th class="oa-number" title="来自经营汇总：核实毛利 ÷ 有核实成本的商品销售额">核实毛利率</th></template>
+            <th v-if="appliedGroup === 'growth'" class="oa-number">较同长度基期</th>
+          </tr></thead>
           <tbody>
-            <tr v-for="(row, index) in rows" :key="row.key ? (row.shop_id || '') + ':' + row.key : row.day || index">
-              <td v-if="mode === 'ranking'" class="oa-number"><span :class="['commerce-rank', { 'commerce-rank-leading': offset + index < 3 }]">{{ offset + index + 1 }}</span></td>
-              <td :class="{ 'oa-number': mode === 'personal' }">
-                <RouterLink v-if="mode === 'ranking' && ['shop', 'growth'].includes(appliedGroup) && row.key"
+            <tr v-for="({ row, sourceRank }, index) in sortedRankingRows" :key="sourceRank">
+              <td class="oa-number"><span :class="['commerce-rank', { 'commerce-rank-leading': (rankingIsComplete ? index + 1 : sourceRank) <= 3 }]">{{ rankingIsComplete ? index + 1 : sourceRank }}</span></td>
+              <td>
+                <RouterLink v-if="['shop', 'growth'].includes(appliedGroup) && rankingIdentity(row)"
                   class="workspace-row-action commerce-rank-link"
-                  :to="{ path: '/operations/orders/detail', query: { ...navigationQuery, shop_id: row.key, ...returnQuery() } }">
-                  {{ shopName(row.key) }} <ArrowUpRight :size="14" />
+                  :to="{ path: '/operations/orders/detail', query: { ...navigationQuery, shop_id: rankingIdentity(row), ...returnQuery() } }">
+                  {{ row.shop_name || shopName(rankingIdentity(row)) }} <ArrowUpRight :size="14" />
                 </RouterLink>
-                <span v-else>{{ row.key || row.day || '—' }}</span>
+                <template v-else-if="appliedGroup === 'product'">
+                  <strong>{{ rankingProductLabel(row) || '商品名称未返回' }}</strong>
+                  <div class="oa-muted">商品 ID {{ rankingIdentity(row) || '—' }}</div>
+                  <div v-if="!row.product_name?.trim() && rankingProductNames.get(rankingProductKey(row))?.multiple" class="oa-muted">SKU 明细有多个名称</div>
+                  <template v-if="!rankingProductLabel(row) && rankingProductKey(row)">
+                    <button v-if="rankingProductNames.get(rankingProductKey(row))?.status !== 'missing'" class="workspace-row-action" type="button"
+                      :disabled="busy || rankingProductNames.get(rankingProductKey(row))?.status === 'loading'" @click="lookupRankingProduct(row)">
+                      {{ rankingProductNames.get(rankingProductKey(row))?.status === 'loading' ? '查询中…' : rankingProductNames.get(rankingProductKey(row))?.status === 'error' ? '查询失败，重试' : '查商品名' }}
+                    </button>
+                    <span v-else class="oa-muted" role="status">未查到商品名称</span>
+                  </template>
+                </template>
+                <template v-else-if="appliedGroup === 'sku'">
+                  <RouterLink v-if="row.sku && row.shop_id" :to="productLink(row.sku, row.shop_id)" class="workspace-row-action commerce-rank-link">
+                    {{ row.product_name?.trim() || row.sku }} <ArrowUpRight :size="14" />
+                  </RouterLink>
+                  <strong v-else>{{ row.product_name?.trim() || row.sku || '—' }}</strong>
+                  <div class="oa-muted">SKU {{ row.sku || '—' }} · 商品 ID {{ row.shop_item_id || '—' }}</div>
+                </template>
+                <template v-else-if="appliedGroup === 'person'">
+                  <div v-if="rankingIdentity(row)" class="oa-muted">{{ rankingIdentity(row) }}
+                    <button type="button" class="workspace-row-action" aria-label="复制人员标识" @click="copyRankingPerson(rankingIdentity(row)!)"><Copy :size="14" /></button>
+                  </div>
+                  <span v-else>—</span>
+                </template>
+                <span v-else>{{ rankingIdentity(row) || '—' }}</span>
               </td>
-              <td class="oa-number"><strong>{{ money(mode === 'ranking' ? rankingValue(row) : row.item_pay_total) }}</strong></td>
-              <template v-if="mode === 'ranking' && showRankingMetrics">
+              <td v-if="['product', 'sku'].includes(appliedGroup)" :title="row.shop_id">{{ shopName(row.shop_id) }}</td>
+              <td v-if="appliedGroup === 'sku'" class="oa-number">{{ row.quantity ?? '—' }}</td>
+              <td class="oa-number"><strong>{{ money(rankingValue(row)) }}</strong></td>
+              <template v-if="showRankingMetrics">
                 <td class="oa-number">
-                  <div v-if="row.key && rankingMetrics.get(row.key)?.share != null" class="commerce-rank-amount">
-                    <span class="commerce-rank-track" aria-hidden="true"><span :style="{ inlineSize: percent(rankingMetrics.get(row.key)?.share) }" /></span>
-                    {{ percent(rankingMetrics.get(row.key)?.share) }}
+                  <div v-if="rankingRowMetrics(row)?.share != null" class="commerce-rank-amount">
+                    <span class="commerce-rank-track" aria-hidden="true"><span :style="{ inlineSize: percent(rankingRowMetrics(row)?.share) }" /></span>
+                    {{ percent(rankingRowMetrics(row)?.share) }}
                   </div>
                   <span v-else>—</span>
                 </td>
-                <td class="oa-number">{{ row.key ? (rankingMetrics.get(row.key)?.count?.toLocaleString('zh-CN') ?? '—') : '—' }}</td>
-                <td class="oa-number">{{ money(row.key ? rankingMetrics.get(row.key)?.gross : null) }}</td>
-                <td class="oa-number">{{ percent(row.key ? rankingMetrics.get(row.key)?.grossRate : null) }}</td>
+                <td class="oa-number">{{ rankingRowMetrics(row)?.count?.toLocaleString('zh-CN') ?? '—' }}</td>
+                <td class="oa-number">{{ money(rankingRowMetrics(row)?.gross) }}
+                  <small v-if="rankingRowMetrics(row)" class="ranking-coverage" :class="{ 'coverage-low': rankingRowMetrics(row)?.coverage.low }" :title="costCoverageDefinition">{{ rankingRowMetrics(row)?.coverage.note }}</small>
+                </td>
+                <td class="oa-number">{{ percent(rankingRowMetrics(row)?.grossRate) }}</td>
               </template>
-              <td v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">
+              <td v-if="appliedGroup === 'growth'" class="oa-number">
                 <span v-if="row.growth_rate != null && row.growth_status !== 'zero_baseline'" :class="['commerce-growth', Number(row.growth_rate) > 0 ? 'commerce-growth-positive' : Number(row.growth_rate) < 0 ? 'commerce-growth-negative' : '']">
                   <ArrowUpRight v-if="Number(row.growth_rate) > 0" :size="14" /><ArrowDownRight v-else-if="Number(row.growth_rate) < 0" :size="14" />{{ (Number(row.growth_rate) * 100).toFixed(1) }}%
                 </span>
@@ -1053,8 +1235,14 @@ onUnmounted(() => {
             </tr>
           </tbody>
         </table>
-        <table v-else class="oa-table commerce-product-table">
-          <thead><tr><th>商品 / SKU</th><th>店铺</th><th class="oa-number">销量</th><th class="oa-number">商品销售额</th><th class="oa-number">成交核实成本</th><th class="oa-number">核实毛利</th><th class="oa-number">核实覆盖率</th><th v-if="mode === 'detail'" class="oa-number">当前维护单价</th></tr></thead>
+        <table v-else-if="mode === 'personal'" class="oa-table">
+          <thead><tr><th class="oa-number">下单日</th><th class="oa-number">商品销售额</th></tr></thead>
+          <tbody><tr v-for="(row, index) in rows" :key="row.day || index">
+            <td class="oa-number">{{ row.day || '—' }}</td><td class="oa-number"><strong>{{ money(row.item_pay_total) }}</strong></td>
+          </tr></tbody>
+        </table>
+        <table v-else class="oa-table commerce-product-table" :class="{ 'with-unit-cost': mode === 'detail' }">
+          <thead><tr><th>商品 / SKU</th><th>店铺</th><th class="oa-number">销量</th><th class="oa-number">商品销售额</th><th class="oa-number">成交核实成本</th><th class="oa-number">核实毛利</th><th class="oa-number" :title="costCoverageDefinition">核实成本覆盖率</th><th v-if="mode === 'detail'" class="oa-number">当前维护单价</th><th class="sku-action-column">操作</th></tr></thead>
           <tbody><tr v-for="(row, index) in displayRows" :key="`${row.shop_id}-${row.shop_item_id}-${row.sku}-${index}`"
             :class="{ 'is-selected': selectedProduct === row, 'is-selectable': mode === 'products' && row.sku && row.shop_id }"
             @click="mode === 'products' && !($event.target as HTMLElement).closest('a,button') && openCost(row)">
@@ -1068,14 +1256,13 @@ onUnmounted(() => {
             </td>
             <td :title="shopName(row.shop_id)">{{ shopName(row.shop_id) }}</td><td class="oa-number">{{ row.quantity ?? '—' }}</td><td class="oa-number">{{ money(row.item_pay_total) }}</td>
             <td class="oa-number">{{ money(row.cost_verified_total) }}</td><td class="oa-number">{{ money(row.verified_gross) }}</td>
-            <td class="oa-number">
-              <button v-if="row.sku && row.shop_id" class="sku-check-action" :class="{ 'oa-pill-warn': lowCoverage(row) }"
-                :ref="(element) => bindProductButton(row, element)" type="button" :aria-label="'核对 ' + row.sku + ' 的成本'" @click="openCost(row)">
-                {{ row.verified_coverage == null ? '补录核价' : (lowCoverage(row) ? '核价 · ' : '核对 · ') + percent(Number(row.verified_coverage)) }}
-              </button>
-              <span v-else>{{ row.verified_coverage == null ? '—' : percent(Number(row.verified_coverage)) }}</span>
-            </td>
+            <td class="oa-number" :class="{ 'coverage-low': lineCoverage(row.verified_coverage).low }" :title="costCoverageDefinition">{{ lineCoverage(row.verified_coverage).low ? lineCoverage(row.verified_coverage).note : lineCoverage(row.verified_coverage).value }}</td>
             <td v-if="mode === 'detail'" class="oa-number">{{ data.cost_context_available === false ? '成本上下文不可用' : money(data.current_cost) }}</td>
+            <td class="sku-action-column">
+              <button v-if="row.sku && row.shop_id" class="sku-check-action" :ref="(element) => bindProductButton(row, element)"
+                type="button" :aria-label="'核对 ' + row.sku + ' 的成本'" @click="openCost(row)">核价</button>
+              <span v-else>—</span>
+            </td>
           </tr></tbody>
         </table>
       </div>

@@ -3,13 +3,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Commerce from './Commerce.vue'
 
-const { orderAPI, routeQuery } = vi.hoisted(() => ({ orderAPI: vi.fn(), routeQuery: {} as Record<string, string> }))
+const { orderAPI, routeQuery, session } = vi.hoisted(() => ({ orderAPI: vi.fn(), routeQuery: {} as Record<string, string>, session: { number: 0 } }))
 vi.mock('vue-router', () => ({
   RouterLink: { template: '<a><slot /></a>' },
   useRoute: () => ({ path: '/operations', fullPath: '/operations', query: routeQuery }),
   useRouter: () => ({ resolve: ({ path }: { path: string }) => ({ fullPath: path }) }),
 }))
-vi.mock('@/services/http', () => ({ getToken: () => 'test-session' }))
+vi.mock('@/services/http', () => ({ getToken: () => 'test-session-' + session.number }))
 vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: () => false }) }))
 vi.mock('@/stores/permissions', () => ({ usePermissionsStore: () => ({ hasMenu: () => false }) }))
 vi.mock('../access', () => ({
@@ -22,10 +22,110 @@ vi.mock('../api', async (importOriginal) => ({
 }))
 
 beforeEach(() => {
+  session.number++
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-11-18T08:30:00Z'))
 })
 afterEach(() => vi.useRealTimers())
+
+it('sorts all available ranking rows precisely and keeps equal amounts in source order with missing values last', async () => {
+  orderAPI.mockImplementation(async (path: string) => {
+    if (path.includes('/rankings?')) return { rows: [
+      { key: 'large', payable_amount: '9007199254740992.02' },
+      { key: 'empty' },
+      { key: 'smaller', payable_amount: '9007199254740992.01' },
+      { key: 'equal', payable_amount: '9007199254740992.010' },
+    ] }
+    if (path.includes('/summary?')) return { rows: [
+      { shop_id: 'large', order_count: 1, verified_gross: '1.01', item_pay_verified_total: '10' },
+      { shop_id: 'smaller', order_count: 99, verified_gross: '1.02', item_pay_verified_total: '50' },
+    ] }
+    return { rows: [] }
+  })
+  const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
+  await flushPromises()
+  const ranks = () => wrapper.findAll('tbody tr').map(row => row.findAll('td').slice(0, 2).map(cell => cell.text()))
+  expect(wrapper.text()).toContain('所选范围全量排序')
+  await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('asc')
+  expect(ranks()).toEqual([['1', 'smaller'], ['2', 'equal'], ['3', 'large'], ['4', 'empty']])
+  await wrapper.find('.commerce-ranking-sort label:nth-child(1) select').setValue('grossRate')
+  expect(ranks()).toEqual([['1', 'smaller'], ['2', 'large'], ['3', 'empty'], ['4', 'equal']])
+  wrapper.unmount()
+})
+
+it('keeps paged product ranks, joins names by shop and ID, and looks up a missing label on demand', async () => {
+  orderAPI.mockClear()
+  orderAPI.mockImplementation(async (path: string) => {
+    if (path.includes('/rankings?')) return { has_more: true, rows: [
+      { key: 'same-id', shop_id: 's1', item_pay_total: '50' },
+      { key: 'same-id', shop_id: 's2', item_pay_total: '20' },
+    ] }
+    if (path.includes('/products?')) {
+      const query = new URL(path, 'https://oa.test').searchParams
+      return { rows: query.has('product')
+        ? [{ shop_id: 's2', shop_item_id: 'same-id', product_name: '第二家商品' }]
+        : [
+          { shop_id: 's1', shop_item_id: 'same-id', product_name: '第一家商品' },
+          { shop_id: 's1', shop_item_id: 'same-id', product_name: '第一家另一商品名' },
+        ] }
+    }
+    return { rows: [] }
+  })
+  const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
+  await flushPromises()
+  await wrapper.find('form select').setValue('product')
+  await wrapper.find('form').trigger('submit')
+  await flushPromises()
+  expect(wrapper.text()).toContain('仅排序本页，保留原榜名次')
+  expect(wrapper.text()).toContain('第一家商品')
+  expect(wrapper.text()).toContain('SKU 明细有多个名称')
+  expect(wrapper.text()).toContain('商品名称未返回')
+  await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('asc')
+  expect(wrapper.findAll('tbody .commerce-rank').map(cell => cell.text())).toEqual(['2', '1'])
+  const productRequests = () => orderAPI.mock.calls.map(([path]) => String(path)).filter(path => path.includes('/products?'))
+  expect(productRequests()).toHaveLength(1)
+  await wrapper.find('tbody button').trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('第二家商品')
+  expect(productRequests()).toHaveLength(2)
+  expect(new URL(productRequests()[1], 'https://oa.test').searchParams.get('shop_id')).toBe('s2')
+  expect(new URL(productRequests()[1], 'https://oa.test').searchParams.get('product')).toBe('same-id')
+  wrapper.unmount()
+})
+
+it('loads shop-product-SKU rows with the applied filters and remembers the SKU sort on return', async () => {
+  const priorState = window.history.state
+  window.history.replaceState({ position: 1 }, '')
+  Object.assign(routeQuery, { group: 'sku', shop_id: 's1', from: '2026-11-17', to: '2026-11-18', include_brush: '1' })
+  orderAPI.mockClear()
+  orderAPI.mockImplementation(async (path: string) => path.includes('/products?') ? { has_more: path.endsWith('offset=0'), rows: [
+    { shop_id: 's1', shop_item_id: 'p1', sku: 'same-sku', product_name: '商品一', quantity: '18', item_pay_total: '99' },
+    { shop_id: 's1', shop_item_id: 'p2', sku: 'same-sku', product_name: '商品二', quantity: '2', item_pay_total: '9' },
+  ] } : { rows: [] })
+  const wrapper = mount(Commerce, { props: { mode: 'ranking' } })
+  await flushPromises()
+  const request = orderAPI.mock.calls.map(([path]) => String(path)).find(path => path.includes('/products?'))
+  expect(request).toBeDefined()
+  expect(Object.fromEntries(new URL(request!, 'https://oa.test').searchParams)).toEqual({
+    from: '2026-11-17', to: '2026-11-18', shop_id: 's1', include_brush: '1', offset: '0',
+  })
+  await wrapper.find('.commerce-ranking-sort label:nth-child(1) select').setValue('quantity')
+  await wrapper.find('.commerce-ranking-sort label:nth-child(2) select').setValue('asc')
+  expect(wrapper.findAll('tbody tr').map(row => row.find('strong, a').text())).toEqual(['商品二', '商品一'])
+  await wrapper.find('.workspace-pager button:last-child').trigger('click')
+  await flushPromises()
+  expect(wrapper.findAll('tbody .commerce-rank').map(cell => cell.text())).toEqual(['102', '101'])
+  wrapper.unmount()
+
+  const returned = mount(Commerce, { props: { mode: 'ranking' } })
+  await flushPromises()
+  expect((returned.find('.commerce-ranking-sort label:nth-child(1) select').element as HTMLSelectElement).value).toBe('quantity')
+  expect((returned.find('.commerce-ranking-sort label:nth-child(2) select').element as HTMLSelectElement).value).toBe('asc')
+  expect(returned.find('.workspace-pager').text()).toContain('第 2 页')
+  returned.unmount()
+  for (const key of Object.keys(routeQuery)) delete routeQuery[key]
+  window.history.replaceState(priorState, '')
+})
 
 it('keeps the overview usable with null freshness and renders a scoped Top 10 and hourly comparison', async () => {
   orderAPI.mockImplementation(async (path: string) => {
@@ -120,4 +220,25 @@ it('falls back after an unassigned ownership response and preserves an explicit 
   expect(orderAPI.mock.calls.filter(([path]) => path.includes('/products?')).map(([path]) => new URL(path, 'http://localhost').searchParams.get('mine'))).toEqual(['1', null, '1', null])
   explicit.unmount()
   delete routeQuery.scope
+})
+
+it('displays amount-based coverage separately from the review action and keeps unknown distinct from zero', async () => {
+  routeQuery.scope = 'overview'
+  orderAPI.mockImplementation(async (path: string) => path.includes('/products?') ? { rows: [
+    { sku: 'A', shop_id: 'shop', verified_coverage: 0, verified_gross: null },
+    { sku: 'B', shop_id: 'shop', verified_coverage: 0.89999 },
+    { sku: 'C', shop_id: 'shop', verified_coverage: 0.9 },
+    { sku: 'D', shop_id: 'shop', verified_coverage: null },
+  ] } : { rows: [] })
+  const wrapper = mount(Commerce, { props: { mode: 'products' } })
+  try {
+    await flushPromises()
+    const table = wrapper.get('.commerce-product-table')
+    expect(table.findAll('tbody tr').map(row => row.findAll('td')[6]!.text()))
+      .toEqual(['仅覆盖 0.0%', '仅覆盖 <90%', '90.0%', '—'])
+    expect(table.findAll('.sku-check-action').map(button => button.text())).toEqual(Array(4).fill('核价'))
+  } finally {
+    wrapper.unmount()
+    delete routeQuery.scope
+  }
 })

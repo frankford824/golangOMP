@@ -254,16 +254,17 @@
   .order-data-pager { flex: none; min-height: 40px; padding-block: 4px; }
   .order-data-table :is(td, th) { padding-block: 4px; }
   .order-data-table { table-layout: fixed; }
-  .order-data-table-detail { min-width: 1050px; }
-  .order-data-table :is(th, td).oa-number { width: 116px; }
-  .order-data-table :is(th, td)[data-column="shop_id"] { width: clamp(140px, 15vw, 300px); }
-  .order-data-table :is(th, td):is([data-column="order_time"], [data-column="computed_at"]) { width: 176px; }
-  .order-data-table :is(th, td):is([data-column="status"], [data-column="state"], [data-column="platform"], [data-column="is_valid"], [data-column="is_brush"], [data-column="period"]) { width: 90px; }
-  .order-data-table-refunds :is(th, td)[data-column="day"] { width: 124px; }
-  .order-data-table-refunds :is(th, td)[data-column="shop_id"] { width: auto; overflow: hidden; }
-  .order-data-table-ledger { width: min(100%, 1040px); }
-  .order-data-table-ledger :is(th, td)[data-column="shop_id"] { width: auto; overflow: hidden; }
-  .order-data-table-ledger :is(th, td)[data-column="name"] { width: 248px; }
+  .order-data-table-detail { min-inline-size: 1140px; }
+  .order-data-table-detail th[data-column="online_order_no"] { inline-size: 16%; }
+  .order-data-table-detail th[data-column="shop_id"] { inline-size: 17%; }
+  .order-data-table-detail th[data-column="order_time"] { inline-size: 15%; }
+  .order-data-table-detail th.oa-number { inline-size: 10%; }
+  .order-data-table-detail th:is([data-column="is_valid"], [data-column="is_brush"], [data-column="platform"]) { inline-size: 6%; }
+  .order-data-table-refunds th[data-column="day"] { inline-size: 14%; }
+  .order-data-table-refunds th[data-column="shop_id"] { inline-size: 24%; }
+  .order-data-table-ledger th[data-column="shop_id"] { inline-size: 21%; }
+  .order-data-table-ledger th[data-column="name"] { inline-size: 22%; }
+  .order-data-table-ledger th[data-column="computed_at"] { inline-size: 16%; }
   .order-data-table .oa-ellipsis { max-width: 100%; }
   .order-data-table .order-data-order-no { max-width: calc(100% - 40px); }
   .order-data-table tbody tr { height: 40px; }

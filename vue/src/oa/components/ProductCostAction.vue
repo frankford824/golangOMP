@@ -4,6 +4,7 @@ import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { usePermission } from '@/composables/usePermission'
 import { getToken } from '@/services/http'
 import { costMaintenanceApi, maintenanceStatuses, type MaintenanceRow } from '@/services/api/costMaintenanceApi'
+import { costCoverageDefinition } from '../costCoverage'
 import { useOAAccess } from '../access'
 import { errorText, money, send } from '../api'
 import { invalidateCostActivity } from '../costActivity'
@@ -220,7 +221,7 @@ defineExpose({ open, close, dismiss, pending: busy })
         <p v-else>暂无系统成本维护记录，可发起核价复核。</p>
       </template>
     </section>
-    <p class="sku-hint">成交成本核实覆盖率按所选期间计算。当前编码成本用于日常维护。</p>
+    <p class="sku-hint">{{ costCoverageDefinition }} 当前编码成本用于日常维护。</p>
     <div class="sku-actions">
       <RouterLink v-if="detailLink" class="oa-button" :to="detailLink">查看商品详情</RouterLink>
       <RouterLink v-if="can('pricing.view')" class="oa-button" :to="pricingLink || { path: '/operations/pricing', query: { sku: subject.sku } }">查看试算依据</RouterLink>
