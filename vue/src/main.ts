@@ -6,6 +6,11 @@ import { oaEnabled } from './oa/access'
 
 if (oaEnabled) {
   document.documentElement.classList.add('oa-live-ui')
+  if (document.fonts) {
+    for (const weight of [400, 500, 600]) {
+      void document.fonts.load(weight + ' 13px "YB JetBrains Mono"', '0123456789').catch(() => undefined)
+    }
+  }
   installChunkRecovery(router)
 }
 

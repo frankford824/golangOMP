@@ -297,7 +297,7 @@ describe('CostRuleManagerView', () => {
     await wrapper.get('.calculate-button').trigger('click')
     await flushPromises()
     expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({ rule_group: 'KT_BOARD', quantity: 1 }))
-    expect(wrapper.text()).toContain('¥ 25.00')
+    expect(wrapper.text()).toContain(import.meta.env.VITE_OA_FEATURES === 'true' ? '¥25.00' : '¥ 25.00')
     expect(mocks.applyRun).not.toHaveBeenCalled()
     await wrapper.get('.calculator-toggle').trigger('click')
     expect(wrapper.find('.calculator').exists()).toBe(false)

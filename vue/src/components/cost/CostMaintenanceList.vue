@@ -27,7 +27,7 @@
         ><button type="submit"><Search :size="16" :stroke-width="1.75" aria-hidden="true" />查询</button>
       </form>
       <div>
-        <RouterLink v-if="canPrice" class="pricing-link" :to="{ name: 'OperationsPricing' }">批量核价</RouterLink>
+        <RouterLink v-if="canPrice" class="pricing-link bulk-pricing-link" :to="{ name: 'OperationsPricing' }">批量核价</RouterLink>
         <button @click="openLogs"><History :size="16" :stroke-width="1.75" aria-hidden="true" />修改日志</button
         ><button :disabled="loading" @click="load()">
           <RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? "刷新中…" : "刷新" }}
@@ -96,7 +96,7 @@
                 }}</small
               >
             </td>
-            <td class="row-actions">
+            <td class="row-actions"><div class="row-action-group">
               <span
                 v-if="row.reviewed && row.status !== 'conflict'"
                 class="maintenance-reviewed"
@@ -123,7 +123,7 @@
                 修改
               </button>
               <RouterLink v-if="canPrice" class="pricing-link" :to="{ name: 'OperationsPricing', query: { sku: row.sku_code } }" :aria-label="'核价 ' + row.sku_code">核价</RouterLink>
-            </td>
+            </div></td>
           </tr>
           <tr v-if="!rows.length">
             <td colspan="6" class="empty">
@@ -347,7 +347,7 @@
               取消</button
             ><button
               type="submit"
-              class="primary"
+              :class="oaEnabled ? 'secondary' : 'primary'"
               :disabled="saving || !changes.length || !reason || stale"
             >
               {{ saving ? "保存中…" : "保存并同步" }}
@@ -1035,6 +1035,16 @@ html.oa-live-ui .maintenance .blocked-confirm + button { margin-left: 8px; }
   white-space: nowrap;
   text-underline-offset: 3px;
 }
+.bulk-pricing-link {
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid rgb(var(--yb-border-strong));
+  border-radius: 6px;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-secondary));
+  text-decoration: none;
+}
+.bulk-pricing-link:hover { border-color: var(--oa-accent); color: var(--oa-accent); }
 .pricing-link:focus-visible { outline: 2px solid rgb(var(--yb-brand)); outline-offset: 2px; }
 
 .cost-refresh-status { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 12px; color: rgb(var(--yb-text-muted)); }
@@ -1047,8 +1057,20 @@ html.oa-live-ui .maintenance .blocked-confirm + button { margin-left: 8px; }
 .cost-inspect-fields dt { color: rgb(var(--yb-text-muted)); }
 .maintenance-list { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 html.oa-live-ui .maintenance tr[data-cost-row] { cursor: pointer; }
-html.oa-live-ui .maintenance tr[data-cost-row]:hover { background: rgb(var(--yb-surface-hover)); }
-html.oa-live-ui .maintenance tr.selected-row { background: rgb(var(--yb-brand-soft)); }
+html.oa-live-ui #app .maintenance tr[data-cost-row]:hover > td { background: rgb(var(--yb-surface-hover)); }
+html.oa-live-ui #app .maintenance tr[data-cost-row].selected-row > td { background: rgb(var(--yb-brand-soft)); }
+html.oa-live-ui .maintenance tr.selected-row > td:first-child { box-shadow: inset 3px 0 var(--oa-accent); }
+.cost-inspector .maintenance-backdrop { background: var(--oa-inspector-scrim); }
+.cost-inspector .maintenance-drawer :is(input, select, textarea):focus {
+  border-color: var(--oa-accent);
+  box-shadow: var(--yb-focus-ring);
+  outline: none;
+}
+.cost-inspector .maintenance-drawer button[data-next] {
+  background: var(--oa-accent);
+  border-color: var(--oa-accent);
+}
+.cost-inspector .maintenance-drawer button.secondary { border-color: rgb(var(--yb-border-strong)); }
 @media (min-width: 1280px) {
   html.oa-live-ui .maintenance :is(.maintenance-tools,.maintenance-tools form,.maintenance-tools > div) { flex-wrap: wrap; gap: 8px; }
   html.oa-live-ui .maintenance :is(.maintenance-tools,.maintenance-footer) :is(button,select,input) {
@@ -1060,15 +1082,27 @@ html.oa-live-ui .maintenance tr.selected-row { background: rgb(var(--yb-brand-so
   html.oa-live-ui .maintenance :is(.maintenance-error,.maintenance-notice,.permission-note) { margin-block: 4px; }
   html.oa-live-ui .maintenance table { table-layout: fixed; min-width: 890px; }
   html.oa-live-ui .maintenance th { z-index: 2; }
-  html.oa-live-ui .maintenance td { height: 50px; padding-block: 3px; }
+  html.oa-live-ui .maintenance td { height: 52px; box-sizing: border-box; padding-block: 3px; }
+  html.oa-live-ui .maintenance td.row-actions { padding-inline: 8px; white-space: nowrap; }
+  html.oa-live-ui .maintenance .row-action-group { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
+  html.oa-live-ui #app .maintenance .row-action-group :is(button, a) { min-height: 32px; height: 32px; box-sizing: border-box; padding: 0 7px; margin: 0; border-radius: 6px; }
+  html.oa-live-ui #app .maintenance .row-action-group .pricing-link {
+    border: 1px solid rgb(var(--yb-border));
+    text-decoration: none;
+  }
+  html.oa-live-ui #app .maintenance .row-action-group .pricing-link:hover { border-color: var(--oa-accent); }
+  html.oa-live-ui .maintenance .row-action-group .maintenance-reviewed { margin: 0; }
+  html.oa-live-ui .maintenance .row-action-group .blocked-confirm small { display: none; }
+  html.oa-live-ui .maintenance td:nth-child(5) :is(span,small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   html.oa-live-ui .maintenance th:nth-child(2) { width: 140px; }
   html.oa-live-ui .maintenance th:nth-child(3) { width: 123px; }
   html.oa-live-ui .maintenance th:nth-child(4) { width: 154px; }
   html.oa-live-ui .maintenance th:nth-child(5) { width: 100px; }
-  html.oa-live-ui .maintenance th:nth-child(6) { width: 175px; }
+  html.oa-live-ui .maintenance th:nth-child(6) { box-sizing: border-box; width: 168px; }
   html.oa-live-ui .maintenance td:first-child :is(strong,span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   html.oa-live-ui .maintenance th.money { font-family: var(--yb-font-mono); }
-  .cost-inspector .maintenance-drawer { width: min(400px, 100%); }
+  .cost-inspector { z-index: var(--oa-inspector-layer, 140); }
+  .cost-inspector .maintenance-drawer { width: min(420px, 100%); }
   .cost-inspector .maintenance-drawer > :is(header,footer) { padding: 10px 12px; gap: 6px; }
   .cost-inspector .drawer-body { padding: 12px; gap: 14px; min-height: 0; }
   .cost-inspector .maintenance-drawer a { color: rgb(var(--yb-brand)); font-size: 13px; }

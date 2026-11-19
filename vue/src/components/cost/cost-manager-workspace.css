@@ -332,7 +332,7 @@ body .modal-card.cost-rule-dialog .binding-option small{font-size:12px;line-heig
     grid-template-columns: minmax(0, 1fr);
   }
   html.oa-live-ui #app .cost-manager-page > .maintenance:has(.inline-inspector) {
-    grid-template-columns: minmax(0, 1fr) var(--cost-inspector-width, 420px);
+    grid-template-columns: minmax(0, 1fr) 420px;
     column-gap: 12px;
   }
   html.oa-live-ui #app .cost-manager-page > .maintenance .maintenance-table {
@@ -344,10 +344,6 @@ body .modal-card.cost-rule-dialog .binding-option small{font-size:12px;line-heig
     margin: 0;
     height: 40px;
   }
-}
-
-@media (min-width: 2300px) {
-  html.oa-live-ui #app .cost-manager-page > .maintenance { --cost-inspector-width: 480px; }
 }
 
 @media (min-width: 1280px) {
@@ -384,5 +380,21 @@ body .modal-card.cost-rule-dialog .binding-option small{font-size:12px;line-heig
     padding-inline: 6px;
     white-space: nowrap;
     font-size: 12px;
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1919px) and (max-height: 800px) {
+  html.oa-live-ui #app .cost-manager-page:has(> .maintenance) {
+    block-size: calc(100dvh - 44px);
+    margin-block: -12px;
+  }
+  html.oa-live-ui #app .cost-manager-page > .maintenance .maintenance-tools { margin-bottom: 2px; }
+  html.oa-live-ui #app .cost-manager-page > .maintenance .maintenance-tools :is(button, select, input) {
+    height: 32px;
+    min-height: 32px;
+  }
+  html.oa-live-ui #app .cost-manager-page > .maintenance .maintenance-table th {
+    height: 24px;
+    padding-block: 2px;
   }
 }

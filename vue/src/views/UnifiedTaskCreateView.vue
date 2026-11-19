@@ -4,12 +4,14 @@
       <div class="hero-copy">
         <h1>创建任务</h1>
       </div>
+      <DesktopSlot target="actions">
       <div class="hero-actions">
         <button class="secondary-button" type="button" :disabled="savingDraft" @click="saveDraft">
           <Save :size="16" />{{ savingDraft ? '正在保存…' : '保存草稿' }}
         </button>
         <button class="secondary-button" type="button" @click="exitCompose"><X :size="16" />返回任务中心</button>
       </div>
+      </DesktopSlot>
     </header>
 
     <p v-if="sourceOrder" class="erp-pending-note">商品来源 {{ sourceOrder.sku }} · 店铺 {{ sourceOrder.shop_id }} · {{ sourceOrder.from }} 至 {{ sourceOrder.to }}</p>
@@ -213,7 +215,7 @@
       <footer class="validation-dock">
         <div class="validation-summary" :class="{ valid: !violations.length && !submitError && (!oaEnabled || validationRequested), pending: oaEnabled && !validationRequested && !submitError }"><CheckCircle2 v-if="!violations.length && !submitError && (!oaEnabled || validationRequested)" :size="22" /><AlertTriangle v-else-if="!oaEnabled || validationRequested || submitError" :size="22" /><div><strong>{{ violations.length ? `还有 ${violations.length} 处需要完善` : submitError ? '提交未完成，请查看提示' : oaEnabled && !validationRequested ? '填写任务信息后提交' : '填写检查通过，可提交校验' }}</strong><span>{{ violations.length ? '点一下红色提示，会直接跳到要改的格子' : submitError ? '填写内容已保留' : oaEnabled && !validationRequested ? '提交时会检查必填项' : '最终创建结果以提交后的系统校验为准' }}</span></div></div>
         <div v-if="violations.length" class="validation-items"><button v-for="issue in violations.slice(0, 4)" :key="`${issue.row_id}-${issue.field}-${issue.message}`" type="button" @click="locateViolation(issue)"><span>{{ issue.row_index == null ? '公共信息' : oaEnabled ? `第 ${issue.row_index + 1} 行明细` : `第 ${issue.row_index + 1} 条明细（表格第 ${issue.row_index + 2} 行）` }}</span>{{ issue.message }}</button></div>
-        <div class="dock-actions"><p v-if="submitError" role="alert">{{ submitError }}</p><button class="primary-button" type="button" :disabled="submitting || validatingIIDs || batchERPResolving || (!oaEnabled && Boolean(violations.length))" @click="submit(false)">{{ validatingIIDs ? '正在核对款式编码…' : submitting ? '正在创建…' : submitLabel }}</button></div>
+        <div class="dock-actions"><p v-if="submitError" role="alert">{{ submitError }}</p><DesktopSlot target="actions"><button class="primary-button oa-button-primary compose-submit" type="button" :disabled="submitting || validatingIIDs || batchERPResolving || (!oaEnabled && Boolean(violations.length))" @click="submit(false)">{{ validatingIIDs ? '正在核对款式编码…' : submitting ? '正在创建…' : submitLabel }}</button></DesktopSlot></div>
       </footer>
     </section>
 
@@ -239,6 +241,7 @@
 <script setup lang="ts">
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { linkOrderTask, orderTaskSource } from '@/oa/orderTask'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { AlertTriangle, Barcode, CheckCircle2, FileArchive, FileImage, ImagePlus, PackageSearch, Paintbrush, Paperclip, Plus, Save, Scissors, Trash2, X } from 'lucide-vue-next'
@@ -1196,9 +1199,19 @@ function startAnother() { resetComposeState() }
   .intent-copy strong { font-size: 0.95rem; }
   .intent-copy small { font-size: 0.8125rem; }
 }
-.oa-task-create { font-size: 14px; }
-.oa-task-create strong { font-weight: 600; }
+.oa-task-create { font-size: 13px; }
+.oa-task-create strong { font-weight: 500; }
 .oa-task-create h1 { font-size: 18px; font-weight: 600; }
-.oa-task-create h2 { font-size: 15px; font-weight: 600; }
+.oa-task-create h2 { font-size: 13px; font-weight: 500; }
 .oa-task-create .validation-summary span { font-size: 12px; }
+@media (min-width: 1280px) {
+  .oa-task-create { padding: 0; }
+  .oa-task-create .compose-hero { display: contents; }
+  .oa-task-create .hero-copy { display: none; }
+  .hero-actions { gap: 6px; }
+  .hero-actions .secondary-button, .compose-submit { min-height: 28px; border-radius: 6px; font-weight: 500; }
+  .compose-submit.oa-button-primary { background: var(--oa-accent); border-color: var(--oa-accent); color: white; }
+}
+:global(html.oa-live-ui #app .content .oa-task-create h2) { font-size: 13px; font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-task-create :is(strong,b)) { font-weight: 500; }
 </style>

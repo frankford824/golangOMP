@@ -108,7 +108,8 @@
           >
             <Menu :size="18" aria-hidden="true" />
           </button>
-          <h1 v-if="oaEnabled && desktop" class="oa-bar-title">{{ moduleName || pageTitle }}</h1>
+          <div v-if="oaEnabled" ref="desktopTitle" class="oa-context-title" />
+          <h1 v-if="oaEnabled && desktop" class="oa-bar-title">{{ $route.name === 'TaskDetail' ? '任务中心 / 任务详情' : moduleName || pageTitle }}</h1>
           <span v-else-if="oaEnabled" class="oa-breadcrumb"><span v-if="moduleName && moduleName !== pageTitle">{{ moduleName }} / </span>{{ pageTitle }}</span>
           <span v-else class="app-topbar__title" title="永箔运营管理系统">
             <span class="app-topbar__full-name">永箔运营管理系统</span>
@@ -220,10 +221,11 @@ const deskQuery = window.matchMedia?.('(min-width: 1280px)')
 const wideSidebar = window.matchMedia?.('(min-width: 1440px)')
 const desktop = ref(oaEnabled && !!deskQuery?.matches)
 const large = ref(!!wideSidebar?.matches)
+const desktopTitle = ref<HTMLElement | null>(null)
 const desktopTabs = ref<HTMLElement | null>(null)
 const desktopStatus = ref<HTMLElement | null>(null)
 const desktopActions = ref<HTMLElement | null>(null)
-if (oaEnabled) provide(desktopChromeKey, { desktop, tabs: desktopTabs, status: desktopStatus, actions: desktopActions })
+if (oaEnabled) provide(desktopChromeKey, { desktop, title: desktopTitle, tabs: desktopTabs, status: desktopStatus, actions: desktopActions })
 function syncDesktop() {
   desktop.value = oaEnabled && !!deskQuery?.matches
   large.value = !!wideSidebar?.matches
@@ -1144,12 +1146,23 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 /* Give compact menu names and their queue shortcuts separate pointer targets. */
 @media (min-width:1280px) {
   .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-entry:has(.oa-nav-signal) {
-    display:grid; justify-items:stretch; gap:2px;
+    display:block;
   }
   .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-entry .oa-nav-signal {
-    position:static; transform:none; justify-self:center; min-width:28px; line-height:16px;
+    position:absolute; top:2px; right:2px; transform:none; min-width:0;
+    font-size:var(--oa-rail-badge-size); line-height:14px; padding:0 4px;
   }
   .oa-sidebar.sidebar.oa-sidebar-open .nav-entry:has(.oa-nav-signal) { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; }
   .oa-sidebar.sidebar.oa-sidebar-open .nav-entry .oa-nav-signal { position:static; transform:none; }
 }
+
+.oa-search-key { white-space:nowrap; flex-shrink:0; }
+@media (min-width:1280px) {
+  .oa-client-shell .app-topbar__brand:has(.oa-bar-title) + .oa-bar-tabs:has(.operation-nav)::before {
+    content:""; align-self:center; flex:0 0 1px; height:14px; background:var(--oa-chrome-divider); margin-inline-end:6px;
+  }
+}
+
+.oa-context-title:empty,.oa-context-title:has(+ .oa-breadcrumb),.oa-context-title:not(:empty) + .oa-bar-title { display:none; }
+.oa-context-title { white-space:nowrap; }
 </style>

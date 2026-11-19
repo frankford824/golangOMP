@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { oaEnabled } from '@/oa/access'
 import type { IWorkbookData, Plugin, PluginCtor, Univer } from '@univerjs/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { AlertTriangle, ImagePlus, LoaderCircle, Table2 } from 'lucide-vue-next'
@@ -112,14 +113,26 @@ function displayCell(row: ComposeRow, column: ComposeColumn): string | number {
   return value ?? ''
 }
 
-/** 按容器宽度等比放大列宽，使表格始终铺满编辑区；容器比定义宽度窄时保持原宽并出横向滚动。 */
+/** OA 桌面编辑区优先显示完整列名，空间不足时保留横向滚动。 */
 function scaledColumnWidths(): number[] {
-  const defined = columns.value.map((column) => column.width)
   const available = (canvasRef.value?.clientWidth || 0) - GRID_CHROME_WIDTH
+  const minimums = columns.value.map((column) => {
+    const labelWidth = Array.from(column.label).reduce((width, character) => width + (character.charCodeAt(0) < 128 ? 8 : 14), 0)
+    return labelWidth + (column.required ? 16 : 0) + 14
+  })
+  const defined = columns.value.map((column, index) => oaEnabled
+    ? Math.max(minimums[index]!, Math.round(column.width * 0.72))
+    : column.width)
   const total = defined.reduce((sum, width) => sum + width, 0)
-  if (!Number.isFinite(available) || available <= total || !total) return defined
-  const scale = available / total
-  return defined.map((width) => Math.floor(width * scale))
+  if (!Number.isFinite(available) || !total) return defined
+  if (available >= total) {
+    return defined.map((width) => Math.floor(width * available / total))
+  }
+  if (!oaEnabled) return defined
+  const minTotal = minimums.reduce((sum, width) => sum + width, 0)
+  if (available <= minTotal || minTotal === total) return minimums
+  const scale = (available - minTotal) / (total - minTotal)
+  return defined.map((width, index) => Math.floor(minimums[index]! + (width - minimums[index]!) * scale))
 }
 
 function designTokenColor(name: string): string {

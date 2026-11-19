@@ -11,6 +11,7 @@
           <RouterLink v-if="canManagePeople" class="um-btn um-btn--ghost" :to="{ name: 'PeopleRoster', query: { q: appliedKeyword || undefined } }">人员花名册</RouterLink>
           <BaseButton
             v-if="canCreateUser"
+            class="oa-new-user" variant="primary"
             type="button"
             size="sm"
             @click="showCreateModal = true"
@@ -2978,5 +2979,17 @@ onBeforeUnmount(() => {
   }
   .user-directory-oa .user-list-panel > :last-child:not(.directory-table) { flex:none;min-height:40px;margin:0; }
   .user-directory-oa .directory-table :deep(.n-data-table-td) { padding-block:4px; }
+}
+
+@media (min-width:1280px) {
+  .user-directory-oa .toolbar { grid-template-columns:minmax(0,1fr) 140px auto; }
+  .user-directory-oa .base-table-pager :deep(.base-table-pager__size),
+  .user-directory-oa .base-table-pager :deep(.base-table-pager__actions) { display:inline-flex; align-items:center; line-height:1.5; }
+  .user-directory-oa .base-table-pager :deep(.base-table-pager__select) { display:inline-flex; align-items:center; justify-content:center; margin:0; }
+}
+
+@media (min-width:1280px) {
+  .user-directory-oa :is(.base-table-pager,.toolbar) :deep(div:has(> .base-select-trigger-button)) { height:32px; min-height:32px; box-sizing:border-box; }
+  .user-directory-oa :is(.base-table-pager,.toolbar) :deep(button.base-select-trigger-button) { height:auto; min-height:0; align-self:stretch; }
 }
 </style>

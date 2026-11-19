@@ -66,6 +66,7 @@
 </template>
 
 <script setup lang="ts">
+import { yuanPrefix } from '@/utils/currency-display'
 import { computed, reactive, ref, watch } from 'vue'
 import {
   costManagementApi,
@@ -209,7 +210,7 @@ function optionalInteger(value: string) {
 }
 
 function money(value: number | null | undefined) {
-  return typeof value === 'number' && Number.isFinite(value) ? `¥ ${value.toFixed(2)}` : '待计算'
+  return typeof value === 'number' && Number.isFinite(value) ? `${yuanPrefix}${value.toFixed(2)}` : '待计算'
 }
 
 async function preview() {

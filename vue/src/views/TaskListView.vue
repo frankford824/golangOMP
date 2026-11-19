@@ -238,12 +238,12 @@
 
         <!-- 统一卡片视图 -->
         <table v-if="oaEnabled && taskView === 'table'" class="oa-task-table">
-          <colgroup><col class="task-col-select" /><col class="task-col-number" /><col class="task-col-name" /><col class="task-col-sku" /><col class="task-col-type" /><col class="task-col-node" /><col /><col class="task-col-handler" /><col class="task-col-due" /></colgroup>
+          <colgroup><col class="task-col-select" /><col class="task-col-number" /><col class="task-col-name" /><col class="task-col-sku" /><col class="task-col-type" /><col class="task-col-node" /><col class="task-col-owner" /><col class="task-col-handler" /><col class="task-col-due" /></colgroup>
           <thead><tr>
             <th scope="col"><input type="checkbox" aria-label="选择本页任务" :checked="allPageSelected" :indeterminate="somePageSelected && !allPageSelected" @change="selectTaskPage" /></th>
             <th scope="col">任务单号</th><th scope="col">任务名称</th><th scope="col">SKU</th><th scope="col">类型与优先级</th><th scope="col">当前节点</th><th scope="col">归属</th><th scope="col">当前处理人</th><th scope="col">截止时间</th>
           </tr></thead>
-          <tbody><tr v-for="task in pagedList" :key="task.id" :data-task-row="task.id" :class="{ 'is-selected': selectedIds.has(task.id) || peekId === task.id }" @click="openTaskRow($event, task)">
+          <tbody><tr v-for="task in pagedList" :key="task.id" :data-task-row="task.id" :class="{ 'is-selected': selectedIds.has(task.id), 'is-inspected': peekId === task.id }" @click="openTaskRow($event, task)">
             <td><input type="checkbox" :aria-label="`选择任务 ${task.taskNo}`" :checked="selectedIds.has(task.id)" @change="toggleSelect(task.id)" /></td>
             <td class="oa-task-number" :title="task.taskNo">{{ task.taskNo }}</td>
             <td><RouterLink v-slot="{ href }" :to="`/tasks/${task.id}`" custom>
@@ -265,6 +265,8 @@
             :key="task.id"
             :task="task"
             :selected="selectedIds.has(task.id)"
+            :class="{ 'is-inspected': oaEnabled && peekId === task.id }"
+            :data-task-row="task.id"
             :overdue="isOverdue(task)"
             :claimable="canClaimTask(task)"
             :customization="isCustomizationTask(task)"
@@ -303,7 +305,10 @@
       </AsyncStateWrapper>
     </div>
 
-      <aside v-if="oaEnabled && peekTask" ref="peekPanel" class="oa-task-peek" aria-labelledby="oa-task-peek-title" tabindex="-1">
+      <Teleport to="body" :disabled="!overlayPeek">
+      <component :is="overlayPeek ? 'dialog' : 'aside'" v-if="oaEnabled && peekTask" ref="peekPanel"
+        class="oa-task-peek" aria-labelledby="oa-task-peek-title" tabindex="-1"
+        @cancel.prevent="closePeek" @click="closePeekFromBackdrop" @keydown="onPeekKeydown">
           <header>
             <h2 id="oa-task-peek-title">任务速览</h2>
             <RouterLink :to="`/tasks/${peekTask.id}`" target="_blank" rel="noopener" @click="saveState">新标签页打开完整详情 ↗</RouterLink>
@@ -323,7 +328,19 @@
             <p v-if="peekActionError" class="task-peek-error" role="alert">{{ peekActionError }}</p>
             <p v-if="peekLoading" role="status">正在读取任务资料…</p>
             <p v-if="peekError" role="status">{{ peekError }}</p>
-            <img v-for="file in peekReferences" :key="file.ref_id || file.asset_id || file.thumbnail_url!" :src="file.thumbnail_url!" :alt="file.filename || '运营参考图'" />
+            <section v-if="peekReferences.length || peekFinals.length" class="task-peek-previews" aria-label="文件预览">
+              <h3>文件预览</h3>
+              <div>
+                <figure v-for="file in peekReferences" :key="file.ref_id || file.asset_id || file.thumbnail_url!">
+                  <img :src="file.thumbnail_url!" :alt="file.filename || '运营参考图'" loading="lazy" />
+                  <figcaption :title="file.filename">参考图 · {{ file.filename || '未命名' }}</figcaption>
+                </figure>
+                <figure v-for="file in peekFinals" :key="file.task_asset_id">
+                  <img :src="file.preview_url!" :alt="file.file_name || '成品图'" loading="lazy" />
+                  <figcaption :title="file.file_name">成品图 · {{ file.file_name || '未命名' }}</figcaption>
+                </figure>
+              </div>
+            </section>
           </section>
           <footer>
             <button type="button" :disabled="peekIndex <= 0" @click="stepPeek(-1)">上一单 ↑</button>
@@ -334,7 +351,8 @@
               </button>
             </form>
           </footer>
-      </aside>
+      </component>
+      </Teleport>
     </div>
 
     <nav v-if="filteredList.length > 0" class="footer-card" aria-label="任务分页">
@@ -679,7 +697,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted, nextTick, reactive, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, onDeactivated, nextTick, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -711,11 +729,13 @@ import type {
   BatchAuditHandoverPayload,
   BatchAuditHandoverResultItem,
 } from '@/services/api/tasksApi'
+import { resourceGroupsApi, type ResourceFile } from '@/services/api/resourceGroupsApi'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { TaskListParams } from '@/services/apiTypes'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import {
   formatTaskRecordDateBeijing,
+  formatDateBeijing,
   formatTaskDueAtDisplay,
   isOverdueByTimestamp as checkOverdue,
 } from '@/utils/date'
@@ -1317,6 +1337,9 @@ const taskView = ref<'table' | 'cards'>('table')
 const allPageSelected = computed(() => pagedList.value.length > 0 && pagedList.value.every((task) => selectedIds.has(task.id)))
 const somePageSelected = computed(() => pagedList.value.some((task) => selectedIds.has(task.id)))
 const peekPanel = ref<HTMLElement>()
+const overlayMedia = oaEnabled ? window.matchMedia('(width < 1920px)') : undefined
+const overlayPeek = ref(Boolean(overlayMedia?.matches))
+function syncPeekMode() { overlayPeek.value = Boolean(overlayMedia?.matches) }
 const peekActionError = ref('')
 const peekCommittedId = ref('')
 const inspectorAutoDismissed = ref(false)
@@ -1327,18 +1350,29 @@ const peekTask = computed(() => pagedList.value[peekIndex.value])
 const canClaimPeek = computed(() => Boolean(peekTask.value && peekTask.value.id !== peekCommittedId.value && canClaimTask(peekTask.value)))
 
 const peekDetail = ref<{ design_requirement?: string; reference_file_refs?: ReferenceFileRef[] }>()
+const peekFinals = ref<ResourceFile[]>([])
 const peekLoading = ref(false)
 const peekError = ref('')
 const peekRequirement = computed(() => peekDetail.value?.design_requirement || peekTask.value?.designRequirement)
 const peekReferences = computed(() => (peekDetail.value?.reference_file_refs ?? peekTask.value?.referenceFileRefs ?? []).filter((file) => file.thumbnail_url))
 watch(peekId, async (id, _previous, onCleanup) => {
   peekDetail.value = undefined
+  peekFinals.value = []
   peekError.value = ''
   peekActionError.value = ''
   peekLoading.value = Boolean(id)
   if (!id) return
   const controller = new AbortController()
   onCleanup(() => controller.abort())
+  if (peekTask.value?.status === 'Completed') {
+    void resourceGroupsApi.taskBundle(Number(id)).then((bundle) => {
+      if (!controller.signal.aborted) {
+        peekFinals.value = bundle.groups.flatMap((group) =>
+          group.finalized_revision?.items.flatMap((item) => item.file?.preview_url ? [item.file] : []) ?? [],
+        )
+      }
+    }).catch(() => { /* The available reference thumbnails still render. */ })
+  }
   try {
     const { data } = await tasksApi.getById(id, controller.signal)
     if (!controller.signal.aborted) peekDetail.value = data?.data ?? data
@@ -1356,7 +1390,19 @@ function syncDefaultPeek() {
     peekId.value = pagedList.value[0]?.id ?? ''
   }
 }
-watch([pagedList, taskView], syncDefaultPeek, { flush: 'post' })
+watch(pagedList, syncDefaultPeek, { flush: 'post' })
+watch(taskView, () => {
+  if (overlayPeek.value && peekId.value) closePeek()
+})
+watch(peekPanel, (panel) => {
+  if (panel instanceof HTMLDialogElement && !panel.open) panel.showModal()
+}, { flush: 'post' })
+onDeactivated(() => {
+  if (peekPanel.value instanceof HTMLDialogElement && peekPanel.value.open) {
+    peekPanel.value.close()
+    peekId.value = ''
+  }
+})
 
 function selectTaskPage() {
   const clear = allPageSelected.value
@@ -1409,8 +1455,14 @@ function openTaskLink(event: MouseEvent, task: Task) {
   void openPeek(task)
 }
 
+function closePeekFromBackdrop(event: MouseEvent) {
+  const panel = peekPanel.value
+  if (overlayPeek.value && event.target === panel && panel && event.clientX < panel.getBoundingClientRect().left) closePeek()
+}
+
 function closePeek() {
   if (claimingTaskId.value) return
+  if (peekPanel.value instanceof HTMLDialogElement && peekPanel.value.open) peekPanel.value.close()
   inspectorAutoDismissed.value = true
   peekId.value = ''
   if (peekReturnFocus?.isConnected) peekReturnFocus.focus({ preventScroll: true })
@@ -1980,7 +2032,8 @@ function shouldIgnoreTaskCardClick(event: MouseEvent): boolean {
 
 function onTaskCardClick(event: MouseEvent, task: Task) {
   if (shouldIgnoreTaskCardClick(event)) return
-  goDetail(task)
+  if (oaEnabled) void openPeek(task)
+  else goDetail(task)
 }
 
 function canClaimTask(task: Task): boolean {
@@ -2051,7 +2104,7 @@ async function claimTask(task: Task, advance = false) {
 }
 
 function formatDate(iso: string): string {
-  return formatTaskDueAtDisplay(iso)
+  return oaEnabled ? formatDateBeijing(iso).replace(/\//g, '-') : formatTaskDueAtDisplay(iso)
 }
 
 function formatUpdatedDate(iso: string): string {
@@ -2123,12 +2176,14 @@ async function refreshList(_force?: boolean) {
 
 onMounted(async () => {
   wideInspector?.addEventListener('change', syncDefaultPeek)
+  overlayMedia?.addEventListener('change', syncPeekMode)
   await refreshList(true)
   await loadAuditHandoverEntryCount()
 })
 
 onBeforeUnmount(() => {
   wideInspector?.removeEventListener('change', syncDefaultPeek)
+  overlayMedia?.removeEventListener('change', syncPeekMode)
   listActionSeq += 1
   if (listActionSuccessTimer) clearTimeout(listActionSuccessTimer)
 })
@@ -3585,13 +3640,13 @@ watch(totalPages, (value) => {
 }
 .oa-task-list .task-list-page-title { font-size: 18px; font-weight: 600; }
 .oa-task-views { display: inline-flex; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; overflow: hidden; }
-.oa-task-views button, .oa-task-peek button { padding: 6px 12px; min-height: 32px; font-size: 14px; }
-.oa-task-views button[aria-pressed=true] { background: rgb(var(--yb-bg-page)); font-weight: 650; }
+.oa-task-views button, .oa-task-peek button { padding: 6px 12px; min-height: 32px; font-size: 13px; font-weight: 500; }
+.oa-task-views button[aria-pressed=true] { background: rgb(var(--yb-bg-page)); color: rgb(var(--yb-brand)); }
 .oa-task-table { width: 100%; min-width: 1040px; border-collapse: collapse; text-align: left; font-size: 13px; }
-.oa-task-table th { background: rgb(var(--yb-bg-page)); color: rgb(var(--yb-text-muted-strong)); white-space: nowrap; font-size: 13px; font-weight: 600; }
+.oa-task-table th { background: rgb(var(--yb-bg-page)); color: rgb(var(--yb-text-muted-strong)); white-space: nowrap; font-size: 13px; font-weight: 500; }
 .oa-task-table th, .oa-task-table td { height: 44px; padding: 4px 8px; border-bottom: 1px solid rgb(var(--yb-border)); }
 .oa-task-table tr.is-selected { background: rgb(var(--yb-bg-page)); }
-.oa-task-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.oa-task-name { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .oa-task-name:hover, .oa-task-peek a { text-decoration: underline; }
 .oa-task-name img { width: 30px; height: 30px; object-fit: cover; border-radius: 4px; flex: none; }
 .oa-task-number { font-family: ui-monospace, monospace; }
@@ -3601,10 +3656,12 @@ watch(totalPages, (value) => {
 .oa-task-list .batch-action-bar { position: sticky; top: 0; z-index: 3; }
 .oa-task-peek {
   display: flex; flex-direction: column; min-height: 0; outline: none;
-  position: absolute; inset: 0 0 0 auto; z-index: 6; width: min(400px, 100%);
-  font-size: 14px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text));
+  position: fixed; inset: 0 0 0 auto; z-index: var(--oa-inspector-layer, 140); width: min(420px, 100vw); height: 100dvh; max-height: 100dvh; max-width: 100vw; margin: 0;
+  font-size: 13px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text));
   border: 1px solid rgb(var(--yb-border)); box-shadow: -8px 0 24px rgb(var(--yb-shadow) / .12);
 }
+dialog.oa-task-peek:not([open]) { display: none; }
+dialog.oa-task-peek::backdrop { background: var(--oa-inspector-scrim); }
 .oa-task-peek header, .oa-task-peek footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; }
 .oa-task-peek header { border-bottom: 1px solid rgb(var(--yb-border)); }
 .oa-task-peek footer { border-top: 1px solid rgb(var(--yb-border)); }
@@ -3614,28 +3671,41 @@ watch(totalPages, (value) => {
 .task-peek-error { color: rgb(var(--yb-danger)); }
 .task-workspace--oa { display: flex; position: relative; min-width: 0; }
 .task-workspace--oa .task-results { min-width: 0; flex: 1; overflow: auto; }
-.oa-task-peek h2 { margin-right: auto; font-size: 15px; font-weight: 600; }
+.oa-task-peek h2 { margin-right: auto; font-size: 13px; font-weight: 500; }
 .oa-task-peek-body { padding: 18px; flex: 1; overflow: auto; }
-.oa-task-peek-body h3 { font-size: 18px; font-weight: 600; }
+.oa-task-peek-body h3 { font-size: 13px; font-weight: 500; }
 .oa-task-peek-body dl { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; margin-block: 16px; }
 .oa-task-peek-body dd { white-space: pre-wrap; overflow-wrap: anywhere; }
-.oa-task-peek-body img { width: min(100%, 420px); margin-top: 12px; }
+.task-peek-previews { margin-top: 16px; }
+.oa-task-peek-body .task-peek-previews h3 { font-size: 13px; margin-bottom: 8px; }
+.task-peek-previews > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.task-peek-previews figure { min-width: 0; margin: 0; }
+.task-peek-previews img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 6px; background: rgb(var(--yb-bg-page)); }
+.task-peek-previews figcaption { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; }
 
 .oa-task-peek-body { min-height: 0; }
-.oa-task-table { table-layout: fixed; min-width: 980px; border-collapse: separate; border-spacing: 0; background: rgb(var(--yb-surface)); }
+.oa-task-table { table-layout: fixed; min-width: 1266px; border-collapse: separate; border-spacing: 0; background: rgb(var(--yb-surface)); }
 .oa-task-table .task-col-select { width: 36px; }
-.oa-task-table .task-col-number { width: 138px; }
-.oa-task-table .task-col-name { width: max(240px, calc((100% - 760px) * .62)); }
-.oa-task-table .task-col-sku { width: clamp(100px, 10%, 158px); }
-.oa-task-table .task-col-type { width: 115px; }
-.oa-task-table .task-col-node { width: 105px; }
-.oa-task-table .task-col-handler { width: 90px; }
-.oa-task-table .task-col-due { width: 146px; }
+.oa-task-table .task-col-number { width: 176px; }
+.oa-task-table .task-col-name { width: auto; }
+.oa-task-table .task-col-sku { width: 128px; }
+.oa-task-table .task-col-type { width: 156px; }
+.oa-task-table .task-col-node { width: 96px; }
+.oa-task-table .task-col-owner { width: 184px; }
+.oa-task-table .task-col-handler { width: 88px; }
+.oa-task-table .task-col-due { width: 142px; }
 .oa-task-table th, .oa-task-table td { height: 40px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .oa-task-table th { position: sticky; top: 0; z-index: 2; }
 .oa-task-table tbody tr { cursor: pointer; }
 .oa-task-table tbody tr:hover { background: rgb(var(--yb-surface-hover)); }
-.oa-task-table tbody tr.is-selected { background: rgb(var(--yb-brand-soft)); }
+:global(#app .oa-task-table tbody tr.is-selected),
+:global(#app .oa-task-table tbody tr.is-selected td),
+:global(#app .oa-task-table tbody tr.is-inspected),
+:global(#app .oa-task-table tbody tr.is-inspected td),
+.task-cards :deep(.is-inspected) { background: rgb(var(--yb-brand-soft)); }
+.oa-task-table tbody tr.is-inspected td:first-child,
+.task-cards :deep(.is-inspected) { box-shadow: inset 3px 0 var(--oa-accent); }
+.oa-task-table td:nth-child(5) :deep(span) { font-size: 12px; font-weight: 500; }
 .oa-task-name span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .task-sku-text { display: inline-block; max-width: calc(100% - 34px); overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .task-row-action, .task-exception-filters button { border: 1px solid rgb(var(--yb-warning-accent) / .35); border-radius: 999px; background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); padding: 3px 8px; font-size: 12px; white-space: nowrap; }
@@ -3669,13 +3739,16 @@ watch(totalPages, (value) => {
   .oa-task-list .toolbar :deep(.base-select-trigger-button) { min-height: 0; block-size: auto; border: 0; }
   .oa-task-list .footer-card :deep(.page-jump-input input) { min-height: 32px; block-size: 32px; }
   .page-header-actions { display: flex; gap: 6px; flex-wrap: nowrap; align-items: center; }
-  .page-header-actions :deep(button) { min-height: 28px; padding: 4px 8px; white-space: nowrap; font-size: 12px; }
+  .page-header-actions :deep(button) { min-height: 28px; padding: 4px 8px; white-space: nowrap; font-size: 12px; font-weight: 500; }
 }
 @media (min-width: 1920px) {
   .task-workspace--oa.has-inspector { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 12px; }
-  .oa-task-peek { position: static; width: auto; min-width: 0; border-radius: 6px; box-shadow: none; }
+  .oa-task-peek { position: static; width: auto; height: auto; min-width: 0; border-radius: 6px; box-shadow: none; }
 }
-@media (min-width: 2300px) {
-  .task-workspace--oa.has-inspector { grid-template-columns: minmax(0, 1fr) 480px; }
-}
+.oa-task-list .toolbar :deep(.quick-apply),
+:global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button--primary) { background: var(--oa-accent); border-color: var(--oa-accent); color: rgb(var(--yb-text-inverse)); }
+.oa-task-list .toolbar :deep(.quick-apply:hover),
+:global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button--primary:hover) { background: rgb(var(--yb-brand-strong)); border-color: rgb(var(--yb-brand-strong)); color: rgb(var(--yb-text-inverse)); }
+:global(html.oa-live-ui #app .content .oa-task-list .oa-task-table th),
+:global(html.oa-live-ui #app .content .oa-task-list .tc--oa :is(strong,b)) { font-weight: 500; }
 </style>

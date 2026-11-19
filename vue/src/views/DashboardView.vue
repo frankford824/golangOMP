@@ -77,7 +77,7 @@
               <span class="dashboard-health-dot" aria-hidden="true" />
               <span class="dashboard-health-label">今日结单</span>
               <strong class="dashboard-health-value">{{ summary.todayCompletedCount }}</strong>
-              <small v-if="dayComparison.completed" class="dashboard-baseline">昨日全天 {{ dayComparison.completed.previous }} <b v-if="dayComparison.completed.delta" class="dashboard-change">{{ dayComparison.completed.delta }}</b></small>
+              <small v-if="dayComparison.completed != null" class="dashboard-baseline">昨日全天 {{ dayComparison.completed }}</small>
             </span>
             <span v-if="!oaEnabled" class="dashboard-health-item dashboard-health-item--quality">
               <span class="dashboard-health-dot" aria-hidden="true" />
@@ -91,17 +91,16 @@
             </span>
           </div>
           <div class="dashboard-exception-links">
-            <button type="button" class="dashboard-exception-link" @click="goTaskPool">查看未指派任务</button>
-            <RouterLink v-if="summary.overdueCount" class="dashboard-exception-link" to="/tasks?operational_bucket=overdue">已逾期 {{ summary.overdueCount }}</RouterLink>
-            <RouterLink v-if="summary.pendingAuditCount" class="dashboard-exception-link" to="/tasks?operational_bucket=pending_audit">待审核 {{ summary.pendingAuditCount }}</RouterLink>
+            <button type="button" class="dashboard-exception-link dashboard-pool-link" @click="goTaskPool">查看未指派任务</button>
+            <RouterLink v-if="summary.overdueCount" class="dashboard-exception-link dashboard-overdue-link" to="/tasks?operational_bucket=overdue">已逾期 {{ summary.overdueCount }}</RouterLink>
           </div>
         </div>
 
         <DesktopSlot target="tabs">
           <nav class="dashboard-section-nav" aria-label="看板内容">
-            <button type="button" @click="scrollBoard(overviewSection)">趋势与状态</button>
-            <button type="button" @click="scrollBoard(activitySection)">任务与动态</button>
-            <button type="button" @click="scrollBoard(riskSection)">风险提醒</button>
+            <button type="button" :aria-current="currentSection === 'overview' ? 'location' : undefined" @click="scrollBoard('overview', overviewSection)">趋势与状态</button>
+            <button type="button" :aria-current="currentSection === 'activity' ? 'location' : undefined" @click="scrollBoard('activity', activitySection)">任务与动态</button>
+            <button type="button" :aria-current="currentSection === 'risk' ? 'location' : undefined" @click="scrollBoard('risk', riskSection)">风险提醒</button>
           </nav>
         </DesktopSlot>
 
@@ -164,9 +163,8 @@
             :value="summary.todayCreatedCount"
             route="/tasks?operational_bucket=today_created"
           >
-            <template v-if="dayComparison.created" #comparison>
-              <span>昨日全天 {{ dayComparison.created.previous }}</span>
-              <b v-if="dayComparison.created.delta" class="dashboard-change">{{ dayComparison.created.delta }}</b>
+            <template v-if="dayComparison.created != null" #comparison>
+              <span>昨日全天 {{ dayComparison.created }}</span>
             </template>
           </DashboardKpiCard>
         </section>
@@ -191,10 +189,10 @@
             <div class="trend-summary-grid" aria-label="今日任务摘要">
               <div class="trend-summary-card trend-summary-card--created">
                 <span class="trend-summary-label">今日新建</span>
-                <strong class="trend-summary-value">{{ trendTodayStats.created }}</strong>
+                <strong class="trend-summary-value">{{ summary.todayCreatedCount }}</strong>
               </div>
               <div class="trend-summary-card trend-summary-card--completed">
-                <span class="trend-summary-label">今日完成</span>
+                <span class="trend-summary-label" title="这里显示趋势序列的完成量，顶部今日结单使用总览计数">趋势今日完成</span>
                 <strong class="trend-summary-value">{{ trendTodayStats.completed }}</strong>
               </div>
               <div class="trend-summary-card trend-summary-card--due">
@@ -215,13 +213,14 @@
             aria-label="任务状态分布"
             tabindex="0"
           >
-            <div class="chart-panel-head">
+            <div class="chart-panel-head status-chart-heading">
               <div>
                 <h2 class="dashboard-panel-heading m-0 text-[0.9rem] font-semibold sm:text-[0.95rem]">
                   任务状态分布
                 </h2>
-                <p class="chart-panel-sub">{{ statusDistribution.conclusion }}</p>
+                <p class="chart-panel-sub">{{ statusDistribution.total }} 项进行中</p>
               </div>
+              <small v-if="!loading" class="status-history-count">已完成/终止 {{ statusDistribution.historicalCount }}</small>
             </div>
             <div v-if="loading" class="status-distribution-skeleton">
               <StatusSkeleton :loading="true" :lines="4" class="!py-0" />
@@ -233,7 +232,7 @@
                   :key="item.key"
                   class="status-stack-seg"
                   :class="`status-stack-seg--${item.key}`"
-                  :style="{ flexGrow: item.value, flexBasis: `${item.percent}%` }"
+                  :style="{ flex: item.value }"
                 />
               </div>
               <div class="status-cards">
@@ -382,7 +381,9 @@ const overviewSection = ref<HTMLElement>()
 const activitySection = ref<HTMLElement>()
 const riskSection = ref<HTMLElement>()
 
-function scrollBoard(section?: HTMLElement) {
+const currentSection = ref<'overview' | 'activity' | 'risk'>('overview')
+function scrollBoard(key: typeof currentSection.value, section?: HTMLElement) {
+  currentSection.value = key
   section?.scrollIntoView({ block: 'start' })
 }
 const { can, hasRole } = usePermission()
@@ -441,7 +442,6 @@ const trend7d = computed(() => {
 const trendTodayStats = computed(() => {
   const last = trend7d.value.labels.length - 1
   return {
-    created: trend7d.value.created[last] ?? 0,
     completed: trend7d.value.completed[last] ?? 0,
     dueOnDay: trend7d.value.dueOnDay[last] ?? 0,
   }
@@ -450,17 +450,11 @@ const trendTodayStats = computed(() => {
 const dayComparison = computed(() => {
   const data = overview.value
   const generated = data?.generated_at
-  if (!generated) return { created: null, completed: null }
+  if (!generated || !Number.isFinite(Date.parse(generated))) return { created: null, completed: null }
   const dayBefore = new Date(Date.parse(generated) - 86_400_000)
   const previousDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(dayBefore)
   const previous = data.trend.find((point) => point.date === previousDate)
-  if (!previous) return { created: null, completed: null }
-  function describe(today: number, yesterday: number) {
-    if (!yesterday) return { previous: 0, delta: '' }
-    const change = (today - yesterday) / yesterday * 100
-    return { previous: yesterday, delta: (change > 0 ? '+' : '') + change.toFixed(1) + '%' }
-  }
-  return { created: describe(summary.value.todayCreatedCount, previous.created), completed: describe(summary.value.todayCompletedCount, previous.completed) }
+  return { created: previous?.created ?? null, completed: previous?.completed ?? null }
 })
 const statusDistribution = computed(() => {
   const activeBucketMeta = {
@@ -468,7 +462,6 @@ const statusDistribution = computed(() => {
 		audit: { tone: 'audit', hint: '审核队列待处理' },
 		customization: { tone: 'customization', hint: '定制设计协同处理中' },
 		blocked: { tone: 'danger', hint: '存在异常，需要人工处理' },
-		completed: { tone: 'completed', hint: '已结单、已归档或已取消' },
   } as const
   const items = (overview.value?.status_distribution ?? []).flatMap((bucket) => {
     const meta = activeBucketMeta[bucket.key as keyof typeof activeBucketMeta]
@@ -477,16 +470,12 @@ const statusDistribution = computed(() => {
   const total = items.reduce((sum, item) => sum + item.value, 0)
   const withPercent = items.map((item) => ({
     ...item,
-    percent: total > 0 ? Math.round((item.value / total) * 100) : 0,
+    percent: total > 0 ? Number(((item.value / total) * 100).toFixed(1)) : 0,
   }))
-  const lead = [...withPercent].sort((a, b) => b.value - a.value)[0]
   return {
     items: withPercent,
     total,
-    conclusion:
-      total > 0
-        ? `当前任务主要集中在「${lead.name}」，共 ${lead.value} 项`
-        : '当前暂无任务',
+    historicalCount: overview.value?.status_distribution.find((bucket) => bucket.key === 'completed')?.count ?? 0,
   }
 })
 
@@ -1729,19 +1718,23 @@ onBeforeUnmount(stopRefreshLoop)
   }
 }
 .oa-task-board .board-header-title { font-size: 18px; font-weight: 600; }
-.oa-task-board .dashboard-panel-heading { font-size: 15px; font-weight: 600; }
+.oa-task-board .dashboard-panel-heading { font-size: 13px; font-weight: 500; }
 .oa-task-board .chart-panel-sub, .oa-task-board .trend-summary-label { font-size: 12px; }
-.oa-task-board :deep(.kpi-card__value) { font-size: 24px; }
+.oa-task-board :deep(.kpi-card__value) { font-size: 24px; font-weight: 500; }
 .oa-task-board :deep(.kpi-card__hint) { font-size: 12px; }
-.oa-task-board .dashboard-health-item--danger { order: -1; font-weight: 650; font-size: 14px; }
-.oa-task-board .trend-summary-value, .oa-task-board .board-header-pending strong { font-size: 24px; font-weight: 600; }
-.oa-task-board strong { font-weight: 600; }
+.oa-task-board .dashboard-health-item--danger { order: -1; font-weight: 500; font-size: 13px; }
+.oa-task-board .trend-summary-value, .oa-task-board .board-header-pending strong { font-size: 24px; font-weight: 500; }
+.oa-task-board strong { font-weight: 500; }
 
 .dashboard-top-actions, .dashboard-exception-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .dashboard-exception-link { border: 1px solid rgb(var(--yb-warning-accent) / .35); border-radius: 999px; background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); padding: 5px 9px; font-size: 12px; white-space: nowrap; }
 .dashboard-exception-link:hover { background: rgb(var(--yb-warning-accent) / .2); }
 .dashboard-baseline { white-space: nowrap; }
-.dashboard-change { display: inline-block; margin-inline-start: 4px; padding: 0 4px; border-radius: 4px; background: rgb(var(--yb-brand-soft)); color: rgb(var(--yb-brand-strong)); font-variant-numeric: tabular-nums; }
+.status-chart-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.status-history-count { white-space: nowrap; color: rgb(var(--yb-text-muted)); font-size: 12px; }
+.status-stack-seg { min-width: 0; }
+.dashboard-health-strip .dashboard-overdue-link { background: var(--oa-alert-tint); color: var(--oa-danger); border-color: var(--oa-alert-line); }
+.dashboard-health-strip .dashboard-pool-link { border: 1px solid rgb(var(--yb-border-strong)); border-radius: 6px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); box-shadow: none; }
 
 @media (min-width: 1024px) {
   .dashboard-shell, .dashboard-workbench { height: auto; min-height: 0; max-width: none; width: 100%; margin: 0; }
@@ -1755,6 +1748,7 @@ onBeforeUnmount(stopRefreshLoop)
   .oa-task-board .board-header-content { display: none; }
   .dashboard-section-nav { border-bottom: 0; align-self: stretch; }
   .dashboard-section-nav button { padding-inline: 8px; }
+  .dashboard-section-nav button[aria-current=location] { border-bottom-color: var(--oa-accent); border-radius: 0; color: var(--oa-accent); font-weight: 500; }
   .dashboard-section-nav button:hover, .dashboard-section-nav button:focus-visible { border-bottom-color: rgb(var(--yb-brand)); color: rgb(var(--yb-brand)); }
   .dashboard-top-actions { flex-wrap: nowrap; }
   .dashboard-top-actions :deep(button) { min-height: 28px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
@@ -1766,6 +1760,8 @@ onBeforeUnmount(stopRefreshLoop)
   .dashboard-health-strip .dashboard-exception-link {
     min-height: 28px; border-radius: 999px; border-color: rgb(var(--yb-warning-accent) / .35); background: rgb(var(--yb-warning-accent) / .09); color: rgb(var(--yb-warning-text)); box-shadow: none;
   }
+  .dashboard-health-strip .dashboard-overdue-link { background: var(--oa-alert-tint); color: var(--oa-danger); border-color: var(--oa-alert-line); }
+  .dashboard-health-strip .dashboard-pool-link { border-radius: 6px; border-color: rgb(var(--yb-border-strong)); background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); }
   .oa-task-board .status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .oa-task-board .status-card { min-height: 0; padding: 6px 8px; }
   .oa-task-board .trend-summary-card { min-height: 0; padding: 6px 8px; }
@@ -1773,7 +1769,7 @@ onBeforeUnmount(stopRefreshLoop)
   .oa-task-board :deep(.kpi-card) { min-height: 70px; gap: 2px; border: 0; border-radius: 0; box-shadow: none; padding: 6px 12px; }
   .oa-task-board :deep(.kpi-card + .kpi-card) { border-inline-start: 1px solid rgb(var(--yb-border)); }
   .oa-task-board :deep(.kpi-card__value) { font-size: 22px; }
-  .oa-task-board :deep(.kpi-card__hint) { font-size: 11px; }
+  .oa-task-board :deep(.kpi-card__hint) { font-size: 12px; }
 }
 @media (min-width: 2300px) {
   .dashboard-workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .2fr); }
@@ -1781,4 +1777,6 @@ onBeforeUnmount(stopRefreshLoop)
   .dashboard-workbench > .dashboard-bottom-grid { grid-column: 1; }
   .dashboard-workbench > .dashboard-risk-zone { grid-column: 2; }
 }
+:global(html.oa-live-ui #app .content .oa-task-board .dashboard-panel-heading) { font-size: 13px; font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-task-board :is(strong,b)) { font-weight: 500; }
 </style>

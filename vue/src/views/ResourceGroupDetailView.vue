@@ -58,6 +58,7 @@
 </template>
 
 <script setup lang="ts">
+import { yuanPrefix } from '@/utils/currency-display'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
@@ -81,13 +82,13 @@ const profile = computed(() => group.value?.sku_profile || null)
 const displaySKU = computed(() => group.value?.sku_code || profile.value?.sku_code || 'SKU 待关联')
 const comboCodes = computed(() => (profile.value?.combo_sku_codes || []).join('、'))
 const areaLabel = computed(() => typeof profile.value?.area_trace?.area_m2 === 'number' ? `${profile.value.area_trace.area_m2.toFixed(3)} ㎡` : '面积待核对')
-const systemCostLabel = computed(() => typeof profile.value?.cost_price === 'number' ? `¥ ${profile.value.cost_price.toFixed(2)}` : '成本待计算')
-const erpCostLabel = computed(() => typeof costReconciliation.value?.erp_cost_price === 'number' ? `¥ ${costReconciliation.value.erp_cost_price.toFixed(2)}` : 'ERP 未返回')
+const systemCostLabel = computed(() => typeof profile.value?.cost_price === 'number' ? `${yuanPrefix}${profile.value.cost_price.toFixed(2)}` : '成本待计算')
+const erpCostLabel = computed(() => typeof costReconciliation.value?.erp_cost_price === 'number' ? `${yuanPrefix}${costReconciliation.value.erp_cost_price.toFixed(2)}` : 'ERP 未返回')
 const costDeltaLabel = computed(() => {
   const delta = costReconciliation.value?.cost_delta
   if (typeof delta !== 'number') return '等待实时核对'
   if (Math.abs(delta) <= 0.0005) return '与系统计算一致'
-  return `比系统成本${delta > 0 ? '高' : '低'} ¥ ${Math.abs(delta).toFixed(2)}`
+  return `比系统成本${delta > 0 ? '高' : '低'} ${yuanPrefix}${Math.abs(delta).toFixed(2)}`
 })
 const reconciliationMessage = computed(() => costReconciliation.value?.message || '尚未进行 ERP 实际成本核对')
 const reconciliationTone = computed(() => costReconciliation.value?.status === 'matched' ? 'is-matched' : costReconciliation.value?.status === 'mismatched' ? 'is-mismatched' : 'is-unavailable')

@@ -43,10 +43,18 @@
 @tailwind utilities;
 
 :root {
+  --yb-line-hairline: #EEF1F6;
+  --yb-line-structure: #DFE4EC;
+  --yb-line-control: #CBD5E1;
+  --yb-line-control-hover: #94A3B8;
+  --yb-focus-ring: 0 0 0 2px rgba(29, 91, 214, 0.16);
+  --oa-inspector-scrim: rgba(15, 23, 42, 0.18);
+  --oa-alert-tint: #FEF2F2;
+  --oa-alert-line: #FECACA;
   color-scheme: light;
-  --oa-font: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --oa-font: "PingFang SC", "Hiragino Sans GB", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
   --oa-chrome-divider: #DFE4EC;
-  --oa-nav-label-size: 11px;
+  --oa-nav-label-size: 12px;
   --oa-kpi-size: 24px;
   --oa-h1-size: 18px;
   --oa-h2-size: 15px;
@@ -591,6 +599,10 @@ body {
 }
 
 html.oa-live-ui {
+  --yb-font-mono: "YB JetBrains Mono", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --oa-chrome-divider: var(--yb-line-structure);
+  --oa-rail-badge-size: 10px;
+  --oa-inspector-layer: 140;
   --yb-bg-page: 244 246 249;
   --yb-surface: 255 255 255;
   --yb-surface-muted: 248 250 252;
@@ -1152,4 +1164,57 @@ html.oa-live-ui #app .content :is(button,select,input,textarea):not(.material-sy
  html.oa-live-ui #app .org-hero p:first-child { display:none; }
  html.oa-live-ui .oa-bar-tabs :is(nav,.workspace-tabs) svg { flex:none; }
  html.oa-live-ui .oa-bar-page-actions .asset-view-modes { display:inline-flex;align-items:center;gap:4px; }
+}
+
+html.oa-live-ui #app .oa-bar-page-actions button.oa-new-user { background:var(--oa-accent); color:rgb(var(--yb-text-inverse)); border-color:var(--oa-accent); }
+
+/* OA desktop controls share the same optical baseline; content cards and
+   editor toolbars keep their own internal layouts. */
+html.oa-live-ui,html.oa-live-ui body,html.oa-live-ui #app {
+  -webkit-font-smoothing:auto; -moz-osx-font-smoothing:auto;
+  text-rendering:optimizeLegibility; font-synthesis:none;
+}
+html.oa-live-ui #app :where(button,.oa-button,.oa-pill,kbd,[role=tab]) {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  line-height:1; white-space:nowrap; vertical-align:middle; box-sizing:border-box;
+}
+html.oa-live-ui #app :is(button,.oa-button,.oa-pill,[role=tab]) > :is(svg,.material-symbols-outlined) { display:block; flex-shrink:0; line-height:1; }
+html.oa-live-ui #app :is(input:not([type=checkbox],[type=radio]),select,textarea) { border-color:var(--yb-line-control); }
+html.oa-live-ui #app :is(input:not([type=checkbox],[type=radio]),select,textarea):hover:not(:disabled) { border-color:var(--yb-line-control-hover); }
+html.oa-live-ui #app :is(input,select,textarea):focus,
+html.oa-live-ui #app :is(button,.oa-button,a):focus-visible,
+html.oa-live-ui dialog :is(input,select,textarea,button):focus-visible {
+  outline:none; border-color:var(--oa-accent); box-shadow:var(--yb-focus-ring);
+}
+html.oa-live-ui #app :is(.oa-button-primary,.auth-submit,.oa-new-user) { -webkit-font-smoothing:antialiased; }
+html.oa-live-ui #app :is(.oa-panel,.content-card,.commerce-metrics,.order-data-results) { border-color:var(--yb-line-structure); }
+html.oa-live-ui #app :is(.oa-table,.oa-task-table,.asset-ledger,.maintenance table) :is(td,th) { border-bottom-color:var(--yb-line-hairline); }
+html.oa-live-ui #app .content :is(th,small,.oa-pill,.status-pill,.status-tag,.identity-badge,.stage-label,.section-label,.mode-badge,.item-count,.sync-pill),
+html.oa-live-ui #app .content :is(.n-ellipsis,.column-head,.step-marker) > span,
+html.oa-live-ui #app .oa-task-views button, html.oa-live-ui #app .oa-resource-rail header p { font-weight:500; }
+html.oa-live-ui #app .avatar-trigger__photo { background-color:var(--oa-accent); }
+html.oa-live-ui #app .avatar-trigger__photo > span { font-weight:500; }
+html.oa-live-ui #app :is(.oa-table,.asset-ledger) .oa-number,
+html.oa-live-ui #app :is(.sku-code,.task-number,.task-sku-text,.date-cell,.amount-cell,.metric-value,.price-value,.employee-no,time) {
+  font-family:var(--yb-font-mono),var(--yb-font-sans); font-variant-numeric:tabular-nums;
+}
+html.oa-live-ui #app .content .notif-toolbar :is(.notif-segment,.notif-btn,.notif-segment button) { border-radius:6px; }
+html.oa-live-ui #app .content .notif-toolbar .notif-segment { padding:2px; border-radius:8px; }
+html.oa-live-ui #app .content .notif-toolbar .notif-segment button { border-radius:6px; }
+@media (min-width:1280px) {
+ html.oa-live-ui #app .content .notif-layout { grid-template-columns:minmax(0,1.618fr) minmax(300px,1fr); }
+ html.oa-live-ui #app .content .commerce-filter :is(.workspace-filters,.oa-filter) :is(button,input:not([type=checkbox]),select) {
+   height:32px; min-height:32px; box-sizing:border-box; margin-block:0; padding-block:0; font-weight:500;
+ }
+ html.oa-live-ui #app .content .commerce-period { padding:2px; border-radius:6px; align-items:center; }
+ html.oa-live-ui #app .content .commerce-period button { border-radius:4px; }
+}
+
+/* Numeric references, short field values and row labels remain readable at 12–13px. */
+html.oa-live-ui #app .oa-bar-tabs :is(button,a,button span),
+html.oa-live-ui #app .avatar-trigger__name,
+html.oa-live-ui #app .content :is(.commerce-comparison strong,.hero-facts dt,.oa-task-detail dd,.cost-row-link strong,.column-head strong,
+  .detail-sku-costs strong,.org-filter-header span,.org-action-btn,.user-name-text,.person-avatar,.sku-code,.sku-facts b) { font-weight:500; }
+html.oa-live-ui #app .content :is(.cost-row-link strong,.detail-sku-costs strong,.sku-code,.sku-facts b,.hero-facts time) {
+  font-family:var(--yb-font-mono),var(--yb-font-sans); font-variant-numeric:tabular-nums;
 }

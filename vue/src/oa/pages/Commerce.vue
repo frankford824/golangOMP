@@ -2,7 +2,7 @@
 import { orderFilters, rememberOrderFilters } from '../orderFilterMemory'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText, Search } from 'lucide-vue-next'
+import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText, Search } from 'lucide-vue-next'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import OAEmpty from '../components/OAEmpty.vue'
@@ -95,6 +95,8 @@ function openCost(row: DataRow, focus = true) {
   costAction.value?.open({
     sku: row.sku, shop: row.shop_id, shopName: shopName(row.shop_id),
     from: query.from, to: query.to, includeBrush: query.include_brush === '1',
+    productName: row.product_name || row.shop_item_id || row.sku,
+    quantity: row.quantity, sales: row.item_pay_total, today: query.from === today && query.to === today,
   }, focus)
 }
 function openProductLink(event: MouseEvent, row: DataRow, navigate: (event?: MouseEvent) => unknown) {
@@ -298,7 +300,20 @@ async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
     const dimensions = props.mode === 'ranking' && (
       ['shop', 'growth', 'platform'].includes(appliedGroup.value)
     ) ? api<OrderResult>('/oa-api/orders/summary?' + summaryQuery).catch(() => undefined) : undefined
-    const [result, supplemental] = await Promise.all([api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`), dimensions])
+    const [firstResult, supplemental] = await Promise.all([api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`), dimensions])
+    let result = firstResult
+    if (sequence !== latest.value) return
+    if (props.mode === 'products' && applied.get('mine') === '1' && result.scope_state === 'unassigned') {
+      applied.delete('mine')
+      applied.set('offset', '0')
+      result = await api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`)
+      if (sequence !== latest.value) return
+      next = 0
+      applied.delete('offset')
+      appliedQuery = applied.toString()
+      productScope.value = 'overview'
+      recordScope(applied)
+    }
     if (sequence === latest.value) {
       data.value = result
       offset.value = next
@@ -318,6 +333,12 @@ async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
     }
   }
   finally { if (sequence === latest.value) busy.value = false }
+}
+
+const appliedMine = computed(() => data.value != null && new URLSearchParams(appliedQuery).get('mine') === '1')
+function showAllProducts() {
+  productScope.value = 'overview'
+  void load()
 }
 
 type MoneyKey = 'payable_amount' | 'item_pay_total' | 'item_pay_verified_total' | 'verified_gross'
@@ -520,10 +541,15 @@ const hourlyComparison = computed(() => {
   return { current: money(currentTotal), previous: money(previousTotal), change: 100 * (currentTotal - previousTotal) / previousTotal, through: hourLabel(lastHour + 1) }
 })
 const axisValues = computed(() => hourlyTrend.value ? hourlySeries.value.flatMap(series => series.points.map(point => point.value)) : chartDays.value.map(day => day.value))
-const domain = computed(() => ({
-  min: Math.min(0, ...axisValues.value),
-  max: Math.max(0, ...axisValues.value),
-}))
+const domain = computed(() => {
+  const min = Math.min(0, ...axisValues.value)
+  const max = Math.max(0, ...axisValues.value)
+  if (!hourlyTrend.value || min === max) return { min, max, step: 0 }
+  const interval = Math.max(1000, (max - min) / 3)
+  const magnitude = 10 ** Math.floor(Math.log10(interval))
+  const step = ([1, 2, 5, 10].find(value => value * magnitude >= interval) ?? 10) * magnitude
+  return { min: Math.floor(min / step) * step, max: Math.ceil(max / step) * step, step }
+})
 const plotY = (value: number) => plot.value.bottom - (value - domain.value.min) / (domain.value.max - domain.value.min || 1) * (plot.value.bottom - plot.value.top)
 const hourX = (hour: number) => plot.value.left + hour / 24 * (plot.value.right - plot.value.left)
 const hourLabel = (hour: number) => String(hour).padStart(2, '0') + ':00'
@@ -531,9 +557,17 @@ const hourlyLines = computed(() => hourlySeries.value.map(series => ({
   label: series.label,
   points: series.points.map(point => ({ ...point, x: hourX(point.hour), y: plotY(point.value) })),
 })))
-const ticks = computed(() => (domain.value.min === domain.value.max ? [0] : [0, 1, 2, 3].map(index =>
-  domain.value.min + (domain.value.max - domain.value.min) * index / 3)))
+const ticks = computed(() => {
+  const { min, max, step } = domain.value
+  if (min === max) return [0]
+  if (!step) return [0, 1, 2, 3].map(index => min + (max - min) * index / 3)
+  return Array.from({ length: Math.round((max - min) / step) + 1 }, (_, index) => min + step * index)
+})
 const axisNumber = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 })
+const hourAxisNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 })
+function hourAmountTick(value: number) {
+  return (Math.abs(value) >= 100000 ? axisNumber : hourAxisNumber).format(value) + '元'
+}
 const points = computed(() => {
   const start = Date.parse(overviewDay.value ? trendWeekStart.value : appliedPeriod.value?.from ?? '')
   const end = Date.parse(appliedPeriod.value?.to ?? '')
@@ -749,7 +783,6 @@ onUnmounted(() => {
 <div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview', 'commerce-list': mode === 'products' || mode === 'ranking', 'commerce-products': mode === 'products' }]">
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
-    <RouterLink v-if="mode === 'overview' && permissions.hasMenu('dashboard')" class="oa-button" :to="{ path: '/', query: { workspace: 'tasks' } }"><BarChart3 :size="15" />任务运营看板</RouterLink>
     <RouterLink v-if="mode === 'detail'" class="oa-button" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }"><ChevronLeft :size="15" />返回商品</RouterLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
@@ -764,7 +797,7 @@ onUnmounted(() => {
           待补成本 / 低覆盖商品
         </RouterLink>
         <button v-if="mode === 'products'" type="button" class="commerce-exception" :aria-pressed="lowCoverageOnly"
-          @click="lowCoverageOnly = !lowCoverageOnly">待补成本 / 低覆盖商品（本页）</button>
+          title="仅筛选本页待补成本或低覆盖商品" @click="lowCoverageOnly = !lowCoverageOnly">仅看低覆盖</button>
         <div class="commerce-period" aria-label="快捷日期">
           <CalendarDays :size="15" aria-hidden="true" />
           <button v-for="period in periods" :key="period.label" type="button" :disabled="busy"
@@ -773,7 +806,7 @@ onUnmounted(() => {
       <label v-if="mode === 'ranking'">排名维度 <select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
       <label v-if="mode === 'products'">商品范围 <select v-model="productScope" name="product-scope"><option value="mine">归属我的商品</option><option value="overview">全部可见商品</option></select></label>
       <label v-if="mode === 'detail'">SKU <input v-model="selectedSku" required /></label>
-      <label v-if="mode !== 'personal'">店铺 <select v-if="shopOptions.length" v-model="shop" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
+      <label v-if="mode !== 'personal'">店铺 <select v-if="shopOptions.length" v-model="shop" class="commerce-shop-select" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
       <label>日期 <OrderDateField v-model="from" label="开始日期" :max="to" :min="earliest" /></label>
       <label>至 <OrderDateField v-model="to" label="结束日期" :min="from" :max="today" /></label>
       <label v-if="mode !== 'ranking' || group !== 'growth'" class="oa-check-inline"><input v-model="includeBrush" type="checkbox" />包含刷单</label>
@@ -788,11 +821,12 @@ onUnmounted(() => {
     <section v-if="mode === 'overview' && summary" class="oa-kpis commerce-metrics" aria-label="经营指标">
       <div v-for="(metric, index) in kpis" :key="metric.name" :class="['oa-kpi', { 'commerce-metric-primary': index === 0 }]">
         <span>{{ metric.name }}</span><b>{{ metric.value }}</b>
-        <small v-if="index === 0 && hourlyComparison" class="commerce-comparison">
-          <span :class="hourlyComparison.change > 0 ? 'commerce-growth-positive' : hourlyComparison.change < 0 ? 'commerce-growth-negative' : ''">
+        <small v-if="index === 0 && hourlyComparison" class="commerce-comparison"
+          :title="'截至 ' + hourlyComparison.through + ' · 所选日 ' + hourlyComparison.current + ' · 前一日 ' + hourlyComparison.previous">
+          截至 {{ hourlyComparison.through }} 较{{ overviewDay === today ? '昨日' : '前一日' }}
+          <strong :class="hourlyComparison.change > 0 ? 'commerce-growth-positive' : hourlyComparison.change < 0 ? 'commerce-growth-negative' : ''">
             {{ hourlyComparison.change > 0 ? '+' : '' }}{{ hourlyComparison.change.toFixed(1) }}%
-          </span>
-          <span :title="'截至 ' + hourlyComparison.through + ' 的完整小时应付 · 所选日 ' + hourlyComparison.current">同期 {{ hourlyComparison.current }} / 前日 {{ hourlyComparison.previous }}</span>
+          </strong>
         </small>
         <small v-if="metric.foot" :class="['commerce-coverage', { 'commerce-coverage-low': parseFloat(metric.foot) < 90 }]">{{ parseFloat(metric.foot) < 90 ? '仅覆盖' : '覆盖' }} {{ metric.foot }}</small>
       </div>
@@ -817,7 +851,7 @@ onUnmounted(() => {
             @focus="activeHour = hourlyLines[0].points.at(-1)?.hour ?? 0" @blur="activeHour = undefined">
             <g v-for="tick in ticks" :key="tick">
               <line :x1="plot.left" :x2="plot.right" :y1="plotY(tick)" :y2="plotY(tick)" stroke="var(--oa-line)" />
-              <text :x="plot.left - 12" :y="plotY(tick) + 4" text-anchor="end">{{ axisNumber.format(tick) }} 元</text>
+              <text :x="plot.left - 12" :y="plotY(tick) + 4" text-anchor="end">{{ hourAmountTick(tick) }}</text>
             </g>
             <text v-for="hour in [0, 4, 8, 12, 16, 20, 24]" :key="hour" :x="hourX(hour)" :y="chartHeight - 7" text-anchor="middle">{{ hourLabel(hour) }}</text>
             <g v-for="(series, index) in hourlyLines" :key="series.label" :class="{ 'commerce-hourly-baseline': index === 1 }">
@@ -904,7 +938,9 @@ onUnmounted(() => {
         <span v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</span>
         <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ displayRows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
       </div>
-      <OAEmpty v-if="!displayRows.length" :title="lowCoverageOnly ? '本页暂无待补成本或低覆盖商品' : '所选范围暂无数据'" kind="search" />
+      <OAEmpty v-if="!displayRows.length" :title="rows.length && lowCoverageOnly ? '本页暂无待补成本或低覆盖商品' : '所选范围暂无数据'" kind="search">
+        <button v-if="mode === 'products' && !rows.length && appliedMine && !data.has_more" type="button" :disabled="busy" @click="showAllProducts">切换为全部可见商品</button>
+      </OAEmpty>
       <div v-else class="oa-table-wrap" tabindex="0" role="region" :aria-label="title + '数据表'">
         <table v-if="mode === 'ranking' || mode === 'personal'" :class="['oa-table', { 'commerce-ranking-table': mode === 'ranking' }]">
           <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><template v-if="mode === 'ranking' && showRankingMetrics"><th class="oa-number">应付占比</th><th class="oa-number">有效订单数</th><th class="oa-number">核实毛利</th><th class="oa-number" title="核实毛利 ÷ 有核实成本的商品销售额">核实毛利率</th></template><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>

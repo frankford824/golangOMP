@@ -21,6 +21,7 @@ vi.mock('@/composables/useTaskFilterOptions', async () => {
 })
 
 import ResourceGroupsView from './ResourceGroupsView.vue'
+import { oaEnabled } from '@/oa/access'
 
 const mountView = () => mount(ResourceGroupsView, {
   global: {
@@ -115,7 +116,7 @@ describe('ResourceGroupsView', () => {
     await wrapper.findAll('.asset-view-modes button')[1]!.trigger('click')
     expect(wrapper.get('.asset-ledger .sku-code').attributes('href')).toBe('/asset-center/8')
     expect(wrapper.get('.asset-ledger').text()).toContain('0.960 ㎡')
-    expect(wrapper.get('.asset-ledger').text()).toContain('¥ 18.50')
+    expect(wrapper.get('.asset-ledger').text()).toContain('¥18.50')
     expect(wrapper.get('.asset-ledger tbody td:nth-child(5)').text()).toBe('—')
     expect(mocks.list).toHaveBeenCalledTimes(1)
     wrapper.unmount()
@@ -186,8 +187,8 @@ describe('ResourceGroupsView', () => {
     }))
     expect(mocks.costReconciliation).toHaveBeenCalledWith(8)
     expect(wrapper.text()).toContain('ERP 实际成本')
-    expect(wrapper.text()).toContain('¥ 20.00')
-    expect(wrapper.get('.cost-mismatch').text()).toBe('¥ 20.00')
+    expect(wrapper.text()).toContain('¥20.00')
+    expect(wrapper.get('.cost-mismatch').text()).toBe('¥20.00')
   })
 
   it('shows a single SKU cover summary card and navigates on click', async () => {
@@ -200,15 +201,20 @@ describe('ResourceGroupsView', () => {
     expect(wrapper.text()).toContain('套装')
     expect(wrapper.text()).toContain('1 张成品')
     expect(wrapper.text()).toContain('0.960 ㎡')
-    expect(wrapper.text()).toContain('¥ 18.50')
+    expect(wrapper.text()).toContain('¥18.50')
     expect(wrapper.text()).toContain('COMBO-01')
     expect(wrapper.text()).toContain('成本规则 · 喷绘面积规则（第 3 版）')
     expect(wrapper.text()).toContain('ERP 已同步')
 
     const card = wrapper.get('.resource-card')
-    expect(card.element.tagName).toBe('BUTTON')
-    await card.trigger('click')
-    expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+    if (oaEnabled) {
+      expect(card.element.tagName).toBe('A')
+      expect(card.attributes('href')).toBe('/asset-center/8')
+    } else {
+      expect(card.element.tagName).toBe('BUTTON')
+      await card.trigger('click')
+      expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+    }
   })
 
   it('resolves protected cover previews by immutable task-asset id', async () => {
@@ -263,12 +269,16 @@ describe('ResourceGroupsView', () => {
     })
     expect(wrapper.text()).toContain('外部资源匹配')
     expect(wrapper.text()).toContain('HSC40222-final.tif')
-    await wrapper.get('.external-card img').trigger('click')
-    expect(mocks.push).toHaveBeenCalledTimes(1)
-    expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/ext-77')
-    mocks.push.mockClear()
-    await wrapper.get('.external-card').trigger('click')
-    expect(mocks.push).toHaveBeenCalledWith('/asset-center/ext-77')
+    if (oaEnabled) {
+      expect(wrapper.get('a.external-card').attributes('href')).toBe('/asset-center/ext-77')
+    } else {
+      await wrapper.get('.external-card img').trigger('click')
+      expect(mocks.push).toHaveBeenCalledTimes(1)
+      expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/ext-77')
+      mocks.push.mockClear()
+      await wrapper.get('.external-card').trigger('click')
+      expect(mocks.push).toHaveBeenCalledWith('/asset-center/ext-77')
+    }
   })
 
   it('shows historical search failure instead of no results and retries the same SKU', async () => {
@@ -323,12 +333,16 @@ describe('ResourceGroupsView', () => {
     expect(wrapper.text()).toContain('参考图')
     expect(wrapper.get('.flat-card img').attributes('data-task-asset-id')).toBe('1002')
     expect(wrapper.get('.flat-card img').attributes('src')).toBeUndefined()
-    await wrapper.get('.flat-card img').trigger('click')
-    expect(mocks.push).toHaveBeenCalledTimes(1)
-    expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/8')
-    mocks.push.mockClear()
-    await wrapper.get('.flat-card').trigger('click')
-    expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+    if (oaEnabled) {
+      expect(wrapper.get('a.flat-card').attributes('href')).toBe('/asset-center/8')
+    } else {
+      await wrapper.get('.flat-card img').trigger('click')
+      expect(mocks.push).toHaveBeenCalledTimes(1)
+      expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/8')
+      mocks.push.mockClear()
+      await wrapper.get('.flat-card').trigger('click')
+      expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+    }
   })
 
   it('renders distinct empty and retryable error states', async () => {

@@ -63,6 +63,7 @@ function mountView() {
     attachTo: document.body,
     global: {
       stubs: {
+        RouterLink: true,
         WorkflowProgress: { template: '<div class="progress-stub">四步流程</div>' },
         TaskStatusTag: { template: '<span class="status-stub">状态</span>' },
         SkuResourceMatrix: { props: ['taskReferences','skuItems'], emits: ['refreshReferences'], template: '<div class="matrix-stub" :data-sku-references="JSON.stringify(skuItems?.map(item => item.reference_file_refs))" :data-sku-costs="JSON.stringify(skuItems?.map(item => item.cost_price))">资源矩阵 {{ taskReferences?.length || 0 }}<button class="matrix-refresh" @click="$emit(\'refreshReferences\')">刷新参考图</button></div>' },
@@ -840,8 +841,8 @@ describe('TaskDetailV8View business context', () => {
 
     expect(wrapper.findAll('button').some((item) => item.text() === '修改结单文件')).toBe(true)
     expect(wrapper.text()).not.toContain('提交修图成品')
-    expect(wrapper.get('.hero-facts').text()).toContain('任务信息更新时间')
-    expect(wrapper.get('.hero-facts').text()).toContain('2026/07/24 10:00')
+    expect(wrapper.get('.hero-facts').text()).toContain('更新时间')
+    expect(wrapper.get('.hero-facts').text()).toContain('2026-07-24 10:00')
     expect(wrapper.get('.hero-facts').text()).not.toContain('完成时间')
   })
 

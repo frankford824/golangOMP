@@ -109,6 +109,15 @@
           />
         </div>
         <div>
+          <label for="registerForm.displayName" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">姓名</label>
+          <input
+            id="registerForm.displayName" autocomplete="name" v-model="registerForm.displayName"
+            type="text"
+            placeholder="请输入真实姓名"
+            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
+          />
+        </div>
+        <div>
           <label for="registerForm.password" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">密码</label>
           <div class="auth-password"><input
             id="registerForm.password" autocomplete="new-password" v-model="registerForm.password"
@@ -122,22 +131,18 @@
         </div>
         <div>
           <label for="registerForm.confirmPassword" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">确认密码</label>
+          <div class="auth-password">
           <input
             id="registerForm.confirmPassword" autocomplete="new-password" v-model="registerForm.confirmPassword"
-            :type="oaEnabled && revealPassword ? 'text' : 'password'"
+            :type="oaEnabled && revealConfirmation ? 'text' : 'password'"
             placeholder="请再次输入密码"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
           />
+            <button v-if="oaEnabled" type="button" class="password-toggle" :aria-label="revealConfirmation ? '隐藏确认密码' : '显示确认密码'" :aria-pressed="revealConfirmation" @click="revealConfirmation = !revealConfirmation">
+              <EyeOff v-if="revealConfirmation" :size="16" /><Eye v-else :size="16" />
+            </button>
+          </div>
           <p v-if="!oaEnabled" class="auth-help mt-1 text-xs text-[rgb(var(--yb-text-muted))]">需与上方密码保持一致</p>
-        </div>
-        <div>
-          <label for="registerForm.displayName" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">姓名</label>
-          <input
-            id="registerForm.displayName" autocomplete="name" v-model="registerForm.displayName"
-            type="text"
-            placeholder="请输入真实姓名"
-            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
-          />
         </div>
         <div>
           <label for="registerForm.mobile" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">手机号</label>
@@ -171,13 +176,13 @@
           </select>
         </div>
         <div>
-          <label for="registerForm.team" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">组</label>
+          <label for="registerForm.team" class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">小组</label>
           <select
             id="registerForm.team" v-model="registerForm.team"
             :disabled="!availableTeams.length"
             class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
           >
-            <option value="">{{ availableTeams.length ? '请选择组' : '请先选择部门' }}</option>
+            <option value="">{{ availableTeams.length ? '请选择小组' : '请先选择部门' }}</option>
             <option v-for="team in availableTeams" :key="team" :value="team">
               {{ team }}
             </option>
@@ -211,7 +216,7 @@
 import oaBrandMark from '@/oa/assets/yongbo-mark.svg'
 import { Eye, EyeOff } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePermissionsStore } from '@/stores/permissions'
 import { resolvePostLoginLandingRoute } from '@/router/home-fallback'
@@ -231,6 +236,11 @@ const errorMessage = ref('')
 
 // 登录表单
 const revealPassword = ref(false)
+const revealConfirmation = ref(false)
+watch(activeTab, () => {
+  revealPassword.value = false
+  revealConfirmation.value = false
+})
 const loginForm = ref({
   username: '',
   password: '',
@@ -526,4 +536,8 @@ async function handleRegister() {
 .oa-auth .auth-card { margin: 0; }
 .oa-auth .register-form { gap: 12px 16px; }
 .oa-auth .register-form label { line-height: 1.45; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .oa-auth .auth-card { transition: width 180ms ease; }
+}
 </style>

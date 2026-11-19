@@ -37,8 +37,8 @@ describe('ResourceGroupDetailView', () => {
     expect(wrapper.text()).toContain('杯具面积规则')
     expect(wrapper.text()).toContain('系统计算成本')
     expect(wrapper.text()).toContain('ERP 实际成本')
-    expect(wrapper.text()).toContain('¥ 9.10')
-    expect(wrapper.text()).toContain('比系统成本高 ¥ 0.50')
+    expect(wrapper.text()).toContain(import.meta.env.VITE_OA_FEATURES === 'true' ? '¥9.10' : '¥ 9.10')
+    expect(wrapper.text()).toContain(import.meta.env.VITE_OA_FEATURES === 'true' ? '比系统成本高 ¥0.50' : '比系统成本高 ¥ 0.50')
     await wrapper.findAll('.hero-actions button')[0].trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/tasks/9')
 

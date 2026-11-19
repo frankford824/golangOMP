@@ -123,7 +123,7 @@
         <span class="tc-meta-val" :title="creator">{{ creator }}</span>
         <template v-if="showDesigner">
           <span class="tc-meta-key">设计</span>
-          <span class="tc-meta-val" :title="designer">{{ designer }}</span>
+          <span class="tc-meta-val" :title="designer === '-' ? undefined : designer">{{ designer === '-' ? '—' : designer }}</span>
         </template>
       </template>
     </div>
@@ -594,7 +594,8 @@ const emit = defineEmits<{
 }
 .tc--oa .tc-title:hover { text-decoration: underline; }
 .tc--oa .tc-no, .tc--oa .tc-meta, .tc--oa .tc-time { font-size: 12px; }
-.tc--oa .tc-title { font-size: 14px; }
+.tc--oa .tc-title { font-size: 13px; font-weight: 500; }
+.tc--oa :is(.tc-no,.tc-meta-key,.tc-meta-val,.tc-time b,.tc-priority,.tc-status) { font-weight: 500; }
 .tc-copy-icon { display: inline-grid; place-items: center; margin-inline-start: 4px; min-width: 24px; min-height: 24px; opacity: .65; }
 @media (hover: hover) {
   .tc-copy-icon { opacity: 0; }

@@ -1,8 +1,8 @@
 <template>
   <section class="notif-page">
-    <header class="notif-hero">
+    <header v-if="!oaEnabled || section === 'system'" class="notif-hero" :class="{ 'notif-toolbar': oaEnabled }">
       <div>
-        <h1>通知中心</h1>
+        <h1 v-if="!oaEnabled">通知中心</h1>
         <p v-if="section === 'system'">共 {{ items.length }} 条 · {{ unreadCount }} 条未读</p>
       </div>
       <div v-if="section === 'system'" class="notif-hero-actions">
@@ -1365,4 +1365,7 @@ html.oa-live-ui .notif-row { cursor: default; }
 html.oa-live-ui .notif-row .notif-type-error { background: rgb(var(--yb-danger-soft)); color: rgb(var(--yb-danger-text)); }
 html.oa-live-ui .notif-row .notif-type-warning { background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
 .notif-task-link { margin-left: 8px; font-size: 13px; color: var(--oa-primary, rgb(var(--yb-brand))); }
+
+.notif-page .notif-toolbar { background:transparent; padding:0; margin:0; border:0; border-radius:0; box-shadow:none; min-height:32px; }
+.notif-toolbar .notif-segment,.notif-toolbar .notif-segment button,.notif-toolbar .notif-btn { border-radius:6px; }
 </style>

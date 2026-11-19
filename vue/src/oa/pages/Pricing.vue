@@ -120,7 +120,6 @@ async function preview() {
 <template>
   <main class="oa-page oa-pricing">
     <PageHead title="SKU 核价" subtitle="按编码查看成本中心的当前成本、计价依据和规则试算结果。">
-      <RouterLink v-if="can('orders.view')" class="oa-button" to="/operations/products">商品表现</RouterLink>
       <RouterLink v-if="canOpenMaintenance" class="oa-button" :to="{ name: 'CostRules' }">编码成本维护</RouterLink>
     </PageHead>
     <OperationNav v-if="can('orders.view')" />
@@ -129,7 +128,7 @@ async function preview() {
       <h2 id="price-request-title">输入商品编码</h2>
       <form class="code-form" @submit.prevent="preview">
         <label for="pricing-codes" class="oa-muted">支持换行或逗号分隔，每批最多 30 个不同编码。</label>
-        <textarea id="pricing-codes" v-model="codes" rows="3" spellcheck="false" :disabled="busy" @input="changedInput" />
+        <textarea id="pricing-codes" v-model="codes" rows="3" spellcheck="false" placeholder="每行一个编码，例如：HSC20454" :disabled="busy" @input="changedInput" />
         <div class="pricing-actions">
           <button type="submit" class="oa-button-primary" :disabled="busy">{{ busy ? '核对中…' : '查询成本与建议' }}</button>
           <span class="oa-muted">{{ parsed.length }} / 30 个编码</span>
@@ -219,7 +218,7 @@ async function preview() {
   .oa-pricing > :not(.pricing-body) { flex: none; }
   .pricing-body { min-block-size: 0; overflow: auto; scrollbar-gutter: stable; }
 }
-.pricing-panel { border-radius: 8px; padding: 16px; min-width: 0; }
+.pricing-panel { border-radius: 8px; padding: 12px 20px; min-width: 0; }
 .code-form { display: grid; gap: 8px; max-width: 640px; margin-top: 8px; }
 .code-form textarea { width: 100%; resize: vertical; }
 .pricing-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -243,7 +242,7 @@ async function preview() {
 .pricing-table tbody tr.is-selected > td { background: rgb(var(--yb-brand-soft)); }
 .pricing-inspector {
   position: fixed; z-index: 12; inset: 44px 0 0 auto; width: min(400px,100vw);
-  min-width: 0; min-height: 0; overflow: auto; padding: 16px;
+  min-width: 0; min-height: 0; overflow: auto; padding: 16px 24px;
   background: var(--oa-surface); box-shadow: -8px 0 24px rgb(var(--yb-shadow) / .11);
 }
 .pricing-inspector header { display: flex; justify-content: space-between; align-items: start; gap: 8px; }

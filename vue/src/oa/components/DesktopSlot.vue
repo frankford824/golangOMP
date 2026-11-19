@@ -2,7 +2,7 @@
 import { computed, inject, onActivated, onDeactivated, ref } from 'vue'
 import { desktopChromeKey } from '../desktopChrome'
 
-const props = defineProps<{ target: 'tabs' | 'status' | 'actions' }>()
+const props = defineProps<{ target: 'title' | 'tabs' | 'status' | 'actions' }>()
 const chrome = inject(desktopChromeKey, null)
 const active = ref(true)
 onActivated(() => { active.value = true })

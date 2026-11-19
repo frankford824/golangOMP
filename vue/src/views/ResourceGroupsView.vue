@@ -9,7 +9,7 @@
           <button type="button" class="quiet-button" :aria-pressed="!showLedger" @click="showLedger = false">图库网格</button>
           <button type="button" class="quiet-button" :aria-pressed="showLedger" @click="showLedger = true">规格台账</button>
         </div>
-        <button class="quiet-button" :disabled="loading" @click="load">
+        <button class="quiet-button asset-refresh" :disabled="loading" @click="load">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
       </div></DesktopSlot>
@@ -45,8 +45,8 @@
     <template v-if="isFlatMode">
       <OAEmpty v-if="oaEnabled && !result.flat_items.length && !error" kind="files" title="没有找到符合条件的资源" description="可调整搜索词或筛选条件，再查看结果。" />
       <div v-else-if="!result.flat_items.length && !error" class="empty">没有找到符合条件的资源。</div>
-      <section v-else-if="result.flat_items.length" class="grid flat-grid" aria-label="匹配资源列表">
-        <button v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" @click="openGroup(item.group_id)">
+      <section v-else-if="result.flat_items.length" class="grid asset-grid flat-grid" aria-label="匹配资源列表">
+        <component :is="oaEnabled ? RouterLink : 'button'" v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" :to="assetDetailTarget(item.group_id)" @click="openLegacyAsset(item.group_id)">
           <span class="cover">
             <AssetPreviewMedia v-if="item.task_asset_id && (item.resource_role !== 'default_style' || item.preview_url)" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" :quiet-loading="oaEnabled" :show-recovery-actions="!oaEnabled" rendition="thumbnail" :open-full-on-click="false" />
             <span v-else class="preview-fallback"><ImageIcon v-if="oaEnabled" :size="28" aria-hidden="true" /><span v-else class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
@@ -58,7 +58,7 @@
               <span class="provenance">来源任务 · {{ item.task_no || item.task_id }}</span>
               <span class="provenance">{{ item.resource_owner_name || '资源所属人待补充' }} · {{ formatResourceDate(item.resource_created_at) }}</span>
             </span>
-        </button>
+        </component>
       </section>
     </template>
 
@@ -68,23 +68,23 @@
       <div v-else-if="oaEnabled && showLedger && result.items.length" class="asset-ledger-scroll" role="region" aria-label="SKU 规格台账" tabindex="0">
         <table class="asset-ledger">
           <thead>
-            <tr><th scope="col">SKU / 产品</th><th scope="col">规格 / 尺寸</th><th scope="col">计价面积</th><th scope="col">系统计算成本</th><th scope="col">ERP 实际成本</th><th scope="col">同步状态</th><th scope="col">操作</th></tr>
+            <tr><th scope="col">SKU / 产品</th><th scope="col">规格 / 尺寸</th><th scope="col">计价面积</th><th scope="col" class="ledger-amount">系统计算成本</th><th scope="col" class="ledger-amount">ERP 实际成本</th><th scope="col">同步状态</th><th scope="col">操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="group in result.items" :key="group.id">
-              <td><RouterLink :to="{ name: 'AssetDetail', params: { id: group.id } }" class="sku-code">{{ displaySKU(group) }}</RouterLink><span>{{ productTitle(group) }}</span></td>
+              <td><RouterLink :to="{ name: 'AssetDetail', params: { id: group.id } }" class="sku-code">{{ displaySKU(group) }}</RouterLink><span :title="productTitle(group)">{{ productTitle(group) }}</span></td>
               <td>{{ group.sku_profile?.size_text || group.sku_profile?.spec_text || '—' }}</td>
               <td>{{ group.sku_profile?.area_trace?.area_m2 == null ? '—' : areaText(group) }}</td>
-              <td>{{ group.sku_profile?.cost_price == null ? '—' : costText(group) }}</td>
-              <td>{{ liveCost(group.id) ? erpCostText(liveCost(group.id)) : '—' }}</td>
+              <td class="ledger-amount">{{ group.sku_profile?.cost_price == null ? '—' : costText(group) }}</td>
+              <td class="ledger-amount">{{ liveCost(group.id) ? erpCostText(liveCost(group.id)) : '—' }}</td>
               <td><span class="sync-pill" :class="syncTone(group)">{{ syncLabel(group) }}</span></td>
               <td><button type="button" class="quiet-button ledger-preview-button" @click="previewGroupID = group.id">速览</button></td>
             </tr>
           </tbody>
         </table>
       </div>
-      <section v-else-if="result.items.length || (!oaEnabled && externalItems.length)" class="grid" aria-label="SKU 资源列表">
-        <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" :aria-label="oaEnabled ? `查看 ${displaySKU(group)} ${productTitle(group)} 资产详情` : undefined" @click="openGroup(group.id)">
+      <section v-else-if="result.items.length || (!oaEnabled && externalItems.length)" class="grid asset-grid" aria-label="SKU 资源列表">
+        <component :is="oaEnabled ? RouterLink : 'button'" v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" :aria-label="oaEnabled ? `查看 ${displaySKU(group)} ${productTitle(group)} 资产详情` : undefined" :to="assetDetailTarget(group.id)" @click="openLegacyAsset(group.id)">
           <span class="cover">
             <AssetPreviewMedia
               v-if="coverAssetID(group) > 0"
@@ -118,11 +118,9 @@
           </span>
           <span class="card-body sku-card-body">
             <span class="sku-heading">
-              <span>
-                <strong class="sku-code">{{ displaySKU(group) }}</strong>
-                <span class="product-name">{{ productTitle(group) }}</span>
-              </span>
+              <strong class="sku-code">{{ displaySKU(group) }}</strong>
               <span class="sync-pill" :class="syncTone(group)">{{ syncLabel(group) }}</span>
+              <span class="product-name" :title="productTitle(group)">{{ productTitle(group) }}</span>
             </span>
             <span class="sku-origin-line">
               <span>{{ laneLabel(group.business_lane) || '常规任务' }}</span>
@@ -133,7 +131,7 @@
             <span class="sku-facts" :class="{ 'has-erp-cost': liveCost(group.id) }">
               <span><small>规格 / 尺寸</small><b>{{ specificationText(group) }}</b></span>
               <span><small>计价面积</small><b>{{ areaText(group) }}</b></span>
-              <span><small>系统计算成本</small><b>{{ costText(group) }}</b></span>
+              <span><small>系统成本</small><b>{{ costText(group) }}</b></span>
               <span v-if="liveCost(group.id)">
                 <small>ERP 实际成本</small>
                 <b :class="{ 'cost-mismatch': liveCost(group.id)?.status === 'mismatched' }">{{ erpCostText(liveCost(group.id)) }}</b>
@@ -143,15 +141,15 @@
             <span class="cost-rule-line">{{ costRuleText(group) }}</span>
             <span v-if="group.migration_incomplete" class="warn">资源待人工确认</span>
           </span>
-        </button>
+        </component>
       </section>
       <section v-if="externalItems.length" class="external-results" aria-label="外部资源匹配">
         <header>
           <div><strong>外部资源匹配</strong><span>ERP / OSS / NAS 已索引资源</span></div>
           <span>{{ externalItems.length }} 个文件</span>
         </header>
-        <div class="grid external-grid">
-          <button v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" @click="openExternal(asset)">
+        <div class="grid asset-grid external-grid">
+          <component :is="oaEnabled ? RouterLink : 'button'" v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" :to="assetDetailTarget(externalResourceID(asset))" @click="openLegacyAsset(externalResourceID(asset))">
             <span class="cover external-cover">
               <AssetPreviewMedia
                 v-if="externalResourceID(asset)"
@@ -171,7 +169,7 @@
               <span class="product-name">{{ externalFileName(asset) }}</span>
               <span class="provenance">{{ asset.source_label || '外部资源' }} · {{ asset.oss_sync_status === 'ready' ? 'OSS 已就绪' : '只读索引' }}</span>
             </span>
-          </button>
+          </component>
         </div>
       </section>
     </template>
@@ -313,11 +311,11 @@ const areaText = (group: ResourceGroup) => {
 }
 const costText = (group: ResourceGroup) => {
   const cost = group.sku_profile?.cost_price
-  return typeof cost === 'number' && Number.isFinite(cost) ? `¥ ${cost.toFixed(2)}` : '成本待计算'
+  return typeof cost === 'number' && Number.isFinite(cost) ? `¥${cost.toFixed(2)}` : '成本待计算'
 }
 const liveCost = (groupID: number) => liveCosts.value.get(groupID)
 const erpCostText = (cost?: ProductCostReconciliation) => {
-  if (typeof cost?.erp_cost_price === 'number' && Number.isFinite(cost.erp_cost_price)) return `¥ ${cost.erp_cost_price.toFixed(2)}`
+  if (typeof cost?.erp_cost_price === 'number' && Number.isFinite(cost.erp_cost_price)) return `¥${cost.erp_cost_price.toFixed(2)}`
   return cost?.status === 'unavailable' ? 'ERP 查询失败' : 'ERP 未维护'
 }
 const comboText = (group: ResourceGroup) => (group.sku_profile?.combo_sku_codes || []).join('、')
@@ -339,13 +337,15 @@ const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).
   return [{ key, label: `${filterLabels[key]}：${display}` }]
 }))
 
-function openGroup(id: number) { void router.push(`/asset-center/${id}`) }
+function assetDetailTarget(id: number | string) {
+  if (oaEnabled) return { name: typeof id === 'number' ? 'AssetDetail' : 'ExternalAssetDetail', params: { id } }
+  return undefined
+}
+function openLegacyAsset(id: number | string) {
+  if (!oaEnabled) void router.push(`/asset-center/${id}`)
+}
 function externalResourceID(asset: BackendAsset) { return String(asset.resource_id || asset.id || '') }
 function externalFileName(asset: BackendAsset) { return asset.file_name || asset.original_filename || externalResourceID(asset) || '外部资源' }
-function openExternal(asset: BackendAsset) {
-  const id = externalResourceID(asset)
-  if (id.startsWith('ext-')) void router.push(`/asset-center/${id}`)
-}
 function clearFilter(key: FilterKey) { filters[key] = ''; search() }
 function clearAllFilters() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }); search() }
 function resetDrawer() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }) }
@@ -573,17 +573,14 @@ onMounted(load)
 }
 
 .sku-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
 }
 
-.sku-heading > span:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 0.2rem;
-}
+.sku-heading > .sku-code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sku-heading > .product-name { grid-column: 1 / -1; width: 100%; }
 
 .sku-code {
   font-size: 0.82rem;
@@ -731,10 +728,18 @@ onMounted(load)
   }
 }
 html.oa-live-ui .asset-view-modes { display: flex; gap: 4px; }
+html.oa-live-ui #app .page-actions :is(.asset-view-modes button,.asset-refresh) { border-radius: 6px; }
+html.oa-live-ui #app .page-actions .asset-refresh { border: 1px solid rgb(var(--yb-border-strong)); }
+html.oa-live-ui .sku-facts > span { padding-inline: clamp(4px, .35vw, 9px); }
+html.oa-live-ui .sku-facts small { white-space: nowrap; }
+html.oa-live-ui .sku-facts b { font-weight: 600; }
 html.oa-live-ui .asset-view-modes [aria-pressed="true"] { background: rgb(var(--yb-brand-soft)); color: rgb(var(--yb-brand)); border-color: currentColor; }
 html.oa-live-ui .search-field input,
 html.oa-live-ui .search-row > button { min-height: 36px; height: 36px; border-radius: 6px; }
 html.oa-live-ui .search-icon { font-size: 18px; top: 9px; }
+html.oa-live-ui .asset-grid a.resource-card { display: grid; text-decoration: none; }
+html.oa-live-ui #app .assets-index-view :is(.mode-badge, .item-count, .sync-pill) { font-weight: 500; }
+html.oa-live-ui #app .assets-index-view .asset-ledger th { font-size: 13px; }
 html.oa-live-ui .resource-card .cover { aspect-ratio: 16 / 10; pointer-events: none; }
 html.oa-live-ui .reference-badge { color: rgb(var(--yb-text-muted)); }
 html.oa-live-ui :is(.sku-facts small, .sku-facts b, .preview-fallback small, .mode-badge, .item-count) { font-size: 12px; }
@@ -755,9 +760,13 @@ html.oa-live-ui .asset-results-region { min-width: 0; }
 .asset-preview-content dd { margin: 0; text-align: right; }
 .asset-preview-content a { display: inline-flex; min-height: 32px; align-items: center; color: var(--oa-accent); font-size: 14px; }
 .asset-preview-drawer footer { position: static; }
-.asset-ledger { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 13px; line-height: 1.5; background: rgb(var(--yb-surface)); }
+.asset-ledger { width: 100%; min-width: 720px; table-layout: fixed; border-collapse: collapse; font-size: 13px; line-height: 1.5; background: rgb(var(--yb-surface)); }
 .asset-ledger :is(th, td) { padding: 8px 12px; border-bottom: 1px solid rgb(var(--yb-border)); text-align: left; white-space: nowrap; }
 .asset-ledger th { background: rgb(var(--yb-surface-muted)); font-weight: 600; }
-.asset-ledger td:first-child span { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.asset-ledger th:first-child { width: 220px; box-sizing: border-box; }
+@media (min-width: 1280px) { .asset-ledger th:first-child { width: 404px; } }
+.asset-ledger td:first-child span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.asset-ledger :is(th,td).ledger-amount { text-align: right; }
+.asset-ledger th.ledger-amount { width: 128px; }
 .asset-ledger :is(td:nth-child(n+2):nth-child(-n+5), .sku-code) { font-family: var(--yb-font-mono, monospace); font-variant-numeric: tabular-nums; }
 </style>

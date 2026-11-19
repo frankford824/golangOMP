@@ -114,7 +114,7 @@ describe('DashboardView authoritative refresh', () => {
     expect(wrapper.text()).toContain('全局进行中任务 978')
     expect(wrapper.text()).toContain('本周完成率 20.0%')
     expect(wrapper.text()).toContain('今日结单')
-    expect(wrapper.get('.dashboard-baseline').text()).toBe('昨日全天 6 -16.7%')
+    expect(wrapper.get('.dashboard-baseline').text()).toBe('昨日全天 6')
 	const departmentBoardButton = wrapper.findAll('button').find((button) => button.text().includes('设计部看板'))
 	expect(departmentBoardButton).toBeTruthy()
 	await departmentBoardButton!.trigger('click')

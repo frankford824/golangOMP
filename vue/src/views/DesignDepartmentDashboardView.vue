@@ -53,6 +53,12 @@
         </article>
       </section>
 
+      <section v-if="!dashboard.summary.task_count" class="state-card design-empty" role="status">
+        <h2>当前筛选范围内暂无设计任务</h2>
+        <p>可以调整团队、设计人员或日期范围。</p>
+        <BaseButton v-if="oaEnabled && !showFilters" size="sm" variant="secondary" @click="showFilters = true">展开筛选</BaseButton>
+      </section>
+      <template v-else>
       <section class="analysis-grid analysis-grid--wide">
         <article class="panel trend-panel"><div class="panel-head"><div><h2>产出趋势</h2><p>所选日期口径下的任务、完成、设计文件与SKU变化</p></div><span>{{ filters.granularity === 'day' ? '按日' : filters.granularity === 'week' ? '按周' : '按月' }}</span></div><DesignDepartmentTrendChart :points="dashboard.trend" /></article>
         <article class="panel"><div class="panel-head"><div><h2>人员工作量</h2><p>按任务量排序，可点击人员继续筛选</p></div><select v-model="peopleSort"><option value="task_count">任务量</option><option value="design_file_count">设计文件</option><option value="completed_task_count">完成量</option><option value="average_turnaround_hours">平均时长</option></select></div>
@@ -66,6 +72,8 @@
         <article class="panel"><div class="panel-head"><div><h2>优先级结构</h2><p>当前范围内任务紧急程度</p></div></div><DesignDepartmentBreakdownChart title="优先级结构" :items="dashboard.priorities" /></article>
         <article class="panel composition-panel"><div class="panel-head"><div><h2>图量与资源结构</h2><p>源文件、成品文件、SKU和资源单元</p></div></div><div class="composition-list"><div v-for="item in dashboard.file_types" :key="item.key"><span>{{ item.label }}</span><strong>{{ item.task_count }}</strong></div></div><div class="quality-grid"><div><span>一次通过率</span><b>{{ percent(dashboard.summary.first_pass_rate) }}</b></div><div><span>按期完成率</span><b>{{ percent(dashboard.summary.on_time_rate) }}</b></div><div><span>中位处理时长</span><b>{{ hours(dashboard.summary.median_turnaround_hours) }}</b></div><div><span>P90处理时长</span><b>{{ hours(dashboard.summary.p90_turnaround_hours) }}</b></div></div></article>
       </section>
+
+      </template>
 
       <section class="panel table-panel">
         <div class="panel-head"><div><h2>人员绩效明细</h2><p>共 {{ dashboard.people.length }} 人；停用账号保留历史数据</p></div><input v-model.trim="peopleKeyword" type="search" placeholder="搜索人员" /></div>
@@ -180,7 +188,7 @@ const filteredTasks = computed(() => { const q = taskKeyword.value.toLowerCase()
 function personMetricValue(person: DesignDepartmentPersonMetric) { const value = person[peopleSort.value]; return peopleSort.value === 'average_turnaround_hours' ? hours(Number(value)) : String(value) }
 function personBarWidth(person: DesignDepartmentPersonMetric) { const max = Math.max(...sortedPeople.value.map((item) => Number(item[peopleSort.value])), 1); return Math.max(2, Number(person[peopleSort.value]) / max * 100) }
 function percent(value: number) { return `${Number(value || 0).toFixed(1)}%` }
-function hours(value: number) { return `${Number(value || 0).toFixed(1)}小时` }
+function hours(value: number) { return `${Number(value || 0).toFixed(1)} 小时` }
 function formatTime(value: string) { return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) }
 function taskTypeLabel(value: string) { return ({ new_product_development: '新品开发', original_product_development: '原品开发', retouch_task: '修图任务', sku_planning: 'SKU规划' } as Record<string, string>)[value] ?? value }
@@ -195,17 +203,17 @@ onBeforeUnmount(() => controller?.abort())
 <style scoped>
 .design-board-page{min-height:100%;padding:24px;background:rgb(var(--yb-bg-page));color:rgb(var(--yb-text-strong))}.design-board-header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}.design-board-header h1{font-size:30px;margin:8px 0 3px}.design-board-header p,.panel-head p{margin:0;color:rgb(var(--yb-text-muted));font-size:13px}.back-link,.person-link,.task-link{border:0;background:none;color:rgb(var(--yb-brand));padding:0;display:inline-flex;align-items:center;gap:5px;cursor:pointer}.header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.freshness{font-size:12px;color:rgb(var(--yb-text-label))}.filter-panel,.panel,.kpi-card,.state-card,.definitions{background:rgb(var(--yb-surface));border:1px solid rgb(var(--yb-border-slate));border-radius:14px;box-shadow:0 4px 18px rgb(var(--yb-shadow)/.04)}.filter-panel{padding:16px;margin-bottom:16px}.preset-row{display:flex;align-items:center;gap:7px;margin-bottom:13px;font-size:13px;color:rgb(var(--yb-text-muted-strong))}.preset-row button{border:1px solid rgb(var(--yb-border-blue-soft));background:rgb(var(--yb-surface-subtle));border-radius:20px;padding:5px 11px;cursor:pointer}.preset-row button.active{background:rgb(var(--yb-surface-blue-control));border-color:rgb(var(--yb-brand-border-strong));color:rgb(var(--yb-brand-link))}.filter-grid{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px}.filter-grid label{font-size:12px;color:rgb(var(--yb-text-muted-strong));display:flex;flex-direction:column;gap:5px}.filter-grid input,.filter-grid select,.panel-head input,.panel-head select{height:36px;border:1px solid rgb(var(--yb-border-form));border-radius:8px;background:rgb(var(--yb-surface));padding:0 9px;color:rgb(var(--yb-text-body-strong))}.filter-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px}.filter-actions>span{margin-right:auto;color:rgb(var(--yb-text-form-muted));font-size:12px}.state-card{padding:24px;text-align:center}.state-card.error{color:rgb(var(--yb-danger-action))}.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}.kpi-card{padding:16px;min-height:118px;display:flex;flex-direction:column;border-top:3px solid rgb(var(--yb-status-pending))}.kpi-card span{font-size:13px;color:rgb(var(--yb-text-form-secondary))}.kpi-card strong{font-size:28px;margin:10px 0 5px}.kpi-card small{color:rgb(var(--yb-text-form-muted-alt))}.kpi-card.green{border-top-color:rgb(var(--yb-success-emerald-bright))}.kpi-card.violet{border-top-color:rgb(var(--yb-purple))}.kpi-card.cyan{border-top-color:rgb(var(--yb-teal-accent))}.kpi-card.amber{border-top-color:rgb(var(--yb-warning-accent))}.kpi-card.red{border-top-color:rgb(var(--yb-red))}.analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}.analysis-grid--wide{grid-template-columns:1.6fr 1fr}.panel{padding:17px;min-width:0}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}.panel-head h2{font-size:16px;margin:0 0 3px}.panel-head>span{font-size:12px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));border-radius:20px;padding:4px 9px}.people-bars{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow:auto}.people-bars button{display:grid;grid-template-columns:85px 1fr 58px;gap:8px;align-items:center;border:0;background:none;padding:4px;cursor:pointer;text-align:left}.people-bars i{height:9px;background:rgb(var(--yb-surface-slate));border-radius:5px;overflow:hidden}.people-bars b{display:block;height:100%;background:linear-gradient(90deg,rgb(var(--yb-brand-bright)),rgb(var(--yb-purple)));border-radius:5px}.people-bars strong{text-align:right;font-size:12px}.composition-list{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.composition-list>div,.quality-grid>div{padding:12px;border-radius:10px;background:rgb(var(--yb-surface-subtle));display:flex;justify-content:space-between}.composition-list strong{font-size:20px}.quality-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}.quality-grid>div{flex-direction:column;gap:7px}.quality-grid span{font-size:12px;color:rgb(var(--yb-text-form-secondary))}.quality-grid b{font-size:18px}.table-panel{margin-bottom:16px}.design-table-wrap{overflow:auto;max-height:520px}.table-panel table{width:100%;border-collapse:collapse;min-width:1050px;font-size:12px}.table-panel th{position:sticky;top:0;background:rgb(var(--yb-surface-raised));color:rgb(var(--yb-text-soft));text-align:left;padding:10px 8px;z-index:1}.table-panel td{padding:10px 8px;border-top:1px solid rgb(var(--yb-border-quiet))}.table-panel td small{display:block;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgb(var(--yb-text-form-muted-alt));margin-top:3px}.danger{color:rgb(var(--yb-danger));font-weight:700}.status-pill{display:inline-block;padding:3px 7px;border-radius:10px;background:rgb(var(--yb-surface-slate))}.status-pill.overdue{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger))}.definitions{padding:13px 16px;margin-bottom:24px}.definitions summary{cursor:pointer;font-weight:600}.definitions dl{display:grid;grid-template-columns:120px 1fr;gap:8px 14px}.definitions dt{font-weight:600}.definitions dd{margin:0;color:rgb(var(--yb-text-muted-strong))}.error button{margin-left:12px}@media(max-width:1250px){.filter-grid{grid-template-columns:repeat(4,1fr)}.kpi-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:800px){.design-board-page{padding:14px}.design-board-header{flex-direction:column}.filter-grid{grid-template-columns:repeat(2,1fr)}.analysis-grid,.analysis-grid--wide{grid-template-columns:1fr}.kpi-grid{grid-template-columns:1fr 1fr}.header-actions{width:100%}}@media(max-width:480px){.filter-grid,.kpi-grid{grid-template-columns:1fr}.design-board-header h1{font-size:24px}}
 .oa-design-board .design-board-header h1 { font-size: 18px; font-weight: 600; }
-.oa-design-board .panel-head h2 { font-size: 15px; font-weight: 600; }
+.oa-design-board .panel-head h2 { font-size: 13px; font-weight: 500; }
 .oa-design-board .panel-head p, .oa-design-board .kpi-card small { font-size: 12px; }
 .oa-design-board td, .oa-design-board th { font-size: 13px; }
-.oa-design-board th, .oa-design-board strong, .oa-design-board b { font-weight: 600; }
+.oa-design-board th, .oa-design-board strong, .oa-design-board b { font-weight: 500; }
 .oa-design-board .back-link { font-size: 14px; }
 .oa-design-board .filter-panel { padding: 5px 12px; }
 .oa-design-board .filter-top { min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .oa-design-board .preset-row { margin: 0; }
 .oa-design-board .filter-expand { min-height: 32px; font-size: 13px; padding: 4px 8px; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; }
 .oa-design-board .kpi-card { color: rgb(var(--yb-text)); background: rgb(var(--yb-surface)); border-color: rgb(var(--yb-border)); }
-.oa-design-board .kpi-card strong { font-weight: 600; color: rgb(var(--yb-text-strong)); }
+.oa-design-board .kpi-card strong { font-weight: 500; color: rgb(var(--yb-text-strong)); }
 .oa-design-board .kpi-card.oa-kpi-risk strong { color: rgb(var(--yb-danger)); }
 
 .design-filter-actions { display: flex; align-items: center; gap: 6px; }
@@ -243,4 +251,9 @@ onBeforeUnmount(() => controller?.abort())
   .oa-design-board .kpi-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
   .oa-design-board .kpi-card:nth-child(n+5) { border-block-start: 0; }
 }
+.design-empty { margin-bottom: 12px; }
+.design-empty h2 { margin: 0 0 4px; font-size: 13px; font-weight: 500; }
+.design-empty p { margin: 0 0 10px; color: rgb(var(--yb-text-muted)); font-size: 13px; }
+:global(html.oa-live-ui #app .content .oa-design-board :is(.panel-head,.design-empty) h2) { font-size: 13px; font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-design-board :is(strong,b,th)) { font-weight: 500; }
 </style>

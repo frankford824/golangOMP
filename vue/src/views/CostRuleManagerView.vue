@@ -16,7 +16,7 @@
     <DesktopSlot target="tabs">
     <nav class="workspace-tabs cost-primary-nav" aria-label="成本维护入口">
       <button type="button" :class="{active:entryTab==='costs'}" :aria-pressed="entryTab==='costs'" @click="entryTab='costs'; calculatorOpen=false">
-        <ListChecks :size="16" :stroke-width="1.75" aria-hidden="true" />编码成本
+        编码成本
       </button>
       <button
         v-for="tab in workspaceTabs"
@@ -26,7 +26,7 @@
         :aria-pressed="entryTab==='schemes' && workspaceTab===tab.key"
         @click="openSchemes(tab.key)"
       >
-        <component :is="tab.icon" :size="16" :stroke-width="1.75" aria-hidden="true" />{{tab.label}}
+        {{ tab.label }}
       </button>
     </nav>
     </DesktopSlot>
@@ -305,11 +305,12 @@
 </template>
 
 <script setup lang="ts">
+import { yuanPrefix } from '@/utils/currency-display'
 import { oaEnabled } from '@/oa/access'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import { routeLocationKey } from 'vue-router'
 import { computed, inject, onActivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Calculator, CheckCheck, History, Layers3, Link2, ListChecks, Plus, RefreshCw, X, ChevronDown } from 'lucide-vue-next'
+import { Calculator, Link2, Plus, RefreshCw, X, ChevronDown } from 'lucide-vue-next'
 import CostModelEditor from '@/components/cost/CostModelEditor.vue'
 import CostInputFields from '@/components/cost/CostInputFields.vue'
 import CostBoundSKUList from '@/components/cost/CostBoundSKUList.vue'
@@ -426,10 +427,10 @@ watch([costFocus, () => route?.fullPath], ([focus]) => {
 onActivated(openSKUEntry)
 let schemesLoaded=false
 const workspaceTabs = [
-  { key: '计价方案', label: '计价方案', icon: Layers3 },
-  { key: '绑定检查', label: '绑定检查', icon: Link2 },
-  { key: '成本同步', label: '成本同步', icon: CheckCheck },
-  { key: '更新记录', label: '更新记录', icon: History },
+  { key: '计价方案', label: '计价方案' },
+  { key: '绑定检查', label: '绑定检查' },
+  { key: '成本同步', label: '成本同步' },
+  { key: '更新记录', label: '更新记录' },
 ] as const
 const workspaceTab = ref<typeof workspaceTabs[number]['key']>('计价方案')
 const schemeDetail = ref<'pricing' | 'bindings'>('pricing')
@@ -507,7 +508,7 @@ const candidateStats = computed(() => candidates.value.reduce((result, candidate
   result[candidateConfidence(candidate)] += 1
   return result
 }, { unique: 0, conflict: 0, unmatched: 0 }))
-const previewCostLabel = computed(() => typeof preview.value?.estimated_cost === 'number' ? `¥ ${preview.value.estimated_cost.toFixed(2)}` : preview.value?.requires_manual_review ? '需要人工报价' : '—')
+const previewCostLabel = computed(() => typeof preview.value?.estimated_cost === 'number' ? `${yuanPrefix}${preview.value.estimated_cost.toFixed(2)}` : preview.value?.requires_manual_review ? '需要人工报价' : '—')
 const previewExplanation = computed(() => preview.value?.explanation || (preview.value ? '计算完成。' : '填写尺寸后试算，不会修改任何任务或 ERP 数据。'))
 const erpMismatchCount = computed(() => costDashboard.value.tags?.find((item) => item.code === 'erp_mismatch')?.count || 0)
 const explicitSKUCodes = computed(() => [...new Set(explicitSKUText.value.split(/[\s,，;；]+/u).map((item) => item.trim()).filter(Boolean))])

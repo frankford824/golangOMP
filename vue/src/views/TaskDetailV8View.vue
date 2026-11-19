@@ -3,6 +3,13 @@
     <div v-if="loading && !task" class="state">正在打开任务…</div>
     <div v-else-if="error && !task" class="state error" role="alert">{{ error }}</div>
     <template v-else-if="task">
+      <DesktopSlot v-if="oaEnabled && task.task_no" target="title">
+        <nav class="task-detail-breadcrumb" aria-label="面包屑">
+          <RouterLink to="/tasks">任务中心</RouterLink>
+          <span aria-hidden="true">/</span>
+          <span aria-current="page">{{ task.task_no }}</span>
+        </nav>
+      </DesktopSlot>
       <section class="task-hero" :class="{ 'is-terminal': isTerminal }">
         <TaskDetailAtmosphere v-if="!oaEnabled" />
         <div class="hero-content">
@@ -268,7 +275,7 @@
                 <button type="button" class="secondary-button" @click="openWorkspace('attachments')"><FileText :size="16" aria-hidden="true" />查看全部附件</button>
               </div>
             </section>
-            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>{{ isRetouch ? '运营参考图' : '任务级附件' }}</span><strong>{{ displayReferenceFiles.length }} 个</strong></div><div><span>任务信息更新时间</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
+            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>{{ isRetouch ? '运营参考图' : '任务级附件' }}</span><strong>{{ displayReferenceFiles.length }} 个</strong></div><div><span>更新时间</span><strong>{{ displayTaskUpdate(task.updated_at) }}</strong></div></section>
             <section v-if="isPlanning" class="planning-detail-section">
               <p class="eyebrow">策划 SKU 明细</p>
               <div class="planning-detail-list">
@@ -390,6 +397,7 @@
 </template>
 
 <script setup lang="ts">
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import { oaEnabled } from '@/oa/access'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
@@ -448,7 +456,7 @@ import { assetsApi } from '@/services/api/assetsApi'
 import type { BackendAsset } from '@/services/apiTypes'
 import { fetchAssetDownloadMetaResolved } from '@/domain/asset-access'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
-import { formatTaskRecordDateBeijing } from '@/utils/date'
+import { formatDateBeijing, formatTaskRecordDateBeijing } from '@/utils/date'
 import { downloadAssetFileWithOriginalFilename } from '@/utils/assetFileDownload'
 
 interface V8Task extends Record<string, unknown> {
@@ -636,8 +644,7 @@ const skuScopeLabel = computed(() => {
 const dueAtRaw = computed(() => task.value?.due_at || task.value?.deadline_at || '')
 const dueAtText = computed(() => {
   if (!dueAtRaw.value) return '未设置'
-  const date = new Date(String(dueAtRaw.value))
-  return Number.isNaN(date.getTime()) ? String(dueAtRaw.value) : new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
+  return formatDateBeijing(dueAtRaw.value).replace(/\//g, '-')
 })
 const dueSoonOrOverdue = computed(() => {
   if (!dueAtRaw.value || ['Completed', 'Archived', 'Cancelled'].includes(task.value?.task_status || '')) return false
@@ -695,14 +702,14 @@ const heroFacts = computed<Array<{ label: string; value: string; tone?: 'empty' 
   if (isPlanning.value) return [
     { label: 'SKU 数量', value: skuCount.value ? `${skuCount.value} 个` : '—' },
     { label: '创建人', value: String(task.value?.creator_name || '—') },
-    { label: '任务信息更新时间', value: displayDate(task.value?.updated_at) },
+    { label: '更新时间', value: displayTaskUpdate(task.value?.updated_at) },
     { label: '归属组织', value: ownerOrg.value },
   ]
   return [
     { label: '当前处理人', value: currentOwner.value, tone: !hasOwner.value && !isTerminal.value ? 'empty' : undefined },
     { label: '截止时间', value: dueAtText.value, tone: dueSoonOrOverdue.value ? 'danger' : undefined },
     { label: '归属组织', value: ownerOrg.value },
-    { label: '任务信息更新时间', value: displayDate(task.value?.updated_at) },
+    { label: '更新时间', value: displayTaskUpdate(task.value?.updated_at) },
   ]
 })
 const sortedEvents = computed(() => [...events.value].sort((left, right) => {
@@ -817,6 +824,9 @@ function unwrapCollection<T>(response: { data?: unknown } | null, fallback: T[] 
     }
   }
   return fallback
+}
+function displayTaskUpdate(value?: string) {
+  return formatTaskRecordDateBeijing(value).replace(/\//g, '-') || '—'
 }
 function displayDate(value: unknown) {
   if (!value) return '刚刚'
@@ -1390,20 +1400,40 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .oa-task-detail .task-hero { min-height: 0; border: 1px solid rgb(var(--yb-border)); border-radius: 12px; background: rgb(var(--yb-surface)); color: rgb(var(--yb-text)); box-shadow: none; }
 .oa-task-detail .task-hero::after { display: none; }
 .oa-task-detail .hero-content { min-height: 0; padding: 12px 16px; }
-.oa-task-detail .hero-identity h1 { font-size: 18px; font-weight: 600; letter-spacing: 0; }
+.oa-task-detail .hero-identity h1 { color: var(--yb-text-primary, var(--oa-ink)); font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
 .oa-task-detail .task-number, .oa-task-detail .hero-facts dt { color: rgb(var(--yb-text-muted-strong)); font-size: 12px; }
 .oa-task-detail .hero-facts dd { color: rgb(var(--yb-text-strong)); }
 .oa-task-detail .hero-facts dd.is-danger { color: rgb(var(--yb-danger)); }
 .oa-task-detail .hero-facts, .oa-task-detail .back-button, .oa-task-detail .hero-actions button, .oa-task-detail .identity-badge { color: rgb(var(--yb-text)); background: rgb(var(--yb-bg-page)); border-color: rgb(var(--yb-border)); box-shadow: none; }
 .oa-task-detail .hero-progress, .oa-task-detail .hero-facts div + div { border-color: rgb(var(--yb-border)); }
-.oa-task-detail .stage-copy h2, .oa-task-detail .brief-card h2, .oa-task-detail .resource-story h2 { font-size: 15px; font-weight: 600; }
-.oa-task-detail .stage-copy, .oa-task-detail .brief-card, .oa-task-detail .resource-story { font-size: 14px; }
-.oa-task-detail .hero-facts dd { font-weight: 600; }
+.oa-task-detail .stage-copy h2, .oa-task-detail .brief-card h2, .oa-task-detail .resource-story h2 { font-size: 13px; font-weight: 500; }
+.oa-task-detail .stage-copy, .oa-task-detail .brief-card, .oa-task-detail .resource-story { font-size: 13px; }
+.oa-task-detail .hero-facts dd { font-weight: 500; }
+.oa-task-detail .hero-facts :is(dt,dd) { white-space: nowrap; }
+.task-detail-breadcrumb { display: none; }
+.oa-task-detail .brief-card :is(strong,button,.section-label,.detail-chips span),
+.oa-task-detail .stage-copy :is(.stage-label,strong),
+.oa-task-detail .hero-actions button { font-size: 12px; font-weight: 500; }
+.oa-task-detail .brief-card :is(.card-heading p,small,.clamped-copy,.muted-copy) { font-size: 12px; }
+
+@media (min-width: 1280px) {
+  .task-detail-breadcrumb { display: inline-flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; font-size: 13px; font-weight: 500; }
+  .task-detail-breadcrumb :is(a, span[aria-hidden]) { color: rgb(var(--yb-text-muted-strong)); }
+  .task-detail-breadcrumb a:hover { color: rgb(var(--yb-brand)); text-decoration: underline; }
+  .task-detail-breadcrumb [aria-current] { color: rgb(var(--yb-text)); }
+  .oa-task-detail .overview-grid { grid-template-columns: minmax(0, 1.618fr) minmax(0, 1fr); }
+  .oa-task-detail .hero-facts { flex-basis: min(550px, 46vw); grid-template-columns: minmax(90px, 1fr) max-content minmax(90px, 1fr) max-content; }
+}
+@media (max-width: 1279px) {
+  .oa-task-detail .hero-facts dd { white-space: normal; }
+}
 .oa-task-detail .hero-progress :deep(li) { color: rgb(var(--yb-text-muted-strong)); }
 .oa-task-detail .hero-progress :deep(.is-current), .oa-task-detail .hero-progress :deep(.is-done) { color: rgb(var(--yb-text-strong)); }
-.oa-task-detail .hero-progress :deep(.step-marker) { font-weight: 600; border-color: rgb(var(--yb-border)); color: rgb(var(--yb-text-muted-strong)); background: rgb(var(--yb-bg-page)); }
+.oa-task-detail .hero-progress :deep(.step-marker) { font-weight: 500; border-color: rgb(var(--yb-border)); color: rgb(var(--yb-text-muted-strong)); background: rgb(var(--yb-bg-page)); }
 .oa-task-detail .hero-progress :deep(.is-current .step-marker), .oa-task-detail .hero-progress :deep(.is-done .step-marker) { color: rgb(var(--yb-text-inverse)); }
 .oa-task-detail .hero-progress :deep(.is-current .step-marker) { background: rgb(var(--yb-brand)); border-color: rgb(var(--yb-brand)); }
 .oa-task-detail .hero-progress :deep(.is-done .step-marker) { background: rgb(var(--yb-success-strong)); border-color: rgb(var(--yb-success-strong)); }
 .oa-task-detail .hero-progress :deep(.step-connector), .oa-task-detail .hero-progress :deep(.step-connector i) { background: rgb(var(--yb-border)); }
+:global(html.oa-live-ui #app .content .oa-task-detail :is(.stage-copy,.brief-card,.resource-story) h2) { font-size: 13px; font-weight: 500; }
+:global(html.oa-live-ui #app .content .oa-task-detail :is(.stage-copy,.brief-card,.resource-story,.hero-progress) :is(strong,b)) { font-weight: 500; }
 </style>

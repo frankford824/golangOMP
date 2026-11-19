@@ -7,7 +7,7 @@ let savedApplication: {
 </script>
 
 <script setup lang="ts">
-import { ArrowLeft, Check, CircleAlert, FileText, Wallet } from 'lucide-vue-next'
+import { ArrowLeft, Check, ChevronDown, ChevronRight, CircleAlert, FileText, Wallet } from 'lucide-vue-next'
 import OAEmpty from '../components/OAEmpty.vue'
 import { computed, onBeforeUnmount, nextTick, onMounted, ref, watch, watchEffect } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
@@ -776,7 +776,7 @@ watch(() => route.query.id, (id, previous) => {
           <tr v-for="item in visibleDocs" :key="item.id" :class="{ 'fee-row-selected': detail?.id === item.id }" :aria-selected="desktopApproval ? detail?.id === item.id : undefined" @click="selectFeeRow($event, item.id)"><td><RouterLink v-if="desktopApproval" class="oa-ellipsis" :title="item.template?.name" :to="openDocumentLink(item.id)" @click.exact.prevent="run(() => open(item.id))">{{ item.template?.name }}</RouterLink><b v-else class="oa-ellipsis" :title="item.template?.name">{{ item.template?.name }}</b><small class="oa-muted oa-ellipsis" :title="item.id">{{ item.id }}</small></td><td>#{{ item.applicant_id }}</td><td class="oa-number">{{ major(item.amount_cents) }}</td><td>{{ item.site === 'asset' ? '资产办理区' : 'OA' }}</td><td><span :class="['oa-pill', 'oa-state-' + item.state]">{{ status(item.state) }}</span></td><td class="oa-action-col"><button :disabled="busy" @click="run(() => open(item.id))">{{ desktopApproval ? (queue === 'pay' ? '登记付款' : '去审批') : '打开单据' }}</button></td></tr>
         </tbody></table>
       </div>
-      <nav v-if="desktopApproval || (!busy && !error && pages > 1)" class="oa-actions fee-pager" aria-label="费用单据分页">
+      <nav v-if="docs.length && (desktopApproval || (!busy && !error && pages > 1))" class="oa-actions fee-pager" aria-label="费用单据分页">
         <span>共 {{ docs.length }} 项 · {{ page }} / {{ pages }} 页</span>
         <button :disabled="busy || page <= 1" @click="page--">上一页</button>
         <button :disabled="busy || page >= pages" @click="page++">下一页</button>
@@ -844,7 +844,7 @@ watch(() => route.query.id, (id, previous) => {
 
   <template v-else-if="mode === 'templates'">
     <div class="oa-split oa-sidebar-split">
-      <section class="oa-panel">
+      <section class="oa-panel" :class="{ 'fee-templates-empty': loadedTemplates && !templates.length && !draft }">
         <h2>费用模板</h2>
         <div class="oa-list"><button v-for="item in templates" :key="item.id" @click="beginTemplate(item)" :aria-current="selection === item.id" :disabled="!canEditTemplate">{{ item.name }} · v{{ item.version }}</button></div>
         <OAEmpty v-if="loadedTemplates && !templates.length" kind="files" title="当前暂无费用模板"
@@ -919,8 +919,8 @@ watch(() => route.query.id, (id, previous) => {
         <button :disabled="grantPage >= grantPages" @click="grantPage++">下一页</button>
       </nav>
     </section>
-    <details v-if="isAdmin" ref="delegatePanel" class="oa-panel fee-disclosure">
-      <summary>模板维护委托</summary>
+    <details v-if="isAdmin" ref="delegatePanel" class="oa-panel fee-disclosure fee-grant-disclosure">
+      <summary>模板维护委托<ChevronRight class="fee-grant-closed" :size="18" aria-hidden="true" /><ChevronDown class="fee-grant-open" :size="18" aria-hidden="true" /></summary>
       <form class="oa-form" @submit.prevent="run(saveDelegate)">
         <div class="oa-form-row">
           <p v-if="inactiveGrant(delegateTarget)" class="oa-muted">{{ delegateTarget && grantName(delegateTarget) }} · 只可撤销历史授权</p>
@@ -930,8 +930,8 @@ watch(() => route.query.id, (id, previous) => {
         <div class="oa-actions"><button type="button" :disabled="busy || !delegateTarget" @click="selectGrantTarget(undefined, 'template')">取消选择</button><button :disabled="busy || !delegateTarget || !grantsLoaded">{{ inactiveGrant(delegateTarget) ? '确认撤销模板维护' : '保存委托' }}</button></div>
       </form>
     </details>
-    <details v-if="isAdmin" ref="financeGrantPanel" class="oa-panel fee-disclosure">
-      <summary>财务经办授权</summary><p class="oa-subtitle">付款登记和费用报表分别授权。保存时会应用这里选择的两项权限。</p>
+    <details v-if="isAdmin" ref="financeGrantPanel" class="oa-panel fee-disclosure fee-grant-disclosure">
+      <summary>财务经办授权<ChevronRight class="fee-grant-closed" :size="18" aria-hidden="true" /><ChevronDown class="fee-grant-open" :size="18" aria-hidden="true" /></summary><p class="oa-subtitle">付款登记和费用报表分别授权。保存时会应用这里选择的两项权限。</p>
       <form class="oa-form oa-person-tabs" @submit.prevent="run(saveFinanceAccess)">
         <p v-if="inactiveGrant(grantTarget)" class="oa-muted">{{ grantTarget && grantName(grantTarget) }} · 只可撤销历史授权</p>
         <FeePersonSelect v-else :model-value="grantTarget" label="经办人" :disabled="busy || !grantsLoaded" @update:model-value="person => selectGrantTarget(person, 'finance')" />
@@ -990,6 +990,22 @@ watch(() => route.query.id, (id, previous) => {
 .fee-error, .oa-page button.fee-danger { color: var(--oa-danger); }
 .oa-form label i[aria-hidden] { margin-inline-start: 4px; color: var(--oa-danger); font-style: normal; }
 .fee-disclosure[open] > summary { margin-bottom: 12px; }
+.fee-templates-empty { grid-column: 1 / -1; }
+.fee-templates-empty :deep(.oa-empty-state__description) { max-width: 100%; }
+.fee-templates-empty :deep(.oa-empty-state__actions) { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.fee-grant-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  list-style: none;
+  border-radius: 6px;
+  padding-inline: 8px;
+}
+.fee-grant-disclosure > summary:hover { background: rgb(var(--yb-surface-muted)); }
+.fee-grant-disclosure > summary::-webkit-details-marker,
+.fee-grant-disclosure:not([open]) .fee-grant-open,
+.fee-grant-disclosure[open] .fee-grant-closed { display: none; }
 .fee-totals { display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 16px 0; padding-block: 12px; border-block: 1px solid var(--oa-line); }
 .fee-totals dt { color: var(--oa-muted); font-size: 12px; }
 .fee-totals dd { margin: 4px 0 0; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -1034,6 +1050,7 @@ watch(() => route.query.id, (id, previous) => {
     overflow: hidden;
     padding: 0;
   }
+  .fee-approval-page .fee-queue > .oa-empty-state { flex: 1 1 0; }
   .fee-approval-page .fee-queue .oa-table-wrap {
     flex: 1 1 0;
     min-height: 0;

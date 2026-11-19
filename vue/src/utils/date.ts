@@ -16,6 +16,15 @@
 
 export const BEIJING_TZ = 'Asia/Shanghai'
 
+// Preserve each field's existing parser; only the OA display format differs.
+const oaDateTime = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: BEIJING_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+function displayedInstant(d: Date): string {
+  return Number.isFinite(d.getTime()) ? oaDateTime.format(d) : ''
+}
+
 const BEIJING_LOCALE = 'zh-CN'
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -151,6 +160,7 @@ export function taskBeijingHour(iso: string | null | undefined): number | null {
 export function formatDateBeijing(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = parseBackendInstant(iso)
+  if (import.meta.env.VITE_OA_FEATURES === 'true') return displayedInstant(d)
   return d.toLocaleString(BEIJING_LOCALE, {
     timeZone: BEIJING_TZ,
     year: 'numeric',
@@ -168,6 +178,7 @@ export function formatDateBeijing(iso: string | null | undefined): string {
 export function formatTaskRecordDateBeijing(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = parseTaskRecordInstant(iso)
+  if (import.meta.env.VITE_OA_FEATURES === 'true') return displayedInstant(d)
   if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleString(BEIJING_LOCALE, {
     timeZone: BEIJING_TZ,
@@ -184,6 +195,7 @@ export function formatTaskRecordDateBeijing(iso: string | null | undefined): str
  */
 export function formatDateTimeBeijing(iso: string | null | undefined): string {
   if (!iso) return ''
+  if (import.meta.env.VITE_OA_FEATURES === 'true') return displayedInstant(parseBackendInstant(iso))
   return parseBackendInstant(iso).toLocaleString(BEIJING_LOCALE, {
     timeZone: BEIJING_TZ,
     dateStyle: 'short',
@@ -196,6 +208,7 @@ export function formatDateTimeBeijing(iso: string | null | undefined): string {
  */
 export function formatDateOnlyBeijing(iso: string | null | undefined): string {
   if (!iso) return ''
+  if (import.meta.env.VITE_OA_FEATURES === 'true') return displayedInstant(parseBackendInstant(iso)).slice(0,10)
   return parseBackendInstant(iso).toLocaleDateString(BEIJING_LOCALE, {
     timeZone: BEIJING_TZ,
     year: 'numeric',
@@ -221,6 +234,7 @@ export function formatTaskDueAtDisplay(iso: string | null | undefined): string {
 /** 资产版本上传时间等：按 ISO 偏移解析后再格式化为北京时间显示（短 dateStyle + timeStyle） */
 export function formatDateTimeBeijingOffsetAware(iso: string | null | undefined): string {
   if (!iso) return ''
+  if (import.meta.env.VITE_OA_FEATURES === 'true') return displayedInstant(parseOffsetAwareInstant(iso))
   return parseOffsetAwareInstant(iso).toLocaleString(BEIJING_LOCALE, {
     timeZone: BEIJING_TZ,
     dateStyle: 'short',
@@ -232,6 +246,7 @@ export function formatDateTimeBeijingOffsetAware(iso: string | null | undefined)
 export function formatDateBeijingOffsetAware(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = parseOffsetAwareInstant(iso)
+  if (import.meta.env.VITE_OA_FEATURES === 'true') return displayedInstant(d)
   return d.toLocaleString(BEIJING_LOCALE, {
     timeZone: BEIJING_TZ,
     year: 'numeric',
