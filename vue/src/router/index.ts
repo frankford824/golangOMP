@@ -201,7 +201,8 @@ router.beforeEach(async (to, _from, next) => {
     if (to.name === 'FeesHome') {
       const defaultTab = feeTabs.find(tab => tab.actions.some(can))
       if (defaultTab) {
-        next({ path: '/fees/' + defaultTab.mode, replace: true })
+        // Keep the incoming navigation type so a sidebar click preserves its source page.
+        next({ path: '/fees/' + defaultTab.mode, query: to.query, hash: to.hash })
         return
       }
     }
