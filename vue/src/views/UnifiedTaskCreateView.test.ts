@@ -20,6 +20,7 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
   onBeforeRouteLeave: vi.fn(),
 }))
+vi.mock('@/oa/components/OAPageReturn.vue', () => ({ default: { template: '<a><slot /></a>' } }))
 vi.mock('@/composables/useTaskDraft', () => ({
   useTaskDraft: () => ({ save: vi.fn(), update: vi.fn(), getById: mocks.getDraft, saving: false }),
 }))

@@ -4,7 +4,8 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, Copy, X } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { orderState } from '../ordersDisplay'
-import OAReturnLink from '../components/OAReturnLink.vue'
+import { oaReturnLabel } from '@/oa/pageTitle'
+import OAPageReturn from '../components/OAPageReturn.vue'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import type { HttpAppError } from '@/services/http'
@@ -298,9 +299,8 @@ watch([() => props.mode, () => route.query, scope, allowed], async () => {
 
 <template>
   <div class="oa-page order-data">
-    <PageHead :title="title" :subtitle="subtitle">
-      <OAReturnLink v-if="returnTarget" class="oa-button" :to="returnTarget" :source="returnSource"><ChevronLeft :size="15" />{{ returnTarget.split('?')[0] === '/operations/rankings' ? '返回经营排行' : '返回总览' }}</OAReturnLink>
-    </PageHead>
+    <OAPageReturn v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
+    <PageHead :title="title" :subtitle="subtitle" />
     <OperationNav :query="navigationQuery" />
 
     <div class="order-data-body" role="region" :aria-label="title + '工作区'">

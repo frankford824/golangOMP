@@ -16,3 +16,13 @@ export function oaPageTitle(path: string) {
   if (path.startsWith('/tasks/')) return path.endsWith('/assets') ? '任务资产' : '任务详情'
   return '永箔运营'
 }
+
+export function oaReturnLabel(path: string) {
+  const url = new URL(path, 'https://oa.invalid')
+  if (url.pathname === '/asset-center') return url.searchParams.get('view') === 'ledger' ? '返回规格台账' : '返回资产中心'
+  if (url.pathname === '/me/notifications') {
+    if (url.searchParams.get('section') === 'cost') return '返回成本复核'
+    if (url.searchParams.get('section') === 'expense') return '返回费用动态'
+  }
+  return '返回' + oaPageTitle(url.pathname)
+}

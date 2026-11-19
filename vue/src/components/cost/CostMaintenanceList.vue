@@ -1,5 +1,6 @@
 <template>
   <section class="maintenance" aria-label="编码成本维护" @keydown="navigateRows">
+    <OAPageReturn v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
     <div class="maintenance-list">
     <div class="maintenance-tools">
       <form @submit.prevent="search">
@@ -27,7 +28,6 @@
         ><button type="submit">查询</button>
       </form>
       <div>
-        <OAReturnLink v-if="returnTarget" class="pricing-link bulk-pricing-link" :to="returnTarget" :source="returnSource">返回来源</OAReturnLink>
         <RouterLink v-if="canPrice" class="pricing-link bulk-pricing-link" :to="pricingLink()">批量核价</RouterLink>
         <button @click="openLogs">修改日志</button
         ><button :disabled="loading" @click="load()">
@@ -481,7 +481,8 @@
 <script setup lang="ts">
 import DesktopSlot from '@/oa/components/DesktopSlot.vue';
 import OAEmpty from '@/oa/components/OAEmpty.vue';
-import OAReturnLink from '@/oa/components/OAReturnLink.vue';
+import { oaReturnLabel } from '@/oa/pageTitle'
+import OAPageReturn from '@/oa/components/OAPageReturn.vue';
 import { orderReturnQuery, orderReturnSource, orderReturnTarget, orderVisit } from '@/oa/orderFilterMemory';
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { oaEnabled } from "@/oa/access";

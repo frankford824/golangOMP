@@ -70,7 +70,7 @@ function mountView() {
     global: {
       stubs: {
         RouterLink: true,
-        OAReturnLink: true,
+        OAReturnLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
         WorkflowProgress: { template: '<div class="progress-stub">四步流程</div>' },
         TaskStatusTag: { template: '<span class="status-stub">状态</span>' },
         SkuResourceMatrix: { props: ['taskReferences','skuItems'], emits: ['refreshReferences'], template: '<div class="matrix-stub" :data-sku-references="JSON.stringify(skuItems?.map(item => item.reference_file_refs))" :data-sku-costs="JSON.stringify(skuItems?.map(item => item.cost_price))">资源矩阵 {{ taskReferences?.length || 0 }}<button class="matrix-refresh" @click="$emit(\'refreshReferences\')">刷新参考图</button></div>' },
@@ -198,6 +198,14 @@ describe('TaskDetailV8View business context', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    if (import.meta.env.VITE_OA_FEATURES === 'true') {
+      const links = wrapper.findAll('[data-oa-page-return]')
+      expect(links).toHaveLength(1)
+      expect(links[0]!.text()).toBe('返回任务看板')
+      expect(links[0]!.attributes('href')).toBe('/')
+      expect(wrapper.find('.back-button').exists()).toBe(false)
+      return
+    }
     const backButton = wrapper.get('.back-button')
     expect(backButton.text()).toBe('返回任务看板')
     await backButton.trigger('click')

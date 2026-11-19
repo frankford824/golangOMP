@@ -19,8 +19,9 @@ import PageHead from '../components/PageHead.vue'
 import { api, dateInChina, download, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
 import { expenseActivityActions, useExpenseActivity } from '../expenseActivity'
+import { oaReturnLabel } from '../pageTitle'
 import { feeDateTime, feeStatus as status } from '../feeDisplay'
-import OAReturnLink from '../components/OAReturnLink.vue'
+import OAPageReturn from '../components/OAPageReturn.vue'
 import { goBackTo, safeReturnPath } from '../returnNavigation'
 import '../styles.css'
 
@@ -36,6 +37,14 @@ type FeeReport = { amount_cents: number; count: number; items: FeeDoc[]; unpaid_
 const props = defineProps<{ mode: string }>()
 const route = useRoute()
 const router = useRouter()
+const isApplicationOrigin = (path: string) => [
+  '/', '/operations', '/me', '/tasks', '/cost-rules', '/asset-center', '/users',
+  '/fees/approval', '/fees/mine', '/fees/templates', '/fees/report', '/fees/document',
+].includes(path)
+const applicationReturn = computed(() => safeReturnPath(route.query.applyFrom, isApplicationOrigin)
+  || safeReturnPath(router.options.history.state?.back, isApplicationOrigin) || '/fees/mine')
+const applicationReturnLabel = computed(() => oaReturnLabel(applicationReturn.value))
+const applicationLink = computed(() => ({ path: '/fees/apply', query: { applyFrom: route.fullPath } }))
 const activeTab = computed(() => feeTabs.find(tab => tab.mode === props.mode))
 const title = computed(() => activeTab.value?.label || ({ apply: '发起费用申请', document: '费用单据' }[props.mode] ?? '费用中心'))
 const allowed = computed(() => {
@@ -817,8 +826,12 @@ watch(() => route.fullPath, syncLocation)
 
 <template>
 <div class="oa-page" :class="{ 'fee-approval-page': desktopApproval }" @keydown="navigateApproval">
+  <OAPageReturn v-if="allowed && returned" @activate="closeReturned">返回单据</OAPageReturn>
+  <OAPageReturn v-else-if="allowed && mode === 'document'" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : route.query.from === 'report' ? '返回费用报表' : '返回费用列表' }}</OAPageReturn>
+  <OAPageReturn v-else-if="allowed && mode === 'apply'" :to="applicationReturn">{{ applicationReturnLabel }}</OAPageReturn>
+  <OAPageReturn v-else-if="allowed && !desktopApproval && (mode === 'mine' || mode === 'approval') && typeof route.query.id === 'string'" :disabled="busy" @activate="run(returnToQueue)">返回{{ returnLabel }}</OAPageReturn>
   <PageHead :title="title" :subtitle="({ mine: '跟踪费用申请的审批进度与付款记录', approval: '处理轮到自己的审批和已获授权的付款登记', templates: '维护费用类型、审批节点与经办权限', report: '按实付日期查询费用支出' } as Record<string, string>)[mode]">
-    <RouterLink v-if="mode !== 'apply' && can('finance.apply')" class="oa-button oa-button-primary" to="/fees/apply">＋ 发起费用申请</RouterLink>
+    <RouterLink v-if="mode !== 'apply' && can('finance.apply')" class="oa-button oa-button-primary" :to="applicationLink">＋ 发起费用申请</RouterLink>
   </PageHead>
   <DesktopSlot target="tabs">
   <nav class="fee-tabs" aria-label="费用中心">
@@ -838,7 +851,6 @@ watch(() => route.fullPath, syncLocation)
     <button v-if="mode === 'apply' && !loadedTemplates" type="button" @click="run(loadTemplates)">重试加载模板</button>
     <button v-else-if="mode === 'templates' && !loadedTemplates" type="button" @click="run(loadTemplates)">重试加载模板</button>
     <button v-else-if="mode === 'document' && !detail && typeof route.query.id === 'string'" type="button" @click="run(() => open(String(route.query.id)))">重试读取单据</button>
-    <OAReturnLink v-if="mode === 'document' && !detail" class="oa-button" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : '返回费用列表' }}</OAReturnLink>
   </div>
   <p v-if="notice" class="fee-banner fee-banner-success" role="status"><Check :size="17" aria-hidden="true" /> {{ notice }}</p>
   <p v-if="busy && !showQueue" class="oa-muted" role="status">{{ detail ? '正在办理单据…' : '正在处理…' }}</p>
@@ -851,7 +863,6 @@ watch(() => route.fullPath, syncLocation)
       <p v-if="missingTemplateDraft" class="fee-banner" role="status">草稿使用的模板当前不可用。</p>
       <OAEmpty v-if="loadedTemplates && !active" kind="files" title="当前暂无可用费用模板" :description="templateGuide">
         <RouterLink v-if="canManageTemplates" class="oa-button oa-button-primary" :to="{ path: '/fees/templates', query: isAdmin && !canEditTemplate ? { manage: 'publish' } : {} }">前往模板与授权</RouterLink>
-        <RouterLink v-else class="oa-button" to="/fees/mine">返回我的申请</RouterLink>
       </OAEmpty>
       <form v-if="active" ref="applicationForm" class="oa-form fee-required" novalidate @input="edited = true" @change="edited = true" @submit.prevent="run(submit)">
         <div class="oa-form-row">
@@ -872,8 +883,7 @@ watch(() => route.fullPath, syncLocation)
         <label><span>{{ active?.evidence || '凭据附件' }}<i aria-hidden="true">*</i></span><input ref="files" type="file" accept=".pdf,.png,.jpg,.jpeg" multiple v-bind="fieldAttrs('files', 'fee-file-help')" @blur="validateField('files', fileProblem, true)" @change="delete fieldErrors.files; uploadEvidence()" /><small id="fee-file-help">PDF、PNG、JPEG，单个文件不超过 10 MB，最多 15 份。</small><small v-if="fieldErrors.files" id="fee-error-files" class="fee-error">{{ fieldErrors.files }}</small></label>
         <div v-for="file in form.files" :key="file.id" class="oa-actions"><span>{{ file.name }}</span><button type="button" @click="edited = true; form.files = form.files.filter(item => item.id !== file.id)">移除</button></div>
         <div class="oa-actions fee-form-actions">
-          <button v-if="returned" type="button" @click="closeReturned">返回单据</button>
-          <button v-else type="button" :disabled="busy || !draftOwner" @click="saveApplicationDraft">暂存草稿</button>
+          <button v-if="!returned" type="button" :disabled="busy || !draftOwner" @click="saveApplicationDraft">暂存草稿</button>
           <button class="oa-button-primary" :disabled="busy || !active">{{ returned ? '重新提交' : '提交申请' }}</button>
         </div>
         <small v-if="!returned" class="oa-muted">草稿保留在当前标签页内存。刷新或关闭页面将清空，收款信息需重新填写。</small>
@@ -901,13 +911,12 @@ watch(() => route.fullPath, syncLocation)
       <div v-else-if="showQueue && error" class="fee-banner fee-banner-error" role="alert">
         <CircleAlert :size="17" aria-hidden="true" /><span>{{ error }}</span>
         <button v-if="typeof route.query.id === 'string'" type="button" @click="run(() => open(String(route.query.id)))">重试读取单据</button>
-        <button type="button" @click="run(returnToQueue)">{{ route.query.id ? '返回列表' : '重新加载列表' }}</button>
+        <button v-if="!route.query.id || desktopApproval" type="button" @click="run(returnToQueue)">{{ route.query.id ? '返回列表' : '重新加载列表' }}</button>
       </div>
       <OAEmpty v-else-if="!busy && !error && (mode === 'document' || !docs.length)" kind="inbox"
         :title="mode === 'document' ? '未选中费用单据' : queueEmpty"
         :description="mode === 'document' ? '请从费用列表或通知打开一张单据。' : queueGuide">
-        <RouterLink v-if="mode === 'mine'" class="oa-button oa-button-primary" to="/fees/apply">发起费用申请</RouterLink>
-        <OAReturnLink v-else-if="mode === 'document'" class="oa-button" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : '返回费用列表' }}</OAReturnLink>
+        <RouterLink v-if="mode === 'mine'" class="oa-button oa-button-primary" :to="applicationLink">发起费用申请</RouterLink>
       </OAEmpty>
       <div v-if="docs.length && (desktopApproval || (!busy && !error))" ref="queuePage" class="oa-table-wrap" role="region" aria-label="费用单据" tabindex="0">
         <table class="oa-table"><thead><tr><th>申请 / 单号</th><th>申请人</th><th class="oa-number">金额</th><th>来源</th><th>状态</th><th class="oa-action-col">操作</th></tr></thead><tbody>
@@ -924,8 +933,7 @@ watch(() => route.fullPath, syncLocation)
       <button v-if="desktopApproval && !inlineApproval" class="fee-inspector-backdrop" type="button" aria-label="关闭单据详情" @click="run(returnToQueue)"></button>
       <div class="fee-inspector-body">
       <div class="oa-actions fee-back">
-        <OAReturnLink v-if="mode === 'document'" class="oa-button" :to="documentReturn"><ArrowLeft :size="15" aria-hidden="true" /> {{ route.query.from === 'notifications' ? '返回费用动态' : '返回列表' }}</OAReturnLink>
-        <button v-else type="button" :disabled="busy" @click="run(returnToQueue)"><ArrowLeft :size="15" aria-hidden="true" /> 返回{{ returnLabel }}</button>
+        <button v-if="desktopApproval" type="button" :disabled="busy" @click="run(returnToQueue)"><ArrowLeft :size="15" aria-hidden="true" /> 返回{{ returnLabel }}</button>
         <RouterLink v-if="desktopApproval" class="oa-button" :to="openDocumentLink(detail.id, true)" target="_blank" rel="noopener">完整详情 ↗</RouterLink>
         <button v-if="own && detail.state === 'returned'" class="oa-button-primary" :disabled="busy" @click="editReturned">修改并重提</button>
       </div>

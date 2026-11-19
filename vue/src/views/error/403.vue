@@ -11,11 +11,12 @@
         您当前角色无权访问此页面，如需访问请联系管理员或尝试切换账号。
       </p>
       <div class="mt-4 flex items-center justify-center gap-3">
-        <BaseButton variant="secondary" size="sm" @click="goHome">
+        <OAPageReturn v-if="oaEnabled" :to="homeTarget || { name: 'Me' }">返回首页</OAPageReturn>
+        <BaseButton v-else variant="secondary" size="sm" @click="goHome">
           返回首页
         </BaseButton>
         <BaseButton variant="primary" size="sm" @click="goLogin">
-          返回登录
+          {{ oaEnabled ? '前往登录' : '返回登录' }}
         </BaseButton>
       </div>
     </div>
@@ -23,8 +24,10 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { oaEnabled } from '@/oa/access'
+import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import { goBackTo } from '@/oa/returnNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -33,10 +36,10 @@ import { resolveFirstAccessibleHomeRoute } from '@/router/home-fallback'
 const router = useRouter()
 const permissionsStore = usePermissionsStore()
 
+const homeTarget = computed(() => resolveFirstAccessibleHomeRoute(permissionsStore))
+
 function goHome() {
-  const fallback = resolveFirstAccessibleHomeRoute(permissionsStore)
-  if (oaEnabled) return goBackTo(router, fallback ?? { name: 'Me' })
-  return router.push(fallback ?? { name: 'Forbidden' })
+  return router.push(homeTarget.value ?? { name: 'Forbidden' })
 }
 
 function goLogin() {

@@ -108,6 +108,7 @@
           >
             <Menu :size="18" aria-hidden="true" />
           </button>
+          <div v-if="oaEnabled" ref="desktopBack" class="oa-bar-return" />
           <div v-if="oaEnabled" ref="desktopTitle" class="oa-context-title" />
           <h1 v-if="oaEnabled && desktop" class="oa-bar-title">{{ $route.name === 'TaskDetail' ? '任务中心 / 任务详情' : moduleName || pageTitle }}</h1>
           <span v-else-if="oaEnabled" class="oa-breadcrumb"><span v-if="moduleName && moduleName !== pageTitle">{{ moduleName }} / </span>{{ pageTitle }}</span>
@@ -131,12 +132,16 @@
         </div>
       </header>
 
+      <div v-if="oaEnabled" ref="compactBack" class="oa-bar-return oa-compact-return" />
       <div ref="contentScroller" :class="{ 'oa-dashboard-viewport': oaEnabled && ($route.path === '/operations' || $route.path.startsWith('/operations/') || $route.path === '/me/performance' || $route.name === 'Dashboard') }" class="app-page-scroll flex-1 overflow-auto custom-scrollbar isolate" :data-workspace="desktopWorkspace">
         <main class="content">
           <PersonalNav v-if="oaEnabled && ($route.path === '/me' || $route.path.startsWith('/me/')) && $route.path !== '/me/performance'" />
           <router-view v-slot="{ Component, route }">
             <KeepAlive :max="8">
-              <component v-if="Component && route.meta.keepAlive" :is="Component" :key="String(route.name || route.path)" />
+              <CachedWorkspace v-if="oaEnabled && Component && route.meta.keepAlive" :key="String(route.name || route.path)">
+                <component :is="Component" />
+              </CachedWorkspace>
+              <component v-else-if="Component && route.meta.keepAlive" :is="Component" :key="String(route.name || route.path)" />
             </KeepAlive>
             <component v-if="Component && !route.meta.keepAlive" :is="Component" :key="route.path" />
           </router-view>
@@ -206,6 +211,7 @@ import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import PersonalNav from '@/oa/components/PersonalNav.vue'
+import CachedWorkspace from '@/oa/components/CachedWorkspace.vue'
 import { desktopChromeKey } from '@/oa/desktopChrome'
 import { useExpenseActivity } from '@/oa/expenseActivity'
 import { useSidebarCounts } from '@/oa/sidebarCounts'
@@ -221,11 +227,14 @@ const deskQuery = window.matchMedia?.('(min-width: 1280px)')
 const wideSidebar = window.matchMedia?.('(min-width: 1440px)')
 const desktop = ref(oaEnabled && !!deskQuery?.matches)
 const large = ref(!!wideSidebar?.matches)
+const desktopBack = ref<HTMLElement | null>(null)
+const compactBack = ref<HTMLElement | null>(null)
+const backHost = computed(() => desktop.value ? desktopBack.value : compactBack.value)
 const desktopTitle = ref<HTMLElement | null>(null)
 const desktopTabs = ref<HTMLElement | null>(null)
 const desktopStatus = ref<HTMLElement | null>(null)
 const desktopActions = ref<HTMLElement | null>(null)
-if (oaEnabled) provide(desktopChromeKey, { desktop, title: desktopTitle, tabs: desktopTabs, status: desktopStatus, actions: desktopActions })
+if (oaEnabled) provide(desktopChromeKey, { desktop, back: backHost, title: desktopTitle, tabs: desktopTabs, status: desktopStatus, actions: desktopActions })
 function syncDesktop() {
   desktop.value = oaEnabled && !!deskQuery?.matches
   large.value = !!wideSidebar?.matches
@@ -1167,6 +1176,10 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   }
 }
 
+.oa-compact-return {
+  flex: none; padding: 4px 12px; background: var(--oa-surface); border-bottom: 1px solid var(--oa-chrome-divider);
+}
+.oa-bar-return:empty { display: none; }
 .oa-context-title:empty,.oa-context-title:has(+ .oa-breadcrumb),.oa-context-title:not(:empty) + .oa-bar-title { display:none; }
 .oa-context-title { white-space:nowrap; }
 

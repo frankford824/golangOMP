@@ -2,7 +2,7 @@
 import OAEmpty from '../components/OAEmpty.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import OAReturnLink from '../components/OAReturnLink.vue'
+import OAPageReturn from '../components/OAPageReturn.vue'
 import { directoryQuery, peopleReturnSource, positiveQueryNumber } from '../peopleNavigation'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
 import PageHead from '../components/PageHead.vue'
@@ -144,10 +144,10 @@ onMounted(() => { if (props.mode === 'people' && !selected.value) void run(() =>
 
 <template>
 <div class="oa-page">
+  <OAPageReturn v-if="mode === 'roster'" :to="rosterReturnTarget">返回人员管理</OAPageReturn>
+  <OAPageReturn v-else-if="selected" :to="directoryTarget">返回目录</OAPageReturn>
   <PageHead :title="mode === 'roster' ? '人员花名册' : selectedName || (selected ? '人员详情' : '人员管理')">
-    <OAReturnLink v-if="mode === 'roster'" class="oa-button" :to="rosterReturnTarget">返回人员管理</OAReturnLink>
-    <OAReturnLink v-else-if="selected" class="oa-button" :to="directoryTarget">返回目录</OAReturnLink>
-    <RouterLink v-else class="oa-button" :to="{ path: '/users/roster', query: { peopleFrom: route.fullPath } }">人员花名册</RouterLink>
+    <RouterLink v-if="mode !== 'roster' && !selected" class="oa-button" :to="{ path: '/users/roster', query: { peopleFrom: route.fullPath } }">人员花名册</RouterLink>
     <RouterLink v-if="currentProfile?.super_admin" class="oa-button" :to="{ name: 'PeopleShopBindings', query: { user_id: selected || undefined, peopleFrom: route.fullPath } }">店铺人员绑定</RouterLink>
   </PageHead>
   <p v-if="!allowed" class="oa-error" role="alert">当前账号没有人员管理权限。</p>

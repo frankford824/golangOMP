@@ -1,24 +1,19 @@
 <template>
   <main class="task-page task-detail-view" :class="{ 'oa-task-detail': oaEnabled }">
+    <OAPageReturn v-if="oaEnabled" :to="returnTarget">{{ backButtonLabel }}</OAPageReturn>
     <div v-if="loading && !task" class="state">正在打开任务…</div>
     <div v-else-if="error && !task" class="state error" role="alert">
       {{ error }}
-      <OAReturnLink v-if="oaEnabled" :to="returnTarget">{{ backButtonLabel }}</OAReturnLink>
     </div>
     <template v-else-if="task">
       <DesktopSlot v-if="oaEnabled && task.task_no" target="title">
-        <nav class="task-detail-breadcrumb" aria-label="面包屑">
-          <OAReturnLink v-if="returnToTaskCenter" :to="returnTarget">任务中心</OAReturnLink>
-          <RouterLink v-else to="/tasks">任务中心</RouterLink>
-          <span aria-hidden="true">/</span>
-          <span aria-current="page">{{ task.task_no }}</span>
-        </nav>
+        <span class="task-detail-context">任务详情 <span aria-hidden="true">/</span> {{ task.task_no }}</span>
       </DesktopSlot>
       <section class="task-hero" :class="{ 'is-terminal': isTerminal }">
         <TaskDetailAtmosphere v-if="!oaEnabled" />
         <div class="hero-content">
           <nav class="hero-nav" aria-label="页面位置">
-            <button class="back-button" :aria-label="backButtonLabel" :title="backButtonLabel" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>{{ backButtonLabel }}</span></button>
+            <button v-if="!oaEnabled" class="back-button" :aria-label="backButtonLabel" :title="backButtonLabel" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>{{ backButtonLabel }}</span></button>
             <div class="hero-actions">
               <TaskStatusTag :status="task.task_status" />
               <button v-if="bundle?.groups.length" type="button" class="default-style-entry"
@@ -403,7 +398,8 @@
 <script setup lang="ts">
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import { workspaceOrigin } from '@/oa/returnNavigation'
-import OAReturnLink from '@/oa/components/OAReturnLink.vue'
+import { oaReturnLabel } from '@/oa/pageTitle'
+import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import { goBackTo } from '@/oa/returnNavigation'
 import { assetTaskReturnSource, taskReturnLabel, taskReturnSource } from '@/oa/taskNavigation'
 import { oaEnabled } from '@/oa/access'
@@ -488,8 +484,7 @@ const returnTarget = computed(() => {
     || (route.query?.from === 'design-dashboard' ? '/design-dashboard' : undefined)
     || '/tasks'
 })
-const backButtonLabel = computed(() => globalReturn.value ? '返回来源页面' : taskReturnLabel(returnTarget.value))
-const returnToTaskCenter = computed(() => returnTarget.value.split(/[?#]/, 1)[0] === '/tasks')
+const backButtonLabel = computed(() => globalReturn.value ? oaReturnLabel(globalReturn.value) : taskReturnLabel(returnTarget.value))
 const { can } = usePermission()
 const permissionsStore = usePermissionsStore()
 const { loading: cancelLoading, needForceConfirm, cancel } = useTaskCancel()
@@ -1419,17 +1414,15 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .oa-task-detail .stage-copy, .oa-task-detail .brief-card, .oa-task-detail .resource-story { font-size: 13px; }
 .oa-task-detail .hero-facts dd { font-weight: 500; }
 .oa-task-detail .hero-facts :is(dt,dd) { white-space: nowrap; }
-.task-detail-breadcrumb { display: none; }
+.task-detail-context { display: none; }
+.oa-task-detail .hero-actions { margin-inline-start: auto; }
 .oa-task-detail .brief-card :is(strong,button,.section-label,.detail-chips span),
 .oa-task-detail .stage-copy :is(.stage-label,strong),
 .oa-task-detail .hero-actions button { font-size: 12px; font-weight: 500; }
 .oa-task-detail .brief-card :is(.card-heading p,small,.clamped-copy,.muted-copy) { font-size: 12px; }
 
 @media (min-width: 1280px) {
-  .task-detail-breadcrumb { display: inline-flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; font-size: 13px; font-weight: 500; }
-  .task-detail-breadcrumb :is(a, span[aria-hidden]) { color: rgb(var(--yb-text-muted-strong)); }
-  .task-detail-breadcrumb a:hover { color: rgb(var(--yb-brand)); text-decoration: underline; }
-  .task-detail-breadcrumb [aria-current] { color: rgb(var(--yb-text)); }
+  .task-detail-context { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 13px; font-weight: 500; }
   .oa-task-detail .overview-grid { grid-template-columns: minmax(0, 1.618fr) minmax(0, 1fr); }
   .oa-task-detail .hero-facts { flex-basis: min(550px, 46vw); grid-template-columns: minmax(90px, 1fr) max-content minmax(90px, 1fr) max-content; }
 }

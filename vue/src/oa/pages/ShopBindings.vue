@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import OAReturnLink from '../components/OAReturnLink.vue'
+import OAPageReturn from '../components/OAPageReturn.vue'
 import { shopBindingReturnSource, positiveQueryNumber } from '../peopleNavigation'
 import type { HttpAppError } from '@/services/http'
 import { api, errorText, send } from '../api'
@@ -62,6 +62,7 @@ async function searchPeople() {
   try {
     const response = await api<{ items: Person[] }>('/oa-api/people/list?' + new URLSearchParams({ q: search.value.trim() }))
     const oldPerson = person.value
+    if (!Array.isArray(response?.items)) throw new Error('人员列表读取失败，请重新搜索')
     people.value = response.items
     if (oldPerson && !people.value.some(item => item.id === oldPerson.id)) people.value.unshift(oldPerson)
   } catch (cause) { searchError.value = errorText(cause) }
@@ -153,9 +154,8 @@ watch(() => route.query.q, (q) => {
 
 <template>
   <div class="oa-page shop-bindings">
-    <PageHead title="店铺人员绑定">
-      <OAReturnLink :to="returnTarget" class="oa-button">{{ returnLabel }}</OAReturnLink>
-    </PageHead>
+    <OAPageReturn :to="returnTarget">{{ returnLabel }}</OAPageReturn>
+    <PageHead title="店铺人员绑定" />
     <p v-if="!admin" class="oa-error" role="alert">仅超级管理员可以管理店铺绑定。</p>
     <template v-else>
       <section class="oa-panel binding-search" aria-label="选择人员">

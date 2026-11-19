@@ -1,5 +1,6 @@
 <template>
   <div class="design-board-page" :class="{ 'oa-design-board': oaEnabled }">
+    <OAPageReturn v-if="oaEnabled" :to="returnTarget">返回主页</OAPageReturn>
     <header class="design-board-header">
       <div>
         <h1>{{ departmentTitle }}</h1>
@@ -10,7 +11,7 @@
       </DesktopSlot>
       <DesktopSlot target="actions">
       <div class="header-actions">
-        <button class="back-link" type="button" @click="returnToTaskBoard"><ArrowLeft :size="16" />返回主页</button>
+        <button v-if="!oaEnabled" class="back-link" type="button" @click="goBackTo(router, returnTarget)"><ArrowLeft :size="16" />返回主页</button>
         <BaseButton variant="ghost" size="sm" :disabled="loading" @click="load"><RefreshCw :size="15" />{{ loading ? '刷新中…' : '刷新' }}</BaseButton>
         <BaseButton variant="primary" size="sm" :disabled="!dashboard" @click="exportCsv"><Download :size="15" />导出明细</BaseButton>
       </div>
@@ -96,6 +97,7 @@ import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, RefreshCw } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import { goBackTo } from '@/oa/returnNavigation'
 import { taskDetailLocation, taskReturnSource } from '@/oa/taskNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
@@ -105,12 +107,12 @@ import { tasksApi } from '@/services/api/tasksApi'
 import type { DesignDepartmentDashboard, DesignDepartmentDashboardBreakdown, DesignDepartmentPersonMetric, DesignDepartmentTaskRow } from '@/types/dashboard'
 
 const router = useRouter()
-function returnToTaskBoard() {
+const returnTarget = computed(() => {
   const source = taskReturnSource(router.currentRoute?.value.query.taskBoardFrom)
   const previous = taskReturnSource(window.history.state?.back)
   const target = [source, previous].find((entry) => entry?.split(/[?#]/, 1)[0] === '/')
-  void goBackTo(router, target || '/?workspace=tasks')
-}
+  return target || '/?workspace=tasks'
+})
 async function openTask(id: number) {
   await rememberDesignFilters(appliedFilters)
   void router.push(taskDetailLocation(id, router.currentRoute?.value.fullPath || '/design-dashboard'))

@@ -5,7 +5,8 @@ import http from '@/services/http'
 import { usePermission } from '@/composables/usePermission'
 import { errorText } from '../api'
 import { useOAAccess } from '../access'
-import OAReturnLink from '../components/OAReturnLink.vue'
+import { oaReturnLabel } from '@/oa/pageTitle'
+import OAPageReturn from '../components/OAPageReturn.vue'
 import { orderReturnQuery, orderReturnSource, orderReturnTarget, orderVisit } from '../orderFilterMemory'
 import OperationNav from '../components/OperationNav.vue'
 import PageHead from '../components/PageHead.vue'
@@ -164,8 +165,8 @@ async function preview() {
 
 <template>
   <main class="oa-page oa-pricing">
+    <OAPageReturn v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
     <PageHead title="SKU 核价" subtitle="按编码查看成本中心的当前成本、计价依据和规则试算结果。">
-      <OAReturnLink v-if="returnTarget" class="oa-button" :to="returnTarget" :source="returnSource">返回来源</OAReturnLink>
       <RouterLink v-if="canOpenMaintenance" class="oa-button" :to="costLink()">编码成本维护</RouterLink>
     </PageHead>
     <OperationNav v-if="can('orders.view')" />

@@ -1,5 +1,6 @@
 <template>
   <section class="space-y-4">
+    <OAPageReturn v-if="oaEnabled" to="/me">返回个人中心</OAPageReturn>
     <div class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
       <div class="flex items-center justify-between gap-2">
         <div>
@@ -88,6 +89,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { oaEnabled } from '@/oa/access'
+import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import { useTaskDraft } from '@/composables/useTaskDraft'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'

@@ -1,5 +1,6 @@
 <template>
   <main class="compose-page" :class="{ 'oa-task-create': oaEnabled }" :data-row-count="rows.length" :data-compose-intent="intent">
+    <OAPageReturn v-if="oaEnabled" :to="composeReturnTarget">{{ composeReturnLabel }}</OAPageReturn>
     <header class="compose-hero">
       <div class="hero-copy">
         <h1>创建任务</h1>
@@ -9,7 +10,7 @@
         <button class="secondary-button" type="button" :disabled="savingDraft" @click="saveDraft">
           <Save :size="16" />{{ savingDraft ? '正在保存…' : '保存草稿' }}
         </button>
-        <button class="secondary-button" type="button" @click="exitCompose"><X :size="16" />{{ composeReturnLabel }}</button>
+        <button v-if="!oaEnabled" class="secondary-button" type="button" @click="exitCompose"><X :size="16" />{{ composeReturnLabel }}</button>
       </div>
       </DesktopSlot>
     </header>
@@ -64,7 +65,7 @@
       <div class="result-heading">
         <div><p class="eyebrow">创建结果</p><h2>{{ resultTitle }}</h2><p>{{ resultSummary }}</p></div>
         <div class="result-heading-actions">
-          <button class="secondary-button" type="button" @click="exitCompose">{{ composeReturnLabel }}</button>
+          <button v-if="!oaEnabled" class="secondary-button" type="button" @click="exitCompose">{{ composeReturnLabel }}</button>
           <button class="primary-button" type="button" @click="startAnother">继续创建</button>
         </div>
       </div>
@@ -242,6 +243,7 @@
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { linkOrderTask, orderTaskSource } from '@/oa/orderTask'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import { goBackTo } from '@/oa/returnNavigation'
 import { composeReturnSource, taskDetailLocation, taskReturnLabel } from '@/oa/taskNavigation'
 import { oaEnabled, useOAAccess } from '@/oa/access'

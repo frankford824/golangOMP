@@ -3,7 +3,8 @@ import { orderFilters, orderOffset, orderReturnQuery, orderReturnSource, orderRe
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText } from 'lucide-vue-next'
-import OAReturnLink from '../components/OAReturnLink.vue'
+import { oaReturnLabel } from '@/oa/pageTitle'
+import OAPageReturn from '../components/OAPageReturn.vue'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import OAEmpty from '../components/OAEmpty.vue'
@@ -853,9 +854,9 @@ onUnmounted(() => {
 
 <template>
 <div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview', 'commerce-list': mode === 'products' || mode === 'ranking', 'commerce-products': mode === 'products' }]">
+  <OAPageReturn v-if="mode === 'detail' || returnTarget" :source="returnSource" :to="returnTarget || { path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }">{{ oaReturnLabel(returnTarget || '/operations/products') }}</OAPageReturn>
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
-    <OAReturnLink v-if="mode === 'detail' || returnTarget" class="oa-button" :source="returnSource" :to="returnTarget || { path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }"><ChevronLeft :size="15" />{{ returnTarget?.split('?')[0] === '/operations' ? '返回总览' : '返回商品' }}</OAReturnLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
   <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" />
