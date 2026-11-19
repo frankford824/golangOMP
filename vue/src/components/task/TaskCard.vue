@@ -85,6 +85,7 @@
         :missing-fields-summary="task.missing_fields_summary_cn"
         :error-message="task.filing_error_message"
       />
+      <button v-if="oaEnabled" type="button" class="tc-peek" :aria-label="`速览 ${task.taskNo}`" @click.stop="emit('peek')">速览</button>
       <span v-if="isBatch" class="tc-batch-count">共 {{ batchCount }} 项</span>
     </div>
 
@@ -210,6 +211,7 @@ const emit = defineEmits<{
   toggleSelect: []
   copy: [value: string, label: string]
   claim: []
+  peek: []
   openBatch: []
 }>()
 </script>
@@ -601,4 +603,5 @@ const emit = defineEmits<{
   .tc-copy-icon { opacity: 0; }
   .tc:hover .tc-copy-icon, .tc:focus-within .tc-copy-icon { opacity: 1; }
 }
+.tc-peek { margin-inline-start:auto; padding:2px 8px; border-radius:6px; color:var(--oa-accent); font-size:12px; }
 </style>

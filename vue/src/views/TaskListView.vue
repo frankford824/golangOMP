@@ -17,7 +17,7 @@
             :loading="refreshingList"
             @click="refreshList(true)"
           >
-            {{ refreshingList ? '刷新中...' : '刷新列表' }}
+            {{ refreshingList ? '刷新中…' : '刷新列表' }}
           </BaseButton>
           <BaseButton
             v-if="showAuditHandoverEntry"
@@ -245,15 +245,16 @@
           </tr></thead>
           <tbody><tr v-for="task in pagedList" :key="task.id" :data-task-row="task.id" :class="{ 'is-selected': selectedIds.has(task.id), 'is-inspected': peekId === task.id }" @click="openTaskRow($event, task)">
             <td><input type="checkbox" :aria-label="`选择任务 ${task.taskNo}`" :checked="selectedIds.has(task.id)" @change="toggleSelect(task.id)" /></td>
-            <td class="oa-task-number" :title="task.taskNo">{{ task.taskNo }}</td>
-            <td><RouterLink v-slot="{ href }" :to="`/tasks/${task.id}`" custom>
-              <a class="oa-task-name" :href="href" @click="openTaskLink($event, task)">
+            <td class="oa-task-number" :title="task.taskNo"><RouterLink :to="`/tasks/${task.id}`" @click.stop="saveState">{{ task.taskNo }}</RouterLink></td>
+            <td><div class="task-name-actions">
+              <RouterLink class="oa-task-name" :to="`/tasks/${task.id}`" @click.stop="saveState">
                 <img v-if="task.referenceFileRefs?.[0]?.thumbnail_url" :src="task.referenceFileRefs[0].thumbnail_url" alt="" loading="lazy" />
                 <span :title="taskCardTitle(task)">{{ taskCardTitle(task) }}</span>
-              </a>
-            </RouterLink></td>
+              </RouterLink>
+              <button type="button" class="task-row-action task-preview-link" :aria-label="`速览 ${task.taskNo}`" @click.stop="openPeek(task)">速览</button>
+            </div></td>
             <td><span class="oa-task-number task-sku-text" :title="displaySku(task)">{{ displaySku(task) }}</span><button v-if="canCopyTaskField(displaySku(task))" type="button" class="oa-task-copy" :aria-label="`复制 SKU ${displaySku(task)}`" @click="copyTaskCardText(displaySku(task), 'SKU')"><Copy :size="14" /></button></td>
-            <td><TaskTypeBadge :type="task.businessType ?? task.taskType" /> {{ TASK_PRIORITY_OPTIONS.find((item) => item.value === task.priority)?.label ?? '—' }}</td>
+            <td><div class="task-type-priority"><TaskTypeBadge :type="task.businessType ?? task.taskType" /><span>{{ TASK_PRIORITY_OPTIONS.find((item) => item.value === task.priority)?.label ?? '—' }}</span></div></td>
             <td><button v-if="task.status === 'PendingAssign'" type="button" class="task-row-action" @click.stop="openPeek(task)">{{ getTaskCenterCardStatusLabel(task) ?? '待指派' }}</button><TaskMainStatusBadge v-else-if="task.mainStatus" :status="task.mainStatus" :label-override="getTaskCenterCardStatusLabel(task) ?? undefined" /><TaskStatusTag v-else :status="task.status" /></td>
             <td :title="ownershipPrimary(task)">{{ ownershipPrimary(task) }}</td><td :title="task.currentHandlerName ?? undefined">{{ task.currentHandlerName || '—' }}</td>
             <td :class="{ 'oa-task-overdue': isOverdue(task) }" :title="task.dueAt ? formatDate(task.dueAt) : undefined">{{ task.dueAt ? formatDate(task.dueAt) : '—' }}<small v-if="isOverdue(task)">{{ overdueLabel(task) }}</small></td>
@@ -296,6 +297,7 @@
             @pointerdown="onTaskCardPointerDown"
             @pointermove="onTaskCardPointerMove"
             @click="onTaskCardClick($event, task)"
+            @peek="openPeek(task)"
             @toggle-select="toggleSelect(task.id)"
             @copy="copyTaskCardText"
             @claim="claimTask(task)"
@@ -1446,13 +1448,7 @@ async function openPeek(task: Task) {
 function openTaskRow(event: MouseEvent, task: Task) {
   if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
   if ((event.target as HTMLElement).closest('input,button,a') || hasActiveTextSelection()) return
-  void openPeek(task)
-}
-
-function openTaskLink(event: MouseEvent, task: Task) {
-  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
-  event.preventDefault()
-  void openPeek(task)
+  goDetail(task)
 }
 
 function closePeekFromBackdrop(event: MouseEvent) {
@@ -2032,8 +2028,8 @@ function shouldIgnoreTaskCardClick(event: MouseEvent): boolean {
 
 function onTaskCardClick(event: MouseEvent, task: Task) {
   if (shouldIgnoreTaskCardClick(event)) return
-  if (oaEnabled) void openPeek(task)
-  else goDetail(task)
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  goDetail(task)
 }
 
 function canClaimTask(task: Task): boolean {
@@ -3751,4 +3747,20 @@ dialog.oa-task-peek::backdrop { background: var(--oa-inspector-scrim); }
 :global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button--primary:hover) { background: rgb(var(--yb-brand-strong)); border-color: rgb(var(--yb-brand-strong)); color: rgb(var(--yb-text-inverse)); }
 :global(html.oa-live-ui #app .content .oa-task-list .oa-task-table th),
 :global(html.oa-live-ui #app .content .oa-task-list .tc--oa :is(strong,b)) { font-weight: 500; }
+
+.task-name-actions { display:flex; align-items:center; gap:8px; }
+.task-name-actions .oa-task-name { flex:1; min-width:0; }
+.task-preview-link { flex:none; }
+:global(html.oa-live-ui #app .content .oa-task-list :is(button,input:not([type=checkbox],[type=file]))) { border-radius: 6px; }
+:global(html.oa-live-ui .oa-task-peek button) { border-radius: 6px; }
+.oa-task-list :deep(button.inline-flex > span:last-child) { display: contents; }
+:global(html.oa-live-ui #app .oa-bar-tabs .task-tabs button) { border-radius: 0; }
+:global(html.oa-live-ui #app .oa-bar-tabs .task-tabs button > span),
+:global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button > span) { display: contents; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button),
+:global(html.oa-live-ui #app .oa-bar-page-actions .oa-task-views button) { border-radius: 6px; }
+:global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button:not(.oa-button-primary)) { border-color: rgb(var(--yb-border-strong)); }
+.oa-task-name span { line-height: 16px; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.task-type-priority { display: flex; align-items: center; gap: 4px; width: max-content; }
+.task-type-priority > * { flex: none; white-space: nowrap; }
 </style>
