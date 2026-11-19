@@ -14,15 +14,15 @@
   align-items: center;
   height: 32px;
   gap: 2px;
-  padding: 2px;
+  padding: 0 2px;
   border: 1px solid var(--oa-line);
   border-radius: 6px;
   background: var(--commerce-muted-surface);
 }
 .commerce-period > svg { margin-inline: 6px 5px; color: var(--oa-muted); }
 #app .commerce-workspace .commerce-period > button {
-  min-height: 26px;
-  height: 26px;
+  min-height: 30px;
+  height: 30px;
   padding: 0 6px;
   border: 0;
   background: transparent;

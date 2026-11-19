@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
-import { NButton, NCheckbox, NDatePicker, NSelect } from 'naive-ui'
+import { NCheckbox, NDatePicker, NSelect } from 'naive-ui'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TaskFilterPanel, { type TaskListFilters } from './TaskFilterPanel.vue'
 
@@ -30,7 +30,7 @@ const filters = (): TaskListFilters => ({
 })
 
 function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
-  const found = wrapper.findAllComponents(NButton).find((item) => item.text().includes(text))
+  const found = wrapper.findAll('button').find((item) => item.text().trim() === text)
   if (!found) throw new Error(`missing button ${text}`)
   return found
 }
