@@ -123,7 +123,7 @@
           <TaskCenterTabs v-if="desktop && taskCenterSubpage" />
         </div>
         <div v-if="oaEnabled" class="oa-bar-local">
-          <RouterLink v-if="showHomeExpenseLink" :to="{ path: '/fees/apply', query: { applyFrom: $route.fullPath } }" class="oa-expense-shortcut" aria-label="发起费用申请" title="发起费用申请">报销 / 付款</RouterLink>
+          <RouterLink v-if="showHomeExpenseLink" :to="{ path: '/fees/apply', query: { applyFrom: $route.fullPath } }" class="oa-expense-shortcut" aria-label="发起费用申请" title="发起费用申请">发起报销 / 付款</RouterLink>
           <div ref="desktopActions" class="oa-bar-page-actions" />
         </div>
         <div class="app-topbar__actions">

@@ -69,6 +69,12 @@ func (app office) readDocumentEvents(ctx context.Context, doc *document) error {
 // document participants retain the existing evidence and account policies.
 func (doc document) limitedDetail() document {
 	doc.RequestID = ""
+	doc.DecisionRequests = nil
+	doc.StepVersion = 0
+	doc.ApprovalSteps = nil
+	doc.PendingApprovers = nil
+	doc.SourceReference = nil
+	doc.Items = nil
 	doc.Reason = ""
 	doc.Holder = ""
 	doc.Account = ""
@@ -81,6 +87,11 @@ func (doc document) limitedDetail() document {
 	doc.Template.Nodes = []string{}
 	doc.Template.Extra = ""
 	doc.Template.Threshold = 0
+	doc.Template.ApprovalNodes = nil
+	doc.Template.AmountRules = nil
+	doc.Template.CCAfterApproval = nil
+	doc.Template.CCAfterPayment = nil
+	doc.Template.FieldDefinitions = nil
 	doc.Route = []int64{}
 	doc.RouteNodes = nil
 	doc.History = []history{}

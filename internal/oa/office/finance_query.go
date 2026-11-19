@@ -76,6 +76,7 @@ type financeRow struct {
 }
 
 type financeFilters struct {
+	sort, order                                                                                                        string
 	page, size                                                                                                         int
 	start, end, basis, group, state, keyword, template, department, team, person, site, channel, min, max, expenseType string
 }
@@ -100,7 +101,7 @@ func parseFinanceFilters(r *http.Request, report bool) (financeFilters, string) 
 	f := financeFilters{
 		basis: q.Get("basis"), group: q.Get("group_by"), state: q.Get("state"), keyword: strings.TrimSpace(q.Get("q")),
 		template: q.Get("template"), expenseType: q.Get("expense_type"), department: q.Get("department"), team: q.Get("team"), person: q.Get("person"), site: q.Get("site"), channel: q.Get("channel"),
-		start: q.Get("start"), end: q.Get("end"), min: q.Get("min_amount_cents"), max: q.Get("max_amount_cents"),
+		sort: q.Get("sort"), order: q.Get("order"), start: q.Get("start"), end: q.Get("end"), min: q.Get("min_amount_cents"), max: q.Get("max_amount_cents"),
 	}
 	var valid bool
 	f.page, valid = activityParam(r, "page", 1, 1_000_000)
@@ -114,6 +115,12 @@ func parseFinanceFilters(r *http.Request, report bool) (financeFilters, string) 
 	f.size, valid = activityParam(r, sizeKey, 15, 100)
 	if !valid {
 		return f, "每页条数无效"
+	}
+	if f.sort != "" && f.sort != "date" && f.sort != "amount" {
+		return f, "排序字段无效"
+	}
+	if f.order != "" && f.order != "asc" && f.order != "desc" {
+		return f, "排序方向无效"
 	}
 	switch f.expenseType {
 	case "", "reimbursement", "payment":
@@ -329,8 +336,8 @@ func (app office) queryFinanceDocuments(w http.ResponseWriter, r *http.Request) 
 	switch q {
 	case "", "mine":
 	case "todo":
-		scope = "d.state='waiting' AND d.approver=? AND d.applicant<>?"
-		args = append(args, actor.ID)
+		scope = "d.state='waiting' AND " + financePendingScope + " AND d.applicant<>?"
+		args = append(args, actor.ID, actor.ID)
 	case "pay":
 		if !permit(actor, "finance.pay") {
 			deny(w)
@@ -431,7 +438,7 @@ func (app office) respondFinanceQuery(w http.ResponseWriter, r *http.Request, sc
 	}
 	defer tx.Rollback()
 	w.Header().Set("Cache-Control", "private, no-store")
-	result := map[string]any{"page": f.page, "size": f.size}
+	result := map[string]any{"page": f.page, "size": f.size, "page_size": f.size}
 	var total int64
 	var totals financeTotals
 	var groups []financeGroup
@@ -465,7 +472,17 @@ func (app office) respondFinanceQuery(w http.ResponseWriter, r *http.Request, sc
 	if documents {
 		selectSQL = "payload"
 	}
-	order := column + " DESC, id DESC"
+	if f.sort == "amount" {
+		column = "request_amount"
+		if r.URL.Query().Get("queue") == "pay" {
+			column = "COALESCE(approved_amount,request_amount)"
+		}
+	}
+	direction := " DESC"
+	if f.order == "asc" {
+		direction = " ASC"
+	}
+	order := column + direction + ", id DESC"
 	if !export {
 		order += " LIMIT ? OFFSET ?"
 		args = append(args, f.size, (f.page-1)*f.size)

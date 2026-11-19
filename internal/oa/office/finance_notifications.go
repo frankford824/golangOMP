@@ -27,6 +27,8 @@ type financeNotice struct {
 type financeActivity struct {
 	Todos             []financeNotice `json:"todos"`
 	Items             []financeNotice `json:"items"`
+	ApproveCount      int64           `json:"approve_count"`
+	PayCount          int64           `json:"pay_count"`
 	TodoCount         int64           `json:"todo_count"`
 	ResultCount       int64           `json:"result_count"`
 	UnreadResultCount int64           `json:"unread_result_count"`
@@ -53,18 +55,39 @@ func recordFinanceResult(ctx context.Context, tx *sql.Tx, doc document) error {
 	}
 }
 
+// A CC is a separate append-only recipient record for each completed phase.
+func recordFinanceCC(ctx context.Context, tx *sql.Tx, doc document) error {
+	var recipients []int64
+	switch doc.State {
+	case "approved":
+		recipients = doc.Template.CCAfterApproval
+	case "paid":
+		recipients = doc.Template.CCAfterPayment
+	}
+	for _, id := range recipients {
+		payload := map[string]any{
+			"document_id": doc.ID, "document_version": doc.Version, "state": doc.State,
+			"title": doc.Template.Name, "kind": "cc", "notify_unread": true,
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO oa_office_notifications(user_id,payload) VALUES(?,?)", id, jsonData(payload)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Current document state is the source of truth for todo badges. A new payer
 // sees pending payments immediately and someone whose grant was revoked sees
 // none, even when the older event table still contains their notifications.
 const financeTodoScope = ` FROM oa_office_documents d
-	WHERE (d.state='waiting' AND d.approver=? AND d.applicant<>?)
+	WHERE (d.state='waiting' AND ` + financePendingScope + ` AND d.applicant<>?)
 	   OR (d.state='returned' AND d.applicant=?)
 	   OR (? AND d.state='approved' AND d.applicant<>?)`
 
 // Historical rows written before this projection include waiting notices and
-// approved notices for payers. Only the applicant's outcome history is shown.
+// approved notices for payers. Show applicant outcomes and explicit CC only.
 const financeResultJoin = ` oa_office_notifications n
-	JOIN oa_office_documents d ON d.id=JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.document_id')) AND d.applicant=n.user_id`
+	JOIN oa_office_documents d ON d.id=JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.document_id')) AND (d.applicant=n.user_id OR JSON_VALUE(n.payload,'$.kind')='cc')`
 const financeResultFilter = `
 	WHERE n.user_id=? AND JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.state')) IN ('approved','returned','rejected','paid','voided')`
 const financeResultScope = " FROM" + financeResultJoin + financeResultFilter
@@ -102,8 +125,8 @@ func (app office) notifications(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	data := financeActivity{Todos: []financeNotice{}, Items: []financeNotice{}}
-	todoArgs := []any{actor.ID, actor.ID, actor.ID, permit(actor, "finance.pay"), actor.ID}
-	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*)"+financeTodoScope, todoArgs...).Scan(&data.TodoCount); err != nil {
+	todoArgs := []any{actor.ID, actor.ID, actor.ID, actor.ID, permit(actor, "finance.pay"), actor.ID}
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*),COALESCE(SUM(d.state='waiting'),0),COALESCE(SUM(d.state='approved'),0)"+financeTodoScope, todoArgs...).Scan(&data.TodoCount, &data.ApproveCount, &data.PayCount); err != nil {
 		internal(w)
 		return
 	}
@@ -121,7 +144,7 @@ func (app office) notifications(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		const resultFields = `SELECT n.id, d.id, JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.state')),
-			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.title')), ''), 'result',
+			COALESCE(JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.title')), ''), CASE WHEN JSON_VALUE(n.payload,'$.kind')='cc' THEN 'cc' ELSE 'result' END,
 			DATE_FORMAT(n.created_at,'%Y-%m-%d %H:%i:%s'), ` + financeResultUnread
 		data.Items, err = selectFinanceNotices(ctx, tx, resultFields+financeResultScope+" ORDER BY n.id DESC LIMIT ? OFFSET ?", actor.ID, limit, (resultPage-1)*limit)
 		if err != nil {

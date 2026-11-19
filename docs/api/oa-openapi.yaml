@@ -11,6 +11,200 @@ externalDocs:
 security:
 - MainBearer: []
 paths:
+  /oa-api/finance/accounts:
+    get:
+      summary: 分页查找收款账户，仅显示尾号。指定其他人员仅供已授权付款经办使用。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/OARecipientAccount'
+                      page: &id001
+                        type: integer
+                        format: int64
+                        minimum: 0
+                      has_more:
+                        type: boolean
+        '403':
+          description: 当前账号无权操作
+      parameters:
+      - in: query
+        name: scope
+        schema:
+          type: string
+          enum:
+          - personal
+          - supplier
+        required: true
+      - in: query
+        name: owner_id
+        schema: *id001
+        required: false
+      - in: query
+        name: q
+        schema: &id002
+          type: string
+        required: false
+      - in: query
+        name: page
+        schema: *id001
+        required: false
+    post:
+      summary: 新增本人默认账户或由财务维护供应商账户
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: *id002
+                      version: *id001
+        '403':
+          description: 当前账号无权操作
+        '409':
+          description: 数据版本已变化或本人已设默认账户
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/OARecipientInput'
+              - required:
+                - scope
+  /oa-api/finance/accounts/{id}:
+    parameters: &id003
+    - in: path
+      name: id
+      required: true
+      schema: *id002
+    put:
+      summary: 凭版本更新收款账户
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: *id002
+                      version: *id001
+        '403':
+          description: 当前账号无权操作
+        '409':
+          description: 数据版本已变化或本人已设默认账户
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OARecipientInput'
+  /oa-api/finance/accounts/{id}/retire:
+    parameters: *id003
+    post:
+      summary: 停用收款账户
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: *id002
+                      version: *id001
+        '403':
+          description: 当前账号无权操作
+        '409':
+          description: 数据版本已变化或本人已设默认账户
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: *id001
+  /oa-api/finance/accounts/{id}/use:
+    parameters: *id003
+    post:
+      summary: 按权限带入完整收款账户并记录读取人和时间
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      holder: *id002
+                      bank: *id002
+                      account: *id002
+        '403':
+          description: 当前账号无权操作
+  /oa-api/finance/draft:
+    parameters:
+      - {in: query, name: site, required: true, schema: {type: string, enum: [main, asset]}}
+    get:
+      summary: Read the signed-in applicant's draft
+      responses:
+        '200':
+          description: Current draft and version, or null and an empty version
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OAFinanceDraftEnvelope'}
+    put:
+      summary: Save the signed-in applicant's draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/OAFinanceDraft'}
+                - type: object
+                  required: [version]
+                  properties:
+                    version: {type: string, description: Last observed version or empty on first save}
+      responses:
+        '200':
+          description: Draft and new version, also used as the submit request ID
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OAFinanceDraftEnvelope'}
+        '409': {description: Draft changed in another session}
+    delete:
+      summary: Delete the signed-in applicant's draft
+      parameters:
+        - {in: query, name: version, required: true, schema: {type: string}}
+      responses:
+        '204': {description: Draft deleted}
+        '409': {description: Draft changed in another session}
   /oa-api/data-alerts:
     get:
       summary: 超级管理员查看订单数据告警（北京时间）
@@ -1930,6 +2124,8 @@ paths:
                         type: array
                         description: 当前申请人的审批通过、退回、拒绝和付款结果。
                         items: { $ref: '#/components/schemas/OAFinanceActivityItem' }
+                      approve_count: {type: integer, format: int64, minimum: 0}
+                      pay_count: {type: integer, format: int64, minimum: 0}
                       todo_count: { type: integer, format: int64, minimum: 0 }
                       result_count: { type: integer, format: int64, minimum: 0 }
                       unread_result_count: { type: integer, format: int64, minimum: 0 }
@@ -2053,6 +2249,37 @@ paths:
     get:
       summary: 查看全部显式费用授权
       description: 仅超级管理员和公司级费用管理员可查看。按账号汇总模板委托和付款、报表授权，包含已停用或离职的历史授权对象。不含收款信息、手机号或其他人事资料。
+      parameters:
+      - in: query
+        name: page
+        schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+      - in: query
+        name: page_size
+        schema: { type: integer, minimum: 1, maximum: 100, default: 15 }
+      - in: query
+        name: size
+        description: page_size 的别名。两项都传时使用 page_size。
+        schema: { type: integer, minimum: 1, maximum: 100 }
+      - in: query
+        name: q
+        description: 匹配姓名、用户编号、工号和部门。
+        schema: { type: string }
+      - in: query
+        name: id
+        description: 精确匹配人员账号 ID。
+        schema: { type: integer, format: int64, minimum: 1 }
+      - in: query
+        name: status
+        schema: { type: string, enum: [active, inactive, deleted, missing] }
+      - in: query
+        name: sort
+        schema: { type: string, enum: [id, name, status, department, employee_no, level], default: id }
+      - in: query
+        name: order
+        schema: { type: string, enum: [asc, desc], default: asc }
+      - in: query
+        name: kind
+        schema: { type: string, enum: [template, finance, pay, report] }
       responses:
         '200':
           description: 成功
@@ -2066,6 +2293,11 @@ paths:
                     type: object
                     required: [items]
                     properties:
+                      total: { type: integer, format: int64 }
+                      page: { type: integer }
+                      page_size: { type: integer }
+                      size: { type: integer }
+                      has_active_payer: { type: boolean, description: 全量授权中是否存在在职付款经办人 }
                       items:
                         type: array
                         items:
@@ -2080,6 +2312,7 @@ paths:
                             level: { type: string, enum: [none, draft, publish] }
                             pay: { type: boolean }
                             report: { type: boolean }
+        '400': { $ref: '#/components/responses/HTTP400' }
         '401':
           $ref: '#/components/responses/HTTP401'
         '403':
@@ -2091,6 +2324,35 @@ paths:
   /oa-api/finance/delegates:
     get:
       summary: 读取财务委派
+      description: 管理员传筛选或分页参数时仅返回显式模板委托，省略参数保留原响应。非管理员只返回自己的级别。
+      parameters:
+      - in: query
+        name: page
+        schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 }
+      - in: query
+        name: page_size
+        schema: { type: integer, minimum: 1, maximum: 100, default: 15 }
+      - in: query
+        name: size
+        description: page_size 的别名。两项都传时使用 page_size。
+        schema: { type: integer, minimum: 1, maximum: 100 }
+      - in: query
+        name: q
+        description: 匹配姓名、用户编号、工号和部门。
+        schema: { type: string }
+      - in: query
+        name: id
+        description: 精确匹配人员账号 ID。
+        schema: { type: integer, format: int64, minimum: 1 }
+      - in: query
+        name: status
+        schema: { type: string, enum: [active, inactive, deleted, missing] }
+      - in: query
+        name: sort
+        schema: { type: string, enum: [id, name, status, department, employee_no, level], default: id }
+      - in: query
+        name: order
+        schema: { type: string, enum: [asc, desc], default: asc }
       responses:
         '200':
           description: 成功
@@ -2104,6 +2366,11 @@ paths:
                     properties:
                       level:
                         type: string
+                      total: { type: integer, format: int64 }
+                      page: { type: integer }
+                      page_size: { type: integer }
+                      size: { type: integer }
+                      has_active_payer: { type: boolean, description: 全量授权中是否存在在职付款经办人 }
                       items:
                         type: array
                         items:
@@ -2116,6 +2383,7 @@ paths:
                               type: string
                 required:
                 - data
+        '400': { $ref: '#/components/responses/HTTP400' }
         '401':
           $ref: '#/components/responses/HTTP401'
         '403':
@@ -2227,6 +2495,59 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+  /oa-api/finance/documents/preview-route:
+    post:
+      summary: 预览实际审批人和节点
+      description: 使用提交时同一规则解析。传 document_id 时仅本人可预览退回或撤回单据原模板快照。无写入。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [template_id, amount_cents]
+              properties:
+                template_id: { type: string, maxLength: 64 }
+                document_id: { type: string }
+                amount_cents: { type: integer, format: int64, minimum: 1, maximum: 100000000000 }
+      responses:
+        '200':
+          description: 按执行顺序返回实际在职审批人。同一节点可能包含多人。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [steps]
+                    properties:
+                      steps:
+                        type: array
+                        items:
+                          type: object
+                          required: [name, mode, approvers]
+                          properties:
+                            name: { type: string }
+                            mode: { type: string, enum: [AND, OR] }
+                            amount_min_cents: { type: integer, format: int64, description: 金额规则触发下限，含边界。 }
+                            amount_max_cents: { type: integer, format: int64, description: 金额规则触发上限，含边界。 }
+                            approvers:
+                              type: array
+                              items:
+                                type: object
+                                required: [id, name]
+                                properties:
+                                  id: { type: string }
+                                  name: { type: string }
+                                  employee_no: { type: integer }
+                                  avatar_url: { type: string }
+        '400': { $ref: '#/components/responses/HTTP400' }
+        '401': { $ref: '#/components/responses/HTTP401' }
+        '403': { $ref: '#/components/responses/HTTP403' }
+        '404': { $ref: '#/components/responses/HTTP404' }
+        '500': { $ref: '#/components/responses/HTTP500' }
   /oa-api/finance/documents:
     get:
       summary: 列出本人申请、办理队列或全局费用台账
@@ -2362,6 +2683,13 @@ paths:
           type: integer
           format: int64
           minimum: 0
+      - in: query
+        name: sort
+        description: 按所选日期口径或金额排序。待付款的金额排序使用核准额，缺失时使用申请额。
+        schema: { type: string, enum: [date, amount], default: date }
+      - in: query
+        name: order
+        schema: { type: string, enum: [asc, desc], default: desc }
       responses:
         '200':
           description: 成功
@@ -2603,6 +2931,8 @@ paths:
       description: 需要显式 finance.report 授权。JSON 明细按页返回，汇总和分组覆盖全部匹配记录。Excel 同样覆盖全部匹配记录，包含汇总、分组和单据明细。分页报表只返回报表字段，不提供账号、银行卡信息或凭证
         ID。旧调用省略所有查询参数或仅传 period 时按实付日期查询，返回全量已付款单据与脱敏账号，金额为整数分，交易流水保持隐藏。
       parameters:
+      - {name: sort, in: query, schema: {type: string, enum: [date, amount]}}
+      - {name: order, in: query, schema: {type: string, enum: [asc, desc]}}
       - in: query
         name: period
         description: 未指定 start 或 end 时接受 YYYY、YYYY-MM 或 YYYY-MM-DD，默认本月。
@@ -2965,6 +3295,11 @@ paths:
           - active
           - disabled
       - in: query
+        name: hr_status
+        schema:
+          type: string
+          enum: [active, probation, regular, leaving, left, disabled]
+      - in: query
         name: department_id
         schema:
           type: integer
@@ -2989,6 +3324,18 @@ paths:
           - manager
           - joined
           - employee_no
+      - in: query
+        name: sort
+        description: 可选排序字段。留空按人员 ID 升序；选择字段时缺项始终在末尾，同值按人员 ID 升序。
+        schema:
+          type: string
+          enum: [name, employee_no, joined]
+      - in: query
+        name: direction
+        description: 排序方向。仅在提供 sort 时传入；使用 sort 且省略 direction 时按升序。
+        schema:
+          type: string
+          enum: [asc, desc]
       responses:
         '200':
           description: 成功
@@ -3006,6 +3353,7 @@ paths:
                     - total
                     - page
                     - page_size
+                    - completeness
                     properties:
                       items:
                         type: array
@@ -3017,6 +3365,14 @@ paths:
                         type: integer
                       page_size:
                         type: integer
+                      completeness:
+                        description: Counts within the other filters, before applying the missing filter.
+                        type: object
+                        required: [manager, joined, employee_no]
+                        properties:
+                          manager: {type: integer, minimum: 0}
+                          joined: {type: integer, minimum: 0}
+                          employee_no: {type: integer, minimum: 0}
         '400':
           $ref: '#/components/responses/HTTP400'
         '401':
@@ -3293,9 +3649,9 @@ paths:
                           additionalProperties: true
                       shops:
                         type: array
-                        items:
-                          type: object
-                          additionalProperties: true
+                        items: {type: string}
+                      finance_handover:
+                        $ref: '#/components/schemas/PersonnelFinanceHandover'
                 required:
                 - data
         '400':
@@ -3310,9 +3666,163 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+    post:
+      summary: 批量交接未完成审批或替换直属下属负责人
+      description: 审批交接需要费用管理员授权。直属负责人替换要求原负责人、新负责人和受影响人员均处于管理范围内。
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: integer, format: int64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, target_id]
+              properties:
+                kind: {type: string, enum: [approvals, subordinates]}
+                target_id: {type: integer, format: int64, minimum: 1}
+      responses:
+        '200':
+          description: 批量交接成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [count]
+                    properties:
+                      count: {type: integer, minimum: 0}
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+  /oa-api/people/{id}/term-shops:
+    get:
+      summary: 查询员工绑定店铺及可选目标店铺
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: integer, format: int64}
+      - in: query
+        name: q
+        schema: {type: string}
+        description: 匹配店铺名称、平台或正式店铺 ID；空值只读取已绑定和待交接店铺。
+      - in: query
+        name: effective_date
+        schema: {type: string, format: date}
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [bound, items]
+                    properties:
+                      bound:
+                        type: array
+                        items: {$ref: '#/components/schemas/PersonnelTermShop'}
+                      items:
+                        type: array
+                        maxItems: 40
+                        items: {$ref: '#/components/schemas/PersonnelTermShop'}
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/{id}/deactivate:
+    post:
+      summary: 核对交接后停用账号
+      description: 交接清单必须可结办；主站 access.manage 与范围授权仍在主站校验。
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: integer, format: int64}
+      responses:
+        '204': {description: 已停用}
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '422': {description: 业务状态或主站字段校验失败}
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/{id}/membership:
+    post:
+      summary: 变更组织归属并登记生效异动
+      description: 需要 OA 人员管理范围和主站授予的人员修改权限。当前北京时间日期生效。
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: integer, format: int64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team]
+              properties:
+                department: {type: string}
+                team:
+                  type: string
+                  description: ungrouped 表示移至未分配池，其余值须同时提供部门。
+      responses:
+        '204': {description: 组织归属已保存}
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '422': {description: 业务状态或主站字段校验失败}
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
   /oa-api/people/{id}/change:
     post:
       summary: 登记人员变更
+      description: 支持 hire、confirm、salary_change、leave_plan、leave、rehire、shop_transfer 与 handover。离职前必须完成影响检查。组织调整请使用 membership。
       parameters:
       - in: path
         name: id
@@ -3348,6 +3858,7 @@ paths:
           $ref: '#/components/responses/HTTP404'
         '409':
           $ref: '#/components/responses/HTTP409'
+        '422': {description: 业务状态或主站字段校验失败}
         '500':
           $ref: '#/components/responses/HTTP500'
         '503':
@@ -3479,6 +3990,95 @@ components:
       type: http
       scheme: bearer
   schemas:
+    OARecipientAccount:
+      type: object
+      properties:
+        id: &id001
+          type: string
+        holder: *id001
+        bank: *id001
+        last_four: *id001
+        version: &id002
+          type: integer
+          format: int64
+          minimum: 0
+    OARecipientInput:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum:
+          - personal
+          - supplier
+        holder: *id001
+        bank: *id001
+        account:
+          type: string
+          writeOnly: true
+        version: *id002
+      required:
+      - holder
+      - bank
+      - account
+    OAFinanceExpenseLine:
+      type: object
+      required: [category, occurred_on, amount_cents, tax_cents]
+      properties:
+        category: {type: string, maxLength: 80}
+        occurred_on: {type: string, format: date}
+        amount_cents: {type: integer, format: int64, minimum: 1, maximum: 100000000000}
+        tax_cents: {type: integer, format: int64, minimum: 0, description: Tax included in the line amount}
+        invoice_no: {type: string, maxLength: 64}
+        description: {type: string, maxLength: 1000}
+    OAFinanceDraft:
+      type: object
+      description: Partial application payload. Draft items may contain empty category, date or amount values.
+      properties:
+        request_id: {type: string, readOnly: true}
+        template_id: {type: string}
+        amount_input: {type: string}
+        reason: {type: string}
+        channel: {type: string}
+        holder: {type: string}
+        account: {type: string}
+        bank: {type: string}
+        site: {type: string, readOnly: true}
+        extra: {type: object, additionalProperties: {type: string}}
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            properties:
+              category: {type: string}
+              occurred_on: {type: string}
+              amount_cents: {type: integer, format: int64}
+              tax_cents: {type: integer, format: int64}
+              invoice_no: {type: string}
+              description: {type: string}
+        item_amounts: {type: array, maxItems: 100, items: {type: string}}
+        item_taxes: {type: array, maxItems: 100, items: {type: string}}
+        evidence:
+          type: array
+          maxItems: 15
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: {type: string}
+              name: {type: string, readOnly: true}
+    OAFinanceDraftEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [draft, version]
+          properties:
+            draft:
+              nullable: true
+              allOf: [{$ref: '#/components/schemas/OAFinanceDraft'}]
+            version: {type: string}
     OAFinanceActivityItem:
       type: object
       required: [id, notification_type, payload, created_at, unread]
@@ -3925,9 +4525,74 @@ components:
           type: boolean
         has_more:
           type: boolean
+    PersonnelHRStatus:
+      type: string
+      enum: [active, probation, regular, leaving, left, disabled]
+    PersonnelEmergencyContact:
+      type: object
+      properties:
+        name: {type: string, maxLength: 100}
+        relationship: {type: string, maxLength: 60}
+        phone: {type: string, maxLength: 40}
+      description: 人员档案仅本人和范围内人员管理者可读；仅范围内人员管理者可修改。
+    PersonnelTermShop:
+      type: object
+      required: [shop_id, shop_name, platform, selectable, bound, handover]
+      properties:
+        shop_id: {type: string}
+        shop_name: {type: string}
+        platform: {type: string}
+        selectable: {type: boolean}
+        bound: {type: boolean}
+        handover: {type: boolean}
+    PersonnelFinanceHandover:
+      type: object
+      properties:
+        pending_approval_count: {type: integer, minimum: 0}
+        future_approval_count: {type: integer, minimum: 0}
+        pending_approvals:
+          type: array
+          description: 仅费用管理员可见单据标识。
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              template_name: {type: string}
+              current: {type: boolean}
+        pending_payments:
+          type: integer
+          minimum: 0
+          description: 付款经办人可处理的共享待付单数，排除本人单据。
+        payment_covered: {type: boolean}
+        bound_template_count: {type: integer, minimum: 0}
+        bound_templates:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              name: {type: string}
+        subordinates:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: integer, format: int64}
+              name: {type: string}
+              employee_no: {type: integer, nullable: true}
+        out_of_scope_subordinates: {type: integer, minimum: 0}
+        can_transfer_approvals: {type: boolean}
+        ready: {type: boolean}
     Person:
       type: object
       properties:
+        confirmed:
+          type: string
+          description: YYYY-MM-DD；空值表示无已生效的转正记录。
+        hr_status: {$ref: '#/components/schemas/PersonnelHRStatus'}
+        mobile: {type: string}
+        email: {type: string}
+        emergency_contact: {$ref: '#/components/schemas/PersonnelEmergencyContact'}
         id:
           type: integer
           format: int64
@@ -4010,6 +4675,30 @@ components:
     PersonChange:
       type: object
       properties:
+        note:
+          type: string
+          maxLength: 300
+          description: 调薪异动备注，仅 salary_change 使用。
+        operation_id: {type: string, readOnly: true}
+        id: {type: integer, format: int64, readOnly: true}
+        recorded_at: {type: string, readOnly: true}
+        recorded: {type: boolean, readOnly: true}
+        shop_ids:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: {type: string}
+        from_shop_ids:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: {type: string}
+        job_title: {type: string, readOnly: true}
+        job_level: {type: string, readOnly: true}
+        previous_job_title: {type: string, readOnly: true}
+        previous_job_level: {type: string, readOnly: true}
+        org_from: {type: string, readOnly: true}
+        org_to: {type: string, readOnly: true}
         kind:
           type: string
         shop_id:
@@ -4080,9 +4769,84 @@ components:
           format: int64
         profile:
           $ref: '#/components/schemas/PersonProfileUpdate'
+        previous_profile:
+          description: 档案差异预览对应的现有字段。
+          $ref: '#/components/schemas/PersonProfileUpdate'
+    FinanceApprovalNode:
+      type: object
+      required: [mode, approvers]
+      properties:
+        name: { type: string, maxLength: 120 }
+        mode:
+          type: string
+          enum: [AND, OR]
+          description: AND 为全体同意，OR 为任意一人同意。退回或拒绝结束当前审批。
+        approvers:
+          type: array
+          minItems: 1
+          maxItems: 12
+          uniqueItems: true
+          items: { type: string, pattern: '^(manager|fixed:[1-9][0-9]*)$' }
+    FinanceSourceReference:
+      type: object
+      required: [kind, number]
+      properties:
+        kind: { type: string, enum: [travel, loan, erp_purchase, contract, other] }
+        number: { type: string, minLength: 1, maxLength: 160 }
+        url: { type: string, format: uri, maxLength: 1024, description: 可选 HTTPS 链接，不允许内嵌凭据。服务端不会访问该地址。 }
     Template:
       type: object
       properties:
+        approval_nodes:
+          type: array
+          maxItems: 12
+          description: 配置后使用此审批链。较旧模板继续使用 nodes。
+          items: { $ref: '#/components/schemas/FinanceApprovalNode' }
+        amount_rules:
+          type: array
+          maxItems: 12
+          description: 按最低金额升序且区间不得重叠。命中区间后追加一组审批人，边界均含，不填最高金额表示不限。
+          items:
+            type: object
+            required: [min_cents, approvers]
+            properties:
+              min_cents: { type: integer, format: int64, minimum: 0, maximum: 100000000000 }
+              max_cents: { type: integer, format: int64, minimum: 0, maximum: 100000000000 }
+              mode: { type: string, enum: [AND, OR], default: AND }
+              approvers:
+                type: array
+                minItems: 1
+                maxItems: 12
+                uniqueItems: true
+                items: { type: string, pattern: '^(manager|fixed:[1-9][0-9]*)$' }
+        field_definitions:
+          type: array
+          maxItems: 30
+          description: 逐字段定义数据类型。fields 和 required 由此派生，extra 的值仍为字符串。
+          items:
+            type: object
+            required: [name, type, required]
+            properties:
+              name: { type: string, maxLength: 120 }
+              type: { type: string, enum: [text, number, date, select] }
+              required: { type: boolean }
+              options:
+                type: array
+                description: 仅单选字段提供选项。
+                minItems: 1
+                maxItems: 60
+                uniqueItems: true
+                items: { type: string, maxLength: 120 }
+        cc_after_approval:
+          type: array
+          uniqueItems: true
+          maxItems: 16
+          items: { type: integer, format: int64, minimum: 1 }
+        cc_after_payment:
+          type: array
+          uniqueItems: true
+          maxItems: 16
+          items: { type: integer, format: int64, minimum: 1 }
         id:
           type: string
         name:
@@ -4118,6 +4882,9 @@ components:
     Application:
       type: object
       properties:
+        items: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/OAFinanceExpenseLine'}, description: 报销明细金额含税，申请总额由服务端汇总。}
+        source_reference:
+          $ref: '#/components/schemas/FinanceSourceReference'
         request_id:
           type: string
         template_id:
@@ -4187,6 +4954,25 @@ components:
     Document:
       type: object
       properties:
+        items: {type: array, items: {$ref: '#/components/schemas/OAFinanceExpenseLine'}}
+        source_reference:
+          $ref: '#/components/schemas/FinanceSourceReference'
+        approval_steps:
+          type: array
+          description: 审批节点快照。route 保留每步首位人员的历史兼容表示。
+          items:
+            type: object
+            required: [name, mode, approver_ids]
+            properties:
+              name: { type: string }
+              mode: { type: string, enum: [AND, OR] }
+              approver_ids:
+                type: array
+                items: { type: integer, format: int64 }
+        pending_approver_ids:
+          type: array
+          description: 当前节点尚未表决的人。
+          items: { type: integer, format: int64 }
         request_id:
           type: string
         template_id:
@@ -4367,6 +5153,15 @@ components:
       - job_level
       - cost_center
       properties:
+        employment_type:
+          type: string
+          enum: ['', full_time, part_time, outsourced]
+          description: OA 档案用工分类。空字符串清除覆盖，恢复使用现有用工记录。
+        emergency_contact: {$ref: '#/components/schemas/PersonnelEmergencyContact'}
+        effective_date:
+          type: string
+          format: date
+          description: 岗位、职级及直属负责人异动登记日期，必须为今日或过去。
         version:
           type: integer
           format: int64
@@ -4430,6 +5225,7 @@ components:
       - bank
       - files
       properties:
+        items: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/OAFinanceExpenseLine'}}
         reason:
           type: string
         channel:
@@ -4458,6 +5254,7 @@ components:
       description: 继续使用原申请编号、归属和模板版本。同付款渠道未填写 account 时保留原账号。
     FinanceDecision:
       type: object
+      description: 多人节点必须提交单据版本。当前会签节点的不同人员可基于该节点内的同一版本提交同意。核减、退回、拒绝须提交最新版本。同一已接受请求重试不会重复写入。
       required:
       - decision
       - current
@@ -4642,6 +5439,7 @@ components:
       - group_by
       - amount_cents
       properties:
+        page_size: {type: integer, minimum: 1, maximum: 100}
         items:
           type: array
           items:

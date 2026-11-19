@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,12 +17,15 @@ import (
 )
 
 type profileUpdate struct {
-	Version    int64  `json:"version"`
-	ManagerID  int64  `json:"manager_id"`
-	Joined     string `json:"joined"`
-	JobTitle   string `json:"job_title"`
-	JobLevel   string `json:"job_level"`
-	CostCenter string `json:"cost_center"`
+	EmploymentType   *string           `json:"employment_type,omitempty"`
+	Version          int64             `json:"version"`
+	EmergencyContact *emergencyContact `json:"emergency_contact,omitempty"`
+	EffectiveDate    string            `json:"effective_date,omitempty"`
+	ManagerID        int64             `json:"manager_id"`
+	Joined           string            `json:"joined"`
+	JobTitle         string            `json:"job_title"`
+	JobLevel         string            `json:"job_level"`
+	CostCenter       string            `json:"cost_center"`
 }
 
 type orgManager struct {
@@ -41,7 +45,7 @@ const directoryPeople = `WITH base AS (
 	SELECT u.id, u.display_name AS name, u.employee_no, u.status,
 		COALESCE(u.department_id,0) AS department_id, COALESCE(u.team_id,0) AS team_id,
 		COALESCE(u.department,'') AS department, COALESCE(u.team,'') AS team,
-		COALESCE(NULLIF((SELECT e.employment_type FROM JSON_TABLE(o.payload, '$.events[*]' COLUMNS
+		COALESCE(NULLIF(c.employment_type,''), NULLIF((SELECT e.employment_type FROM JSON_TABLE(o.payload, '$.events[*]' COLUMNS
 			(seq FOR ORDINALITY, employment_type VARCHAR(48) PATH '$.employment_type', effective_date VARCHAR(10) PATH '$.effective_date')) e
 			WHERE e.employment_type<>'' AND e.effective_date<=? ORDER BY seq DESC LIMIT 1),''),
 			NULLIF(JSON_UNQUOTE(JSON_EXTRACT(o.payload,'$.employment_type')),''),u.employment_type,'') AS employment_type,
@@ -64,15 +68,30 @@ const directoryPeople = `WITH base AS (
 				AND ((op.subject_type='department' AND op.subject_id=u.department_id) OR (op.subject_type='team' AND op.subject_id=u.team_id)))) AS protected
 	FROM users u LEFT JOIN oa_office_people o ON o.id=u.id
 	LEFT JOIN oa_office_person_profiles p ON p.user_id=u.id
+	LEFT JOIN oa_office_person_contacts c ON c.user_id=u.id
 	WHERE u.status<>'deleted'
+), lifecycle AS (
+	SELECT person.id,
+		COALESCE(MAX(CASE WHEN e.kind='leave' AND e.day<=? THEN e.day END),'') AS left_on,
+		COALESCE(MAX(CASE WHEN e.kind IN ('hire','rehire') AND e.day<=? THEN e.day END),'') AS hired_on,
+		COALESCE(MAX(CASE WHEN e.kind='confirm' AND e.day<=? THEN e.day END),'') AS confirmed_on,
+		COALESCE(MAX(CASE WHEN e.kind='leave_plan' THEN e.day END),'') AS leaving_on
+	FROM oa_office_people person JOIN JSON_TABLE(person.payload,'$.events[*]' COLUMNS (
+		kind VARCHAR(32) PATH '$.kind', day VARCHAR(10) PATH '$.effective_date')) e ON TRUE
+	GROUP BY person.id
 ), directory AS (
 	SELECT b.*,
+		CASE WHEN l.left_on<>'' AND l.left_on>=l.hired_on AND b.status<>'active' THEN 'left'
+			WHEN b.status<>'active' THEN 'disabled'
+			WHEN l.leaving_on>l.left_on AND l.leaving_on>=l.hired_on THEN 'leaving'
+			WHEN l.confirmed_on<>'' AND l.confirmed_on>=l.hired_on THEN 'regular'
+			WHEN l.hired_on<>'' THEN 'probation' ELSE 'active' END AS hr_status,
 		CASE WHEN b.manager_override_id>0 THEN COALESCE(om.id,0)
 			WHEN tm.id IS NOT NULL THEN tm.id WHEN dm.id IS NOT NULL THEN dm.id ELSE 0 END AS manager_id,
 		CASE WHEN b.manager_override_id>0 THEN 'person'
 			WHEN tm.id IS NOT NULL THEN 'team' WHEN dm.id IS NOT NULL THEN 'department' ELSE '' END AS manager_source,
 		CASE WHEN b.manager_override_id>0 THEN COALESCE(om.display_name,'') ELSE COALESCE(tm.display_name,dm.display_name,'') END AS manager_name
-	FROM base b LEFT JOIN org_teams t ON t.id=b.team_id AND t.department_id=b.department_id AND t.enabled=1
+	FROM base b LEFT JOIN lifecycle l ON l.id=b.id LEFT JOIN org_teams t ON t.id=b.team_id AND t.department_id=b.department_id AND t.enabled=1
 	LEFT JOIN org_departments d ON d.id=b.department_id AND d.enabled=1
 	LEFT JOIN oa_office_org_managers ot ON ot.org_kind='team' AND ot.org_id=t.id AND d.id IS NOT NULL
 	LEFT JOIN oa_office_org_managers od ON od.org_kind='department' AND od.org_id=d.id
@@ -83,7 +102,7 @@ const directoryPeople = `WITH base AS (
 
 func directoryDates() []any {
 	today := businessDate().Format(time.DateOnly)
-	return []any{today, today, today}
+	return []any{today, today, today, today, today, today}
 }
 
 func (app office) effectiveManager(r *http.Request, id int64) (int64, error) {
@@ -93,8 +112,8 @@ func (app office) effectiveManager(r *http.Request, id int64) (int64, error) {
 }
 
 func (app office) applyProfile(ctx context.Context, p *person) error {
-	return app.db.QueryRowContext(ctx, directoryPeople+`SELECT manager_id,manager_override_id,manager_source,manager_name,joined,job_title,job_level,cost_center,profile_version FROM directory WHERE id=?`, append(directoryDates(), p.ID)...).
-		Scan(&p.ManagerID, &p.ManagerOverrideID, &p.ManagerSource, &p.ManagerName, &p.Joined, &p.JobTitle, &p.JobLevel, &p.CostCenter, &p.ProfileVersion)
+	return app.db.QueryRowContext(ctx, directoryPeople+`SELECT manager_id,manager_override_id,manager_source,manager_name,joined,job_title,job_level,cost_center,profile_version,employment_type FROM directory WHERE id=?`, append(directoryDates(), p.ID)...).
+		Scan(&p.ManagerID, &p.ManagerOverrideID, &p.ManagerSource, &p.ManagerName, &p.Joined, &p.JobTitle, &p.JobLevel, &p.CostCenter, &p.ProfileVersion, &p.EmploymentType)
 }
 
 func validProfile(input profileUpdate) bool {
@@ -166,18 +185,69 @@ func (app office) allowedManager(r *http.Request, actor platform.Actor, id int64
 
 func writeProfile(ctx context.Context, tx *sql.Tx, id, actor int64, input profileUpdate) error {
 	var version int64
-	err := tx.QueryRowContext(ctx, `SELECT version FROM oa_office_person_profiles WHERE user_id=? FOR UPDATE`, id).Scan(&version)
+	var oldJob, oldLevel, oldJoined string
+	var oldManager int64
+	err := tx.QueryRowContext(ctx, `SELECT version,job_title,job_level,COALESCE(DATE_FORMAT(joined,'%Y-%m-%d'),''),manager_id
+		FROM oa_office_person_profiles WHERE user_id=? FOR UPDATE`, id).Scan(&version, &oldJob, &oldLevel, &oldJoined, &oldManager)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if version != input.Version {
 		return errProfileVersion
 	}
+	input.JobTitle = strings.TrimSpace(input.JobTitle)
+	input.JobLevel = strings.TrimSpace(input.JobLevel)
 	_, err = tx.ExecContext(ctx, `INSERT INTO oa_office_person_profiles(user_id,version,manager_id,joined,job_title,job_level,cost_center,updated_by)
 		VALUES(?,?,?,NULLIF(?,''),?,?,?,?) ON DUPLICATE KEY UPDATE version=VALUES(version),manager_id=VALUES(manager_id),joined=VALUES(joined),
 		job_title=VALUES(job_title),job_level=VALUES(job_level),cost_center=VALUES(cost_center),updated_by=VALUES(updated_by)`,
-		id, version+1, input.ManagerID, input.Joined, strings.TrimSpace(input.JobTitle), strings.TrimSpace(input.JobLevel), strings.TrimSpace(input.CostCenter), actor)
-	return err
+		id, version+1, input.ManagerID, input.Joined, input.JobTitle, input.JobLevel, strings.TrimSpace(input.CostCenter), actor)
+	if err != nil {
+		return err
+	}
+	if input.EmergencyContact != nil || input.EmploymentType != nil {
+		contact := any(nil)
+		if input.EmergencyContact != nil {
+			contact = jsonData(input.EmergencyContact)
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO oa_office_person_contacts(user_id,payload,employment_type)
+			VALUES(?,COALESCE(?,JSON_OBJECT()),COALESCE(?,''))
+			ON DUPLICATE KEY UPDATE payload=COALESCE(?,payload),employment_type=COALESCE(?,employment_type)`,
+			id, contact, input.EmploymentType, contact, input.EmploymentType)
+		if err != nil {
+			return err
+		}
+	}
+	if oldJoined == "" && input.Joined != "" {
+		var exists bool
+		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM oa_office_people WHERE id=?
+			AND JSON_SEARCH(payload,'one','hire',NULL,'$.events[*].kind') IS NOT NULL)`, id).Scan(&exists)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if err := recordPersonEvent(ctx, tx, id, change{Kind: "hire_profile", EffectiveDate: input.Joined, ActorID: actor}); err != nil {
+				return err
+			}
+		}
+	}
+	day := input.EffectiveDate
+	if day == "" {
+		day = businessDate().Format(time.DateOnly)
+	}
+	if oldJob != input.JobTitle || oldLevel != input.JobLevel {
+		kind := "job_change"
+		if oldJob == input.JobTitle {
+			kind = "level_change"
+		}
+		if err := recordPersonEvent(ctx, tx, id, change{Kind: kind, EffectiveDate: day, ActorID: actor,
+			PreviousJobTitle: oldJob, PreviousJobLevel: oldLevel, JobTitle: input.JobTitle, JobLevel: input.JobLevel}); err != nil {
+			return err
+		}
+	}
+	if oldManager != input.ManagerID {
+		return recordPersonEvent(ctx, tx, id, change{Kind: "manager_change", EffectiveDate: day, ActorID: actor, ManagerID: input.ManagerID})
+	}
+	return nil
 }
 
 var errProfileVersion = errors.New("档案已变化，请刷新后重试")
@@ -206,16 +276,24 @@ func (app office) updateProfile(w http.ResponseWriter, r *http.Request) {
 		bad(w, "入职日期须为今日或过去，岗位、职级、成本中心各限 100 字")
 		return
 	}
+	if input.EmploymentType != nil && !slices.Contains([]string{"", "full_time", "part_time", "outsourced"}, *input.EmploymentType) {
+		bad(w, "用工类型无效")
+		return
+	}
+	if input.EmergencyContact != nil && !input.EmergencyContact.normalize() {
+		bad(w, "紧急联系人须同时填写姓名和电话")
+		return
+	}
+	if input.EffectiveDate != "" {
+		day, err := time.Parse(time.DateOnly, input.EffectiveDate)
+		if err != nil || day.Year() < 1000 || input.EffectiveDate > businessDate().Format(time.DateOnly) {
+			bad(w, "档案变更生效日期须为今日或过去")
+			return
+		}
+	}
 	if input.ManagerID == p.ID {
 		bad(w, errManagerInvalid.Error())
 		return
-	}
-	if input.ManagerID != 0 {
-		_, err = app.allowedManager(r, actor, input.ManagerID)
-		if err != nil {
-			profileFailure(w, err)
-			return
-		}
 	}
 	tx, err := app.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -226,6 +304,13 @@ func (app office) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if err = lockManagers(ctx, tx); err != nil {
 		internal(w)
 		return
+	}
+	if input.ManagerID != 0 {
+		_, err = app.allowedManager(r, actor, input.ManagerID)
+		if err != nil {
+			profileFailure(w, err)
+			return
+		}
 	}
 	if err = writeProfile(ctx, tx, p.ID, actor.ID, input); err != nil {
 		profileFailure(w, err)
@@ -245,6 +330,10 @@ func (app office) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := app.applyProfile(ctx, &p); err != nil {
+		internal(w)
+		return
+	}
+	if err := app.applyPersonRecords(r, &p); err != nil {
 		internal(w)
 		return
 	}
@@ -449,17 +538,49 @@ func pageValue(s string, fallback int) (int, error) {
 	return v, nil
 }
 
+func rosterOrder(field, direction string) (string, bool) {
+	order := " ASC"
+	switch direction {
+	case "", "asc":
+	case "desc":
+		order = " DESC"
+	default:
+		return "", false
+	}
+	switch field {
+	case "":
+		return "id", direction == ""
+	case "name":
+		return "(name=''),name" + order + ",id", true
+	case "employee_no":
+		return "(employee_no IS NULL),employee_no" + order + ",id", true
+	case "joined":
+		return "(joined=''),joined" + order + ",id", true
+	default:
+		return "", false
+	}
+}
+
 func (app office) rosterPeople(w http.ResponseWriter, r *http.Request) {
 	ctx, actor := r.Context(), platform.ActorFrom(r)
 	if !permit(actor, "people.manage") {
 		deny(w)
 		return
 	}
-	q := r.URL.Query()
+	q, queryErr := url.ParseQuery(r.URL.RawQuery)
+	if queryErr != nil {
+		bad(w, "花名册查询参数无效")
+		return
+	}
 	page, e1 := pageValue(q.Get("page"), 1)
 	size, e2 := pageValue(q.Get("page_size"), 25)
 	if e1 != nil || e2 != nil || size > 100 || page > 1000000 {
 		bad(w, "分页参数无效")
+		return
+	}
+	order, ok := rosterOrder(q.Get("sort"), q.Get("direction"))
+	if !ok {
+		bad(w, "花名册排序参数无效")
 		return
 	}
 	where, scopeArgs := rosterScope(actor)
@@ -488,10 +609,19 @@ func (app office) rosterPeople(w http.ResponseWriter, r *http.Request) {
 			args = append(args, id)
 		}
 	}
+	if hrStatus := q.Get("hr_status"); hrStatus != "" {
+		if !slices.Contains([]string{"active", "probation", "regular", "leaving", "left", "disabled"}, hrStatus) {
+			bad(w, "在职状态无效")
+			return
+		}
+		where += " AND hr_status=?"
+		args = append(args, hrStatus)
+	}
 	if employment := q.Get("employment_type"); employment != "" {
 		where += " AND employment_type=?"
 		args = append(args, employment)
 	}
+	countWhere := where
 	switch q.Get("missing") {
 	case "":
 	case "manager":
@@ -510,14 +640,20 @@ func (app office) rosterPeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	var managerMissing, joinedMissing, employeeMissing int
+	if err = tx.QueryRowContext(ctx, directoryPeople+`SELECT COALESCE(SUM(manager_id=0),0),COALESCE(SUM(joined=''),0),
+		COALESCE(SUM(employee_no IS NULL),0) FROM directory`+countWhere, args...).Scan(&managerMissing, &joinedMissing, &employeeMissing); err != nil {
+		internal(w)
+		return
+	}
 	var total int
 	if err = tx.QueryRowContext(ctx, directoryPeople+`SELECT COUNT(*) FROM directory`+where, args...).Scan(&total); err != nil {
 		internal(w)
 		return
 	}
-	rows, err := tx.QueryContext(ctx, directoryPeople+`SELECT id,name,employee_no,status,department_id,team_id,department,team,employment_type,joined,
+	rows, err := tx.QueryContext(ctx, directoryPeople+`SELECT id,name,employee_no,status,hr_status,department_id,team_id,department,team,employment_type,joined,
 		manager_override_id,manager_id,manager_source,manager_name,job_title,job_level,cost_center,profile_version
-		FROM directory`+where+` ORDER BY id LIMIT ? OFFSET ?`, append(args, size, (page-1)*size)...)
+		FROM directory`+where+" ORDER BY "+order+" LIMIT ? OFFSET ?", append(args, size, (page-1)*size)...)
 	if err != nil {
 		internal(w)
 		return
@@ -526,7 +662,7 @@ func (app office) rosterPeople(w http.ResponseWriter, r *http.Request) {
 	items := []person{}
 	for rows.Next() {
 		var p person
-		if err = rows.Scan(&p.ID, &p.Name, &p.EmployeeNo, &p.Status, &p.DepartmentID, &p.TeamID, &p.Department, &p.Team, &p.EmploymentType, &p.Joined,
+		if err = rows.Scan(&p.ID, &p.Name, &p.EmployeeNo, &p.Status, &p.HRStatus, &p.DepartmentID, &p.TeamID, &p.Department, &p.Team, &p.EmploymentType, &p.Joined,
 			&p.ManagerOverrideID, &p.ManagerID, &p.ManagerSource, &p.ManagerName, &p.JobTitle, &p.JobLevel, &p.CostCenter, &p.ProfileVersion); err != nil {
 			internal(w)
 			return
@@ -545,5 +681,5 @@ func (app office) rosterPeople(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
+	platform.JSON(w, 200, map[string]any{"items": items, "total": total, "page": page, "page_size": size, "completeness": map[string]int{"manager": managerMissing, "joined": joinedMissing, "employee_no": employeeMissing}})
 }

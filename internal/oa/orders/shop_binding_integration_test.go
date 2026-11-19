@@ -75,6 +75,8 @@ func TestShopBindingMutationControlsOrderScopeWithoutPersonnelAttribution(t *tes
 			ext.ExpectQuery("SELECT payload FROM oa_office_people WHERE id=.+FOR UPDATE").WithArgs(42).
 				WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(prior))
 			if expected == 200 {
+				ext.ExpectExec("INSERT INTO oa_office_person_events").WithArgs(42, 5, sqlmock.AnyArg(), "shop_transfer", sqlmock.AnyArg()).
+					WillReturnResult(sqlmock.NewResult(1, 1))
 				ext.ExpectExec("UPDATE oa_office_people SET version=").WithArgs(sqlmock.AnyArg(), &stored, 42).
 					WillReturnResult(sqlmock.NewResult(42, 1))
 				ext.ExpectCommit()

@@ -49,6 +49,18 @@ func (app office) handoverItems(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
+	rows.Close()
+	tx, err := app.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		internal(w)
+		return
+	}
+	defer tx.Rollback()
+	finance, err := app.financeHandoverSummary(r, tx, p.ID)
+	if err != nil || tx.Commit() != nil {
+		internal(w)
+		return
+	}
 	shops := []string{}
 	today := businessDate().Format(time.DateOnly)
 	if app.baseline != nil {
@@ -70,5 +82,5 @@ func (app office) handoverItems(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	slices.Sort(shops)
-	platform.JSON(w, 200, map[string]any{"items": items, "shops": shops})
+	platform.JSON(w, 200, map[string]any{"items": items, "shops": shops, "finance_handover": finance})
 }

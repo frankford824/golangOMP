@@ -31,6 +31,7 @@ func TestFinanceAdminsCanPublishWithoutDelegation(t *testing.T) {
 			t.Fatalf("template management: %d %s", w.Code, w.Body.String())
 		}
 		mock.ExpectBegin()
+		mock.ExpectQuery("SELECT version FROM oa_office_org_managers").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 		mock.ExpectExec("INSERT INTO oa_office_templates").WithArgs("test-travel").WillReturnResult(sqlmock.NewResult(1, 1))
 		mock.ExpectQuery("SELECT version FROM oa_office_templates").WithArgs("test-travel").
 			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(0))
@@ -90,9 +91,15 @@ func TestFinanceGrantListAndInactiveRevocation(t *testing.T) {
 	}
 
 	mock.ExpectExec("UPDATE oa_office_delegates SET level='none'").WithArgs(int64(12)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT version FROM oa_office_org_managers").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 	mock.ExpectExec("UPDATE oa_office_finance_actions SET can_pay=FALSE").WithArgs(int64(12)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT version FROM oa_office_org_managers").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 	mock.ExpectQuery("SELECT status FROM users").WithArgs(int64(12)).
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("inactive"))
+	mock.ExpectRollback()
 	for _, test := range []struct {
 		handler http.HandlerFunc
 		body    string

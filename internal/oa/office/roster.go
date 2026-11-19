@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ type rosterRow struct {
 	Name               string         `json:"name"`
 	Error              string         `json:"error"`
 	Profile            *profileUpdate `json:"profile,omitempty"`
+	PreviousProfile    *profileUpdate `json:"previous_profile,omitempty"`
 	PersonID           int64          `json:"id"`
 	Version            int            `json:"version"`
 	EmploymentType     string         `json:"employment_type"`
@@ -182,23 +184,42 @@ func (app office) previewPeople(w http.ResponseWriter, r *http.Request) {
 				row.Version = p.Version
 				row.Name = p.Name
 			}
-			if row.Error == "" && extended {
+			if row.Error == "" && sheet == "人员" {
 				if err := app.applyProfile(r.Context(), &p); err != nil {
 					internal(w)
 					return
 				}
-				input, err := app.rosterProfile(r, actor, p, values)
-				if errors.Is(err, errManagerInvalid) || errors.Is(err, errRosterProfile) || errors.Is(err, errManagerCycle) {
-					row.Error = err.Error()
-				} else if err != nil {
-					internal(w)
-					return
-				} else {
-					row.Profile = input
+				previousType := p.EmploymentType
+				previous := profileUpdate{Version: p.ProfileVersion, ManagerID: p.ManagerOverrideID, Joined: p.Joined,
+					JobTitle: p.JobTitle, JobLevel: p.JobLevel, CostCenter: p.CostCenter, EmploymentType: &previousType}
+				if extended {
+					input, err := app.rosterProfile(r, actor, p, values)
+					if errors.Is(err, errManagerInvalid) || errors.Is(err, errRosterProfile) || errors.Is(err, errManagerCycle) {
+						row.Error = err.Error()
+					} else if err != nil {
+						internal(w)
+						return
+					} else {
+						row.Profile = input
+					}
+				}
+				employment := values[3]
+				if employment != "" && employment != previousType {
+					if !slices.Contains([]string{"full_time", "part_time", "outsourced"}, employment) {
+						row.Error = "用工类型须为 full_time、part_time 或 outsourced"
+					} else {
+						if row.Profile == nil {
+							copy := previous
+							row.Profile = &copy
+						}
+						row.Profile.EmploymentType = &employment
+					}
+				}
+				if row.Profile != nil {
+					row.PreviousProfile = &previous
 				}
 			}
 			if row.Error == "" && sheet == "人员" {
-				row.EmploymentType = values[3]
 				row.PreviousEmployeeNo = p.EmployeeNo
 				row.PreviousName = p.Name
 				if values[1] != "" {
@@ -226,9 +247,6 @@ func (app office) previewPeople(w http.ResponseWriter, r *http.Request) {
 					} else {
 						row.NewName = values[2]
 					}
-				}
-				if len(row.EmploymentType) > 48 {
-					row.Error = "用工类型过长"
 				}
 			} else if row.Error == "" {
 				row.ShopID = values[1]
@@ -431,7 +449,13 @@ func (app office) confirmPeople(w http.ResponseWriter, r *http.Request) {
 		if row.ShopID != "" {
 			prior := len(p.Terms)
 			addTerm(&p, row.ShopID, row.From)
-			dirty = len(p.Terms) != prior || dirty
+			if len(p.Terms) != prior {
+				if err := recordPersonEvent(ctx, tx, p.ID, change{Kind: "shop_transfer", EffectiveDate: row.From, ActorID: actor.ID, ShopID: row.ShopID}); err != nil {
+					internal(w)
+					return
+				}
+				dirty = true
+			}
 		}
 		if dirty {
 			p.Version++

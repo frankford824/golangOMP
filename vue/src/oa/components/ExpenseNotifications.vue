@@ -125,11 +125,11 @@ watch(() => activity.revision, load)
     <p v-if="loading" role="status">正在加载费用动态…</p>
     <div v-else-if="error" role="alert"><p>{{ error }}</p><button type="button" class="oa-button" @click="refresh">重新加载</button></div>
     <ul v-else-if="items.length">
-      <li v-for="item in items" :key="item.payload.kind === 'result' ? item.id : item.payload.document_id">
+      <li v-for="item in items" :key="tab === 'results' ? item.id : item.payload.document_id">
         <RouterLink :to="documentLocation(item)" @click="openItem($event, item)">
           <strong>{{ item.payload.title || '费用单据' }} <span v-if="item.unread" class="expense-unread">未读</span></strong>
           <span :class="['expense-status', 'oa-state-' + item.payload.state]">
-            {{ item.payload.kind === 'result' ? (resultLabels[item.payload.state] || '状态更新') : actionLabels[item.payload.kind] }}
+            {{ item.payload.kind === 'cc' ? '抄送 · ' + (resultLabels[item.payload.state] || '状态更新') : item.payload.kind === 'result' ? (resultLabels[item.payload.state] || '状态更新') : actionLabels[item.payload.kind] }}
           </span>
           <time :datetime="item.created_at">{{ feeDateTime(item.created_at) }}</time>
         </RouterLink>

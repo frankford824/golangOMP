@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import BaseSelect from '@/components/base/BaseSelect.vue'
+import OaDateField from '../components/OaDateField.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useOAAccess } from '../access'
@@ -18,6 +20,14 @@ const bases: Record<string, string> = { submitted: '首次提交日期', approve
 const groups: Record<string, string> = {
   department: '部门', team: '团队', person: '申请人', site: '店铺', template: '模板', payee: '收款方',
   channel: '付款渠道', status: '单据状态',
+}
+function choices(values: Record<string,string>, all = false) {
+  const options = Object.entries(values).map(([value,label]) => ({value,label}))
+  return all ? [{value:'',label:'全部'}, ...options] : options
+}
+function paidShare(paid: string, total: string) {
+  const denominator = BigInt(total || '0')
+  return denominator > 0n ? Number(BigInt(paid || '0') * 1000n / denominator) / 10 : null
 }
 const metrics = [
   { key: 'requested_cents', label: '申请金额' }, { key: 'approved_cents', label: '核准金额' },
@@ -85,6 +95,7 @@ function filtersFromRoute() {
   return {
     basis: queryString('basis') || (report.value ? 'paid' : 'submitted'),
     group_by: queryString('group_by') || 'department',
+    sort: queryString('sort') || 'date', order: queryString('order') || 'desc',
     start: queryString('start') || defaults.start, end: queryString('end') || defaults.end,
     state: queryString('state'), q: queryString('q'), template: queryString('template'), expense_type: queryString('expense_type'),
     department: queryString('department'), team: queryString('team'), person: queryString('person'),
@@ -195,16 +206,18 @@ async function exportReport() {
     <form class="finance-filters oa-panel" aria-label="筛选费用单据" @submit.prevent="search">
       <div class="finance-fields">
         <label>搜索<input v-model="form.q" type="search" :placeholder="report ? '单号、用途、收款方、人员、模板' : '单号、人员、模板、组织、店铺'" maxlength="80"></label>
-        <label>状态<select v-model="form.state"><option value="">全部</option><option v-for="(label, state) in states" :key="state" :value="state">{{ label }}</option></select></label>
-        <label>日期口径<select v-model="form.basis"><option v-for="(label, key) in bases" :key="key" :value="key">{{ label }}</option></select></label>
-        <label>开始日期<input v-model="form.start" type="date"></label>
-        <label>结束日期<input v-model="form.end" type="date"></label>
-        <label v-if="report">汇总维度<select v-model="form.group_by"><option v-for="(label, key) in groups" :key="key" :value="key">{{ label }}</option></select></label>
+        <BaseSelect v-model="form.state" label="状态" :options="choices(states, true)" />
+        <BaseSelect v-model="form.basis" label="日期口径" :options="choices(bases)" />
+        <OaDateField v-model="form.start" label="开始日期" />
+        <OaDateField v-model="form.end" label="结束日期" />
+        <BaseSelect v-if="report" v-model="form.group_by" label="汇总维度" :options="choices(groups)" />
       </div>
       <details class="finance-advanced">
         <summary>更多筛选</summary>
         <div class="finance-fields">
-          <label>费用类型<select v-model="form.expense_type"><option value="">全部</option><option value="reimbursement">报销</option><option value="payment">付款</option></select></label>
+          <BaseSelect v-model="form.expense_type" label="费用类型" :options="choices({reimbursement:'报销',payment:'付款'}, true)" />
+          <BaseSelect v-model="form.sort" label="明细排序" :options="choices({date:'所选口径日期',amount:'申请金额'})" />
+          <BaseSelect v-model="form.order" label="顺序" :options="choices({desc:'从高到低',asc:'从低到高'})" />
           <label>模板<input v-model="form.template" placeholder="模板全称" maxlength="80"></label>
           <label>部门<input v-model="form.department" placeholder="部门全称" maxlength="80"></label>
           <label>团队<input v-model="form.team" placeholder="团队全称" maxlength="80"></label>
@@ -222,7 +235,7 @@ async function exportReport() {
       </div>
       <p v-if="formError" role="alert">{{ formError }}</p>
     </form>
-    <p v-if="loading" role="status">正在读取费用单据…</p>
+    <div v-if="loading" class="finance-loading oa-panel" role="status"><span>正在读取费用单据…</span><i v-for="n in 3" :key="n" aria-hidden="true"></i></div>
     <div v-else-if="error" class="oa-panel finance-message" role="alert">
       <p>{{ error }}</p>
       <button type="button" class="oa-button" @click="load">重试</button>
@@ -239,10 +252,11 @@ async function exportReport() {
         <div v-if="result.groups?.length" class="oa-panel finance-table" tabindex="0" role="region" aria-label="分组汇总表">
           <table class="oa-table">
             <caption>按{{ groups[filtersFromRoute().group_by] }}汇总</caption>
-            <thead><tr><th scope="col">{{ groups[filtersFromRoute().group_by] }}</th><th scope="col">单据数</th><th v-for="m in metrics" :key="m.key" scope="col">{{ m.label }}</th></tr></thead>
+            <thead><tr><th scope="col">{{ groups[filtersFromRoute().group_by] }}</th><th scope="col">实付占比</th><th scope="col">单据数</th><th v-for="m in metrics" :key="m.key" scope="col">{{ m.label }}</th></tr></thead>
             <tbody>
               <tr v-for="group in result.groups" :key="group.key">
                 <th scope="row">{{ (filtersFromRoute().group_by === 'status' ? states[group.label] : group.label) || (filtersFromRoute().group_by === 'person' ? '账号 #' + group.key : '未记录') }}</th>
+                <td class="paid-share"><template v-if="paidShare(group.paid_cents, result.summary.paid_cents) !== null"><progress max="100" :value="paidShare(group.paid_cents,result.summary.paid_cents) ?? 0" aria-label="实付金额占比" /> {{ paidShare(group.paid_cents,result.summary.paid_cents) }}%</template><template v-else>—</template></td>
                 <td>{{ group.count }}</td><td v-for="m in metrics" :key="m.key">{{ amount(group[m.key]) }}</td>
               </tr>
             </tbody>
@@ -308,4 +322,8 @@ async function exportReport() {
 .finance-table span { display: block; color: var(--oa-muted); }
 .finance-table a { text-decoration: underline; }
 .finance-pagination { justify-content: flex-end; }
+.finance-loading { display:grid; gap:8px; padding:16px; color:var(--oa-muted); }
+.finance-loading i { height:12px; width:80%; background:var(--yb-line-hairline); border-radius:4px; }
+.finance-loading i:nth-child(3){width:60%}
+.paid-share progress { width:64px; accent-color:var(--oa-accent); vertical-align:middle; }
 </style>

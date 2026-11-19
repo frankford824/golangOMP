@@ -19,6 +19,9 @@ function confirm() {
       <dl v-if="config.facts?.length">
         <div v-for="[key, value] in config.facts" :key="key"><dt>{{ key }}</dt><dd>{{ value || '—' }}</dd></div>
       </dl>
+      <div v-if="config.reasonChoices?.length" class="oa-actions" aria-label="快捷退回意见">
+        <button v-for="choice in config.reasonChoices" :key="choice" type="button" @click="reason = choice">{{ choice }}</button>
+      </div>
       <label v-if="config.reasonLabel">{{ config.reasonLabel }}<textarea v-model="reason" required rows="3" maxlength="2000" /></label>
     </div>
     <template #footer><footer class="fee-confirm-actions">

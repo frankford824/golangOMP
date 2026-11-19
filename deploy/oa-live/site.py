@@ -4,6 +4,26 @@ import re
 import sys
 from pathlib import Path
 
+# nginx inherits add_header only when the child defines no headers of its own.
+def secure_headers(vhost):
+    directives = {
+        'Strict-Transport-Security': 'max-age=31536000',
+        'X-Frame-Options': 'SAMEORIGIN',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Content-Security-Policy': "base-uri 'self'; frame-ancestors 'self'; object-src 'self' blob:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; form-action 'self'",
+    }
+    names = '|'.join(map(re.escape, directives))
+    vhost = re.sub(r'^\s*add_header\s+(?:'+names+r')\s+[^;\n]+;[ \t]*$', '', vhost, flags=re.M|re.I)
+    def headers(indent):
+        return '\n'.join(f'{indent}add_header {name} "{value}" always;' for name,value in directives.items())
+    # The copied vhost has flat location blocks. Preserve native cache headers.
+    def location(match):
+        block = match.group()
+        return block[:-1] + headers('        ') + '\n    }' if re.search(r'^\s*add_header\s+', block, re.M) else block
+    vhost = re.sub(r'^    location[^\n]*\{[^{}]*?^    \}', location, vhost, flags=re.M|re.S)
+    return vhost.replace('server {', 'server {\n'+headers('    '), 1)
+
 def render(text,root,previous=None):
     servers=re.findall(r'^server\s*\{.*?^\}',text,re.M|re.S)
     choices=[s for s in servers if re.search(r'^\s*server_name\s+yongbo\.cloud;',s,re.M) and re.search(r'listen\s+443\s+ssl',s)]
@@ -15,6 +35,7 @@ def render(text,root,previous=None):
     vhost=vhost.replace('server_name yongbo.cloud;','server_name oa.yongbo.cloud;').replace('/etc/letsencrypt/live/yongbo.cloud/','/etc/letsencrypt/live/oa.yongbo.cloud/').replace('root /var/www/yongbo.cloud;',f'root {root};')
     extra="""
     proxy_cookie_domain yongbo.cloud oa.yongbo.cloud;
+    location = /oa-api/health { return 404; }
     location ^~ /oa-api/ {
         proxy_pass http://127.0.0.1:18095;
         proxy_http_version 1.1;
@@ -51,6 +72,6 @@ def render(text,root,previous=None):
     location ^~ /.well-known/acme-challenge/ { root /var/www/certbot; try_files $uri =404; }
     location / { return 301 https://oa.yongbo.cloud$request_uri; }
 }
-"""+vhost[:-1]+extra+"}\n"
+"""+secure_headers(vhost[:-1]+extra+"}\n")
 if __name__=='__main__':
     print(render(Path(sys.argv[1]).read_text(),'/srv/yongbo-oa-live/current/web',sys.argv[2] if len(sys.argv)>2 else None))

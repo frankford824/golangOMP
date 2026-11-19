@@ -28,6 +28,10 @@ func (app office) financeGrants(w http.ResponseWriter, r *http.Request) {
 		deny(w)
 		return
 	}
+	if len(r.URL.Query()) != 0 {
+		app.financeGrantsPage(w, r, "")
+		return
+	}
 	items, err := app.readFinanceGrants(r)
 	if err != nil {
 		internal(w)

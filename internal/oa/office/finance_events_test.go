@@ -65,6 +65,9 @@ func TestFinanceDocumentTransitions(t *testing.T) {
 				ApprovedAmount: tc.approvedAmount,
 			}
 			mock.ExpectBegin()
+			if tc.action == "decision" {
+				mock.ExpectQuery("SELECT version FROM oa_office_org_managers").WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+			}
 			mock.ExpectQuery("SELECT payload FROM oa_office_documents WHERE id=.+FOR UPDATE").
 				WithArgs(doc.ID).WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(jsonData(doc)))
 			if tc.paymentReceipt {

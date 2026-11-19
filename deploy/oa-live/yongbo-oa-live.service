@@ -7,6 +7,7 @@ Group=yongbo-oa-live
 WorkingDirectory=/srv/yongbo-oa-live/current
 ExecStart=/srv/yongbo-oa-live/current/oa-extension
 EnvironmentFile=/etc/yongbo-oa-live/service.env
+EnvironmentFile=/etc/yongbo-oa-live/office-key.env
 StateDirectory=yongbo-oa-live
 StateDirectoryMode=0700
 UMask=0077

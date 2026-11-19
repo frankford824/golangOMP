@@ -8,6 +8,9 @@ export interface UserRow {
   username: string
   employee_no?: number | null
   display_name?: string
+  mobile?: string
+  email?: string
+  avatar_url?: string
   department?: string
   team?: string
   status?: 'active' | 'disabled' | string

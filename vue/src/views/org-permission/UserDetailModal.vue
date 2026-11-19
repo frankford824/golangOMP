@@ -3,9 +3,11 @@
     <div ref="panel" class="modal-panel um-modal user-detail" :class="{ 'user-detail-oa': oaEnabled }" role="dialog" aria-modal="true" aria-labelledby="user-detail-title">
       <header class="modal-header">
         <div class="modal-heading">
+          <img v-if="oaEnabled && user.avatar_url" class="detail-avatar" :src="user.avatar_url" alt="" />
           <component :is="oaEnabled ? 'h2' : 'h3'" id="user-detail-title" class="section-title">{{ user.display_name || user.username }}</component>
           <div class="detail-identity">
             <span>{{ user.username }} · {{ formatEmployeeNo(user.employee_no) }}</span>
+            <span v-if="canViewTerms">{{ [user.department, user.team].filter(Boolean).join(' / ') || '未分配' }}<template v-if="managerName"> · 直属负责人 {{ managerName }}</template></span>
             <span class="detail-status" :class="{ 'detail-status--active': user.status === 'active' }">
               {{ user.status === 'active' ? '已启用' : formatUserStatusForDisplay(user.status) }}
             </span>
@@ -45,6 +47,10 @@
                   <input v-model.trim="basicForm.employee_no" class="input" inputmode="numeric" placeholder="0–9999" :disabled="!canEditBasicInfo || busy" />
                 </label>
               </div>
+              <div v-if="oaEnabled" class="detail-grid">
+                <label class="field-label"><span>手机号</span><input v-model.trim="basicForm.mobile" class="input" type="tel" maxlength="40" :disabled="!canEditBasicInfo || busy" /></label>
+                <label class="field-label"><span>邮箱</span><input v-model.trim="basicForm.email" class="input" type="email" maxlength="128" :disabled="!canEditBasicInfo || busy" /></label>
+              </div>
               <div v-if="canEditBasicInfo" class="detail-actions">
                 <button type="submit" class="um-btn um-btn--ghost" :disabled="busy || !isBasicDirty">{{ basicSubmitting ? '保存中…' : '保存基本信息' }}</button>
               </div>
@@ -76,7 +82,7 @@
             </form>
             <p v-else class="detail-note">{{ [user.department, user.team].filter(Boolean).join(' / ') || '未分配' }}</p>
           </section>
-          <PersonnelProfile v-if="canViewTerms && activeTab === 'profile'" :key="user.id" :user-id="user.id" />
+          <PersonnelProfile v-if="canViewTerms && activeTab === 'profile'" :key="user.id" :user-id="user.id" native-contacts @loaded="managerName = $event" />
         </div>
 
         <div v-show="activeTab === 'roles'" id="user-detail-panel-roles" class="modal-body" role="tabpanel" aria-labelledby="user-detail-tab-roles">
@@ -141,10 +147,14 @@
         </div>
 
         <div v-if="canViewTerms && termsVisited" v-show="activeTab === 'terms'" id="user-detail-panel-terms" class="modal-body detail-terms-panel" role="tabpanel" aria-labelledby="user-detail-tab-terms">
-          <PersonnelTerms :key="user.id" :user-id="user.id" />
+          <PersonnelTerms :key="user.id" :user-id="user.id" mode="shops" @loaded="managerName = $event.manager_name || ''" />
         </div>
 
-        <div v-if="hasSecurity" v-show="activeTab === 'security'" id="user-detail-panel-security" class="modal-body" role="tabpanel" aria-labelledby="user-detail-tab-security">
+        <div v-if="canViewTerms ? activeTab === 'records' : hasSecurity" v-show="activeTab === 'records' || activeTab === 'security'"
+          :id="canViewTerms ? 'user-detail-panel-records' : 'user-detail-panel-security'" class="modal-body" role="tabpanel"
+          :aria-labelledby="canViewTerms ? 'user-detail-tab-records' : 'user-detail-tab-security'">
+          <PersonnelTerms v-if="canViewTerms && !confirmDisable && !confirmDelete" :key="user.id" :user-id="user.id" mode="records" @loaded="managerName = $event.manager_name || ''" />
+          <template v-if="hasSecurity">
           <template v-if="!confirmDelete && !confirmDisable">
             <section v-if="canResetPassword" class="detail-section">
               <h4>重置密码</h4>
@@ -177,9 +187,10 @@
               <h4 id="confirm-disable-title">确认停用账号</h4>
               <p>{{ user.display_name || user.username }}（{{ user.username }}） · {{ formatEmployeeNo(user.employee_no) }}</p>
               <p class="detail-note">停用后，此人无法登录。管理员可以重新启用该账号。</p>
+              <PersonnelFinanceHandover v-if="oaEnabled" :user-id="user.id" @ready="disableReady = $event" />
               <div class="detail-actions">
                 <button ref="cancelDisableButton" type="button" class="um-btn um-btn--ghost" :disabled="busy" @click="cancelDisable">取消</button>
-                <button type="button" class="um-btn detail-danger-solid" :disabled="busy" @click="disableAccount">确认停用账号</button>
+                <button type="button" class="um-btn detail-danger-solid" :disabled="busy || (oaEnabled && !disableReady)" @click="disableAccount">确认停用账号</button>
               </div>
             </section>
           <section v-else-if="confirmDelete" class="detail-section detail-confirm">
@@ -191,6 +202,7 @@
               <button type="button" class="um-btn detail-danger-solid" :disabled="deleting" @click="emit('delete-user')">{{ deleting ? '删除中…' : '确认删除' }}</button>
             </div>
           </section>
+          </template>
         </div>
         <p v-if="actionMessage" class="detail-feedback" role="status">{{ actionMessage }}</p>
       </template>
@@ -213,6 +225,7 @@ import {
 } from './userManagementTypes'
 
 const PersonnelProfile = defineAsyncComponent(() => import('@/oa/components/PersonnelProfile.vue'))
+const PersonnelFinanceHandover = defineAsyncComponent(() => import('@/oa/components/PersonnelFinanceHandover.vue'))
 const PersonnelTerms = defineAsyncComponent(() => import('@/oa/components/PersonnelTerms.vue'))
 
 const props = defineProps<{
@@ -232,7 +245,7 @@ const props = defineProps<{
   isBasicDirty: boolean
   isRolesDirty: boolean
   deleting: boolean
-  basicForm: { display_name: string; employee_no: string }
+  basicForm: { display_name: string; employee_no: string; mobile?: string; email?: string }
   membershipForm: { department: string; team: string }
   membershipDepartmentOptions: SelectOptionItem[]
   membershipTeamOptions: SelectOptionItem[]
@@ -265,15 +278,18 @@ const emit = defineEmits<{
 const selectedRoles = defineModel<string[]>('selectedRoles', { required: true })
 const newPassword = defineModel<string>('newPassword', { required: true })
 
-type DetailTab = 'profile' | 'roles' | 'terms' | 'security'
+type DetailTab = 'profile' | 'roles' | 'terms' | 'records' | 'security'
 function supportedTab(tab?: DetailTab): DetailTab {
   if (tab === 'terms' && props.canViewTerms) return tab
+  if ((tab === 'records' || tab === 'security') && props.canViewTerms) return 'records'
   if (tab === 'roles') return tab
   if (tab === 'security' && (props.canResetPassword || props.canDisableUser || props.canDeleteUser)) return tab
   return 'profile'
 }
 const activeTab = ref<DetailTab>(supportedTab(props.initialTab))
 const termsVisited = ref(activeTab.value === 'terms')
+const managerName = ref('')
+const disableReady = ref(false)
 const confirmDelete = ref(false)
 const confirmDisable = ref(false)
 const statusButton = ref<HTMLButtonElement | null>(null)
@@ -284,10 +300,10 @@ const cancelButton = ref<HTMLButtonElement | null>(null)
 const busy = computed(() => props.deleting || props.basicSubmitting || props.membershipSubmitting || props.roleSubmitting || props.passwordSubmitting || props.statusSubmitting)
 const hasSecurity = computed(() => props.canResetPassword || props.canDisableUser || props.canDeleteUser)
 const tabs = computed<{ id: DetailTab; label: string }[]>(() => [
-  { id: 'profile', label: '资料与归属' },
-  { id: 'roles', label: '角色权限' },
-  ...(props.canViewTerms ? [{ id: 'terms' as const, label: '任职与交接' }] : []),
-  ...(hasSecurity.value ? [{ id: 'security' as const, label: '账号安全' }] : []),
+  { id: 'profile', label: props.canViewTerms ? '档案信息' : '资料与归属' },
+  { id: 'roles', label: props.canViewTerms ? '权限与角色' : '角色权限' },
+  ...(props.canViewTerms ? [{ id: 'terms' as const, label: '店铺与任职' }] : []),
+  ...(props.canViewTerms ? [{ id: 'records' as const, label: '异动与交接' }] : hasSecurity.value ? [{ id: 'security' as const, label: '账号安全' }] : []),
 ])
 
 function selectTab(id: DetailTab) {
@@ -328,6 +344,7 @@ async function requestStatusChange() {
     return
   }
   emit('clear-message')
+  disableReady.value = false
   confirmDisable.value = true
   await nextTick()
   cancelDisableButton.value?.focus()
@@ -378,7 +395,9 @@ useModalA11y(ref(true), panel, { onEsc: () => confirmDisable.value ? void cancel
   font-size: 14px;
   line-height: 1.6;
   border-radius: 8px;
+  width: min(700px, calc(100vw - 2rem));
 }
+.detail-avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
 :global(html.oa-live-ui body .user-detail-oa .section-title) { font-size: 16px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
 :global(html.oa-live-ui body .user-detail-oa :is(h4, h5)) { font-size: 14px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
 :global(html.oa-live-ui body .user-detail-oa :is(.detail-note, .detail-identity, .role-check em)) { color: var(--oa-text-secondary, rgb(var(--yb-text-muted))); font-size: 12px; }

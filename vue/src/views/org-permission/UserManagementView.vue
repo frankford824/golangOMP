@@ -177,15 +177,15 @@
               </div>
               <div class="directory-actions">
                 <BaseButton
-                  v-if="!oaEnabled && canManageAccess && !batchSelectMode"
+                  v-if="canManageAccess && !batchSelectMode"
                   variant="secondary"
                   size="sm"
                   :disabled="listLoading || !eligibleBatchUsers.length"
                   @click="batchSelectMode = true"
-                >批量删除</BaseButton>
+                >{{ oaEnabled ? '批量操作' : '批量删除' }}</BaseButton>
               </div>
             </div>
-            <div v-if="oaEnabled ? selectedBatchUsers.length > 0 : batchSelectMode" class="batch-selection-bar">
+            <div v-if="batchSelectMode" class="batch-selection-bar">
               <span v-if="oaEnabled">已选 {{ selectedBatchUsers.length }} 人</span>
               <span v-else>已选本页 {{ selectedBatchUsers.length }} 个账号</span>
               <div class="directory-actions">
@@ -501,7 +501,7 @@ import {
 import { usePermissionsStore } from '@/stores/permissions'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { goBackTo } from '@/oa/returnNavigation'
-import { directoryQuery, positiveQueryNumber } from '@/oa/peopleNavigation'
+import { directoryQuery, positiveQueryNumber, rosterReturnSource } from '@/oa/peopleNavigation'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import { api as oaApi, dateInChina, send as oaSend } from '@/oa/api'
 import { coreUserRoleGroups, planOARoleReplacement } from '@/oa/userRoles'
@@ -572,7 +572,7 @@ const orgFiltersOpen = ref(false)
 let directoryResize: ResizeObserver | undefined
 const batchSelectMode = ref(false)
 const directoryScrollWidth = computed(() =>
-  (compactDirectory.value ? 240 : 744) + ((batchSelectMode.value || (oaEnabled && selectedBatchUsers.value.length > 0)) ? 42 : 0),
+  (compactDirectory.value ? 240 : 744) + (batchSelectMode.value ? 42 : 0),
 )
 const batchSelectedIDs = ref<string[]>([])
 const eligibleBatchUsers = computed(() => users.value.filter(canSelectForDeletion))
@@ -597,7 +597,7 @@ const passwordSubmitting = ref(false)
 const basicSubmitting = ref(false)
 const detailActionMessage = ref('')
 const resetPasswordValue = ref('')
-const basicForm = ref<{ display_name: string; employee_no: string }>({ display_name: '', employee_no: '' })
+const basicForm = ref({ display_name: '', employee_no: '', mobile: '', email: '' })
 const accessRoles = ref<AccessRole[]>([])
 const accessPolicyRevision = ref(0)
 const detailEffectiveAccess = ref<EffectiveAccess | null>(null)
@@ -1143,7 +1143,7 @@ const orgActionConfirmText = computed(() => {
   return '确认停用'
 })
 const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
-  const selectionColumn: DataTableColumns<UserRow> = (batchSelectMode.value || (oaEnabled && canManageAccess.value)) ? [{
+  const selectionColumn: DataTableColumns<UserRow> = batchSelectMode.value ? [{
     key: 'batch-selection',
     width: 42,
     fixed: 'left',
@@ -1297,6 +1297,7 @@ const isMembershipDirty = computed(() => {
 const isBasicDirty = computed(() => !!detailUser.value && (
   basicForm.value.display_name !== (detailUser.value.display_name ?? '')
   || basicForm.value.employee_no !== (detailUser.value.employee_no == null ? '' : String(detailUser.value.employee_no))
+  || (oaEnabled && (basicForm.value.mobile !== (detailUser.value.mobile || '') || basicForm.value.email !== (detailUser.value.email || '')))
 ))
 
 function mapRawUser(raw: Record<string, unknown>): UserRow {
@@ -1313,6 +1314,9 @@ function mapRawUser(raw: Record<string, unknown>): UserRow {
     username: String(raw.username ?? ''),
     employee_no: employeeNo,
     display_name: typeof raw.display_name === 'string' ? raw.display_name : undefined,
+    mobile: typeof raw.mobile === 'string' ? raw.mobile : undefined,
+    email: typeof raw.email === 'string' ? raw.email : undefined,
+    avatar_url: typeof raw.avatar_url === 'string' ? raw.avatar_url : undefined,
     department: typeof raw.department === 'string' ? raw.department : undefined,
     team: typeof raw.team === 'string' ? raw.team : (typeof raw.group === 'string' ? raw.group : undefined),
     status: typeof raw.status === 'string' ? raw.status : undefined,
@@ -1726,6 +1730,7 @@ async function openDetail(u: UserRow | string) {
     basicForm.value = {
       display_name: detailUser.value.display_name ?? '',
       employee_no: detailUser.value.employee_no == null ? '' : String(detailUser.value.employee_no),
+      mobile: detailUser.value.mobile || '', email: detailUser.value.email || '',
     }
     membershipForm.value = {
       department: detailUser.value.department ?? '',
@@ -1751,10 +1756,10 @@ async function openDetail(u: UserRow | string) {
   }
 }
 
-type PersonDetailTab = 'profile' | 'roles' | 'terms' | 'security'
+type PersonDetailTab = 'profile' | 'roles' | 'terms' | 'records' | 'security'
 const requestedDetailTab = computed<PersonDetailTab>(() => {
   const tab = oaRoute?.query.tab
-  return tab === 'roles' || tab === 'terms' || tab === 'security' ? tab : 'profile'
+  return tab === 'roles' || tab === 'terms' || tab === 'records' || tab === 'security' ? tab : 'profile'
 })
 
 function listLocationQuery() {
@@ -1788,7 +1793,8 @@ function clearDetail() {
 
 function closeDetail() {
   if (oaRoute?.query.user_id && oaRouter) {
-    void goBackTo(oaRouter, { name: 'UserManagement', query: directoryQuery(oaRoute.query) })
+    const roster = rosterReturnSource(oaRoute.query.rosterFrom)
+    void goBackTo(oaRouter, roster || { name: 'UserManagement', query: directoryQuery(oaRoute.query) })
   } else clearDetail()
 }
 
@@ -1797,7 +1803,7 @@ async function refreshDetailAndList(userId: string, section: 'basic' | 'membersh
   if (detailUser.value?.id === userId) {
     detailUser.value = user
     if (section === 'basic') {
-      basicForm.value = { display_name: user.display_name ?? '', employee_no: user.employee_no == null ? '' : String(user.employee_no) }
+      basicForm.value = { display_name: user.display_name ?? '', employee_no: user.employee_no == null ? '' : String(user.employee_no), mobile: user.mobile || '', email: user.email || '' }
     }
     if (section === 'membership') {
       membershipForm.value = { department: user.department ?? '', team: user.team ?? '' }
@@ -1962,6 +1968,7 @@ async function submitBasicInfo() {
   try {
     await usersApi.patch(detailUser.value.id, {
       display_name: displayName,
+      ...(oaEnabled ? { mobile: basicForm.value.mobile, email: basicForm.value.email } : {}),
       ...(employeeNo == null ? {} : { employee_no: employeeNo }),
     })
     await refreshDetailAndList(detailUser.value.id, 'basic')
@@ -1979,7 +1986,8 @@ async function setUserStatus(next: 'active' | 'disabled') {
   detailActionMessage.value = ''
   try {
     if (next === 'disabled') {
-      await usersApi.deactivate(detailUser.value.id)
+      if (oaEnabled) await oaSend('/oa-api/people/' + detailUser.value.id + '/deactivate', {})
+      else await usersApi.deactivate(detailUser.value.id)
     } else {
       await usersApi.activate(detailUser.value.id)
     }
@@ -1998,11 +2006,11 @@ async function submitMembership() {
   membershipSubmitting.value = true
   detailActionMessage.value = ''
   try {
-    await patchUserMembership(
-      detailUser.value.id,
-      membershipForm.value.department,
-      membershipForm.value.team,
-    )
+    if (oaEnabled && canManagePeople.value) {
+      await oaSend('/oa-api/people/' + detailUser.value.id + '/membership', membershipForm.value)
+    } else {
+      await patchUserMembership(detailUser.value.id, membershipForm.value.department, membershipForm.value.team)
+    }
     await refreshDetailAndList(detailUser.value.id, 'membership')
     // 归属变化会改变组织人数,同步刷新树上的人数徽标。
     void loadOrgOptions()
@@ -2023,7 +2031,8 @@ async function clearMembership() {
     // 不能再发 `{department:'', team:''}`（后端 validateDepartment("") 返回 400
     // "department is required"）。统一走 `team:'ungrouped'` 别名，由后端把
     // department 覆盖为 DepartmentUnassigned 并解析未分配池 team。
-    await clearUserMembership(detailUser.value.id)
+    if (oaEnabled && canManagePeople.value) await oaSend('/oa-api/people/' + detailUser.value.id + '/membership', { team: 'ungrouped' })
+    else await clearUserMembership(detailUser.value.id)
     await refreshDetailAndList(detailUser.value.id, 'membership')
     void loadOrgOptions()
     detailActionMessage.value = '已移到未分配池'

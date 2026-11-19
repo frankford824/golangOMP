@@ -2,7 +2,7 @@ import { onBeforeUnmount, shallowRef } from 'vue'
 
 export type FeeConfirmation = {
   title: string; message?: string; facts?: [string, string][]; confirmText: string
-  danger?: boolean; reasonLabel?: string
+  danger?: boolean; reasonLabel?: string; reasonChoices?: string[]
 }
 export type ConfirmationResult = { reason: string } | null
 

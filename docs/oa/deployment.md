@@ -18,3 +18,7 @@ OA 使用现有 main-ops 的 `index.html`、AppShell、路由、登录组件及�
 4. 通过 `/oa-release.json` 核实版本，检查三站 HTTPS、正式 API 的同源公开数据、无凭证拒绝以及 ClickHouse 水位。生产验收不进行演示入职、离职、改价、报销、付款或结算。需要端到端写验证时使用本地 fixture。所有者认可后另行决定是否把主站默认前端切换到新版；OA 发布不会自动切换主站。
 
 接口见 `docs/api/oa-openapi.yaml`、`docs/oa/orders.md` 和 `docs/oa/office.md`。
+
+## 费用与人事 P1 发布
+
+通过正式迁移台账只应用 156、157、158 的正向段，然后使用原数据库部署环境执行 `python3 deploy/oa-live/provision.py --office-p1`。该模式向现有 OA 账号增量授权；在首次启用时生成 `/etc/yongbo-oa-live/office-key.env`（0600），之后发布继续沿用原密钥。恢复含草稿或账户的数据库时必须同时恢复该密钥，不能替换为随机新密钥。预览审批人和人事详情需要正式只读账号可读取头像与邮箱。OA 内部健康检查使用扩展进程监听的回环端口；公网 OA 虚拟主机对此路径返回 404。原主站和资产域名继续使用各自的发布流程。

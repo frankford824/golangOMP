@@ -9,8 +9,12 @@ export function shopBindingReturnSource(value: unknown) {
   return safeReturnPath(value, (path) => path === '/users' || path === '/users/roster')
 }
 
+export function rosterReturnSource(value: unknown) {
+  return safeReturnPath(value, path => path === '/users/roster')
+}
+
 export function directoryQuery(query: LocationQuery): LocationQueryRaw {
-  const { user_id: _user, tab: _tab, ...rest } = query
+  const { user_id: _user, tab: _tab, rosterFrom: _rosterFrom, ...rest } = query
   return rest
 }
 

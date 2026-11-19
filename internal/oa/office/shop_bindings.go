@@ -197,7 +197,12 @@ func (app office) changeShopBindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Version++
-	p.Events = append(p.Events, change{Kind: "shop_transfer", ActorID: platform.ActorFrom(r).ID, EffectiveDate: today, ShopID: input.Shop, FromShopID: input.From})
+	event := change{Kind: "shop_transfer", ActorID: platform.ActorFrom(r).ID, EffectiveDate: today, ShopID: input.Shop, FromShopID: input.From, Recorded: true}
+	p.Events = append(p.Events, event)
+	if err := recordPersonEvent(r.Context(), tx, p.ID, event); err != nil {
+		internal(w)
+		return
+	}
 	if savePerson(r, tx, p) != nil || tx.Commit() != nil {
 		internal(w)
 		return

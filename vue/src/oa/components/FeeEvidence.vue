@@ -4,7 +4,7 @@ import BaseModal from '@/components/base/BaseModal.vue'
 import http from '@/services/http'
 import { download, errorText } from '../api'
 
-const props = defineProps<{ ids: string[]; label: string }>()
+const props = defineProps<{ ids: string[]; label: string; names?: string[] }>()
 const index = ref(-1)
 const src = ref('')
 const mime = ref('')
@@ -54,8 +54,8 @@ onBeforeUnmount(reset)
   <section v-if="ids.length" class="fee-evidence" :aria-label="label">
     <h3>{{ label }}（{{ ids.length }}）</h3>
     <div v-for="(id, i) in ids" :key="id" class="file-line">
-      <span>{{ label }} {{ i + 1 }}</span><button type="button" @click="preview(i)">预览{{ label }}</button>
-      <button type="button" @click="original(i)">下载{{ label }}</button>
+      <span>{{ names?.[i] || label + " " + (i + 1) }}</span><button type="button" @click="preview(i)">预览{{ label }}</button>
+      <button type="button" @click="original(i)">下载{{ label }}</button><slot name="actions" :id="id" />
     </div>
     <p v-if="downloadError" role="alert">{{ downloadError }}</p>
     <BaseModal :model-value="index >= 0" :title="filename || label + '预览'" panel-max-width="1024px" @cancel="close">

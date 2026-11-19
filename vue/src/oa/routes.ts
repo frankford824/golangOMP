@@ -33,6 +33,7 @@ export const oaRoutes: RouteRecordRaw[] = oaEnabled ? [
   { path: 'people/roster', redirect: to => ({ name: 'PeopleRoster', query: to.query, hash: to.hash }) },
   { path: 'people/:id(\\d+)', redirect: to => ({ name: 'UserManagement', query: { ...to.query, user_id: String(to.params.id), tab: 'terms' }, hash: to.hash }) },
   { path: 'fees', name: 'FeesHome', component: Fees, props: { mode: 'home' }, meta: { requiresAuth: true } },
+  { path: 'fees/accounts', component: () => import('./pages/RecipientAccounts.vue'), meta: { requiresAuth:true,title:'常用收款账户' } },
   { path: 'fees/apply', component: Fees, props: { mode: 'apply' }, meta: { requiresAuth: true, title: '发起费用申请' } },
   ...feeTabs.map(({ mode, label }) => ({
     path: 'fees/' + mode, component: Fees, props: { mode }, meta: { requiresAuth: true, title: label },

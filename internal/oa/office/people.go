@@ -9,35 +9,41 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"workflow/internal/oa/platform"
 )
 
 type person struct {
-	ID                int64    `json:"id"`
-	Name              string   `json:"name"`
-	EmployeeNo        *int     `json:"employee_no"`
-	DepartmentID      int64    `json:"department_id"`
-	TeamID            int64    `json:"team_id"`
-	Department        string   `json:"department"`
-	Team              string   `json:"team"`
-	Status            string   `json:"status"`
-	EmploymentType    string   `json:"employment_type"`
-	Joined            string   `json:"joined"`
-	Left              string   `json:"left"`
-	Roles             []string `json:"roles"`
-	Management        string   `json:"management"`
-	ManagerID         int64    `json:"manager_id"`
-	ManagerOverrideID int64    `json:"manager_override_id"`
-	ManagerName       string   `json:"manager_name"`
-	ManagerSource     string   `json:"manager_source"`
-	JobTitle          string   `json:"job_title"`
-	JobLevel          string   `json:"job_level"`
-	CostCenter        string   `json:"cost_center"`
-	ProfileVersion    int64    `json:"profile_version"`
-	Version           int      `json:"version"`
-	Events            []change `json:"events"`
-	Terms             []term   `json:"terms"`
+	ID                int64             `json:"id"`
+	Name              string            `json:"name"`
+	EmployeeNo        *int              `json:"employee_no"`
+	DepartmentID      int64             `json:"department_id"`
+	TeamID            int64             `json:"team_id"`
+	Department        string            `json:"department"`
+	Team              string            `json:"team"`
+	Status            string            `json:"status"`
+	EmploymentType    string            `json:"employment_type"`
+	Joined            string            `json:"joined"`
+	Left              string            `json:"left"`
+	Confirmed         string            `json:"confirmed"`
+	HRStatus          string            `json:"hr_status"`
+	Mobile            string            `json:"mobile,omitempty"`
+	Email             string            `json:"email,omitempty"`
+	EmergencyContact  *emergencyContact `json:"emergency_contact,omitempty"`
+	Roles             []string          `json:"roles"`
+	Management        string            `json:"management"`
+	ManagerID         int64             `json:"manager_id"`
+	ManagerOverrideID int64             `json:"manager_override_id"`
+	ManagerName       string            `json:"manager_name"`
+	ManagerSource     string            `json:"manager_source"`
+	JobTitle          string            `json:"job_title"`
+	JobLevel          string            `json:"job_level"`
+	CostCenter        string            `json:"cost_center"`
+	ProfileVersion    int64             `json:"profile_version"`
+	Version           int               `json:"version"`
+	Events            []change          `json:"events"`
+	Terms             []term            `json:"terms"`
 }
 type term struct {
 	ShopID          string `json:"shop_id"`
@@ -104,34 +110,52 @@ func shopOverrides(terms []term, today string) map[string]bool {
 }
 
 type change struct {
-	Kind           string   `json:"kind"`
-	EffectiveDate  string   `json:"effective_date"`
-	DepartmentID   int64    `json:"department_id"`
-	TeamID         int64    `json:"team_id"`
-	ShopID         string   `json:"shop_id"`
-	FromShopID     string   `json:"from_shop_id"`
-	TargetID       int64    `json:"target_id"`
-	Roles          []string `json:"roles"`
-	Management     string   `json:"management"`
-	EmploymentType string   `json:"employment_type"`
-	ManagerID      int64    `json:"manager_id"`
-	Version        int      `json:"version"`
-	ActorID        int64    `json:"actor_id"`
+	Note             string   `json:"note,omitempty"`
+	OperationID      string   `json:"operation_id,omitempty"`
+	ID               int64    `json:"id,omitempty"`
+	RecordedAt       string   `json:"recorded_at,omitempty"`
+	Recorded         bool     `json:"recorded,omitempty"`
+	JobTitle         string   `json:"job_title,omitempty"`
+	JobLevel         string   `json:"job_level,omitempty"`
+	PreviousJobTitle string   `json:"previous_job_title,omitempty"`
+	PreviousJobLevel string   `json:"previous_job_level,omitempty"`
+	OrgFrom          string   `json:"org_from,omitempty"`
+	OrgTo            string   `json:"org_to,omitempty"`
+	Kind             string   `json:"kind"`
+	EffectiveDate    string   `json:"effective_date"`
+	DepartmentID     int64    `json:"department_id"`
+	TeamID           int64    `json:"team_id"`
+	ShopID           string   `json:"shop_id"`
+	FromShopID       string   `json:"from_shop_id"`
+	ShopIDs          []string `json:"shop_ids,omitempty"`
+	FromShopIDs      []string `json:"from_shop_ids,omitempty"`
+	TargetID         int64    `json:"target_id"`
+	Roles            []string `json:"roles"`
+	Management       string   `json:"management"`
+	EmploymentType   string   `json:"employment_type"`
+	ManagerID        int64    `json:"manager_id"`
+	Version          int      `json:"version"`
+	ActorID          int64    `json:"actor_id"`
 }
 
 func (p *person) project() {
 	now := businessDate().Format(time.DateOnly)
-	for _, event := range p.Events {
+	events := slices.Clone(p.Events)
+	slices.SortStableFunc(events, func(a, b change) int { return strings.Compare(a.EffectiveDate, b.EffectiveDate) })
+	for _, event := range events {
 		if event.EffectiveDate > now {
 			continue
 		}
 		switch event.Kind {
 		case "hire", "rehire":
 			p.Joined = event.EffectiveDate
+			p.Confirmed = ""
 			p.Left = ""
 			p.Status = "active"
 			p.Roles = []string{}
 			p.Management = "none"
+		case "confirm":
+			p.Confirmed = event.EffectiveDate
 		case "leave":
 			p.Left = event.EffectiveDate
 			p.Status = "inactive"
@@ -204,6 +228,10 @@ func (app office) mountPeople(mux *http.ServeMux) {
 	mux.HandleFunc("PUT "+path+"{id}/profile", app.updateProfile)
 	mux.HandleFunc("GET "+path+"{id}", app.personDetail)
 	mux.HandleFunc("GET "+path+"{id}/handover", app.handoverItems)
+	mux.HandleFunc("POST "+path+"{id}/handover", app.applyFinanceHandover)
+	mux.HandleFunc("GET "+path+"{id}/term-shops", app.termShops)
+	mux.HandleFunc("POST "+path+"{id}/deactivate", app.deactivatePerson)
+	mux.HandleFunc("POST "+path+"{id}/membership", app.recordPersonnelTransfer)
 	mux.HandleFunc("GET "+path+"{id}/shop-bindings", app.readShopBindings)
 	mux.HandleFunc("POST "+path+"{id}/shop-bindings", app.changeShopBindings)
 	mux.HandleFunc("POST "+path+"{id}/change", app.changePerson)
@@ -347,6 +375,10 @@ func (app office) personDetail(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
+	if err := app.applyPersonRecords(r, &p); err != nil {
+		internal(w)
+		return
+	}
 	platform.JSON(w, 200, p)
 }
 func lockPerson(r *http.Request, tx *sql.Tx, p person) (person, error) {
@@ -372,18 +404,33 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &input) {
 		return
 	}
-	input.ActorID = actor.ID
+	input = change{Kind: input.Kind, EffectiveDate: input.EffectiveDate,
+		DepartmentID: input.DepartmentID, TeamID: input.TeamID, ShopID: strings.TrimSpace(input.ShopID),
+		FromShopID: strings.TrimSpace(input.FromShopID), TargetID: input.TargetID, Roles: input.Roles,
+		Management: input.Management, EmploymentType: input.EmploymentType, ManagerID: input.ManagerID,
+		Version: input.Version, ActorID: actor.ID, Recorded: true, Note: strings.TrimSpace(input.Note), ShopIDs: input.ShopIDs, FromShopIDs: input.FromShopIDs}
 	today := businessDate().Format(time.DateOnly)
 	if input.EffectiveDate == "" {
 		input.EffectiveDate = today
 	}
-	if _, err := time.Parse(time.DateOnly, input.EffectiveDate); err != nil || input.EffectiveDate < today {
-		bad(w, "生效日期必须为今日或未来")
+	if day, err := time.Parse(time.DateOnly, input.EffectiveDate); err != nil || day.Year() < 1000 || input.EffectiveDate < today && slices.Contains([]string{"shop_transfer", "handover", "leave_plan"}, input.Kind) {
+		bad(w, "请提供有效生效日期；调店、交接和待离职须为今日或未来")
 		return
 	}
-	if !slices.Contains([]string{"hire", "transfer", "shop_transfer", "leave", "handover", "rehire", "roles"}, input.Kind) {
+	if !slices.Contains([]string{"hire", "transfer", "shop_transfer", "leave", "leave_plan", "confirm", "salary_change", "handover", "rehire", "roles"}, input.Kind) {
 		bad(w, "任职动作无效")
 		return
+	}
+	if input.Kind == "salary_change" {
+		if utf8.RuneCountInString(input.Note) > 300 {
+			bad(w, "调薪备注最多 300 字")
+			return
+		}
+		// This event only records the occurrence. Payroll and all other profile fields are independent.
+		input = change{Kind: input.Kind, EffectiveDate: input.EffectiveDate, Version: input.Version,
+			ActorID: input.ActorID, Note: input.Note, Recorded: true}
+	} else {
+		input.Note = ""
 	}
 	if input.Management == "super_admin" {
 		bad(w, "超级管理员由受保护的 OA 核心授权维护")
@@ -397,24 +444,25 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "组织调动必须通过主站原生人员接口维护")
 		return
 	}
-	if (input.Kind == "leave" || input.Kind == "rehire" || input.Kind == "hire") && input.EffectiveDate != today {
+	if input.EffectiveDate > today && slices.Contains([]string{"hire", "leave", "rehire"}, input.Kind) {
 		bad(w, "请在生效日完成主站账号变更后登记")
 		return
 	}
 	input.Roles = nil
 	input.Management = ""
+	if input.EmploymentType != "" && !slices.Contains([]string{"full_time", "part_time", "outsourced"}, input.EmploymentType) {
+		bad(w, "用工类型无效")
+		return
+	}
 	if input.ManagerID != 0 {
 		if input.EffectiveDate != today {
 			bad(w, "请在生效日维护直属负责人")
 			return
 		}
-		if _, err := app.allowedManager(r, actor, input.ManagerID); err != nil {
-			profileFailure(w, err)
-			return
-		}
+
 	}
 	id := number(r.PathValue("id"))
-	if id == actor.ID && input.Kind == "leave" || input.ManagerID == id && id > 0 {
+	if id == actor.ID && (input.Kind == "leave" || input.Kind == "leave_plan") || input.ManagerID == id && id > 0 {
 		bad(w, "该动作不能对本人执行")
 		return
 	}
@@ -454,7 +502,7 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.DepartmentID, input.TeamID = 0, 0
-	if p.Management == "super_admin" && (input.Kind == "leave" || !actor.SuperAdmin) {
+	if p.Management == "super_admin" && (input.Kind == "leave" || input.Kind == "leave_plan" || !actor.SuperAdmin) {
 		deny(w)
 		return
 	}
@@ -472,9 +520,31 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if input.ManagerID != 0 {
-		if err := lockManagers(r.Context(), tx); err != nil {
+	if input.Kind == "leave" || input.Kind == "leave_plan" {
+		if err := lockPersonnelFinance(r.Context(), tx); err != nil {
 			internal(w)
+			return
+		}
+	}
+	if err := lockManagers(r.Context(), tx); err != nil {
+		internal(w)
+		return
+	}
+	p, err = app.sourcePerson(r, id)
+	if err != nil {
+		internal(w)
+		return
+	}
+	if target.ID > 0 {
+		target, err = app.sourcePerson(r, input.TargetID)
+		if err != nil {
+			conflict(w)
+			return
+		}
+	}
+	if input.ManagerID != 0 {
+		if _, err := app.allowedManager(r, actor, input.ManagerID); err != nil {
+			profileFailure(w, err)
 			return
 		}
 		var exists bool
@@ -512,7 +582,7 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		deny(w)
 		return
 	}
-	if p.Version != input.Version || len(p.Events) > 0 && p.Events[len(p.Events)-1].EffectiveDate > input.EffectiveDate {
+	if p.Version != input.Version {
 		conflict(w)
 		return
 	}
@@ -520,8 +590,32 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		platform.Error(w, 422, "请先通过主站原生接口停用或启用该账号")
 		return
 	}
+	if (input.Kind == "confirm" || input.Kind == "leave_plan") && (p.Status != "active" || current.Left != "") {
+		conflict(w)
+		return
+	}
+	if input.Kind == "leave_plan" && slices.ContainsFunc(p.Events, func(e change) bool {
+		return e.Kind == "leave_plan" && e.EffectiveDate == input.EffectiveDate
+	}) {
+		conflict(w)
+		return
+	}
+	if input.Kind == "leave" && current.Left != "" {
+		conflict(w)
+		return
+	}
+	if input.Kind == "confirm" && slices.ContainsFunc(p.Events, func(e change) bool {
+		return e.Kind == "confirm" && (current.Joined == "" || e.EffectiveDate >= current.Joined)
+	}) {
+		conflict(w)
+		return
+	}
 	if (input.Kind == "rehire" && current.Status != "inactive") || (input.Kind == "hire" && current.Joined != "") || (input.Kind == "shop_transfer" && current.Status != "active") {
 		conflict(w)
+		return
+	}
+	if input.EffectiveDate < today && input.Kind != "hire" && current.Joined > input.EffectiveDate {
+		bad(w, "生效日期早于入职日期")
 		return
 	}
 	if target.ID > 0 {
@@ -532,11 +626,38 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if input.Kind == "shop_transfer" && input.ShopID == "" && input.FromShopID == "" {
+	if (input.Kind == "leave" || input.Kind == "leave_plan") && !app.canClosePersonnel(w, r, tx, p.ID) {
+		return
+	}
+	for _, pair := range []struct {
+		legacy string
+		shops  *[]string
+	}{
+		{input.ShopID, &input.ShopIDs}, {input.FromShopID, &input.FromShopIDs},
+	} {
+		if pair.legacy != "" && !slices.Contains(*pair.shops, pair.legacy) {
+			*pair.shops = append(*pair.shops, pair.legacy)
+		}
+		if len(*pair.shops) > 100 {
+			bad(w, "单次最多选择 100 个店铺")
+			return
+		}
+		seen := map[string]bool{}
+		for i, raw := range *pair.shops {
+			shop := strings.TrimSpace(raw)
+			if !textOK(shop, 128) || seen[shop] {
+				bad(w, "店铺选择无效或重复")
+				return
+			}
+			(*pair.shops)[i] = shop
+			seen[shop] = true
+		}
+	}
+	if input.Kind == "shop_transfer" && len(input.ShopIDs) == 0 && len(input.FromShopIDs) == 0 {
 		bad(w, "请提供店铺")
 		return
 	}
-	if input.Kind == "handover" && (target.ID == 0 || input.ShopID == "") {
+	if input.Kind == "handover" && (target.ID == 0 || len(input.ShopIDs) == 0 || len(input.FromShopIDs) != 0) {
 		bad(w, "请选择店铺和接手人")
 		return
 	}
@@ -544,8 +665,13 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		bad(w, "店铺或用工类型超出长度限制")
 		return
 	}
-	handed := false
-	if app.baseline != nil && (input.Kind == "leave" || input.FromShopID != "" || input.Kind == "handover") {
+	if input.Kind == "shop_transfer" || input.Kind == "handover" || (input.Kind == "hire" && len(input.ShopIDs) != 0) {
+		if !app.validateTermShopChange(w, r, p, input) {
+			return
+		}
+	}
+	handed := []string{}
+	if app.baseline != nil && (input.Kind == "leave" || len(input.FromShopIDs) > 0 || input.Kind == "handover") {
 		base, err := app.baseline(r.Context(), p.EmployeeNo)
 		if err != nil {
 			platform.Error(w, 503, "暂时无法核对店铺归属")
@@ -556,45 +682,59 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 			if _, alreadyLocal := overrides[shop]; alreadyLocal {
 				continue
 			}
-			if input.Kind == "leave" || shop == input.FromShopID || input.Kind == "handover" && shop == input.ShopID {
+			if input.Kind == "leave" || slices.Contains(input.FromShopIDs, shop) || input.Kind == "handover" && slices.Contains(input.ShopIDs, shop) {
 				addTerm(&p, shop, input.EffectiveDate)
 			}
 		}
 	}
-	if input.Kind == "leave" || input.FromShopID != "" || input.Kind == "handover" {
+	if input.Kind == "leave" || len(input.FromShopIDs) > 0 || input.Kind == "handover" {
 		for index := range p.Terms {
 			item := &p.Terms[index]
-			if input.Kind == "handover" && item.ShopID == input.ShopID && item.PendingHandover && item.To <= input.EffectiveDate {
+			if input.Kind == "handover" && slices.Contains(input.ShopIDs, item.ShopID) && item.PendingHandover && item.To <= input.EffectiveDate {
 				addTerm(&target, item.ShopID, input.EffectiveDate)
 				item.PendingHandover = false
-				handed = true
+				if !slices.Contains(handed, item.ShopID) {
+					handed = append(handed, item.ShopID)
+				}
 				continue
 			}
-			if (input.Kind == "leave" || item.ShopID == input.FromShopID || input.Kind == "handover" && item.ShopID == input.ShopID) && (item.To == "" || item.To > input.EffectiveDate) {
+			if (input.Kind == "leave" || slices.Contains(input.FromShopIDs, item.ShopID) || input.Kind == "handover" && slices.Contains(input.ShopIDs, item.ShopID)) && (item.To == "" || item.To > input.EffectiveDate) {
 				item.To = input.EffectiveDate
 				if item.From > item.To {
 					item.To = item.From
 				}
 				if target.ID > 0 && item.From <= input.EffectiveDate {
 					addTerm(&target, item.ShopID, input.EffectiveDate)
-					handed = true
+					if !slices.Contains(handed, item.ShopID) {
+						handed = append(handed, item.ShopID)
+					}
 				} else if input.Kind == "leave" && item.From <= input.EffectiveDate {
 					item.PendingHandover = true
 				}
 			}
 		}
 	}
-	if input.Kind == "handover" && !handed {
+	if input.Kind == "handover" && len(handed) != len(input.ShopIDs) {
 		conflict(w)
 		return
 	}
-	if (input.Kind == "hire" || input.Kind == "shop_transfer") && input.ShopID != "" {
-		addTerm(&p, input.ShopID, input.EffectiveDate)
+	if input.Kind == "hire" || input.Kind == "shop_transfer" {
+		for _, shop := range input.ShopIDs {
+			addTerm(&p, shop, input.EffectiveDate)
+		}
 	}
 	p.Version++
 	p.Events = append(p.Events, input)
-	if target.ID > 0 {
+	if err := recordPersonEvent(r.Context(), tx, p.ID, input); err != nil {
+		internal(w)
+		return
+	}
+	if len(handed) > 0 {
 		target.Version++
+		if err := recordPersonEvent(r.Context(), tx, target.ID, change{Kind: "shop_received", EffectiveDate: input.EffectiveDate, ActorID: actor.ID, ShopIDs: handed, TargetID: p.ID}); err != nil {
+			internal(w)
+			return
+		}
 		if err := savePerson(r, tx, target); err != nil {
 			internal(w)
 			return
@@ -617,6 +757,14 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 	authoritativeStatus := p.Status
 	p.project()
 	p.Status = authoritativeStatus
+	if err := app.applyProfile(r.Context(), &p); err != nil {
+		internal(w)
+		return
+	}
+	if err := app.applyPersonRecords(r, &p); err != nil {
+		internal(w)
+		return
+	}
 	platform.JSON(w, 200, p)
 }
 func addTerm(p *person, shop, date string) {

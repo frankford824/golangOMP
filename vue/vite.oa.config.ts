@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import tailwindcss from 'tailwindcss'
@@ -43,6 +44,10 @@ export default defineConfig(config => {
   const api = main.server?.proxy?.['/v1']
   return {
     ...main,
+    resolve: { ...main.resolve, alias: [
+      ...(config.mode === 'production' ? [{ find: /^@\/mocks$/, replacement: fileURLToPath(new URL('./src/services/noMock.ts', import.meta.url)) }] : []),
+      ...Object.entries(main.resolve?.alias ?? {}).map(([find, replacement]) => ({ find, replacement: String(replacement) })),
+    ] },
     plugins: [...(main.plugins ?? []), {
       name: 'oa-brand-icon',
       transformIndexHtml(html: string) {

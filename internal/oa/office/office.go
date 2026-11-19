@@ -23,12 +23,19 @@ type office struct {
 
 func CheckSchema(ctx context.Context, db *sql.DB) error {
 	var count int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('oa_office_templates','oa_office_template_versions','oa_office_delegates','oa_office_finance_actions','oa_office_documents','oa_office_files','oa_office_people','oa_office_notifications','oa_office_imports','oa_office_document_events','oa_office_person_profiles','oa_office_org_managers')`).Scan(&count)
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('oa_office_templates','oa_office_template_versions','oa_office_delegates','oa_office_finance_actions','oa_office_documents','oa_office_files','oa_office_people','oa_office_notifications','oa_office_imports','oa_office_document_events','oa_office_person_profiles','oa_office_org_managers','oa_office_finance_drafts','oa_office_document_items','oa_office_invoice_locks','oa_office_person_contacts','oa_office_person_events','oa_office_recipient_accounts','oa_office_recipient_access')`).Scan(&count)
 	if err != nil {
 		return err
 	}
-	if count != 12 {
-		return fmt.Errorf("OA office schema incomplete: found %d of 12 tables", count)
+	if count != 19 {
+		return fmt.Errorf("OA office schema incomplete: found %d of 19 tables", count)
+	}
+	var locks int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM oa_office_org_managers WHERE org_kind='lock' AND org_id IN (0,1)").Scan(&locks); err != nil {
+		return err
+	}
+	if locks != 2 {
+		return fmt.Errorf("missing OA office coordination rows")
 	}
 	return nil
 }
@@ -36,6 +43,7 @@ func CheckSchema(ctx context.Context, db *sql.DB) error {
 func Mount(mux *http.ServeMux, db, source *sql.DB, native http.Handler, baseline func(context.Context, *int) (map[string]bool, error), bindings ShopBindingDirectory) {
 	app := office{db: db, source: source, native: native, baseline: baseline, bindings: bindings}
 	app.mountFinance(mux)
+	mountAccounts(mux, app)
 	app.mountPeople(mux)
 }
 

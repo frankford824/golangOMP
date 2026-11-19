@@ -2,6 +2,8 @@
 """Create scoped service credentials after migration 152. Only run on the main ECS."""
 from pathlib import Path
 import os
+import base64
+import tempfile
 import re
 import secrets
 import subprocess
@@ -11,7 +13,7 @@ directory=Path('/etc/yongbo-oa-live')
 tables=['oa_office_templates','oa_office_template_versions','oa_office_delegates','oa_office_finance_actions','oa_office_documents','oa_office_files','oa_office_people','oa_office_notifications','oa_office_imports','oa_order_feedback','oa_order_task_links']
 reader={
     'auth_permissions':'code,enabled',
-    'users': 'id,display_name,mobile,employee_no,department_id,team_id,department,team,status,employment_type,is_config_super_admin',
+    'users': 'id,display_name,mobile,email,avatar_url,employee_no,department_id,team_id,department,team,status,employment_type,is_config_super_admin',
     'tasks': 'id,task_no,product_name_snapshot,task_status,current_handler_id,designer_id',
     'user_roles':'user_id,role',
     'org_departments':'id,name,enabled', 'org_teams':'id,name,department_id,enabled',
@@ -60,6 +62,46 @@ def office_grants(sql, database, peer):
     for table, privileges in grants.items():
         sql(f"GRANT {privileges} ON `{database}`.`{table}` TO {writer}")
 
+def office_p1(sql, database, peer):
+    writer = f"'oa_formal_extension'@'{peer}'"
+    if sql(f"SELECT COUNT(*) FROM mysql.user WHERE user='oa_formal_extension' AND host='{peer}'") != '1':
+        raise RuntimeError('Existing OA extension account expected')
+    migrations = "'156_oa_finance_applications.sql','157_oa_personnel_extensions.sql','158_oa_recipient_accounts.sql'"
+    if sql(f"SELECT COUNT(*) FROM schema_migrations WHERE file_name IN ({migrations}) AND status IN ('applied','baseline')") != '3':
+        raise RuntimeError('OA office migrations 156 through 158 required')
+    source = f"'oa_formal_reader'@'{peer}'"
+    if sql(f"SELECT COUNT(*) FROM mysql.user WHERE user='oa_formal_reader' AND host='{peer}'") != '1':
+        raise RuntimeError('Existing OA source account expected')
+    sql(f"GRANT SELECT (email,avatar_url) ON `{database}`.`users` TO {source}")
+    grants = {
+        'oa_office_finance_drafts': 'SELECT, INSERT, UPDATE, DELETE',
+        'oa_office_document_items': 'SELECT, INSERT, DELETE',
+        'oa_office_invoice_locks': 'SELECT, INSERT, UPDATE',
+        'oa_office_person_contacts': 'SELECT, INSERT, UPDATE',
+        'oa_office_person_events': 'SELECT, INSERT',
+        'oa_office_recipient_accounts': 'SELECT, INSERT, UPDATE',
+        'oa_office_recipient_access': 'SELECT, INSERT',
+    }
+    for table, privileges in grants.items():
+        sql(f"GRANT {privileges} ON `{database}`.`{table}` TO {writer}")
+
+    path = directory / 'office-key.env'
+    if not path.exists():
+        for table in ('oa_office_finance_drafts','oa_office_recipient_accounts'):
+            if sql(f"SELECT EXISTS(SELECT 1 FROM `{database}`.`{table}`)") != '0':
+                raise RuntimeError('Restore the existing OA encryption key before continuing')
+        with tempfile.NamedTemporaryFile(dir=directory, mode='w', delete=False) as temp:
+            temp.write('OA_OFFICE_ENCRYPTION_KEY='+base64.b64encode(secrets.token_bytes(32)).decode()+'\n')
+        try:
+            os.link(temp.name,path)
+        except FileExistsError:
+            pass
+        finally:
+            os.unlink(temp.name)
+    if not re.fullmatch(r'OA_OFFICE_ENCRYPTION_KEY=[A-Za-z0-9+/]{43}=\n?',path.read_text()):
+        raise RuntimeError('Invalid OA encryption key file')
+    path.chmod(0o600)
+
 def main():
     os.umask(0o077)
     database=os.environ['DB_NAME']
@@ -74,6 +116,10 @@ def main():
     if not re.fullmatch(r'[a-zA-Z0-9.:-]+',peer):raise RuntimeError('unexpected MySQL peer')
     registered=sql("SELECT COUNT(*) FROM schema_migrations WHERE file_name='152_oa_business_extensions.sql' AND status='applied'")
     if registered!='1':raise RuntimeError('Migration 152 must be applied first')
+    if sys.argv[1:]==['--office-p1']:
+        office_p1(sql,database,peer)
+        print('OA P1 office privileges and encryption key ready.')
+        return
     if sys.argv[1:]==['--office-grants']:
         office_grants(sql,database,peer)
         print('OA office privileges applied.')
@@ -101,6 +147,7 @@ def main():
         params[name]=f'{user}:{password}@tcp({dbhost}:{port})/{database}?parseTime=true&loc=Asia%2FShanghai&charset=utf8mb4'
     workflow_grants(sql,database,peer)
     office_grants(sql,database,peer)
+    office_p1(sql,database,peer)
     key=sys.stdin.buffer.read().rstrip(b'\r\n').decode()
     if not key or '\r' in key or '\n' in key:raise RuntimeError('Missing order reader credential')
     params.update(OPS_READER_PASSWORD=key,OA_FORMAL_DATABASE=database,OA_FILES_DIR='/var/lib/yongbo-oa-live/files',TZ='Asia/Shanghai')

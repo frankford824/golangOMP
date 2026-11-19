@@ -9,14 +9,14 @@ type Event = {
   bank_reference?: string; payment_date?: string
 }
 defineProps<{ entries?: Event[] }>()
-const labels: Record<string, string> = { submit:'提交申请', approve:'同意', return:'退回修改', reject:'拒绝', resubmit:'重新提交', payment:'登记付款', withdraw:'撤回', void:'作废' }
+const labels: Record<string, string> = { submit:'提交申请', approve:'同意', return:'退回修改', reject:'拒绝', resubmit:'重新提交', payment:'登记付款', handover:'交接审批', transfer:'交接审批', cc:'已抄送', withdraw:'撤回', void:'作废' }
 const amount = (value: number) => money((value / 100).toFixed(2))
 </script>
 <template>
   <section class="fee-audit" aria-label="操作记录"><h3>操作记录</h3>
     <p v-if="!entries?.length">暂无可查看的操作记录</p>
     <ol v-else>
-      <li v-for="(entry, index) in entries" :key="index">
+      <li v-for="(entry, index) in entries" :key="index" :data-action="entry.action">
         <div><strong>{{ labels[entry.action] ?? entry.action }}</strong>
           <span v-if="entry.node_name">{{ entry.node_name }}</span>
           <time>{{ feeDateTime(entry.created_at || entry.at || '') }}</time>
@@ -42,4 +42,8 @@ const amount = (value: number) => money((value / 100).toFixed(2))
 .fee-audit li > div { display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; }
 .fee-audit p { margin:3px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .fee-audit time { color:var(--oa-secondary); font-family:var(--yb-font-mono); font-size:12px; }
+.fee-audit li[data-action=approve]::before,.fee-audit li[data-action=payment]::before { background:var(--oa-success); }
+.fee-audit li[data-action=return]::before { background:var(--oa-warning); }
+.fee-audit li[data-action=reject]::before { background:var(--oa-danger); }
+.fee-audit li[data-action=withdraw]::before,.fee-audit li[data-action=void]::before { background:var(--oa-secondary); }
 </style>

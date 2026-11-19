@@ -2,6 +2,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { expect, it, vi } from 'vitest'
 import Fees from './Fees.vue'
+import http from '@/services/http'
+import FeeExpenseLines from '../components/FeeExpenseLines.vue'
 
 const { feeAPI, send, push, profile, actions, query } = vi.hoisted(() => ({
   feeAPI: vi.fn(), send: vi.fn(), push: vi.fn(), profile: { id: '7' },
@@ -90,14 +92,17 @@ it('moves an isolated request through application, two approvers, payment and re
     id: 'DEMO-FEE', applicant_id: 7, template, amount_cents: 12050, reason: '演示用途',
     channel: 'person', holder: '演示收款人', account: '•••• 1234', bank: '演示银行',
     extra: { 项目: '演示项目' }, files: ['demo-evidence'], site: 'main',
+    history: [{ action: 'submit', actor_id: 7, at: '2025-01-01T00:00:00Z' }],
     state: 'waiting', current: 0, version: 1, route: [8, 9], approved_amount_cents: undefined as number | undefined,
     payment: null as { amount_cents: number; date: string; receipt: string; bank_reference: string } | null,
   }
-  feeAPI.mockImplementation(async (url: string, options?: { body?: FormData }) => {
+  vi.spyOn(http, 'post').mockImplementation(async (_url, body) => {
+    const name = ((body as FormData).get('file') as File).name
+    return { data: { data: { id: name.startsWith('receipt') ? 'demo-receipt' : 'demo-evidence', name } } }
+  })
+  feeAPI.mockImplementation(async (url: string) => {
     if (url.endsWith('/templates')) return { items: [template], level: 'none' }
-    if (url.endsWith('/files')) {
-      return { id: (options?.body?.get('file') as File).name.startsWith('receipt') ? 'demo-receipt' : 'demo-evidence', name: (options?.body?.get('file') as File).name }
-    }
+    if (url.includes('/finance/draft?')) return { draft: null, version: '' }
     if (url.includes('queue=')) {
       const items = url.includes('queue=pay') ? (domain.state === 'approved' ? [domain] : []) : (domain.state === 'waiting' ? [domain] : [])
       return { items, total: items.length }
@@ -107,6 +112,7 @@ it('moves an isolated request through application, two approvers, payment and re
   })
   send.mockImplementation(async (url: string, body: Record<string, unknown>) => {
     if (url.endsWith('/documents')) return domain
+    if (url.endsWith('/preview-route')) return { steps: [] }
     if (url.endsWith('/decision')) {
       expect(body.current).toBe(domain.current)
       expect(body.version).toBe(domain.version)
@@ -136,12 +142,16 @@ it('moves an isolated request through application, two approvers, payment and re
   await flushPromises()
   await wrapper.get('form').trigger('submit')
   await flushPromises()
-  expect(wrapper.text()).toContain('请输入项目')
+  expect(wrapper.text()).toContain('请填写项目')
   expect(send).not.toHaveBeenCalled()
-  const inputs = wrapper.findAll('input:not([type=file])')
-  for (const [index, value] of ['120.50', '演示收款人', 'DEMO-1234', '演示银行', '演示项目'].entries()) {
-    await inputs[index].setValue(value)
-  }
+  await wrapper.get('input[placeholder="填写与收款账户一致的名称"]').setValue('演示收款人')
+  await wrapper.get('input[placeholder="填写实际收款账号"]').setValue('DEMO-1234')
+  await wrapper.get('input[placeholder="填写收款账户的开户银行名称"]').setValue('演示银行')
+  const project = wrapper.findAll('label').find(label => label.text().startsWith('项目'))!
+  await project.get('input').setValue('演示项目')
+  wrapper.getComponent(FeeExpenseLines).vm.$emit('update:modelValue', [{
+    key: 'line', category: '交通', occurred_on: '2025-01-01', amount: '120.50', tax: '5.50', invoice_no: 'DEMO-123', description: '演示交通',
+  }])
   await wrapper.get('textarea').setValue('演示用途')
   await inputUpload(wrapper, 'evidence.pdf')
   await wrapper.get('form').trigger('submit')
@@ -158,6 +168,25 @@ it('moves an isolated request through application, two approvers, payment and re
     wrapper = mount(Fees, { props: { mode: 'approval' } })
     await flushPromises()
     await click(wrapper, '打开单据')
+    const approvalRoute = wrapper.get('[aria-label="审批路线"]')
+    expect(approvalRoute.text()).toContain('当前待审批')
+    expect(wrapper.get('[aria-label="操作记录"]').text()).toContain('账号 #7（未留存姓名）')
+    expect(wrapper.get('.fee-document-number').text()).toContain('DEMO-FEE')
+    if (actor === '8') {
+      expect(approvalRoute.text()).toContain('待流转')
+      const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+      const writeText = vi.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+      try {
+        await wrapper.get('.fee-document-number button').trigger('click')
+        expect(writeText).toHaveBeenCalledWith('DEMO-FEE')
+      } finally {
+        if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard)
+        else Reflect.deleteProperty(navigator, 'clipboard')
+      }
+    } else {
+      expect(approvalRoute.text()).toContain('已通过')
+    }
     const readCount = feeAPI.mock.calls.length
     if (actor === '9') {
       await wrapper.get('#fee-approval-form input[type=checkbox]').setValue(true)
@@ -184,7 +213,7 @@ it('moves an isolated request through application, two approvers, payment and re
   await click(wrapper, '打开单据')
   expect(wrapper.text()).toContain('应付金额')
   await inputUpload(wrapper, 'receipt.pdf')
-  expect(wrapper.text()).toContain('已上传：receipt.pdf')
+  expect(wrapper.text()).toContain('receipt.pdf')
   await wrapper.get('input[placeholder="银行或收款平台交易流水号"]').setValue('REF-DEMO')
   await wrapper.get('form').trigger('submit')
   await flushPromises()

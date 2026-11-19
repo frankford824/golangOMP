@@ -4,7 +4,7 @@ import { NSelect } from 'naive-ui'
 import { errorText } from '../api'
 import { searchFeePeople, approverLabel, type FeePerson } from '../feePeople'
 
-const props = defineProps<{ label: string; disabled?: boolean }>()
+const props = defineProps<{ label: string; disabled?: boolean; inline?: boolean }>()
 const person = defineModel<FeePerson>()
 const people = ref<FeePerson[]>([])
 const options = computed(() => people.value.map(item => ({ value: item.id, label: approverLabel(item) })))
@@ -64,6 +64,7 @@ onUnmounted(() => {
     <span>{{ props.label }}</span>
     <NSelect
       :value="selected"
+      :to="props.inline ? false : undefined"
       :options="options"
       :fallback-option="(id: string | number) => ({ value: id, label: person ? approverLabel(person) : '当前所选人员' })"
       :input-props="{ 'aria-label': props.label }"
