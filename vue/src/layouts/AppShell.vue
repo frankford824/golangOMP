@@ -120,6 +120,7 @@
         </div>
         <div v-if="oaEnabled" ref="desktopTabs" class="oa-bar-tabs" />
         <div class="app-topbar__actions">
+          <RouterLink v-if="showHomeExpenseLink" :to="{ path: '/fees/apply', query: { applyFrom: $route.fullPath } }" class="oa-expense-shortcut" aria-label="发起费用申请" title="发起费用申请">报销 / 付款</RouterLink>
           <div v-if="oaEnabled" ref="desktopActions" class="oa-bar-page-actions" />
           <div v-if="oaEnabled" ref="desktopStatus" class="oa-bar-status" />
           <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
@@ -205,6 +206,7 @@ import { ref, computed, provide, watch, nextTick, onMounted, onUnmounted } from 
 import { useRouter } from 'vue-router'
 import { Menu, Search, PanelLeftOpen, PanelLeftClose } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
+import { resolveFirstAccessibleHomeRoute } from '@/router/home-fallback'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
@@ -248,6 +250,13 @@ const desktopWorkspace = computed(() => {
   if (['/operations','/','/design-dashboard'].includes(path)) return 'overview'
   if (['/tasks','/operations/products','/operations/pricing','/operations/rankings','/users','/cost-rules','/fees/approval','/fees/mine'].includes(path) || path.startsWith('/operations/orders/')) return 'list'
   return 'page'
+})
+const showHomeExpenseLink = computed(() => {
+  if (!oaEnabled || !can('finance.apply')) return false
+  const current = router.currentRoute.value.path
+  if (current === '/' || current === '/operations' || current === '/me') return true
+  const home = resolveFirstAccessibleHomeRoute(permissionsStore)
+  return home != null && current === router.resolve(home).path
 })
 const expenseActivity = useExpenseActivity()
 const workCounts = useSidebarCounts(computed(() => ({
@@ -1122,6 +1131,13 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 .oa-sidebar .nav-item:not(.active) { border-color:var(--oa-surface); }
 .oa-nav-signal { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); padding: 0 4px; min-width: 20px; text-align: center; border-radius: 6px; font: 500 12px/18px var(--yb-font-mono); color: rgb(var(--yb-warning-text)); background: rgb(var(--yb-warning-soft)); }
 .oa-sidebar:not(.oa-sidebar-open) .oa-nav-signal { right: 0; top: 0; transform: none; }
+.oa-expense-shortcut {
+  display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center;
+  height: 32px; padding: 0 8px; border: 1px solid var(--yb-line-control); border-radius: 6px;
+  color: var(--oa-accent); background: var(--oa-surface); font: 500 13px/1 var(--oa-font);
+  text-decoration: none; white-space: nowrap;
+}
+.oa-expense-shortcut:hover, .oa-expense-shortcut:focus-visible { border-color: var(--oa-accent); }
 .oa-bar-title { font: 600 15px/1.4 var(--oa-font); white-space: nowrap; }
 .oa-bar-tabs,.oa-bar-status,.oa-bar-page-actions { display:none; }
 @media (min-width:1280px) {

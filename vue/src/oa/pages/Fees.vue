@@ -77,6 +77,12 @@ const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 const templates = ref<FeeTemplate[]>([])
+function feeTypeLabel(value: string) {
+  return value === 'payment' || value === '付款' ? '付款' : '报销'
+}
+const applicationTemplates = computed(() => ['报销', '付款'].map(type => ({
+  type, items: templates.value.filter(item => feeTypeLabel(item.type) === type),
+})).filter(group => group.items.length))
 const docs = ref<FeeDoc[]>([])
 const page = ref(requestedPage(route.query.page))
 const pages = computed(() => Math.max(1, Math.ceil(docs.value.length / 15)))
@@ -215,6 +221,7 @@ const level = ref('')
 type FinanceGrant = Approver & { status: string; level: string; pay: boolean; report: boolean }
 const grantedPeople = ref<FinanceGrant[]>([])
 const grantsLoaded = ref(false)
+const hasPayHandler = computed(() => grantedPeople.value.some(person => person.status === 'active' && person.pay))
 const grantPage = ref(1)
 const grantPages = computed(() => Math.max(1, Math.ceil(grantedPeople.value.length / 15)))
 const visibleGrants = computed(() => grantedPeople.value.slice((grantPage.value - 1) * 15, grantPage.value * 15))
@@ -234,19 +241,19 @@ function openGrantPanel(panel: HTMLDetailsElement | undefined) {
   panel.querySelector('summary')?.focus({ preventScroll: true })
 }
 const templateFields = ref({ fields: '', threshold: '0.00' })
-const templateForm = ref<HTMLFormElement>()
-const approverQuery = ref('')
-const approverOptions = ref<Approver[]>([])
 const knownApprovers = ref<Record<number, Approver>>({})
-const approverBusy = ref(false)
-const approverError = ref('')
-let approverSearch = 0
-const approverNext = ref(0)
-let requestedApproverQuery = ''
+const templateNodeKeys = ref<number[]>([])
+const templateError = ref('')
+let templateNodeKey = 0
 const grants = ref({ pay: false, report: false })
 const delegate = ref({ level: 'draft' })
 const grantTarget = ref<Approver>()
 const delegateTarget = ref<Approver>()
+const canSaveFinanceGrant = computed(() => {
+  if (busy.value || !grantsLoaded.value || !grantTarget.value) return false
+  const current = grantedPeople.value.find(person => person.id === grantTarget.value?.id)
+  return grants.value.pay !== Boolean(current?.pay) || grants.value.report !== Boolean(current?.report)
+})
 const inactiveGrant = (target: Approver | undefined) => !!target && grantedPeople.value.some(item => item.id === target.id && item.status !== 'active')
 function selectGrantTarget(target: Approver | undefined, kind: 'template' | 'finance') {
   const current = grantedPeople.value.find(item => item.id === target?.id)
@@ -374,33 +381,53 @@ function nodeLabel(value: string) {
   const person = knownApprovers.value[Number(value.replace(/^fixed:/, ''))]
   return person ? approverLabel(person) : '模板指定审批人'
 }
-function approvalChoices(value: string) {
-  const results = approverOptions.value.map(person => ({ value: `fixed:${person.id}`, label: approverLabel(person) }))
-  if (value.startsWith('fixed:') && !results.some(option => option.value === value)) results.unshift({ value, label: nodeLabel(value) })
-  return [{ value: 'manager', label: '申请人直属负责人' }, ...results]
+function fixedApproverId(value: string) {
+  const match = /^fixed:([1-9][0-9]*)$/.exec(value)
+  const id = Number(match?.[1])
+  return Number.isSafeInteger(id) ? id : undefined
 }
-async function findApprovers(afterId = 0) {
-  if (!afterId) {
-    requestedApproverQuery = approverQuery.value
-    approverNext.value = 0
-    approverOptions.value = []
-  }
-  const search = ++approverSearch
-  approverBusy.value = true
-  approverError.value = ''
+function selectedApprover(value: string) {
+  const id = fixedApproverId(value)
+  if (id === undefined) return undefined
+  return knownApprovers.value[id] ?? { id, name: '账号 #' + id }
+}
+function approverType(value: string) {
+  if (value === 'manager') return value
+  return value.startsWith('fixed:') ? 'fixed' : ''
+}
+function setTemplateApprover(value: string, index?: number) {
+  if (!draft.value) return
+  if (index === undefined) draft.value.extra = value
+  else draft.value.nodes[index] = value
+  draftEdited.value = true
+}
+function changeTemplateApproverType(event: Event, index?: number) {
+  const type = (event.target as HTMLSelectElement).value
+  setTemplateApprover(type === 'fixed' ? 'fixed:' : type, index)
+}
+function selectTemplateApprover(person: Approver | undefined, index?: number) {
+  if (person) knownApprovers.value[person.id] = person
+  setTemplateApprover(person ? `fixed:${person.id}` : 'fixed:', index)
+}
+function addTemplateNode() {
+  if (!draft.value || draft.value.nodes.length >= 12) return
+  draft.value.nodes.push('')
+  templateNodeKeys.value.push(templateNodeKey++)
+  draftEdited.value = true
+}
+function removeTemplateNode(index: number) {
+  draft.value?.nodes.splice(index, 1)
+  templateNodeKeys.value.splice(index, 1)
+  draftEdited.value = true
+}
+async function resolveTemplateApprovers(values: string[]) {
+  const ids = [...new Set(values.map(fixedApproverId).filter(id => id !== undefined))].map(String)
+  if (!ids.length) return
   try {
-    const selected = [...new Set([...(draft.value?.nodes ?? []), draft.value?.extra ?? ''])]
-      .filter(value => value.startsWith('fixed:'))
-      .map(value => value.slice(6))
-    const { items, selected: resolved, next_after_id } = await searchFeePeople(requestedApproverQuery, selected, afterId)
-    if (search !== approverSearch) return
-    approverOptions.value = afterId ? [...approverOptions.value, ...(items || [])] : (items || [])
-    approverNext.value = next_after_id || 0
-    for (const person of [...approverOptions.value, ...(resolved ?? [])]) knownApprovers.value[person.id] = person
-  } catch (cause) {
-    if (search === approverSearch) approverError.value = errorText(cause)
-  } finally {
-    if (search === approverSearch) approverBusy.value = false
+    const { selected } = await searchFeePeople('', ids)
+    for (const person of selected ?? []) knownApprovers.value[person.id] = person
+  } catch {
+    // Keep the saved account ID visible if the directory cannot resolve its name.
   }
 }
 const historyLabel = (action: string) => decisions[action] || ({ submit: '提交申请', resubmit: '重新提交', payment: '登记付款' })[action] || action
@@ -409,7 +436,9 @@ const movingNode = (from: number, delta: number) => {
   const target = from + delta
   if (!nodes || target < 0 || target >= nodes.length) return
   draftEdited.value = true
+  const keys = templateNodeKeys.value
   ;[nodes[from], nodes[target]] = [nodes[target], nodes[from]]
+  ;[keys[from], keys[target]] = [keys[target], keys[from]]
 }
 const list = (value: string) => [...new Set(value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean))]
 
@@ -468,7 +497,7 @@ async function loadTemplates() {
   const localDraft = savedApplication?.site === form.value.site ? savedApplication?.values : undefined
   const template = templates.value.find(item => item.id === localDraft?.template_id)
   missingTemplateDraft.value = Boolean(localDraft && !template)
-  form.value.template_id = template?.id || templates.value[0]?.id || ''
+  form.value.template_id = template?.id || (templates.value.length === 1 ? templates.value[0]!.id : '')
   selectTemplate()
   if (localDraft && template) {
     form.value.amount = localDraft.amount
@@ -688,34 +717,50 @@ async function loadReport() {
 function beginTemplate(template?: FeeTemplate) {
   if (!leaveDraft()) return
   draftEdited.value = false
+  templateError.value = ''
   selection.value = template?.id || ''
-  draft.value = template ? { ...template } : { id: crypto.randomUUID(), name: '', type: '报销', channels: [], fields: [], required: [], evidence: '', nodes: [], threshold_cents: 0, extra: '', version: 0 }
+  draft.value = template ? { ...template } : { id: crypto.randomUUID(), name: '', type: '', channels: [], fields: [], required: [], evidence: '', nodes: [], threshold_cents: 0, extra: '', version: 0 }
   editingId.value = template?.id || ''
+  if (draft.value.type === 'reimbursement') draft.value.type = '报销'
+  if (draft.value.type === 'payment') draft.value.type = '付款'
   draft.value.channels = [...(draft.value.channels || [])]
   draft.value.required = [...(draft.value.required || [])]
   draft.value.nodes = [...(draft.value.nodes || [])]
-  templateFields.value = { fields: draft.value.fields?.join(', ') || '', threshold: (draft.value.threshold_cents / 100).toFixed(2) }
-  approverQuery.value = ''
-  approverOptions.value = []
-  void findApprovers()
+  templateNodeKeys.value = draft.value.nodes.map(() => templateNodeKey++)
+  templateFields.value = { fields: draft.value.fields?.join(', ') || '', threshold: draft.value.threshold_cents ? (draft.value.threshold_cents / 100).toFixed(2) : '' }
+  void resolveTemplateApprovers([...draft.value.nodes, draft.value.extra ?? ''])
 }
 async function saveTemplate(publish: boolean) {
-  if (!draft.value?.id) throw new Error('请填写模板 ID')
-  if (!templateForm.value?.reportValidity()) return
-  if (!draft.value.channels.length) throw new Error('请选择至少一种支付方式')
-  if (!draft.value.nodes.length) throw new Error('请添加至少一个审批节点')
+  if (!draft.value || !canEditTemplate.value || (publish && level.value !== 'publish')) return
+  templateError.value = ''
+  const { type, channels: selectedChannels, nodes, extra } = draft.value
+  const name = draft.value.name.trim()
+  const evidence = draft.value.evidence.trim()
   const fields = list(templateFields.value.fields)
-  const threshold = Number(templateFields.value.threshold)
+  const threshold = templateFields.value.threshold.trim()
+  const amountParts = /^(\d+)(?:\.(\d{1,2}))?$/.exec(threshold || '0')
+  const thresholdCents = amountParts ? Number(amountParts[1]) * 100 + Number((amountParts[2] || '').padEnd(2, '0')) : NaN
+  const byteLength = (value: string) => new TextEncoder().encode(value).length
+  const incompleteNode = nodes.findIndex(value => value !== 'manager' && fixedApproverId(value) === undefined)
+  if (!name || byteLength(name) > 120) templateError.value = '请填写模板名称（最多 120 字节）'
+  else if (type !== '报销' && type !== '付款') templateError.value = '请选择费用类型'
+  else if (!evidence || byteLength(evidence) > 240) templateError.value = '请填写凭证要求（最多 240 字节）'
+  else if (!selectedChannels.length || selectedChannels.some(channel => !Object.keys(channels).includes(channel))) templateError.value = '请选择至少一种有效支付方式'
+  else if (fields.length > 30) templateError.value = '最多可设置 30 个自定义字段'
+  else if (!nodes.length || nodes.length > 12) templateError.value = '请添加 1 至 12 个审批节点'
+  else if (incompleteNode >= 0) templateError.value = `请为第 ${incompleteNode + 1} 步选择审批人`
+  else if (!Number.isSafeInteger(thresholdCents)) templateError.value = '请输入有效的加签金额，最多两位小数'
+  else if (thresholdCents > 0 && extra !== 'manager' && fixedApproverId(extra) === undefined) templateError.value = '请选择加签审批人'
+  if (templateError.value) return
   const body = {
-    ...draft.value, fields, required: draft.value.required.filter(field => fields.includes(field)),
-    nodes: draft.value.nodes.map(value => value.trim()),
-    threshold_cents: threshold === 0 ? 0 : cents(templateFields.value.threshold), publish,
+    ...draft.value, name, evidence, fields, required: draft.value.required.filter(field => fields.includes(field)),
+    threshold_cents: thresholdCents, extra: thresholdCents > 0 ? extra : '', publish,
   }
   await send('/oa-api/finance/templates/' + encodeURIComponent(draft.value.id), body, 'PUT')
   draftEdited.value = false
   await loadTemplates()
   draft.value = undefined
-  notice.value = publish ? '模板已发布' : '草稿已保存'
+  notice.value = publish ? '模板已发布，员工可发起申请' : '草稿已保存'
 }
 async function loadGrants() {
   grantsLoaded.value = false
@@ -727,11 +772,12 @@ async function saveFinanceAccess() {
   const { pay, report } = grants.value
   if (!grantTarget.value) throw new Error('请选择经办人')
   const { id } = grantTarget.value
+  const personName = grantName(grantTarget.value)
   if (!window.confirm(`为 ${grantName(grantTarget.value)}（账号 #${id}）保存财务授权？付款登记：${pay ? '允许' : '不允许'}；支出统计：${report ? '允许' : '不允许'}。`)) return
   await send('/oa-api/finance/actions/' + encodeURIComponent(id), { pay, report }, 'PUT')
   grantTarget.value = undefined
   await loadGrants()
-  notice.value = pay || report ? '财务经办权限已保存' : '财务经办权限已撤销'
+  notice.value = pay || report ? personName + '的财务授权已保存' : personName + '的财务授权已撤销'
 }
 async function saveDelegate() {
   if (!delegateTarget.value) throw new Error('请选择受托人')
@@ -861,14 +907,23 @@ watch(() => route.fullPath, syncLocation)
       <p v-if="returned && lastReturn?.comment" class="fee-banner">退回意见　{{ lastReturn.comment }}</p>
       <p v-if="draftRestored" class="fee-banner" role="status">已恢复申请草稿，请重新填写收款信息。</p>
       <p v-if="missingTemplateDraft" class="fee-banner" role="status">草稿使用的模板当前不可用。</p>
-      <OAEmpty v-if="loadedTemplates && !active" kind="files" title="当前暂无可用费用模板" :description="templateGuide">
+      <OAEmpty v-if="loadedTemplates && !templates.length && !returnedTemplate" kind="files" title="当前暂无可用费用模板" :description="templateGuide">
         <RouterLink v-if="canManageTemplates" class="oa-button oa-button-primary" :to="{ path: '/fees/templates', query: isAdmin && !canEditTemplate ? { manage: 'publish' } : {} }">前往模板与授权</RouterLink>
       </OAEmpty>
-      <form v-if="active" ref="applicationForm" class="oa-form fee-required" novalidate @input="edited = true" @change="edited = true" @submit.prevent="run(submit)">
+      <form v-if="active || templates.length" ref="applicationForm" class="oa-form fee-required" novalidate @input="edited = true" @change="edited = true" @submit.prevent="run(submit)">
         <div class="oa-form-row">
-          <label><span>申请模板<i aria-hidden="true">*</i></span><select v-model="form.template_id" :disabled="!!returned" required @change="selectTemplate"><option v-for="item in returnedTemplate ? [returnedTemplate] : templates" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-          <label><span>金额（元）<i aria-hidden="true">*</i></span><input v-model="form.amount" inputmode="decimal" placeholder="例如 120.50" required v-bind="fieldAttrs('amount')" @blur="validateField('amount', amountProblem, true)" @input="validateField('amount', amountProblem)" /><small v-if="fieldErrors.amount" id="fee-error-amount" class="fee-error">{{ fieldErrors.amount }}</small></label>
+          <label><span>申请模板<i aria-hidden="true">*</i></span><select v-model="form.template_id" :disabled="!!returned" required @change="selectTemplate">
+            <option disabled value="">选择报销或付款模板</option>
+            <option v-if="returnedTemplate" :value="returnedTemplate.id">{{ returnedTemplate.name }}</option>
+            <template v-else>
+              <optgroup v-for="group in applicationTemplates" :key="group.type" :label="group.type">
+                <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </optgroup>
+            </template>
+          </select></label>
+          <label v-if="active"><span>金额（元）<i aria-hidden="true">*</i></span><input v-model="form.amount" inputmode="decimal" placeholder="例如 120.50" required v-bind="fieldAttrs('amount')" @blur="validateField('amount', amountProblem, true)" @input="validateField('amount', amountProblem)" /><small v-if="fieldErrors.amount" id="fee-error-amount" class="fee-error">{{ fieldErrors.amount }}</small></label>
         </div>
+        <template v-if="active">
         <label><span>用途与说明<i aria-hidden="true">*</i></span><textarea v-model="form.reason" required maxlength="2000" placeholder="说明本笔支出的用途" v-bind="fieldAttrs('reason')" @blur="validateField('reason', () => requiredProblem(form.reason, '请输入费用用途'), true)" @input="validateField('reason', () => requiredProblem(form.reason, '请输入费用用途'))" /><small v-if="fieldErrors.reason" id="fee-error-reason" class="fee-error">{{ fieldErrors.reason }}</small></label>
         <fieldset class="oa-fieldset oa-form-row">
           <legend>收款信息</legend>
@@ -887,6 +942,7 @@ watch(() => route.fullPath, syncLocation)
           <button class="oa-button-primary" :disabled="busy || !active">{{ returned ? '重新提交' : '提交申请' }}</button>
         </div>
         <small v-if="!returned" class="oa-muted">草稿保留在当前标签页内存。刷新或关闭页面将清空，收款信息需重新填写。</small>
+        </template>
       </form>
     </section>
     <section v-if="active" class="oa-panel">
@@ -989,47 +1045,56 @@ watch(() => route.fullPath, syncLocation)
   </template>
 
   <template v-else-if="mode === 'templates'">
+    <section v-if="isAdmin && grantsLoaded && !hasPayHandler" class="oa-panel fee-setup-notice" aria-label="付款经办设置">
+      <div><h2>尚未指定付款经办人</h2><p class="oa-muted">选一位在职同事负责登记付款、上传回单。审批人在各模板中设置。</p></div>
+      <button type="button" @click="selectGrantTarget(undefined, 'finance'); openGrantPanel(financeGrantPanel)">设置付款经办人</button>
+    </section>
     <div class="oa-split oa-sidebar-split">
       <section class="oa-panel" :class="{ 'fee-templates-empty': loadedTemplates && !templates.length && !draft }">
         <h2>费用模板</h2>
-        <div class="oa-list"><button v-for="item in templates" :key="item.id" @click="beginTemplate(item)" :aria-current="selection === item.id" :disabled="!canEditTemplate">{{ item.name }} · v{{ item.version }}</button></div>
+        <div class="oa-list"><button v-for="item in templates" :key="item.id" @click="beginTemplate(item)" :aria-current="selection === item.id" :disabled="!canEditTemplate">{{ feeTypeLabel(item.type) }} · {{ item.name }} · {{ item.version ? '线上 v' + item.version : '尚未发布' }}</button></div>
         <OAEmpty v-if="loadedTemplates && !templates.length" kind="files" title="当前暂无费用模板"
           :description="canEditTemplate ? '新建模板，配置支付方式、凭证和审批节点。发布后员工可以发起申请。' : templateGuide">
           <button v-if="canEditTemplate && !draft" class="oa-button-primary" @click="beginTemplate()">创建第一个费用模板</button>
-          <button v-if="isAdmin && !draft" @click="openGrantPanel(delegatePanel)">指定模板发布人</button>
-          <button v-if="isAdmin" @click="openGrantPanel(financeGrantPanel)">设置付款经办人</button>
+          <button v-if="isAdmin && !canEditTemplate && !draft" @click="openGrantPanel(delegatePanel)">指定模板发布人</button>
         </OAEmpty>
         <button v-if="loadedTemplates && templates.length && canEditTemplate" :class="{ 'oa-button-primary': !draft }" @click="beginTemplate()">新建费用模板</button>
       </section>
       <section v-if="draft && canEditTemplate" class="oa-panel">
         <h2>{{ editingId ? '维护模板' : '新建费用模板' }}</h2>
-        <p class="oa-muted">保存草稿供维护人员继续编辑。发布后生效，历史单据继续使用原模板版本。</p>
-        <form ref="templateForm" class="oa-form fee-required" @input="draftEdited = true" @change="draftEdited = true" @submit.prevent="run(() => saveTemplate(false))">
+        <p class="oa-muted">{{ level === 'publish' ? '保存草稿可继续编辑。发布后员工可用，历史单据沿用原模板版本。' : '你可以保存和修改草稿。草稿需由有发布权限的人员发布，员工才可使用。' }}</p>
+        <form class="oa-form fee-required" novalidate @input="draftEdited = true" @change="draftEdited = true" @submit.prevent="run(() => saveTemplate(false))">
           <div class="oa-form-row">
             <label><span>名称<i aria-hidden="true">*</i></span><input v-model.trim="draft.name" placeholder="例如差旅报销" required /></label>
-            <label><span>单据类型<i aria-hidden="true">*</i></span><select v-model="draft.type"><option>报销</option><option>付款</option></select></label>
-            <label>可填写字段<input v-model="templateFields.fields" placeholder="费用归属，合同编号" /></label>
+            <label><span>费用类型<i aria-hidden="true">*</i></span><select v-model="draft.type" required><option value="" disabled>选择费用类型</option><option>报销</option><option>付款</option></select></label>
+            <label>自定义字段<input v-model="templateFields.fields" placeholder="例如费用归属，合同编号" /></label>
             <label><span>凭证要求<i aria-hidden="true">*</i></span><input v-model.trim="draft.evidence" placeholder="例如发票" required /></label>
           </div>
           <fieldset class="oa-fieldset"><legend>支付方式</legend><div class="oa-checks"><label v-for="(label, key) in channels" :key="key"><input v-model="draft.channels" type="checkbox" :value="key" />{{ label }}</label></div></fieldset>
           <fieldset v-if="list(templateFields.fields).length" class="oa-fieldset"><legend>必填字段</legend><div class="oa-checks"><label v-for="field in list(templateFields.fields)" :key="field"><input v-model="draft.required" type="checkbox" :value="field" />{{ field }}</label></div></fieldset>
           <fieldset class="oa-fieldset oa-form"><legend>审批节点</legend>
-            <div class="oa-actions oa-filter"><label>搜索审批人<input v-model="approverQuery" placeholder="姓名 / 拼音 / 部门 / 工号 / 完整手机号" @keydown.enter.prevent="findApprovers()" /></label><button type="button" :disabled="approverBusy" @click="findApprovers()">{{ approverBusy ? '搜索中…' : '搜索' }}</button></div>
-            <p v-if="approverError" class="oa-error" role="alert">{{ approverError }}</p>
-            <p v-else-if="!approverBusy && !approverOptions.length" class="oa-muted" role="status">没有匹配的在职人员。</p>
-            <div v-if="approverNext" class="oa-actions"><small role="status">已加载 {{ approverOptions.length }} 名候选</small><button type="button" :disabled="approverBusy" @click="findApprovers(approverNext)">加载更多候选</button></div>
-            <div v-for="(item, index) in draft.nodes" :key="index" class="oa-actions">
-              <label>第 {{ index + 1 }} 步<select v-model="draft.nodes[index]" :aria-label="'第 ' + (index + 1) + ' 步'" required><option value="" disabled>选择审批人</option><option v-for="option in approvalChoices(item)" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-              <button type="button" :disabled="index === 0" @click="movingNode(index, -1)">上移</button>
-              <button type="button" :disabled="index + 1 === draft.nodes.length" @click="movingNode(index, 1)">下移</button>
-              <button type="button" @click="draftEdited = true; draft.nodes.splice(index, 1)">移除</button>
+            <p class="oa-muted">按从上到下的顺序审批，同一人只需审批一次。选择申请人直属负责人前，请确认人员资料已配置负责人。
+              指定人员本人申请时，系统会尝试使用直属负责人或备用审批人。</p>
+            <div v-for="(item, index) in draft.nodes" :key="templateNodeKeys[index]" class="oa-form">
+              <div class="oa-actions">
+                <label>第 {{ index + 1 }} 步审批人类型<select :value="approverType(item)" required @change="changeTemplateApproverType($event, index)"><option value="" disabled>选择审批人类型</option><option value="fixed">指定人员</option><option value="manager">申请人直属负责人</option></select></label>
+                <button type="button" :disabled="index === 0" :aria-label="'上移第 ' + (index + 1) + ' 步'" @click="movingNode(index, -1)">上移</button>
+                <button type="button" :disabled="index + 1 === draft.nodes.length" :aria-label="'下移第 ' + (index + 1) + ' 步'" @click="movingNode(index, 1)">下移</button>
+                <button type="button" :aria-label="'移除第 ' + (index + 1) + ' 步'" @click="removeTemplateNode(index)">移除</button>
+              </div>
+              <FeePersonSelect v-if="approverType(item) === 'fixed'" :model-value="selectedApprover(item)" :label="'第 ' + (index + 1) + ' 步指定审批人'" :disabled="busy" @update:model-value="person => selectTemplateApprover(person, index)" />
             </div>
-            <button type="button" @click="draftEdited = true; draft.nodes.push(draft.nodes.length ? '' : 'manager')">添加审批节点</button>
+            <button type="button" :disabled="draft.nodes.length >= 12" @click="addTemplateNode">添加审批节点</button>
           </fieldset>
-          <div class="oa-form-row">
-            <label>金额达到时加签（元）<input v-model.trim="templateFields.threshold" inputmode="decimal" pattern="[0-9]+(\.[0-9]{1,2})?" required /></label>
-            <label v-if="Number(templateFields.threshold) > 0">加签审批人<select v-model="draft.extra" aria-label="加签审批人" required><option value="" disabled>选择审批人</option><option v-for="option in approvalChoices(draft.extra)" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-          </div>
+          <fieldset class="oa-fieldset oa-form"><legend>金额加签</legend>
+            <label>加签起始金额（元）<input v-model.trim="templateFields.threshold" inputmode="decimal" placeholder="留空或填 0 则不加签" /></label>
+            <template v-if="Number(templateFields.threshold) > 0">
+              <p class="oa-muted">申请金额达到该金额时，在常规审批结束后加签。</p>
+              <label>加签审批人类型<select :value="approverType(draft.extra || '')" required @change="changeTemplateApproverType($event)"><option value="" disabled>选择审批人类型</option><option value="fixed">指定人员</option><option value="manager">申请人直属负责人</option></select></label>
+              <FeePersonSelect v-if="approverType(draft.extra || '') === 'fixed'" :model-value="selectedApprover(draft.extra)" label="加签指定审批人" :disabled="busy" @update:model-value="person => selectTemplateApprover(person)" />
+            </template>
+          </fieldset>
+          <p v-if="templateError" class="oa-error" role="alert">{{ templateError }}</p>
           <div class="oa-actions"><button type="button" :disabled="busy" @click="if (leaveDraft()) { draftEdited = false; draft = undefined; selection = '' }">关闭编辑</button><button :disabled="busy">保存草稿</button><button v-if="level === 'publish'" class="oa-button-primary" type="button" :disabled="busy" @click="run(() => saveTemplate(true))">发布模板</button></div>
         </form>
       </section>
@@ -1082,7 +1147,7 @@ watch(() => route.fullPath, syncLocation)
         <p v-if="inactiveGrant(grantTarget)" class="oa-muted">{{ grantTarget && grantName(grantTarget) }} · 只可撤销历史授权</p>
         <FeePersonSelect v-else :model-value="grantTarget" label="经办人" :disabled="busy || !grantsLoaded" @update:model-value="person => selectGrantTarget(person, 'finance')" />
         <div class="oa-checks"><label><input v-model="grants.pay" type="checkbox" :disabled="inactiveGrant(grantTarget)" />付款登记</label><label><input v-model="grants.report" type="checkbox" :disabled="inactiveGrant(grantTarget)" />费用报表</label></div>
-        <div class="oa-actions"><button type="button" :disabled="busy || !grantTarget" @click="selectGrantTarget(undefined, 'finance')">取消选择</button><button :disabled="busy || !grantTarget || !grantsLoaded">{{ inactiveGrant(grantTarget) ? '确认撤销财务经办' : '保存财务授权' }}</button></div>
+        <div class="oa-actions"><button type="button" :disabled="busy || !grantTarget" @click="selectGrantTarget(undefined, 'finance')">取消选择</button><button :disabled="!canSaveFinanceGrant">{{ inactiveGrant(grantTarget) ? '确认撤销财务经办' : '保存财务授权' }}</button></div>
       </form>
     </details>
   </template>
@@ -1123,6 +1188,8 @@ watch(() => route.fullPath, syncLocation)
 .fee-document { align-items: start; }
 .fee-timeline li { padding-block: 5px; }
 .fee-step-current { color: var(--oa-accent); font-weight: 600; }
+.fee-setup-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fee-setup-notice p { margin-top: 4px; }
 .fee-grants-heading { margin-bottom: 8px; }
 .fee-grants-heading h2 { margin: 0 auto 0 0; }
 .fee-form-actions { padding-top: 10px; border-top: 1px solid var(--oa-line); justify-content: flex-end; }
