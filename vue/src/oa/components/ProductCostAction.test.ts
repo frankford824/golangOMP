@@ -102,3 +102,15 @@ it('keeps cost hidden without read permission and sends a review request using t
   expect(mocks.maintain).not.toHaveBeenCalled()
   wrapper.unmount()
 })
+
+it('keeps both costs unknown and offers review when the SKU has no maintenance record', async () => {
+  mocks.list.mockResolvedValue({ data: [], next_before_id: 0 })
+  const wrapper = await open()
+  try {
+    expect(wrapper.get('[aria-label="当前编码成本"]').text()).toContain('系统单位成本—ERP 最近观测单位成本—')
+    expect(wrapper.findAll('button').some(button => button.text() === '确认当前系统成本')).toBe(false)
+    expect(wrapper.get('textarea').exists()).toBe(true)
+  } finally {
+    wrapper.unmount()
+  }
+})

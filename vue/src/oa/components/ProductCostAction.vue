@@ -211,13 +211,13 @@ defineExpose({ open, close, dismiss, pending: busy })
         <p role="alert" class="oa-error">{{ costReadError }}</p>
         <button type="button" @click="loadCurrentCost">重新读取成本</button>
       </template>
-      <p v-else-if="!currentCost">暂无系统成本维护记录。</p>
       <template v-else>
         <dl>
-          <div><dt>系统单位成本</dt><dd>{{ costAmount(currentCost.cost_price) }}</dd></div>
-          <div><dt>ERP 最近观测单位成本</dt><dd>{{ costAmount(currentCost.erp_cost) }}</dd></div>
+          <div><dt>系统单位成本</dt><dd>{{ costAmount(currentCost?.cost_price) }}</dd></div>
+          <div><dt>ERP 最近观测单位成本</dt><dd>{{ costAmount(currentCost?.erp_cost) }}</dd></div>
         </dl>
-        <p>{{ maintenanceStatuses[currentCost.status] ?? currentCost.status }}</p>
+        <p v-if="currentCost">{{ maintenanceStatuses[currentCost.status] ?? currentCost.status }}</p>
+        <p v-else>暂无系统成本维护记录，可发起核价复核。</p>
       </template>
     </section>
     <p class="sku-hint">成交成本核实覆盖率按所选期间计算。当前编码成本用于日常维护。</p>
