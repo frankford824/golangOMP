@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"strings"
@@ -46,7 +47,7 @@ func JSON(w http.ResponseWriter, status int, data any) {
 }
 
 func Error(w http.ResponseWriter, status int, message string) {
-	write(w, status, map[string]string{"error": message})
+	ErrorWithCode(w, status, "", message)
 }
 
 func write(w http.ResponseWriter, status int, body any) {
@@ -75,6 +76,7 @@ func (i Identity) Authenticate(next http.Handler) http.Handler {
 		done   chan struct{}
 		actor  Actor
 		status int
+		trace  string
 	}
 	var mu sync.Mutex
 	flights := make(map[[32]byte]*pending)
@@ -88,12 +90,12 @@ func (i Identity) Authenticate(next http.Handler) http.Handler {
 		mu.Lock()
 		f := flights[key]
 		if f == nil {
-			f = &pending{done: make(chan struct{})}
+			f = &pending{done: make(chan struct{}), trace: TraceID(r.Context())}
 			flights[key] = f
 			go func(call *pending, token string) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				call.actor, call.status = i.resolve(ctx, token)
+				call.actor, call.status = i.resolve(traceContext(ctx, call.trace), token)
 				mu.Lock()
 				delete(flights, key)
 				close(call.done)
@@ -107,6 +109,9 @@ func (i Identity) Authenticate(next http.Handler) http.Handler {
 		case <-f.done:
 		}
 		if f.status != 200 {
+			if id := TraceID(r.Context()); id != "" && f.trace != "" && id != f.trace {
+				log.Printf("oa_identity_failed trace_id=%s upstream_trace_id=%s status=%d", id, f.trace, f.status)
+			}
 			msg := "账号服务暂时不可用"
 			if f.status == 401 || f.status == 403 {
 				msg = "登录已失效或账号未启用"
@@ -126,6 +131,7 @@ func (i Identity) resolve(ctx context.Context, token string) (Actor, int) {
 		return Actor{}, 503
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(TraceHeader, TraceID(ctx))
 	resp, err := i.Client.Do(req)
 	if err != nil {
 		return Actor{}, 503

@@ -310,8 +310,14 @@ watch(user, () => {
 
 onMounted(loadProfile)
 
-function logout(): void {
-  permissionsStore.logout()
+async function logout(): Promise<void> {
+  if (oaEnabled) {
+    try {
+      await permissionsStore.logout()
+    } catch {
+      return
+    }
+  } else void permissionsStore.logout()
   void router.push('/login')
 }
 </script>

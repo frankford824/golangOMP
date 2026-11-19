@@ -1,4 +1,5 @@
-import http from '@/services/http'
+import http, { type HttpAppError } from '@/services/http'
+import { showOaRequestError } from './requestErrors'
 
 type Envelope<T> = T | { data: T }
 function unwrap<T>(body: Envelope<T>): T {
@@ -36,7 +37,9 @@ export function saveFile(blob: Blob, filename: string) {
 }
 
 export function errorText(error: unknown) {
-  return error instanceof Error ? error.message : '暂时无法完成操作，请稍后重试'
+  if (!(error instanceof Error)) return '暂时无法完成操作，请稍后重试'
+  showOaRequestError(error as HttpAppError)
+  return error.message
 }
 
 export function money(value: number | string | null | undefined) {

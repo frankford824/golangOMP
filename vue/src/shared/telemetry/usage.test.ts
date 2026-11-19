@@ -43,6 +43,23 @@ describe('authenticated two-app usage telemetry', () => {
     expect(installUsageTelemetry(s.router, { appId: app, getToken: () => 'account-a' })).toBe(s.stop)
   })
 
+  it.each([false, true])('uses the correct transport for navigation and unload with cookieSession=%s', async cookieSession => {
+    vi.useFakeTimers()
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/a', component: {} }] })
+    stops.push(installUsageTelemetry(router, { appId: 'main-ops', getToken: () => 'synthetic-session', cookieSession }))
+    await router.push('/a')
+    await vi.advanceTimersByTimeAsync(100)
+    window.dispatchEvent(new Event('pagehide'))
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    for (const [path, options] of fetcher.mock.calls) {
+      expect(path).toBe('/v1/trace-events')
+      expect(options?.credentials).toBe('same-origin')
+      expect(options?.keepalive).toBe(true)
+      expect(new Headers(options?.headers).get('Authorization')).toBe(cookieSession ? null : 'Bearer synthetic-session')
+    }
+  })
+
   it('does not count anonymous routes or carry a session across accounts', async () => {
     const s = setup(); s.setToken(null)
     await s.router.push('/a')

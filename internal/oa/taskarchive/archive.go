@@ -35,7 +35,7 @@ func GlobalAllowed(ctx context.Context, source *sql.DB, actor platform.Actor) bo
 			WHERE a.user_id = ? AND a.scope_mode = 'global'
 		)`, actor.ID).Scan(&allowed)
 	if err != nil {
-		log.Printf("[OA-TASK-ARCHIVE] verify global scope actor=%d error=%v", actor.ID, err)
+		log.Printf("oa_task_archive_scope_failed trace_id=%s error_type=%T", platform.TraceID(ctx), err)
 	}
 	return err == nil && allowed
 }
@@ -90,7 +90,7 @@ func (h archiveHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, repo.ErrConflict):
 		platform.Error(w, http.StatusConflict, "只可归档已结单或已取消的任务，请刷新列表后重新选择")
 	default:
-		log.Printf("[OA-TASK-ARCHIVE] actor=%d task_count=%d error=%v", actor.ID, len(ids), err)
+		log.Printf("oa_task_archive_failed trace_id=%s error_type=%T", platform.TraceID(r.Context()), err)
 		platform.Error(w, http.StatusServiceUnavailable, "批量归档暂未确认，请刷新列表后重试")
 	}
 }

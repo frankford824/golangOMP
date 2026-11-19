@@ -202,9 +202,15 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onDocumentKeydown, true)
 })
 
-function logout(): void {
+async function logout(): Promise<void> {
   closeMenu()
-  permissionsStore.logout()
+  if (oaEnabled) {
+    try {
+      await permissionsStore.logout()
+    } catch {
+      return
+    }
+  } else void permissionsStore.logout()
   void router.push('/login')
 }
 </script>

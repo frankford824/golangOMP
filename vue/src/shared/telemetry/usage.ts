@@ -61,7 +61,7 @@ export async function observeUsageOperation<T>(action: string, metadata: Metadat
   }
 }
 
-export function installUsageTelemetry(router: Router, options: { appId: UsageApp; getToken: () => string | null; send?: Send }): () => void {
+export function installUsageTelemetry(router: Router, options: { appId: UsageApp; getToken: () => string | null; cookieSession?: boolean; send?: Send }): () => void {
   const existing = installed.get(router)
   if (existing) return existing
   if (typeof window === 'undefined') return () => undefined
@@ -70,7 +70,11 @@ export function installUsageTelemetry(router: Router, options: { appId: UsageApp
     // Dedicated transport: never recursively instrument itself or clear login on telemetry failure.
     const response = await fetch('/v1/trace-events', {
       method: 'POST', credentials: 'same-origin', keepalive: true,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Usage-App': options.appId },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Usage-App': options.appId,
+        ...(!options.cookieSession ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(event), signal: AbortSignal.timeout(5000),
     })
     if (!response.ok) throw new Error('usage_delivery_failed')

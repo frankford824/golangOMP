@@ -1,4 +1,4 @@
-import http, { getToken, type HttpAppError } from '@/services/http'
+import http, { getBearerToken, type HttpAppError } from '@/services/http'
 import { isMockEnabled } from '@/mocks'
 
 export type AIMessageStatus = 'streaming' | 'completed' | 'cancelled' | 'failed'
@@ -201,7 +201,7 @@ export const aiChatApi = {
     signal?: AbortSignal,
   ): Promise<void> {
     if (isMockEnabled()) return mockStream(conversationID, request.content, onEvent, signal)
-    const token = getToken()
+    const token = getBearerToken()
     const response = await fetch(`/v1/ai/chat/conversations/${encodeURIComponent(conversationID)}/messages:stream`, {
       method: 'POST',
       signal,

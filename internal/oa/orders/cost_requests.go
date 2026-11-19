@@ -60,7 +60,7 @@ func readCostInput(w http.ResponseWriter, r *http.Request, value any) bool {
 	return true
 }
 func costUnavailable(w http.ResponseWriter, err error) {
-	log.Printf("[OA-COST-REQUEST] operation failed: %v", err)
+	log.Printf("oa_cost_request_failed trace_id=%s error_type=%T", w.Header().Get(platform.TraceHeader), err)
 	platform.Error(w, 503, "核价消息暂不可用，请稍后重试")
 }
 

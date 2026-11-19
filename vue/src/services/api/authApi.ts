@@ -37,6 +37,9 @@ export const authApi = {
   login: (payload: { username: string; password: string }, signal?: AbortSignal) =>
     http.post<LoginResponse>('/v1/auth/login', payload, { signal }),
 
+  migrateOASession: (legacyBearer: string) =>
+    http.post<void>('/oa-api/session/migrate', undefined, { headers: { Authorization: 'Bearer ' + legacyBearer } }),
+
   /**
    * 获取当前登录用户信息（含 frontend_access）
    * GET /v1/auth/me

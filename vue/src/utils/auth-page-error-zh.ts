@@ -9,6 +9,9 @@ import { resolveApiUserMessage } from '@/utils/api-message-zh'
  * 将登录/注册相关错误转为中文说明；保留 trace_id 便于用户反馈（不改变接口）。
  */
 export function formatAuthPageError(err: unknown): string {
+  if (import.meta.env.VITE_OA_FEATURES === 'true' && err instanceof Error && /[\u4e00-\u9fff]/.test(err.message)) {
+    return err.message
+  }
   return resolveApiUserMessage(err, {
     includeTrace: true,
     fallback: '操作失败，请稍后重试',

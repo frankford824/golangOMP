@@ -2,6 +2,7 @@ package platform
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ func Native(base string) http.Handler {
 			r.Method == "POST" && (path == "/v1/cost-rules/preview" || strings.HasSuffix(path, "/deactivate") && numericPath(strings.TrimSuffix(path, "/deactivate"), "/v1/users/")) ||
 			r.Method == "PATCH" && numericPath(path, "/v1/users/")
 		if !allowed {
-			http.Error(w, "unsupported native operation", 403)
+			Error(w, 403, "当前请求不支持调用主站服务")
 			return
 		}
 		target := base + path
@@ -32,15 +33,21 @@ func Native(base string) http.Handler {
 			return
 		}
 		req.Header.Set("Authorization", r.Header.Get("Authorization"))
+		id := TraceID(r.Context())
+		req.Header.Set(TraceHeader, id)
 		if r.Method == "PATCH" || r.Method == "POST" {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		resp, err := client.Do(req)
 		if err != nil {
+			log.Printf("oa_native_failed trace_id=%s status=503", id)
 			Error(w, 503, "主站业务服务暂不可用")
 			return
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode >= http.StatusBadRequest {
+			log.Printf("oa_native_failed trace_id=%s status=%d", id, resp.StatusCode)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, io.LimitReader(resp.Body, 8<<20))

@@ -143,6 +143,12 @@
       <div v-if="oaEnabled" ref="desktopStatus" class="oa-page-status" />
       <div ref="contentScroller" :class="{ 'oa-dashboard-viewport': oaEnabled && ($route.path === '/operations' || $route.path.startsWith('/operations/') || $route.path === '/me/performance' || $route.name === 'Dashboard') }" class="app-page-scroll flex-1 overflow-auto custom-scrollbar isolate" :data-workspace="desktopWorkspace">
         <main class="content">
+          <div v-if="oaEnabled && (oaAccessState === 'unavailable' || feeAccessBlocked)" class="oa-access-status">
+            <span role="status">{{ oaAccessMessage }}</span>
+            <button v-if="oaAccessState === 'unavailable'" type="button" :disabled="oaAccessChecking" @click="retryOAAccess">
+              {{ oaAccessChecking ? '正在重试…' : '重新核验' }}
+            </button>
+          </div>
           <PersonalNav v-if="oaEnabled && ['/me', '/me/security', '/me/org'].includes($route.path)" />
           <router-view v-slot="{ Component, route }">
             <KeepAlive :max="8">
@@ -151,7 +157,7 @@
               </CachedWorkspace>
               <component v-else-if="Component && route.meta.keepAlive" :is="Component" :key="String(route.name || route.path)" />
             </KeepAlive>
-            <component v-if="Component && !route.meta.keepAlive" :is="Component" :key="route.path" />
+            <component v-if="Component && !route.meta.keepAlive && !feeAccessBlocked" :is="Component" :key="route.path" />
           </router-view>
         </main>
       </div>
@@ -214,7 +220,8 @@ import { useRouter } from 'vue-router'
 import { Menu, Search, PanelLeftOpen, PanelLeftClose } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
 import { resolveFirstAccessibleHomeRoute } from '@/router/home-fallback'
-import { oaEnabled, useOAAccess } from '@/oa/access'
+import { ensureOAAccess, oaEnabled, useOAAccess } from '@/oa/access'
+import { feeTabs } from '@/oa/routes'
 import GlobalSearchOverlay from '@/components/global-search/GlobalSearchOverlay.vue'
 import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
@@ -231,8 +238,33 @@ import oaBrandMark from '@/oa/assets/yongbo-mark.svg'
 import AvatarDropdown from '@/components/layout/AvatarDropdown.vue'
 
 const permissionsStore = usePermissionsStore()
-const { can } = useOAAccess()
+const { activated: oaAccessConfirmed, can, state: oaAccessState, checking: oaAccessChecking } = useOAAccess()
 const router = useRouter()
+const feeRoute = computed(() => router.currentRoute.value.path === '/fees' || router.currentRoute.value.path.startsWith('/fees/'))
+const feeAccessBlocked = computed(() => oaEnabled && feeRoute.value && !oaAccessConfirmed.value
+  && (oaAccessState.value !== 'denied' || router.currentRoute.value.path === '/fees/accounts'))
+const oaAccessMessage = computed(() => {
+  if (oaAccessState.value === 'loading') return '正在核验 OA 权限…'
+  if (oaAccessState.value === 'denied') return '当前账号的 OA 授权无效，请确认账号状态。'
+  return oaAccessConfirmed.value
+    ? '暂时无法刷新 OA 权限，页面沿用本次登录已确认的权限。'
+    : '暂时无法核验 OA 权限，请重试。'
+})
+function retryOAAccess() {
+  void ensureOAAccess(true)
+}
+function refreshVisibleOAAccess() {
+  if (document.visibilityState === 'visible') void ensureOAAccess()
+}
+watch([oaAccessConfirmed, () => router.currentRoute.value.name], ([confirmed, name]) => {
+  if (!oaEnabled || !confirmed || name !== 'FeesHome') return
+  const tab = feeTabs.find(item => item.actions.some(can))
+  if (tab) {
+    const { query, hash } = router.currentRoute.value
+    void router.replace({ path: '/fees/' + tab.mode, query, hash })
+  }
+}, { immediate: true })
+let feeAccessRefresh: ReturnType<typeof setInterval> | undefined
 
 const deskQuery = window.matchMedia?.('(min-width: 1280px)')
 const wideSidebar = window.matchMedia?.('(min-width: 1440px)')
@@ -493,6 +525,13 @@ onMounted(() => {
   deskQuery?.addEventListener('change', syncDesktop)
   wideSidebar?.addEventListener('change', syncDesktop)
   window.addEventListener('keydown', onGlobalKeydown)
+  if (oaEnabled) {
+    window.addEventListener('focus', refreshVisibleOAAccess)
+    document.addEventListener('visibilitychange', refreshVisibleOAAccess)
+    feeAccessRefresh = setInterval(() => {
+      if (feeRoute.value) refreshVisibleOAAccess()
+    }, 60_000)
+  }
   removeRouteBeforeGuard = router.beforeEach((_to, from, next) => {
     if (oaEnabled && from.name === 'TaskList' && _to.name !== 'TaskList') {
       const filters: Record<string, string> = {}
@@ -521,6 +560,11 @@ onUnmounted(() => {
   deskQuery?.removeEventListener('change', syncDesktop)
   wideSidebar?.removeEventListener('change', syncDesktop)
   window.removeEventListener('keydown', onGlobalKeydown)
+  if (oaEnabled) {
+    window.removeEventListener('focus', refreshVisibleOAAccess)
+    document.removeEventListener('visibilitychange', refreshVisibleOAAccess)
+    clearInterval(feeAccessRefresh)
+  }
   stopRouteLoading()
   removeRouteBeforeGuard?.()
   removeRouteAfterHook?.()
@@ -535,6 +579,31 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 </script>
 
 <style scoped>
+.oa-access-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-block-end: 12px;
+  padding: 8px 12px;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 8px;
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface-muted));
+  font-size: 14px;
+}
+
+.oa-access-status button {
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface));
+}
+
+.oa-access-status button:disabled {
+  opacity: .65;
+}
 .nav-section-label {
   @apply px-4 pt-3 pb-1 text-[10px] font-headline font-bold uppercase tracking-[0.2em];
   color: rgb(var(--yb-text-muted));

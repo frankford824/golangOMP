@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { TOKEN_STORAGE_KEY } from '@/services/http'
 
 const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   me: vi.fn(),
+  migrate: vi.fn(),
   refreshAssetCookie: vi.fn(() => Promise.resolve()),
   loadNotifications: vi.fn(() => Promise.resolve()),
   startRealtime: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('@/services/api/authApi', () => ({
   authApi: {
     login: mocks.login,
     me: mocks.me,
+    migrateOASession: mocks.migrate,
     refreshAssetCookie: mocks.refreshAssetCookie,
     logout: vi.fn(() => Promise.resolve()),
   },
@@ -90,5 +92,78 @@ describe('permissions login recovery', () => {
     await expect(store.loginWithCredentials('legacy-user', 'password-value')).rejects.toMatchObject({ status: 401 })
 
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
+  })
+})
+
+
+describe('OA browser session recovery', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.stubEnv('VITE_OA_FEATURES', 'true')
+    localStorage.clear()
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => vi.unstubAllEnvs())
+
+  async function newStore() {
+    const { createPinia, setActivePinia } = await import('pinia')
+    const { usePermissionsStore } = await import('@/stores/permissions')
+    setActivePinia(createPinia())
+    return usePermissionsStore()
+  }
+
+  const user = { id: 42, username: 'fixture', frontend_access: { menus: ['task_list'] } }
+
+  it('uses the confirmed login response without requesting /auth/me again', async () => {
+    const store = await newStore()
+    mocks.login.mockResolvedValueOnce({ data: { data: { user } } })
+    await store.loginWithCredentials('fixture', 'mock-password')
+    expect(store.currentUser?.id).toBe('42')
+    expect(mocks.me).not.toHaveBeenCalled()
+  })
+
+  it.each([{ status: 429, traceId: 'fixture-trace' }, new Error('timeout')])(
+    'lets the same store retry a temporary /auth/me failure', async failure => {
+      const store = await newStore()
+      mocks.me.mockRejectedValueOnce(failure).mockResolvedValueOnce({ data: { data: user } })
+      await expect(store.restoreSession()).rejects.toMatchObject({ cause: failure })
+      expect(store.currentUser).toBeNull()
+      await store.restoreSession()
+      expect(store.currentUser?.id).toBe('42')
+    },
+  )
+
+  it('holds legacy input in memory for retry without overriding the outage with /auth/me', async () => {
+    const store = await newStore()
+    const key = 'yb.oa.formal.token.v1'
+    localStorage.setItem(key, 'migration-fixture')
+    mocks.migrate.mockRejectedValueOnce({ status: 503 }).mockResolvedValueOnce(undefined)
+    mocks.me.mockResolvedValueOnce({ data: { data: user } })
+
+    await expect(store.restoreSession()).rejects.toMatchObject({ cause: { status: 503 } })
+    expect(mocks.me).not.toHaveBeenCalled()
+    expect(localStorage.getItem(key)).toBeNull()
+    await store.restoreSession()
+    expect(mocks.migrate.mock.calls).toEqual([['migration-fixture'], ['migration-fixture']])
+    expect(store.currentUser?.id).toBe('42')
+  })
+
+  it('marks an authoritative 403 as access denied rather than retryable', async () => {
+    const store = await newStore()
+    mocks.me.mockRejectedValueOnce({ status: 403, traceId: 'fixture-trace' })
+    await expect(store.restoreSession()).rejects.toMatchObject({
+      blocked: true,
+      traceId: 'fixture-trace',
+      message: '当前账号无法访问 OA。',
+    })
+    expect(store.currentUser).toBeNull()
+  })
+
+  it('passes through an authoritative 401', async () => {
+    const store = await newStore()
+    mocks.me.mockRejectedValueOnce({ status: 401 })
+    await expect(store.restoreSession()).rejects.toMatchObject({ status: 401 })
+    expect(store.currentUser).toBeNull()
   })
 })

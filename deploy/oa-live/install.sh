@@ -35,7 +35,9 @@ restore(){
   code=$?;trap - ERR
   select_release "$prior"
   if [[ -x "$prior/oa-extension" ]]; then systemctl restart yongbo-oa-live || true; else systemctl stop yongbo-oa-live || true; fi
-  cp "$known_good" "$site"
+  python3 "$release/site.py" --protect-rollback "$known_good" > "$site.next"
+  chmod 644 "$site.next"
+  mv -Tf "$site.next" "$site"
   if nginx -t;then systemctl reload nginx;fi
   rm -f "$known_good"
   echo 'OA reverted to its previous formal frontend; original sites were not switched.' >&2; exit "$code"

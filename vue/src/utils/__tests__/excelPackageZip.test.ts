@@ -174,6 +174,21 @@ describe('excelPackageZip', () => {
     expect(sumExcelPackageQuantities(unmatched)).toBe(11)
   })
 
+  it('uses the OA cookie only for same-origin package files', async () => {
+    vi.stubEnv('VITE_OA_FEATURES', 'true')
+    try {
+      const blob = new Blob(['image'])
+      const fetcher = vi.fn(async () => ({ ok: true, status: 200, blob: async () => blob }) as Response)
+      const load = createExcelPackageBlobLoader(fetcher)
+      await load(item({ resource_id: 'ext-1', download_url: '/v1/assets/ext-1/content' }))
+      await load(item({ resource_id: 'ext-2', download_url: 'https://storage.example/image.png' }))
+      expect(fetcher).toHaveBeenNthCalledWith(1, '/v1/assets/ext-1/content', { credentials: 'same-origin', mode: 'cors' })
+      expect(fetcher).toHaveBeenNthCalledWith(2, 'https://storage.example/image.png', { credentials: 'omit', mode: 'cors' })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('downloads the same source once and shares the blob across duplicate rows', async () => {
     const blob = new Blob(['image'])
     const fetcher = vi.fn(async () => ({ ok: true, status: 200, blob: async () => blob }) as Response)

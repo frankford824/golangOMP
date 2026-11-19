@@ -10,6 +10,15 @@ import type {
 import { RoleEnum, DataScopeEnum, PermissionEnum } from '@/types'
 import { authApi } from '@/services/api/authApi'
 import { setToken, clearToken } from '@/services/http'
+import {
+  announceOASessionChange,
+  discardLegacyOABearer,
+  getOASessionId,
+  markOASession,
+  oaCookieSessionEnabled,
+  takeLegacyOABearer,
+} from '@/services/oaSession'
+import { OASessionRecoveryError } from '@/oa/sessionRecovery'
 import { useNotificationsStore } from '@/stores/notifications.store'
 import { useRealtimeStore } from '@/stores/realtime.store'
 import { useTasksStore } from '@/stores/tasks'
@@ -158,12 +167,20 @@ export const usePermissionsStore = defineStore('permissions', () => {
   const actorDepartment = ref<string>('')
   const actorDepartmentId = ref<number | null>(null)
   const actorTeam = ref<string>('')
+  let restorePending: Promise<void> | undefined
+  let logoutPending: Promise<void> | undefined
 
   /**
    * 真实后端登录（用于生产/联调场景）
    * 后端返回格式：{ data: { user, session: { token } } } 或 { user, token }
    */
   async function loginWithCredentials(username: string, password: string): Promise<void> {
+    if (oaCookieSessionEnabled) {
+      await logoutPending
+      const { data } = await authApi.login({ username, password })
+      await resumeOASessionAfterLogin(data)
+      return
+    }
     const res = await authApi.login({ username, password })
     const raw = res.data as (
       | LoginResponse
@@ -198,20 +215,56 @@ export const usePermissionsStore = defineStore('permissions', () => {
     }
   }
 
-  /**
-   * 从 localStorage token 恢复会话（路由守卫初始化调用）
-   * 若 token 无效，后端返回 401，http 拦截器会自动清除 token 并跳转登录
-   * 兼容 /me 返回 { data: user } 或直接 user
-   */
-  async function restoreSession(): Promise<void> {
+  async function resumeOASessionAfterLogin(payload: unknown): Promise<void> {
+    resetSession()
+    announceOASessionChange()
+    if (!applySessionPayload(payload)) await restoreSession()
+  }
+
+  function restoreSession(): Promise<void> {
+    if (!oaCookieSessionEnabled) return loadSession()
+    if (!restorePending) {
+      restorePending = loadSession()
+        .catch((error: unknown) => {
+          if ((error as { status?: number } | null)?.status === 401) throw error
+          throw new OASessionRecoveryError(error)
+        })
+        .finally(() => { restorePending = undefined })
+    }
+    return restorePending
+  }
+
+  async function loadSession(): Promise<void> {
+    if (oaCookieSessionEnabled) {
+      await logoutPending
+      const legacy = takeLegacyOABearer()
+      if (legacy) {
+        try {
+          await authApi.migrateOASession(legacy)
+          discardLegacyOABearer()
+        } catch (error) {
+          const status = (error as { status?: number })?.status
+          if (status !== 401 && status !== 403) throw error
+          discardLegacyOABearer()
+        }
+      }
+    }
     const res = await authApi.me()
-    const snapshot = extractCurrentUserFromAuthMe(res.data as AuthMePayload | undefined)
-    const user = snapshot?.user ?? null
-    if (!user) throw new Error('会话恢复失败：缺少用户信息')
-    const access = snapshot?.frontendAccess ?? user.frontend_access
-    if (!access) throw new Error('会话恢复失败：缺少 frontend_access')
+    applySessionPayload(res.data, true)
+  }
+
+  function applySessionPayload(payload: unknown, required = false): boolean {
+    const snapshot = extractCurrentUserFromAuthMe(payload as AuthMePayload | undefined)
+    const user = snapshot?.user
+    const access = snapshot?.frontendAccess ?? user?.frontend_access
+    if (!user || !access) {
+      if (required) throw new Error(user ? '会话恢复失败：缺少 frontend_access' : '会话恢复失败：缺少用户信息')
+      return false
+    }
+    if (oaCookieSessionEnabled && !getOASessionId()) markOASession(true)
     applyAuthenticatedUser(user, access)
     startAuthenticatedServices()
+    return true
   }
 
   function applyAuthenticatedUser(user: BackendUser, access: FrontendAccess): void {
@@ -234,7 +287,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
   }
 
   function startAuthenticatedServices(): void {
-    void authApi.refreshAssetCookie().catch(() => undefined)
+    if (!oaCookieSessionEnabled) void authApi.refreshAssetCookie().catch(() => undefined)
     void useNotificationsStore().load().catch(() => undefined)
     void useWebPushStore().initAfterLogin().catch(() => undefined)
     useRealtimeStore().start()
@@ -350,9 +403,25 @@ export const usePermissionsStore = defineStore('permissions', () => {
     currentUser.value = user
   }
 
-  function logout() {
+  function logout(): Promise<void> {
+    if (oaCookieSessionEnabled) {
+      if (!logoutPending) {
+        logoutPending = (async () => {
+          await useWebPushStore().cleanupOnLogout().catch(() => undefined)
+          await authApi.logout()
+          resetSession()
+          announceOASessionChange()
+        })().finally(() => { logoutPending = undefined })
+      }
+      return logoutPending
+    }
     void useWebPushStore().cleanupOnLogout().catch(() => undefined)
     void authApi.logout().catch(() => undefined)
+    resetSession()
+    return Promise.resolve()
+  }
+
+  function resetSession(): void {
     clearToken()
     useRealtimeStore().stop()
     useNotificationsStore().reset()
@@ -532,6 +601,8 @@ export const usePermissionsStore = defineStore('permissions', () => {
     actorDepartmentId,
     actorTeam,
     loginWithCredentials,
+    resumeOASessionAfterLogin,
+    resetSession,
     restoreSession,
     setCurrentUser,
     logout,

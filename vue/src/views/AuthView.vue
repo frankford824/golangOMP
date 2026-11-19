@@ -220,6 +220,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePermissionsStore } from '@/stores/permissions'
 import { resolvePostLoginLandingRoute } from '@/router/home-fallback'
+import { OASessionRecoveryError, showOASessionRecovery } from '@/oa/sessionRecovery'
 import { authApi } from '@/services/api/authApi'
 import { formatAuthPageError } from '@/utils/auth-page-error-zh'
 
@@ -323,7 +324,8 @@ async function handleLogin() {
     if (oaEnabled) await router.replace(landing)
     else await router.push(landing)
   } catch (err: unknown) {
-    errorMessage.value = formatAuthPageError(err)
+    if (oaEnabled && err instanceof OASessionRecoveryError) showOASessionRecovery(route.fullPath, err)
+    else errorMessage.value = formatAuthPageError(err)
   } finally {
     isLoading.value = false
   }
@@ -375,10 +377,11 @@ async function handleRegister() {
       mobile: registerForm.value.mobile.trim(),
       email: registerForm.value.email.trim() || undefined,
     }
-    await authApi.register(payload)
+    const registration = await authApi.register(payload)
 
-    // 注册成功，自动登录
-    await permissionsStore.loginWithCredentials(
+    // OA registration already sets the formal browser session.
+    if (oaEnabled) await permissionsStore.resumeOASessionAfterLogin(registration.data)
+    else await permissionsStore.loginWithCredentials(
       registerForm.value.username.trim(),
       registerForm.value.password,
     )
@@ -389,7 +392,8 @@ async function handleRegister() {
     if (oaEnabled) await router.replace(landing)
     else await router.push(landing)
   } catch (err: unknown) {
-    errorMessage.value = formatAuthPageError(err)
+    if (oaEnabled && err instanceof OASessionRecoveryError) showOASessionRecovery(route.fullPath, err)
+    else errorMessage.value = formatAuthPageError(err)
   } finally {
     isLoading.value = false
   }

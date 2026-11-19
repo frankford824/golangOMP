@@ -113,10 +113,7 @@ func saveExpenseLines(r *http.Request, tx *sql.Tx, doc document) error {
 
 func writeExpenseError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errInvoiceClaimed) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]string{"code": "INVOICE_ALREADY_CLAIMED", "error": "发票号码已被其他单据占用，请核对明细"})
+		platform.ErrorWithCode(w, http.StatusConflict, "INVOICE_ALREADY_CLAIMED", "发票号码已被其他单据占用，请核对明细")
 		return
 	}
 	internal(w)

@@ -666,5 +666,5 @@ func NewOAExtensionRouter(db, source *sql.DB, coreURL string) http.Handler {
 		}
 		api.ServeHTTP(w, platform.WithActor(r, actor))
 	})))
-	return public
+	return platform.Trace(platform.BrowserSessions(public, coreURL))
 }

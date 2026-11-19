@@ -2,15 +2,42 @@ openapi: 3.0.3
 info:
   title: Yongbo OA 扩展 API
   version: 1.0.0
-  description: 仅描述 cmd/oa-extension 挂载的 OA 扩展接口。使用既有主站用户 Bearer，业务权限由服务端按账号与范围判定。任务、成本、库存及资产业务仍使用原生 /v1 合同。
+  description: 仅描述 cmd/oa-extension 挂载的 OA 扩展接口。浏览器通过 OA 专属会话 Cookie 使用主站身份，扩展进程仍按正式账号与数据范围判定业务权限。任务、成本、库存及资产业务仍使用原生 /v1 合同。
 servers:
 - url: /
 externalDocs:
   description: 主站与资产工作台原生业务合同
   url: openapi.yaml
 security:
+- OABrowserSession: []
 - MainBearer: []
+x-oa-error-format:
+  requestHeader: X-OA-Error-Format
+  standardFormat: v2
+  responseHeader: X-Trace-ID
+  schema:
+    $ref: '#/components/schemas/Error'
 paths:
+  /oa-api/session/migrate:
+    post:
+      summary: 一次性把既有 OA 会话兑换为浏览器 Cookie
+      description: 仅接受 OA 同源请求。已有有效 OA Cookie 时保留该会话。
+      security:
+      - MainBearer: []
+      responses:
+        '200':
+          description: 兑换成功或已持有有效会话。响应正文不含会话凭证。
+          headers:
+            Set-Cookie:
+              description: 适用时设置 OA 浏览器会话 Cookie。
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '503':
+          $ref: '#/components/responses/HTTP503'
   /oa-api/finance/accounts:
     get:
       summary: 分页查找收款账户，仅显示尾号。指定其他人员仅供已授权付款经办使用。
@@ -3986,9 +4013,15 @@ paths:
       description: 使用本人预览 token 确认，返回行级结果。档案版本冲突需重新预览。
 components:
   securitySchemes:
+    OABrowserSession:
+      type: apiKey
+      in: cookie
+      name: __Host-yb-oa-session
+      description: OA 浏览器会话由 OA 入口验证，核心服务继续校验主站正式会话。
     MainBearer:
       type: http
       scheme: bearer
+      description: 正式纯 API 客户端的 Bearer 凭证，请勿同时发送 OA 会话 Cookie。浏览器仅在迁移入口提交旧凭证。
   schemas:
     OARecipientAccount:
       type: object
@@ -4384,12 +4417,30 @@ components:
                 minimum: 0
                 exclusiveMinimum: true
     Error:
+      description: >
+        默认沿用 error 字符串。请求头 X-OA-Error-Format 为 v2 时使用对象，
+        并在 X-Trace-ID 响应头返回同一个请求追踪号。发送方可用追踪号查询日志。
+      oneOf:
+        - $ref: '#/components/schemas/OALegacyError'
+        - $ref: '#/components/schemas/OAStandardError'
+    OALegacyError:
       type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        code: { type: string, example: INVOICE_ALREADY_CLAIMED }
+        trace_id: { type: string }
+    OAStandardError:
+      type: object
+      required: [error]
       properties:
         error:
-          type: string
-      required:
-      - error
+          type: object
+          required: [code, message, trace_id]
+          properties:
+            code: { type: string, example: INVOICE_ALREADY_CLAIMED }
+            message: { type: string, example: 发票号码已被其他单据占用，请核对明细 }
+            trace_id: { type: string, example: '3000a3f9ac8e426fbb507a025468cc84' }
     Actor:
       type: object
       properties:

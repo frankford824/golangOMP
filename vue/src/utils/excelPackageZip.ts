@@ -1,5 +1,5 @@
 import type { AssetExcelPackageItem } from '@/services/api/assetsApi'
-import { sanitizeZipEntryName } from '@/utils/batchZipDownload'
+import { resolveBatchDownloadCredentials, sanitizeZipEntryName } from '@/utils/batchZipDownload'
 
 type ExcelPackageZipItem = Pick<
   AssetExcelPackageItem,
@@ -147,7 +147,9 @@ async function fetchExcelPackageBlob(url: string, fetcher: FetchLike): Promise<B
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       const response = await fetcher(url, {
-        credentials: 'omit',
+        credentials: import.meta.env.VITE_OA_FEATURES === 'true'
+          ? resolveBatchDownloadCredentials(url)
+          : 'omit',
         mode: 'cors',
       })
       if (response.ok) return response.blob()

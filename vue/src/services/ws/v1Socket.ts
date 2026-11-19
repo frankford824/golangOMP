@@ -1,4 +1,6 @@
-import { getToken } from '@/services/http'
+import { getBearerToken } from '@/services/http'
+
+import { oaCookieSessionEnabled } from '@/services/oaSession'
 
 export type V1WsEventType =
   | 'task_pool_count_changed'
@@ -21,13 +23,14 @@ const WS_TOKEN_PROTOCOL_PREFIX = 'wf-token.'
 
 function resolveWsUrl(): string {
   const explicit = String(import.meta.env.VITE_WS_BASE_URL ?? '').trim()
-  const base = explicit || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+  const base = (!oaCookieSessionEnabled && explicit) || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
   const url = new URL('/ws/v1', base)
   return url.toString()
 }
 
 function resolveWsProtocols(): string[] | undefined {
-  const token = getToken()
+  if (oaCookieSessionEnabled) return ['workflow-v1']
+  const token = getBearerToken()
   if (!token) return undefined
   return ['workflow-v1', `${WS_TOKEN_PROTOCOL_PREFIX}${base64UrlEncode(token)}`]
 }

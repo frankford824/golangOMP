@@ -7,11 +7,13 @@ import { getToken } from '@/services/http'
 import {
   isDashboardEntryRoute,
   resolveFirstAccessibleHomeRoute,
+  resolvePostLoginLandingRoute,
 } from '@/router/home-fallback'
 import { installUsageTelemetry } from '@/shared/telemetry/usage'
 import { ensureOAAccess, oaEnabled, useOAAccess } from '@/oa/access'
 import { isUnassignedDesignDepartment } from '@/oa/taskBoardAccess'
 import { feeTabs, oaRoutes } from '@/oa/routes'
+import { OASessionRecoveryError, oaSessionRecovery, showOASessionRecovery } from '@/oa/sessionRecovery'
 
 /**
  * 路由门禁：以后端 `frontend_access.menus` 为 SoT（Single Source of Truth）。
@@ -179,17 +181,28 @@ router.beforeEach(async (to, _from, next) => {
   const permissionsStore = usePermissionsStore()
   const requiresAuth = to.meta?.requiresAuth === true
 
-  // ─── Token 会话恢复 ────────────────────────────────────────────────────────
-  // 若本地有 token 但 store 中尚无用户信息（如硬刷新），尝试通过 /me 恢复会话
-  if (getToken() && !permissionsStore.currentUser) {
+  // OA reads the formal browser session even without a local credential.
+  if (!permissionsStore.currentUser && (oaEnabled || getToken())) {
     try {
       await permissionsStore.restoreSession()
-    } catch {
-      // 若 /me 失败（401），http 拦截器已清除 token，继续往下走即跳登录
+    } catch (error) {
+      if (oaEnabled && error instanceof OASessionRecoveryError) {
+        showOASessionRecovery(to.fullPath, error)
+        next(false)
+        return
+      }
+      // Protected routes below require a verified user.
     }
   }
 
   const currentUser = permissionsStore.currentUser
+  const recovered = oaEnabled && oaSessionRecovery.value !== undefined
+  if (recovered) oaSessionRecovery.value = undefined
+  if (recovered && currentUser && to.name === 'Login') {
+    const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : undefined
+    next(resolvePostLoginLandingRoute(router, permissionsStore, redirect))
+    return
+  }
 
   if (requiresAuth && !currentUser) {
     next({ path: '/login', query: { redirect: to.fullPath } })
@@ -197,7 +210,9 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   if (oaEnabled && currentUser) {
-    await ensureOAAccess()
+    const oaCheck = ensureOAAccess()
+    const needsOA = to.meta.oaAction || to.meta.oaMenuAlternative || (to.name === 'Dashboard' && to.query.workspace !== 'tasks')
+    if (needsOA) await oaCheck
     const { can } = useOAAccess()
     if (to.name === 'MeTaskDrafts' && permissionsStore.hasMenu('task_list') && permissionsStore.hasAction('task.create')) {
       next({ name: 'TaskList', query: { ...to.query, tab: 'drafts' }, hash: to.hash })
@@ -269,4 +284,4 @@ router.beforeEach(async (to, _from, next) => {
   next()
 })
 
-installUsageTelemetry(router, { appId: 'main-ops', getToken })
+installUsageTelemetry(router, { appId: 'main-ops', getToken, cookieSession: oaEnabled })
