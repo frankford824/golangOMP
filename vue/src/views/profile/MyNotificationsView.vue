@@ -30,17 +30,20 @@
       </div>
     </header>
 
-    <DesktopSlot v-if="oaEnabled && (showExpenseActivity || showCostActivity)" target="tabs">
+    <DesktopSlot v-if="oaEnabled && (showExpenseActivity || showCostActivity || currentProfile?.super_admin)" target="tabs">
       <nav class="notif-oa-segment" aria-label="通知分类">
         <RouterLink :to="{ name: 'MeNotifications' }" :aria-current="section === 'system' ? 'page' : undefined">系统通知</RouterLink>
         <RouterLink v-if="showExpenseActivity" :to="{ name: 'MeNotifications', query: { section: 'expense' } }"
           :aria-current="section === 'expense' ? 'page' : undefined">费用动态</RouterLink>
         <RouterLink v-if="showCostActivity" :to="{ name: 'MeNotifications', query: { section: 'cost' } }"
           :aria-current="section === 'cost' ? 'page' : undefined">成本复核</RouterLink>
+        <RouterLink v-if="currentProfile?.super_admin" :to="{ name: 'MeNotifications', query: { section: 'data-alerts' } }"
+          :aria-current="section === 'data-alerts' ? 'page' : undefined">数据告警</RouterLink>
       </nav>
     </DesktopSlot>
     <ExpenseNotifications v-if="section === 'expense'" :key="expenseTab + ':' + expensePage" :initial-tab="expenseTab" :initial-page="expensePage" />
     <CostRequestInbox v-else-if="section === 'cost'" :key="router.currentRoute.value.fullPath" />
+    <DataAlerts v-else-if="section === 'data-alerts'" />
     <div v-else class="notif-layout">
       <section class="notif-list-panel" :aria-busy="oaEnabled ? pageLoading : undefined">
         <div class="notif-section-head">
@@ -306,6 +309,7 @@ const showExpenseActivity = computed(() => expenseActivityActions.some(canOA))
 const showCostActivity = computed(() => canOA('orders.view') || canOA('cost.request.handle'))
 const section = computed(() => {
   const requested = route.query.section
+  if (requested === 'data-alerts' && currentProfile.value?.super_admin) return 'data-alerts'
   if (requested === 'expense' && showExpenseActivity.value) return 'expense'
   if (requested === 'cost' && showCostActivity.value) return 'cost'
   return 'system'
@@ -316,6 +320,7 @@ const expensePage = computed(() => {
 })
 const expenseTab = computed(() => route.query.activity === 'results' ? 'results' : 'todos')
 const ExpenseNotifications = defineAsyncComponent(() => import('@/oa/components/ExpenseNotifications.vue'))
+const DataAlerts = defineAsyncComponent(() => import('@/oa/components/DataAlerts.vue'))
 const CostRequestInbox = defineAsyncComponent(() => import('@/oa/components/CostRequestInbox.vue'))
 const notificationsStore = useNotificationsStore()
 const permissionsStore = usePermissionsStore()

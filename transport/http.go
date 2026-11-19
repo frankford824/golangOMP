@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/domain"
+	"workflow/internal/oa/dwalerts"
 	"workflow/internal/oa/office"
 	"workflow/internal/oa/orders"
 	"workflow/internal/oa/platform"
@@ -633,6 +634,7 @@ func NewOAExtensionRouter(db, source *sql.DB, coreURL string) http.Handler {
 	orders.Mount(api, db, native)
 	pricing.Mount(api, native)
 	api.Handle("POST /oa-api/tasks/batch-archive", taskarchive.New(db))
+	api.HandleFunc("GET /oa-api/data-alerts", dwalerts.List)
 	api.HandleFunc("GET /oa-api/me", func(w http.ResponseWriter, r *http.Request) { platform.JSON(w, 200, platform.ActorFrom(r)) })
 	public := http.NewServeMux()
 	identity := platform.NewIdentity(coreURL)

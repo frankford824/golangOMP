@@ -11,6 +11,43 @@ externalDocs:
 security:
 - MainBearer: []
 paths:
+  /oa-api/data-alerts:
+    get:
+      summary: 超级管理员查看订单数据告警（北京时间）
+      parameters:
+      - in: query
+        name: summary
+        schema: { type: string, enum: ['1'] }
+        description: 只返回未恢复数，items 为空
+      responses:
+        '200':
+          description: 未恢复的 warning/critical 事件组数及最近 100 条事件
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      active_count: { type: integer }
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            seq: { type: integer }
+                            source: { type: string }
+                            id: { type: string }
+                            event: { type: string, enum: [firing, repeat, resolved] }
+                            at: { type: string }
+                            kind: { type: string }
+                            severity: { type: string, enum: [critical, warning, info] }
+                            title: { type: string }
+                            message: { type: string }
+        '401': { $ref: '#/components/responses/HTTP401' }
+        '403': { $ref: '#/components/responses/HTTP403' }
+        '503': { $ref: '#/components/responses/HTTP503' }
   /oa-api/health:
     get:
       summary: 扩展库健康状态
