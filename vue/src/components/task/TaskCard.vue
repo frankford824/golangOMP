@@ -67,7 +67,7 @@
     </div>
 
     <!-- 标题 -->
-    <RouterLink v-if="oaEnabled" class="tc-title" :to="`/tasks/${task.id}`" :title="title" @click.stop>{{ title }}</RouterLink>
+    <RouterLink v-if="oaEnabled" class="tc-title" :to="detailTo ?? ('/tasks/' + task.id)" :title="title" @click.stop>{{ title }}</RouterLink>
     <div v-else class="tc-title tc-copy-zone" :title="title" data-card-copy-zone>{{ title }}</div>
 
     <!-- 状态:圆点 + 文字 -->
@@ -151,6 +151,7 @@
 </template>
 
 <script setup lang="ts">
+import type { RouteLocationRaw } from 'vue-router'
 import { RouterLink } from 'vue-router'
 import { oaEnabled } from '@/oa/access'
 import { Copy } from 'lucide-vue-next'
@@ -172,6 +173,7 @@ export interface TaskCardBatchPreviewItem {
 
 const props = defineProps<{
   task: Task
+  detailTo?: RouteLocationRaw
   selected: boolean
   overdue: boolean
   claimable: boolean

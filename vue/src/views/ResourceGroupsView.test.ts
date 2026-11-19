@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+enableAutoUnmount(afterEach)
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), costReconciliation: vi.fn(), batchSearchAssets: vi.fn(), push: vi.fn() }))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
@@ -11,10 +13,27 @@ vi.mock('@/services/api/assetsApi', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@/services/api/assetsApi')>()
   return { ...original, assetsApi: { ...original.assetsApi, batchSearchAssets: mocks.batchSearchAssets } }
 })
-vi.mock('vue-router', () => ({
-  RouterLink: { props: ['to'], template: '<a :href="`/asset-center/${to.params.id}`"><slot /></a>' },
-  useRouter: () => ({ push: mocks.push }),
-}))
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  const route = reactive({ name: 'AssetsIndex', fullPath: '/asset-center', query: {} as Record<string, string> })
+  const resolve = (to: { name: string; params?: { id: number | string }; query?: Record<string, string> }) => {
+    const path = to.name === 'AssetsIndex' ? '/asset-center' : `/asset-center/${to.params?.id}`
+    const query = new URLSearchParams(to.query).toString()
+    return { fullPath: query ? `${path}?${query}` : path }
+  }
+  return {
+    RouterLink: { props: ['to'], methods: { resolve }, template: '<a :href="resolve(to).fullPath"><slot /></a>' },
+    useRoute: () => {
+      Object.assign(route, { fullPath: '/asset-center', query: {} })
+      return route
+    },
+    useRouter: () => ({
+      push: mocks.push,
+      resolve,
+      replace: (to: { name: string; query?: Record<string, string> }) => Object.assign(route, { ...resolve(to), query: to.query ?? {} }),
+    }),
+  }
+})
 vi.mock('@/composables/useTaskFilterOptions', async () => {
   const { ref } = await import('vue')
   return { useTaskFilterOptions: () => ({ creatorOptions: ref([{ value: '', label: '全部' }, { value: '12', label: '李运营' }]) }) }
@@ -114,7 +133,7 @@ describe('ResourceGroupsView', () => {
     expect(wrapper.get('.reference-badge').text()).toBe('参考图')
     expect(wrapper.get('[data-task-asset-id="2026"]').attributes('alt')).toBe('reference.png')
     await wrapper.findAll('.asset-view-modes button')[1]!.trigger('click')
-    expect(wrapper.get('.asset-ledger .sku-code').attributes('href')).toBe('/asset-center/8')
+    expect(wrapper.get('.asset-ledger .sku-code').attributes('href')).toBe('/asset-center/8?assetFrom=%2Fasset-center%3Fview%3Dledger')
     expect(wrapper.get('.asset-ledger').text()).toContain('0.960 ㎡')
     expect(wrapper.get('.asset-ledger').text()).toContain('¥18.50')
     expect(wrapper.get('.asset-ledger tbody td:nth-child(5)').text()).toBe('—')
@@ -213,7 +232,7 @@ describe('ResourceGroupsView', () => {
     } else {
       expect(card.element.tagName).toBe('BUTTON')
       await card.trigger('click')
-      expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+      expect(mocks.push).toHaveBeenCalledWith(expect.objectContaining({ name: 'AssetDetail', params: { id: 8 } }))
     }
   })
 
@@ -270,14 +289,14 @@ describe('ResourceGroupsView', () => {
     expect(wrapper.text()).toContain('外部资源匹配')
     expect(wrapper.text()).toContain('HSC40222-final.tif')
     if (oaEnabled) {
-      expect(wrapper.get('a.external-card').attributes('href')).toBe('/asset-center/ext-77')
+      expect(wrapper.get('a.external-card').attributes('href')).toBe('/asset-center/ext-77?assetFrom=%2Fasset-center%3Fq%3DHSC40222')
     } else {
       await wrapper.get('.external-card img').trigger('click')
       expect(mocks.push).toHaveBeenCalledTimes(1)
-      expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/ext-77')
+      expect(mocks.push).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'ExternalAssetDetail', params: { id: 'ext-77' } }))
       mocks.push.mockClear()
       await wrapper.get('.external-card').trigger('click')
-      expect(mocks.push).toHaveBeenCalledWith('/asset-center/ext-77')
+      expect(mocks.push).toHaveBeenCalledWith(expect.objectContaining({ name: 'ExternalAssetDetail', params: { id: 'ext-77' } }))
     }
   })
 
@@ -338,10 +357,10 @@ describe('ResourceGroupsView', () => {
     } else {
       await wrapper.get('.flat-card img').trigger('click')
       expect(mocks.push).toHaveBeenCalledTimes(1)
-      expect(mocks.push).toHaveBeenLastCalledWith('/asset-center/8')
+      expect(mocks.push).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'AssetDetail', params: { id: 8 } }))
       mocks.push.mockClear()
       await wrapper.get('.flat-card').trigger('click')
-      expect(mocks.push).toHaveBeenCalledWith('/asset-center/8')
+      expect(mocks.push).toHaveBeenCalledWith(expect.objectContaining({ name: 'AssetDetail', params: { id: 8 } }))
     }
   })
 

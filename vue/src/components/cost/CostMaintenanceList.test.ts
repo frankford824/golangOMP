@@ -15,10 +15,19 @@ vi.mock("@/services/api/costMaintenanceApi", async (original) => ({
   ...(await original<typeof import("@/services/api/costMaintenanceApi")>()),
   costMaintenanceApi: mocks,
 }));
-vi.mock("vue-router", async (original) => ({
-  ...(await original<typeof import("vue-router")>()),
-  RouterLink: (await import("@vue/test-utils")).RouterLinkStub,
-}));
+vi.mock("vue-router", async (original) => {
+  const vueRouter = await original<typeof import("vue-router")>();
+  const router = vueRouter.createRouter({
+    history: vueRouter.createMemoryHistory(),
+    routes: [{ name: "CostRules", path: "/cost-rules", component: {} }],
+  });
+  return {
+    ...vueRouter,
+    useRoute: () => router.resolve("/cost-rules"),
+    useRouter: () => router,
+    RouterLink: (await import("@vue/test-utils")).RouterLinkStub,
+  };
+});
 import CostMaintenanceList from "./CostMaintenanceList.vue";
 const row = {
   id: 10,

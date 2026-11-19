@@ -219,7 +219,7 @@ const props = defineProps<{
   unavailable: boolean
   currentRoleNames: string
   canViewTerms?: boolean
-  initialTab?: 'terms'
+  initialTab?: DetailTab
   canEditBasicInfo: boolean
   canMoveTeam: boolean
   canClearMembership: boolean
@@ -248,6 +248,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'change-tab': [tab: DetailTab]
   close: []
   'delete-user': []
   'clear-message': []
@@ -263,7 +264,13 @@ const selectedRoles = defineModel<string[]>('selectedRoles', { required: true })
 const newPassword = defineModel<string>('newPassword', { required: true })
 
 type DetailTab = 'profile' | 'roles' | 'terms' | 'security'
-const activeTab = ref<DetailTab>(props.canViewTerms && props.initialTab === 'terms' ? 'terms' : 'profile')
+function supportedTab(tab?: DetailTab): DetailTab {
+  if (tab === 'terms' && props.canViewTerms) return tab
+  if (tab === 'roles') return tab
+  if (tab === 'security' && (props.canResetPassword || props.canDisableUser || props.canDeleteUser)) return tab
+  return 'profile'
+}
+const activeTab = ref<DetailTab>(supportedTab(props.initialTab))
 const termsVisited = ref(activeTab.value === 'terms')
 const confirmDelete = ref(false)
 const confirmDisable = ref(false)
@@ -287,10 +294,14 @@ function selectTab(id: DetailTab) {
   confirmDisable.value = false
   activeTab.value = id
   if (id === 'terms') termsVisited.value = true
+  emit('change-tab', id)
   emit('clear-message')
 }
 
-watch(() => props.initialTab, tab => { if (tab === 'terms' && props.canViewTerms) selectTab(tab) })
+watch(() => props.initialTab, (tab) => {
+  activeTab.value = supportedTab(tab)
+  if (activeTab.value === 'terms') termsVisited.value = true
+})
 
 function navigateTabs(event: KeyboardEvent) {
   const index = tabs.value.findIndex((tab) => tab.id === activeTab.value)

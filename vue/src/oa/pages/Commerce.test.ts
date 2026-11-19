@@ -6,7 +6,8 @@ import Commerce from './Commerce.vue'
 const { orderAPI } = vi.hoisted(() => ({ orderAPI: vi.fn() }))
 vi.mock('vue-router', () => ({
   RouterLink: { template: '<a><slot /></a>' },
-  useRoute: () => ({ path: '/operations', query: {} }),
+  useRoute: () => ({ path: '/operations', fullPath: '/operations', query: {} }),
+  useRouter: () => ({ resolve: ({ path }: { path: string }) => ({ fullPath: path }) }),
 }))
 vi.mock('@/services/http', () => ({ getToken: () => 'test-session' }))
 vi.mock('@/stores/permissions', () => ({ usePermissionsStore: () => ({ hasMenu: () => false }) }))

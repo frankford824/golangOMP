@@ -6,8 +6,8 @@
       </div>
       <DesktopSlot target="actions"><div class="page-actions">
         <div v-if="oaEnabled && !isFlatMode" class="asset-view-modes" role="group" aria-label="结果视图">
-          <button type="button" class="quiet-button" :aria-pressed="!showLedger" @click="showLedger = false">图库网格</button>
-          <button type="button" class="quiet-button" :aria-pressed="showLedger" @click="showLedger = true">规格台账</button>
+          <button type="button" class="quiet-button" :aria-pressed="!showLedger" @click="setLedger(false)">图库网格</button>
+          <button type="button" class="quiet-button" :aria-pressed="showLedger" @click="setLedger(true)">规格台账</button>
         </div>
         <button class="quiet-button asset-refresh" :disabled="loading" @click="load">
           {{ loading ? '刷新中…' : '刷新' }}
@@ -22,7 +22,7 @@
           <input v-model.trim="filters.q" aria-label="搜索资产" placeholder="搜索 SKU、产品名称或文件名" />
         </label>
         <button class="primary-button">搜索</button>
-        <button type="button" class="filter-button" :class="{ active: filterDrawerOpen || activeFilters.length }" @click="filterDrawerOpen = true">
+        <button type="button" class="filter-button" :class="{ active: filterDrawerOpen || activeFilters.length }" @click="openFilterDrawer()">
           筛选<span v-if="activeFilters.length"> {{ activeFilters.length }}</span>
         </button>
       </form>
@@ -46,7 +46,7 @@
       <OAEmpty v-if="oaEnabled && !result.flat_items.length && !error" kind="files" title="没有找到符合条件的资源" description="可调整搜索词或筛选条件，再查看结果。" />
       <div v-else-if="!result.flat_items.length && !error" class="empty">没有找到符合条件的资源。</div>
       <section v-else-if="result.flat_items.length" class="grid asset-grid flat-grid" aria-label="匹配资源列表">
-        <component :is="oaEnabled ? RouterLink : 'button'" v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" :to="assetDetailTarget(item.group_id)" @click="openLegacyAsset(item.group_id)">
+        <component :is="oaEnabled ? RouterLink : 'button'" v-for="(item, index) in result.flat_items" :key="`${item.group_id}-${item.resource_role}-${index}`" class="resource-card flat-card" :to="oaEnabled ? assetDetailTarget(item.group_id) : undefined" @click="openLegacyAsset(item.group_id)">
           <span class="cover">
             <AssetPreviewMedia v-if="item.task_asset_id && (item.resource_role !== 'default_style' || item.preview_url)" :task-asset-id="String(item.task_asset_id)" :alt="item.file_name" :quiet-loading="oaEnabled" :show-recovery-actions="!oaEnabled" rendition="thumbnail" :open-full-on-click="false" />
             <span v-else class="preview-fallback"><ImageIcon v-if="oaEnabled" :size="28" aria-hidden="true" /><span v-else class="file-mark">{{ fileInitial(item.file_name) }}</span><small>暂无预览</small></span>
@@ -72,7 +72,7 @@
           </thead>
           <tbody>
             <tr v-for="group in result.items" :key="group.id">
-              <td><RouterLink :to="{ name: 'AssetDetail', params: { id: group.id } }" class="sku-code">{{ displaySKU(group) }}</RouterLink><span :title="productTitle(group)">{{ productTitle(group) }}</span></td>
+              <td><RouterLink :to="assetDetailTarget(group.id)" class="sku-code">{{ displaySKU(group) }}</RouterLink><span :title="productTitle(group)">{{ productTitle(group) }}</span></td>
               <td>{{ group.sku_profile?.size_text || group.sku_profile?.spec_text || '—' }}</td>
               <td>{{ group.sku_profile?.area_trace?.area_m2 == null ? '—' : areaText(group) }}</td>
               <td class="ledger-amount">{{ group.sku_profile?.cost_price == null ? '—' : costText(group) }}</td>
@@ -84,7 +84,7 @@
         </table>
       </div>
       <section v-else-if="result.items.length || (!oaEnabled && externalItems.length)" class="grid asset-grid" aria-label="SKU 资源列表">
-        <component :is="oaEnabled ? RouterLink : 'button'" v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" :aria-label="oaEnabled ? `查看 ${displaySKU(group)} ${productTitle(group)} 资产详情` : undefined" :to="assetDetailTarget(group.id)" @click="openLegacyAsset(group.id)">
+        <component :is="oaEnabled ? RouterLink : 'button'" v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" :aria-label="oaEnabled ? `查看 ${displaySKU(group)} ${productTitle(group)} 资产详情` : undefined" :to="oaEnabled ? assetDetailTarget(group.id) : undefined" @click="openLegacyAsset(group.id)">
           <span class="cover">
             <AssetPreviewMedia
               v-if="coverAssetID(group) > 0"
@@ -149,7 +149,7 @@
           <span>{{ externalItems.length }} 个文件</span>
         </header>
         <div class="grid asset-grid external-grid">
-          <component :is="oaEnabled ? RouterLink : 'button'" v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" :to="assetDetailTarget(externalResourceID(asset))" @click="openLegacyAsset(externalResourceID(asset))">
+          <component :is="oaEnabled ? RouterLink : 'button'" v-for="asset in externalItems" :key="externalResourceID(asset)" class="resource-card external-card" :to="oaEnabled ? assetDetailTarget(externalResourceID(asset)) : undefined" @click="openLegacyAsset(externalResourceID(asset))">
             <span class="cover external-cover">
               <AssetPreviewMedia
                 v-if="externalResourceID(asset)"
@@ -165,7 +165,7 @@
               <span class="mode-badge">外部</span>
             </span>
             <span class="card-body">
-              <strong class="sku-code">{{ asset.sku_code || asset.primary_sku_code || filters.q }}</strong>
+              <strong class="sku-code">{{ asset.sku_code || asset.primary_sku_code || applied.q }}</strong>
               <span class="product-name">{{ externalFileName(asset) }}</span>
               <span class="provenance">{{ asset.source_label || '外部资源' }} · {{ asset.oss_sync_status === 'ready' ? 'OSS 已就绪' : '只读索引' }}</span>
             </span>
@@ -212,7 +212,7 @@
               <div><dt>系统计算成本</dt><dd>{{ costText(previewGroup) }}</dd></div>
               <div><dt>同步状态</dt><dd>{{ syncLabel(previewGroup) }}</dd></div>
             </dl>
-            <RouterLink :to="{ name: 'AssetDetail', params: { id: previewGroup.id } }" @click="previewGroupID = null">前往资产详情</RouterLink>
+            <RouterLink :to="assetDetailTarget(previewGroup.id)" @click.exact="previewGroupID = null">前往资产详情</RouterLink>
           </div>
           <footer>
             <button type="button" class="quiet-button" :disabled="previewGroupIndex <= 0" @click="stepPreview(-1)">上一项 ↑</button>
@@ -244,8 +244,8 @@
 <script setup lang="ts">
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
-import { computed, onMounted, reactive, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { ImageIcon } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
@@ -256,8 +256,11 @@ import { assetsApi, type AssetBatchSearchManifest } from '@/services/api/assetsA
 import { resourceGroupsApi, type FlatResourceItem, type ProductCostReconciliation, type ResourceGroup, type ResourceRevision } from '@/services/api/resourceGroupsApi'
 
 type FilterKey = 'resource_role' | 'file_format' | 'created_from' | 'created_to' | 'resource_owner_id'
+const resourceRoles = ['reference', 'source', 'final', 'default_style'] as const
+type ResourceRole = typeof resourceRoles[number] | ''
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const showLedger = ref(false)
 const previewGroupID = ref<number | null>(null)
@@ -272,7 +275,11 @@ const brokenFlat = ref(new Set<number>())
 const liveCosts = ref(new Map<number, ProductCostReconciliation>())
 const externalItems = ref<BackendAsset[]>([])
 let liveCostRequestVersion = 0
-const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final' | 'default_style', file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
+const filters = reactive({ q: '', resource_role: '' as ResourceRole, file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
+const applied = reactive({ ...filters })
+let requestedPage = 1
+let hasLoadedQuery = false
+const listPath = ref('/asset-center')
 const initialPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? Math.max(80, Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE || 100)) : 24
 const result = reactive({ items: [] as ResourceGroup[], flat_items: [] as FlatResourceItem[], view_mode: 'group' as 'group' | 'flat', page: 1, page_size: initialPageSize, total: 0 })
 const previewGroupIndex = computed(() => result.items.findIndex(group => group.id === previewGroupID.value))
@@ -285,7 +292,8 @@ function stepPreview(direction: -1 | 1) {
 const { creatorOptions: rawCreatorOptions } = useTaskFilterOptions(true, '全部')
 const creatorOptions = computed(() => rawCreatorOptions.value.filter((item) => item.value))
 const totalPages = computed(() => Math.max(1, Math.ceil(result.total / result.page_size)))
-const isFlatMode = computed(() => result.view_mode === 'flat' || !!filters.resource_role || !!filters.file_format || !!filters.created_from || !!filters.created_to || !!filters.resource_owner_id)
+const hasResourceFilters = computed(() => Boolean(applied.resource_role || applied.file_format || applied.created_from || applied.created_to || applied.resource_owner_id))
+const isFlatMode = computed(() => result.view_mode === 'flat' || hasResourceFilters.value)
 const revision = (group: ResourceGroup): ResourceRevision | null | undefined => group.finalized_revision || group.working_revision
 const finals = (group: ResourceGroup) => [...(revision(group)?.items || [])].sort((a, b) => a.sort_order - b.sort_order)
 const laneLabel = (lane?: string) => ({ normal: '常规', customization: '定制' }[lane || ''] || '')
@@ -331,41 +339,103 @@ const fileInitial = (name?: string) => (name || '文件').split('.').pop()?.slic
 const formatResourceDate = (value?: string) => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value)) : '时间待补充'
 const filterLabels: Record<FilterKey, string> = { resource_role: '资源类型', file_format: '文件格式', created_from: '创建开始', created_to: '创建结束', resource_owner_id: '资源所属人' }
 const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).flatMap((key) => {
-  const value = String(filters[key] || '')
+  const value = applied[key]
   if (!value) return []
   const display = key === 'resource_owner_id' ? creatorOptions.value.find((item) => item.value === value)?.label || value : key === 'resource_role' ? roleLabel(value) : value
   return [{ key, label: `${filterLabels[key]}：${display}` }]
 }))
 
 function assetDetailTarget(id: number | string) {
-  if (oaEnabled) return { name: typeof id === 'number' ? 'AssetDetail' : 'ExternalAssetDetail', params: { id } }
-  return undefined
+  return {
+    name: typeof id === 'number' ? 'AssetDetail' : 'ExternalAssetDetail',
+    params: { id },
+    query: listPath.value === '/asset-center' ? undefined : { assetFrom: listPath.value },
+  }
 }
 function openLegacyAsset(id: number | string) {
-  if (!oaEnabled) void router.push(`/asset-center/${id}`)
+  if (!oaEnabled) void router.push(assetDetailTarget(id))
 }
 function externalResourceID(asset: BackendAsset) { return String(asset.resource_id || asset.id || '') }
 function externalFileName(asset: BackendAsset) { return asset.file_name || asset.original_filename || externalResourceID(asset) || '外部资源' }
-function clearFilter(key: FilterKey) { filters[key] = ''; search() }
-function clearAllFilters() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }); search() }
-function resetDrawer() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }) }
-function searchFromDrawer() { filterDrawerOpen.value = false; search() }
+function openFilterDrawer() {
+  Object.assign(filters, { ...applied, q: filters.q })
+  filterDrawerOpen.value = true
+}
+function clearFilter(key: FilterKey) {
+  navigateList({ ...applied, [key]: '' }, 1)
+}
+function clearAllFilters() {
+  navigateList({ q: applied.q, resource_role: '', file_format: '', created_from: '', created_to: '', resource_owner_id: '' }, 1)
+}
+function resetDrawer() {
+  for (const key of Object.keys(filterLabels) as FilterKey[]) filters[key] = ''
+}
+function searchFromDrawer() {
+  filterDrawerOpen.value = false
+  navigateList({ ...filters }, 1, showLedger.value, true)
+}
+function queryText(query: LocationQuery, key: string) {
+  const value = query[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+function navigateList(next: typeof applied, page: number, ledger = showLedger.value, refresh = false) {
+  const query = Object.fromEntries(Object.entries(next).filter(([,value]) => value !== ''))
+  if (page > 1) query.page = String(page)
+  if (ledger) query.view = 'ledger'
+  const target = { name: 'AssetsIndex', query }
+  if (router.resolve(target).fullPath !== route.fullPath) void router.replace(target)
+  else if (refresh) void load()
+}
+function setLedger(ledger: boolean) {
+  navigateList({ ...applied }, requestedPage, ledger)
+}
+watch(() => route.name === 'AssetsIndex' ? route.query : null, (query, previous) => {
+  if (!query) {
+    filterDrawerOpen.value = false
+    previewGroupID.value = null
+    return
+  }
+  listPath.value = route.fullPath
+  const nextPage = Number(queryText(query, 'page'))
+  const page = Number.isSafeInteger(nextPage) && nextPage > 1 ? nextPage : 1
+  const resourceRole = queryText(query, 'resource_role')
+  const next: typeof applied = {
+    q: queryText(query, 'q'),
+    resource_role: resourceRoles.find(role => role === resourceRole) ?? '',
+    file_format: queryText(query, 'file_format'),
+    created_from: queryText(query, 'created_from'),
+    created_to: queryText(query, 'created_to'),
+    resource_owner_id: queryText(query, 'resource_owner_id'),
+  }
+  const needsLoad = !hasLoadedQuery || page !== requestedPage || Object.entries(next).some(([key, value]) => applied[key as keyof typeof applied] !== value)
+  showLedger.value = query.view === 'ledger'
+  if (!needsLoad) {
+    if (!previous) Object.assign(filters, applied)
+    return
+  }
+  hasLoadedQuery = true
+  requestedPage = page
+  Object.assign(applied, next)
+  Object.assign(filters, next)
+  void nextTick(() => { if (resultsViewport.value) resultsViewport.value.scrollTop = 0 })
+  void load()
+}, { immediate: true })
 async function load() {
   const requestVersion = ++liveCostRequestVersion
   liveCosts.value = new Map()
   loading.value = true
   error.value = ''
   try {
-    const exactSKUQuery = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(filters.q)
+    const exactSKUQuery = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(applied.q)
     const externalSearch = exactSKUQuery
-      ? assetsApi.batchSearchAssets({ terms: [filters.q.toUpperCase()], format_filter: 'all', asset_kind: 'all' }).catch(() => null)
+      ? assetsApi.batchSearchAssets({ terms: [applied.q.toUpperCase()], format_filter: 'all', asset_kind: 'all' }).catch(() => null)
       : Promise.resolve(null)
     const [next, externalResponse] = await Promise.all([
-      resourceGroupsApi.list({ q: exactSKUQuery ? undefined : filters.q || undefined, sku_code: exactSKUQuery ? filters.q.toUpperCase() : undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, page: result.page, page_size: result.page_size }),
+      resourceGroupsApi.list({ q: exactSKUQuery ? undefined : applied.q || undefined, sku_code: exactSKUQuery ? applied.q.toUpperCase() : undefined, resource_role: applied.resource_role || undefined, file_format: applied.file_format || undefined, created_from: applied.created_from || undefined, created_to: applied.created_to || undefined, resource_owner_id: applied.resource_owner_id || undefined, page: requestedPage, page_size: result.page_size }),
       externalSearch,
     ])
     if (requestVersion !== liveCostRequestVersion) return
-    result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (isFlatMode.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
+    result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (hasResourceFilters.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
     const externalBody = externalResponse?.data
     const externalManifest = externalBody && typeof externalBody === 'object' && 'data' in externalBody
       ? externalBody.data as AssetBatchSearchManifest | undefined
@@ -408,12 +478,11 @@ async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number)
   }))
 }
 function goPage(page: number) {
-  result.page = Math.max(1, Math.min(totalPages.value, page))
-  if (resultsViewport.value) resultsViewport.value.scrollTop = 0
-  void load()
+  navigateList({ ...applied }, Math.max(1, Math.min(totalPages.value, page)))
 }
-function search() { goPage(1) }
-onMounted(load)
+function search() {
+  navigateList({ ...applied, q: filters.q }, 1, showLedger.value, true)
+}
 </script>
 
 <style scoped>

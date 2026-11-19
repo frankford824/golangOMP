@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import http from '@/services/http'
 import { usePermission } from '@/composables/usePermission'
 import { errorText } from '../api'
 import { useOAAccess } from '../access'
+import OAReturnLink from '../components/OAReturnLink.vue'
+import { orderReturnQuery, orderReturnSource, orderReturnTarget, orderVisit } from '../orderFilterMemory'
 import OperationNav from '../components/OperationNav.vue'
 import PageHead from '../components/PageHead.vue'
 import '../styles.css'
@@ -19,21 +21,41 @@ type Row = {
 }
 
 const route = useRoute()
+const router = useRouter()
+const returnTarget = computed(() => orderReturnTarget(route))
+const returnSource = computed(() => orderReturnSource(route))
+type Visit = { codes: string; queried: boolean; row?: string; closed: boolean; scroll: number }
+let visit = orderVisit<Visit>('pricing')
+const previous = visit.read()
+const resultRegion = ref<HTMLElement>()
+let restoring = Boolean(previous)
+const queried = ref(previous?.queried ?? false)
+function saveVisit() {
+  if (!restoring) visit.save({ codes: codes.value, queried: queried.value, row: selected.value?.sku_code, closed, scroll: resultRegion.value?.scrollTop ?? 0 })
+}
+function costLink(sku?: string) {
+  const query = Object.fromEntries(Object.entries(route.query).filter(([key, value]) =>
+    ['returnTo', 'returnFallback', 'sku'].includes(key) && typeof value === 'string')) as Record<string, string>
+  if (codes.value && codes.value.length <= 500) query.sku = codes.value
+  return { name: 'CostRules', query: { ...(sku ? { sku, focus: 'cost-detail' } : {}),
+    ...orderReturnQuery(router, route.path, query, route.fullPath) } }
+}
 const { can } = useOAAccess()
 const { canAccessMenu } = usePermission()
-const codes = ref(typeof route.query.sku === 'string' ? route.query.sku : '')
+const codes = ref(previous?.codes ?? (typeof route.query.sku === 'string' ? route.query.sku : ''))
 const parsed = computed(() => [...new Set(codes.value.split(/[\r\n,，、;；]+/).map(code => code.trim().toUpperCase()).filter(Boolean))])
 const rows = ref<Row[]>([])
 const selected = ref<Row>()
 const inspectorHeading = ref<HTMLElement>()
 let viewport: MediaQueryList | undefined
-let closed = false
+let closed = previous?.closed ?? false
+watch([codes, selected, queried], saveVisit, { flush: 'post' })
 function select(row: Row, focus = true) {
   selected.value = row
   if (focus) void nextTick(() => inspectorHeading.value?.focus())
 }
 function openDefault() {
-  if (viewport?.matches && !closed && !selected.value && rows.value[0]) select(rows.value[0], false)
+  if (!restoring && viewport?.matches && !closed && !selected.value && rows.value[0]) select(rows.value[0], false)
 }
 function close() {
   const row = selected.value
@@ -67,7 +89,20 @@ watch(rows, () => {
 onMounted(() => {
   viewport = window.matchMedia?.('(min-width: 2300px)')
   viewport?.addEventListener('change', openDefault)
+  void restorePreview(previous)
 })
+async function restorePreview(saved?: Visit) {
+  const activeVisit = visit
+  if (saved?.queried) {
+    await preview()
+    await nextTick()
+    if (activeVisit !== visit || route.path !== '/operations/pricing') return
+    const row = rows.value.find(item => item.sku_code === saved.row)
+    if (row) select(row, false)
+    if (resultRegion.value) resultRegion.value.scrollTop = saved.scroll
+  }
+  restoring = false
+}
 onUnmounted(() => viewport?.removeEventListener('change', openDefault))
 const busy = ref(false)
 const error = ref('')
@@ -83,14 +118,21 @@ let requestVersion = 0
 
 function changedInput() {
   requestVersion++
+  queried.value = false
   rows.value = []
   busy.value = false
   error.value = ''
 }
 
-watch(() => route.query.sku, (sku) => {
-  codes.value = typeof sku === 'string' ? sku : ''
+watch(() => route.fullPath, async () => {
+  if (route.path !== '/operations/pricing') return
+  visit = orderVisit<Visit>('pricing')
+  const saved = visit.read()
+  restoring = Boolean(saved)
+  closed = saved?.closed ?? false
+  codes.value = saved?.codes ?? (typeof route.query.sku === 'string' ? route.query.sku : '')
   changedInput()
+  await restorePreview(saved)
 })
 
 async function preview() {
@@ -105,7 +147,10 @@ async function preview() {
   rows.value = []
   try {
     const response = await http.post<{ data: { rows: Row[] } }>('/oa-api/pricing/preview', { sku_codes: parsed.value }, { timeout: 60_000 })
-    if (version === requestVersion) rows.value = response.data.data.rows
+    if (version === requestVersion) {
+      rows.value = response.data.data.rows
+      queried.value = true
+    }
   } catch (e) {
     if (version === requestVersion) {
       const message = (e as { responseData?: { error?: unknown } })?.responseData?.error
@@ -120,7 +165,8 @@ async function preview() {
 <template>
   <main class="oa-page oa-pricing">
     <PageHead title="SKU 核价" subtitle="按编码查看成本中心的当前成本、计价依据和规则试算结果。">
-      <RouterLink v-if="canOpenMaintenance" class="oa-button" :to="{ name: 'CostRules' }">编码成本维护</RouterLink>
+      <OAReturnLink v-if="returnTarget" class="oa-button" :to="returnTarget" :source="returnSource">返回来源</OAReturnLink>
+      <RouterLink v-if="canOpenMaintenance" class="oa-button" :to="costLink()">编码成本维护</RouterLink>
     </PageHead>
     <OperationNav v-if="can('orders.view')" />
     <div class="pricing-body" @keydown="rowKey" role="region" aria-label="SKU 核价工作区">
@@ -143,7 +189,7 @@ async function preview() {
         <h2 id="price-results-title">核价结果</h2>
         <p class="oa-muted">共 {{ rows.length }} 个编码。规则试算供核对。维护正式成本请打开对应的编码成本记录。</p>
       </div>
-      <div class="oa-table-wrap" tabindex="0" role="region" aria-label="逐项核价结果">
+      <div ref="resultRegion" class="oa-table-wrap" tabindex="0" @scroll="saveVisit" role="region" aria-label="逐项核价结果">
         <table class="oa-table pricing-table">
           <thead><tr><th scope="col">编码 / 商品</th><th scope="col" class="oa-number">当前成本</th><th scope="col" class="oa-number">试算建议</th><th scope="col">状态与依据</th></tr></thead>
           <tbody>
@@ -151,7 +197,7 @@ async function preview() {
               @click="!($event.target as HTMLElement).closest('a,button') && select(row)">
               <td>
                 <RouterLink v-if="canOpenMaintenance && row.sku_item_id"
-                  :to="{ name: 'CostRules', query: { sku: row.sku_code } }" custom v-slot="{ href }">
+                  :to="costLink(row.sku_code)" custom v-slot="{ href }">
                   <a :href="href" target="_blank" rel="noopener" @click.exact.prevent="select(row)">{{ row.sku_code }}</a>
                 </RouterLink>
                 <strong v-else>{{ row.sku_code }}</strong>
@@ -178,7 +224,7 @@ async function preview() {
       <p>{{ labels[selected.state] }}</p>
       <p v-if="selected.reason">{{ selected.reason }}</p>
       <RouterLink v-if="canOpenMaintenance && selected.sku_item_id" class="oa-button"
-        :to="{ name: 'CostRules', query: { sku: selected.sku_code } }" target="_blank" rel="noopener">打开完整成本记录 ↗</RouterLink>
+        :to="costLink(selected.sku_code)" target="_blank" rel="noopener">打开完整成本记录 ↗</RouterLink>
       <dl class="pricing-inspector-totals">
         <div><dt>当前成本</dt><dd>{{ selected.sku_item_id && selected.current_cost == null ? '未记录' : price(selected.current_cost) }}</dd></div>
         <div><dt>试算建议</dt><dd>{{ price(selected.suggested_cost) }}</dd></div>

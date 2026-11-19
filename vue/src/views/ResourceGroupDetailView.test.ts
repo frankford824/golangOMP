@@ -2,8 +2,13 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), costReconciliation: vi.fn(), batchDownload: vi.fn(), downloadBatchAsZip: vi.fn(), push: vi.fn() }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { id: '8' } }), useRouter: () => ({ push: mocks.push }) }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), costReconciliation: vi.fn(), batchDownload: vi.fn(), downloadBatchAsZip: vi.fn() }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ currentRoute: { value: { path: '/asset-center/8' } } }),
+  useRoute: () => ({ params: { id: '8' }, fullPath: '/asset-center/8', query: {} }),
+  RouterLink: { props: ['to'], template: '<a :data-target="JSON.stringify(to)"><slot /></a>' },
+}))
+vi.mock('@/oa/components/OAReturnLink.vue', () => ({ default: { props: ['to'], template: '<a><slot /></a>' } }))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@/services/api/resourceGroupsApi')>()
   return { ...original, resourceGroupsApi: { ...original.resourceGroupsApi, get: mocks.get, costReconciliation: mocks.costReconciliation, batchDownload: mocks.batchDownload } }
@@ -39,8 +44,11 @@ describe('ResourceGroupDetailView', () => {
     expect(wrapper.text()).toContain('ERP 实际成本')
     expect(wrapper.text()).toContain(import.meta.env.VITE_OA_FEATURES === 'true' ? '¥9.10' : '¥ 9.10')
     expect(wrapper.text()).toContain(import.meta.env.VITE_OA_FEATURES === 'true' ? '比系统成本高 ¥0.50' : '比系统成本高 ¥ 0.50')
-    await wrapper.findAll('.hero-actions button')[0].trigger('click')
-    expect(mocks.push).toHaveBeenCalledWith('/tasks/9')
+    expect(JSON.parse(wrapper.get('.hero-actions a').attributes('data-target')!)).toEqual({
+      name: 'TaskDetail',
+      params: { id: 9 },
+      query: { assetDetailFrom: '/asset-center/8' },
+    })
 
     await wrapper.findAll('.hero-actions button').find((item) => item.text() === '下载全部成品')?.trigger('click')
     await flushPromises()

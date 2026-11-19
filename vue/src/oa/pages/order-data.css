@@ -275,3 +275,5 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+.order-data-results .oa-table-wrap { overflow-anchor: none; }

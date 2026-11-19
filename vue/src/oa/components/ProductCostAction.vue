@@ -12,7 +12,7 @@ export type CostTarget = {
 const { can, currentProfile } = useOAAccess()
 const permissions=usePermissionsStore()
 const mayMaintain=computed(()=>permissions.hasMenu('cost_rules') && can('cost.request.handle'))
-const props = defineProps<{ split?: boolean; detailLink?: RouteLocationRaw }>()
+const props = defineProps<{ split?: boolean; detailLink?: RouteLocationRaw; pricingLink?: RouteLocationRaw; maintenanceLink?: RouteLocationRaw }>()
 const emit = defineEmits<{ dismiss: []; closed: []; saved: [message: string] }>()
 const heading = ref<HTMLElement>()
 const panel = ref<HTMLElement>()
@@ -99,9 +99,9 @@ defineExpose({ open, close, dismiss, pending: busy })
     <p class="sku-hint">经营报表使用成交时的成本。编码当前成本由成本中心维护。</p>
     <div class="sku-actions">
       <RouterLink v-if="detailLink" class="oa-button" :to="detailLink" target="_blank" rel="noopener">打开完整详情 ↗</RouterLink>
-      <RouterLink v-if="mayMaintain" class="oa-button" :to="{ path: '/cost-rules', query: { sku: subject.sku } }"
+      <RouterLink v-if="mayMaintain" class="oa-button" :to="maintenanceLink || { path: '/cost-rules', query: { sku: subject.sku } }"
         target="_blank" rel="noopener">维护当前编码成本 ↗</RouterLink>
-      <RouterLink v-if="can('pricing.view')" class="oa-button" :to="{ path: '/operations/pricing', query: { sku: subject.sku } }"
+      <RouterLink v-if="can('pricing.view')" class="oa-button" :to="pricingLink || { path: '/operations/pricing', query: { sku: subject.sku } }"
         target="_blank" rel="noopener">查看试算依据 ↗</RouterLink>
     </div>
     <form v-if="!message" @submit.prevent="submit">

@@ -19,7 +19,7 @@
           </button>
           <router-link
             class="inline-flex min-h-9 items-center justify-center rounded bg-[var(--v1-bg-primary)] px-3 text-xs text-[rgb(var(--yb-text-inverse))]"
-            to="/tasks/create?create=1"
+            :to="{ name: 'TaskCreate', query: { create: '1', taskFrom: '/me/task-drafts' } }"
           >
             创建任务
           </router-link>
@@ -62,7 +62,7 @@
               <router-link
                 v-if="!group.expired"
                 class="inline-flex min-h-8 items-center justify-center rounded border border-[var(--v1-border)] px-2 text-xs text-[var(--v1-text-secondary)]"
-                :to="`/tasks/create?create=1&draft_id=${encodeURIComponent(draft.id)}`"
+                :to="{ name: 'TaskCreate', query: { create: '1', draft_id: draft.id, taskFrom: '/me/task-drafts' } }"
               >
                 继续编辑
               </router-link>

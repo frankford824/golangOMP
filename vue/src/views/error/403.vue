@@ -24,6 +24,8 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { oaEnabled } from '@/oa/access'
+import { goBackTo } from '@/oa/returnNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
 import { usePermissionsStore } from '@/stores/permissions'
 import { resolveFirstAccessibleHomeRoute } from '@/router/home-fallback'
@@ -33,11 +35,13 @@ const permissionsStore = usePermissionsStore()
 
 function goHome() {
   const fallback = resolveFirstAccessibleHomeRoute(permissionsStore)
-  router.push(fallback ?? { name: 'Forbidden' })
+  if (oaEnabled) return goBackTo(router, fallback ?? { name: 'Me' })
+  return router.push(fallback ?? { name: 'Forbidden' })
 }
 
 function goLogin() {
-  router.push({ name: 'Login' })
+  if (oaEnabled) return goBackTo(router, { name: 'Login' })
+  return router.push({ name: 'Login' })
 }
 </script>
 

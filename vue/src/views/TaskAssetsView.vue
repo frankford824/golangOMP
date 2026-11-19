@@ -7,7 +7,7 @@
         <p>以资源组为唯一口径，不展示历史文件版本和存储生命周期。</p>
       </div>
       <div class="actions">
-        <BaseButton variant="secondary" @click="router.push(`/tasks/${taskId}`)">返回任务</BaseButton>
+        <BaseButton variant="secondary" @click="backToTask">返回任务</BaseButton>
         <BaseButton :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</BaseButton>
       </div>
     </header>
@@ -21,6 +21,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { goBackTo, safeReturnPath } from '@/oa/returnNavigation'
+import { assetTaskReturnSource, taskReturnSource } from '@/oa/taskNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
 import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceGroupsApi'
@@ -31,6 +33,17 @@ const taskId = computed(() => Number(route.params.id))
 const bundle = ref<ResourceBundle | null>(null)
 const loading = ref(false)
 const error = ref('')
+
+function backToTask() {
+  if (!Number.isInteger(taskId.value) || taskId.value <= 0) return void goBackTo(router, '/tasks')
+  const path = '/tasks/' + taskId.value
+  const previous = safeReturnPath(window.history.state?.back, (entry) => entry === path)
+  if (previous) return void goBackTo(router, previous)
+  void goBackTo(router, {
+    path,
+    query: { taskFrom: taskReturnSource(route.query.taskFrom), assetDetailFrom: assetTaskReturnSource(route.query.assetDetailFrom) },
+  })
+}
 
 async function load() {
   if (!Number.isInteger(taskId.value) || taskId.value <= 0) {

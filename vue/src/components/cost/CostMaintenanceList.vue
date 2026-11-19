@@ -27,7 +27,8 @@
         ><button type="submit">查询</button>
       </form>
       <div>
-        <RouterLink v-if="canPrice" class="pricing-link bulk-pricing-link" :to="{ name: 'OperationsPricing' }">批量核价</RouterLink>
+        <OAReturnLink v-if="returnTarget" class="pricing-link bulk-pricing-link" :to="returnTarget" :source="returnSource">返回来源</OAReturnLink>
+        <RouterLink v-if="canPrice" class="pricing-link bulk-pricing-link" :to="pricingLink()">批量核价</RouterLink>
         <button @click="openLogs">修改日志</button
         ><button :disabled="loading" @click="load()">
           {{ loading ? "刷新中…" : "刷新" }}
@@ -38,7 +39,7 @@
       {{ error }} <button @click="load()">重新读取</button>
     </p>
     <p v-if="notice" role="status" class="maintenance-notice">{{ notice }}</p>
-    <div class="maintenance-table" role="region" aria-label="编码成本列表" tabindex="0" :aria-busy="loading">
+    <div ref="resultRegion" class="maintenance-table" role="region" @scroll="saveVisit" aria-label="编码成本列表" tabindex="0" :aria-busy="loading">
       <table>
         <thead>
           <tr>
@@ -124,7 +125,7 @@
               >
                 修改
               </button>
-              <RouterLink v-if="canPrice" class="pricing-link" :to="{ name: 'OperationsPricing', query: { sku: row.sku_code } }" :aria-label="'核价 ' + row.sku_code">核价</RouterLink>
+              <RouterLink v-if="canPrice" class="pricing-link" :to="pricingLink(row.sku_code)" :aria-label="'核价 ' + row.sku_code">核价</RouterLink>
             </div></td>
           </tr>
           <tr v-if="!rows.length">
@@ -480,12 +481,15 @@
 <script setup lang="ts">
 import DesktopSlot from '@/oa/components/DesktopSlot.vue';
 import OAEmpty from '@/oa/components/OAEmpty.vue';
-import { RouterLink } from "vue-router";
+import OAReturnLink from '@/oa/components/OAReturnLink.vue';
+import { orderReturnQuery, orderReturnSource, orderReturnTarget, orderVisit } from '@/oa/orderFilterMemory';
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { oaEnabled } from "@/oa/access";
 import { retryCostRead } from '@/utils/cost-read-retry';
 import {
   computed,
   nextTick,
+  onActivated,
   onBeforeUnmount,
   onDeactivated,
   onMounted,
@@ -512,12 +516,33 @@ const permission = usePermission(),
     () => permission.can("catalog.manage") && permission.can("erp.manage"),
   );
 const props = defineProps<{ initialSku?: string; focus?: "cost-conflicts" | "cost-detail"; focusRevision?: string }>();
+const route = useRoute();
+const router = useRouter();
+const returnTarget = computed(() => oaEnabled ? orderReturnTarget(route) : undefined);
+const returnSource = computed(() => orderReturnSource(route));
+const resultRegion = ref<HTMLElement>();
+type Visit = { keyword: string; status: string; review: 'pending' | 'reviewed' | 'all'; pageSize: number; cursors: number[]; row?: number; scroll: number; used: boolean };
+let visit = oaEnabled ? orderVisit<Visit>('cost-maintenance') : undefined;
+let pendingVisit = visit?.read();
+let visitActive = true;
+let appliedVisit: Pick<Visit,'keyword'|'status'|'review'|'pageSize'|'cursors'> | undefined;
+function saveVisit() {
+  if (!visitActive || !visit || pendingVisit || !appliedVisit) return;
+  visit.save({ ...appliedVisit, row: selected.value?.id, scroll: resultRegion.value?.scrollTop ?? 0, used: usedInspector });
+}
+function pricingLink(sku?: string) {
+  const query = Object.fromEntries(Object.entries(route.query).filter(([key, value]) =>
+    ['tab','sku','focus','returnTo','returnFallback'].includes(key) && typeof value === 'string')) as Record<string, string>;
+  if (appliedVisit?.keyword) query.sku = appliedVisit.keyword;
+  return { name: 'OperationsPricing', query: { ...(sku ? { sku } : {}),
+    ...orderReturnQuery(router, route.path, query, route.fullPath) } };
+}
 const rows = ref<MaintenanceRow[]>([]),
-  keyword = ref(props.initialSku ?? ""),
-  status = ref(props.focus === "cost-conflicts" ? "conflict" : ""),
-  reviewState = ref<"pending" | "reviewed" | "all">(props.initialSku && props.focus !== "cost-conflicts" ? "all" : "pending"),
-  pageSize = ref(50),
-  cursors = ref([0]),
+  keyword = ref(pendingVisit?.keyword ?? props.initialSku ?? ""),
+  status = ref(pendingVisit?.status ?? (props.focus === "cost-conflicts" ? "conflict" : "")),
+  reviewState = ref<"pending" | "reviewed" | "all">(pendingVisit?.review ?? (props.initialSku && props.focus !== "cost-conflicts" ? "all" : "pending")),
+  pageSize = ref(pendingVisit?.pageSize ?? 50),
+  cursors = ref(pendingVisit ? [...pendingVisit.cursors] : [0]),
   nextID = ref(0),
   loading = ref(false),
   error = ref(""),
@@ -540,7 +565,8 @@ const editing = ref(false);
 const saveNextButton = ref<HTMLButtonElement>();
 let inspectorMedia: MediaQueryList | undefined;
 let defaultMedia: MediaQueryList | undefined;
-let usedInspector = false;
+let usedInspector = pendingVisit?.used ?? false;
+watch(selected, saveVisit, { flush: "post" });
 const costDetailLink = (row: MaintenanceRow) => ({ name: "CostRules", query: { sku: row.sku_code, focus: "cost-detail" } });
 function syncInspectorSize() {
   inlineInspector.value = Boolean(inspectorMedia?.matches);
@@ -548,7 +574,7 @@ function syncInspectorSize() {
   openDefaultInspector();
 }
 function openDefaultInspector() {
-  if (usedInspector) return;
+  if (usedInspector || pendingVisit) return;
   if (props.focus === "cost-detail" && props.initialSku) {
     const row = rows.value.find(item => item.sku_code === props.initialSku);
     if (row) inspect(row, true);
@@ -699,22 +725,25 @@ async function load(background = false) {
   loading.value = true;
   error.value = "";
   try {
-    const result = await retryCostRead(() => costMaintenanceApi.list(
-      {
-        keyword: keyword.value,
-        status: status.value,
-        review_state: reviewState.value,
-        before_id: cursors.value.at(-1),
-        page_size: pageSize.value,
-      },
-      signal,
-    ), signal);
+    const params = { keyword: keyword.value, status: status.value, review_state: reviewState.value,
+      before_id: cursors.value.at(-1), page_size: pageSize.value };
+    const result = await retryCostRead(() => costMaintenanceApi.list(params, signal), signal);
     if (ticket !== epoch) return;
     rows.value = result.data || [];
     nextID.value = result.next_before_id;
     refreshed.value = result.refreshed_at;
     if (selected.value && !editing.value) selected.value = rows.value.find(row => row.id === selected.value?.id) ?? null;
-    openDefaultInspector();
+    appliedVisit = { keyword: params.keyword, status: params.status, review: params.review_state,
+      pageSize: params.page_size, cursors: [...cursors.value] };
+    if (pendingVisit) {
+      const saved = pendingVisit;
+      const row = rows.value.find(item => item.id === saved.row);
+      pendingVisit = undefined;
+      if (row) inspect(row, false);
+      await nextTick();
+      if (resultRegion.value) resultRegion.value.scrollTop = saved.scroll;
+    } else openDefaultInspector();
+    saveVisit();
   } catch (e) {
     if (ticket === epoch && !controller?.signal.aborted)
       error.value = e instanceof Error ? e.message : "读取失败";
@@ -728,7 +757,21 @@ function search() {
   load();
 }
 watch([() => props.initialSku, () => props.focus, () => props.focusRevision], ([sku, focus], [previousSku, previousFocus]) => {
-  if (!sku && !previousSku && !focus && !previousFocus) return;
+  if (!visitActive || (!sku && !previousSku && !focus && !previousFocus)) return;
+  if (oaEnabled) {
+    visit = orderVisit<Visit>('cost-maintenance');
+    pendingVisit = visit.read();
+    if (pendingVisit) {
+      keyword.value = pendingVisit.keyword;
+      status.value = pendingVisit.status;
+      reviewState.value = pendingVisit.review;
+      pageSize.value = pendingVisit.pageSize;
+      cursors.value = [...pendingVisit.cursors];
+      usedInspector = pendingVisit.used;
+      void load();
+      return;
+    }
+  }
   if (focus === "cost-detail") usedInspector = false;
   if (focus === "cost-conflicts") {
     keyword.value = "";
@@ -1000,10 +1043,35 @@ onMounted(() => {
   }
   load();
   timer = setInterval(() => {
-    if (!loading.value) load(true);
+    if (visitActive && !loading.value) load(true);
   }, 15000);
 });
+onActivated(() => {
+  if (!oaEnabled || visitActive) return;
+  visitActive = true;
+  visit = orderVisit<Visit>('cost-maintenance');
+  pendingVisit = visit.read();
+  if (pendingVisit) {
+    keyword.value = pendingVisit.keyword;
+    status.value = pendingVisit.status;
+    reviewState.value = pendingVisit.review;
+    pageSize.value = pendingVisit.pageSize;
+    cursors.value = [...pendingVisit.cursors];
+    usedInspector = pendingVisit.used;
+    void load();
+  } else {
+    keyword.value = props.focus === 'cost-conflicts' ? '' : props.initialSku ?? '';
+    status.value = props.focus === 'cost-conflicts' ? 'conflict' : '';
+    reviewState.value = props.initialSku && props.focus !== 'cost-conflicts' ? 'all' : 'pending';
+    search();
+  }
+});
 onDeactivated(() => {
+  if (oaEnabled) {
+    visitActive = false;
+    epoch++;
+    controller?.abort();
+  }
   selected.value = null;
   editing.value = false;
   logsOpen.value = false;

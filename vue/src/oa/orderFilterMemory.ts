@@ -1,12 +1,16 @@
-import type { LocationQuery } from 'vue-router'
+import type { LocationQuery, RouteLocationNormalizedLoaded, Router } from 'vue-router'
 import { getToken } from '@/services/http'
 import { dateInChina } from './api'
+import { safeReturnPath } from './returnNavigation'
 
 // A tab remembers query controls only. Start fresh on sign-in or the next Beijing day.
 let identity: string | null = null
 let day = ''
 let shared: Record<string, string> = {}
 const perPage = new Map<string, Record<string, string>>()
+const visits = new Map<string, unknown>()
+let visitSequence = 0
+const visitPrefix = Math.random().toString(36).slice(2)
 
 function currentSession() {
   const token = getToken()
@@ -16,6 +20,7 @@ function currentSession() {
     day = currentDay
     shared = {}
     perPage.clear()
+    visits.clear()
   }
   return Boolean(token)
 }
@@ -35,4 +40,41 @@ export function rememberOrderFilters(mode: string, query: Record<string, string>
   shared = { from: query.from, to: query.to, include_brush: query.include_brush ?? '0' }
   if (query.shop_id) shared.shop_id = query.shop_id
   perPage.set(mode, { ...specific })
+}
+
+
+export function orderVisit<T>(name: string) {
+  const state = typeof window === 'undefined' ? undefined : window.history.state
+  let historyEntry: string | undefined = state?.oaOrderVisit
+  if (typeof state?.position === 'number' && !historyEntry) {
+    historyEntry = visitPrefix + '-' + ++visitSequence
+    window.history.replaceState({ ...state, oaOrderVisit: historyEntry }, '')
+  }
+  const identityAtEntry = getToken()
+  const key = historyEntry ? historyEntry + ':' + name : ''
+  return {
+    read: () => currentSession() && key ? visits.get(key) as T | undefined : undefined,
+    save(snapshot: T) {
+      if (!currentSession() || !key || identity !== identityAtEntry) return
+      visits.set(key, snapshot)
+      if (visits.size > 80) visits.delete(visits.keys().next().value!)
+    },
+  }
+}
+
+export function orderOffset(value: unknown) {
+  const n = typeof value === 'string' ? Number(value) : value
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 10000 && n % 100 === 0 ? n : 0
+}
+
+export function orderReturnQuery(router: Router, path: string, query: Record<string, string>, source: string) {
+  return { returnTo: source, returnFallback: router.resolve({ path, query }).fullPath }
+}
+
+const orderReturnRoutes = /^(?:\/operations(?:\/(?:products(?:\/[^/]+)?|rankings|pricing|orders\/(?:detail|ledger|refunds)))?|\/me\/(?:performance|notifications)|\/cost-rules)$/
+export function orderReturnSource(route: RouteLocationNormalizedLoaded) {
+  return safeReturnPath(route.query.returnTo, path => orderReturnRoutes.test(path))
+}
+export function orderReturnTarget(route: RouteLocationNormalizedLoaded) {
+  return safeReturnPath(route.query.returnFallback, path => orderReturnRoutes.test(path)) ?? orderReturnSource(route)
 }

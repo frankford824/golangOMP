@@ -10,7 +10,7 @@
       </DesktopSlot>
       <DesktopSlot target="actions">
       <div class="header-actions">
-        <button class="back-link" type="button" @click="router.push('/')"><ArrowLeft :size="16" />返回主页</button>
+        <button class="back-link" type="button" @click="returnToTaskBoard"><ArrowLeft :size="16" />返回主页</button>
         <BaseButton variant="ghost" size="sm" :disabled="loading" @click="load"><RefreshCw :size="15" />{{ loading ? '刷新中…' : '刷新' }}</BaseButton>
         <BaseButton variant="primary" size="sm" :disabled="!dashboard" @click="exportCsv"><Download :size="15" />导出明细</BaseButton>
       </div>
@@ -41,7 +41,7 @@
         <label>优先级<select v-model="filters.priority"><option value="">全部优先级</option><option v-for="item in priorityOptions" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
         <label>业务类型<select v-model="filters.business_lane"><option value="">全部业务</option><option value="normal">常规</option><option value="customization">定制</option></select></label>
       </div>
-      <div v-show="!oaEnabled || showFilters" class="filter-actions"><span>所有指标、图表和明细共用当前筛选范围</span><BaseButton variant="ghost" size="sm" @click="resetFilters">重置</BaseButton><BaseButton variant="primary" size="sm" :disabled="loading" @click="load">应用筛选</BaseButton></div>
+      <div v-show="!oaEnabled || showFilters" class="filter-actions"><span>所有指标、图表和明细共用当前筛选范围</span><BaseButton variant="ghost" size="sm" @click="resetFilters">重置</BaseButton><BaseButton variant="primary" size="sm" :disabled="loading" @click="applyDesignFilters">应用筛选</BaseButton></div>
     </section>
 
     <div v-if="error" class="state-card error" role="alert">{{ error }}<BaseButton variant="ghost" size="sm" @click="load">重试</BaseButton></div>
@@ -82,7 +82,7 @@
 
       <section id="design-task-exceptions" ref="taskSection" class="panel table-panel">
         <div class="panel-head"><div><h2>任务明细与异常定位</h2><p>{{ overdueOnly ? '最近 200 条任务中的逾期明细' : '最多展示当前筛选范围内最近 200 条任务' }}</p></div><input v-model.trim="taskKeyword" type="search" placeholder="任务号、产品或人员" /></div>
-        <div class="design-table-wrap"><table><thead><tr><th>任务号</th><th>设计人员</th><th>类型</th><th>状态</th><th>优先级</th><th>源文件</th><th>成品</th><th>SKU</th><th>打回</th><th>处理时长</th><th>截止时间</th></tr></thead><tbody><tr v-for="task in filteredTasks" :key="task.task_id"><td><button type="button" class="task-link" @click="router.push(`/tasks/${task.task_id}?from=design-dashboard`)">{{ task.task_no }}</button><small>{{ task.product_name }}</small></td><td>{{ task.designer_name }}</td><td>{{ taskTypeLabel(task.task_type) }}</td><td><span class="status-pill" :class="{ overdue: task.overdue }">{{ taskStatusLabel(task.task_status) }}</span></td><td>{{ priorityLabel(task.priority) }}</td><td>{{ task.source_file_count }}</td><td>{{ task.final_file_count }}</td><td>{{ task.sku_count }}</td><td :class="{ danger: task.audit_reject_count > 0 }">{{ task.audit_reject_count }}</td><td>{{ task.turnaround_hours == null ? '—' : hours(task.turnaround_hours) }}</td><td>{{ task.deadline_at ? formatDateTime(task.deadline_at) : '—' }}</td></tr></tbody></table></div>
+        <div class="design-table-wrap"><table><thead><tr><th>任务号</th><th>设计人员</th><th>类型</th><th>状态</th><th>优先级</th><th>源文件</th><th>成品</th><th>SKU</th><th>打回</th><th>处理时长</th><th>截止时间</th></tr></thead><tbody><tr v-for="task in filteredTasks" :key="task.task_id"><td><button type="button" class="task-link" @click="openTask(task.task_id)">{{ task.task_no }}</button><small>{{ task.product_name }}</small></td><td>{{ task.designer_name }}</td><td>{{ taskTypeLabel(task.task_type) }}</td><td><span class="status-pill" :class="{ overdue: task.overdue }">{{ taskStatusLabel(task.task_status) }}</span></td><td>{{ priorityLabel(task.priority) }}</td><td>{{ task.source_file_count }}</td><td>{{ task.final_file_count }}</td><td>{{ task.sku_count }}</td><td :class="{ danger: task.audit_reject_count > 0 }">{{ task.audit_reject_count }}</td><td>{{ task.turnaround_hours == null ? '—' : hours(task.turnaround_hours) }}</td><td>{{ task.deadline_at ? formatDateTime(task.deadline_at) : '—' }}</td></tr></tbody></table></div>
       </section>
 
       <details class="definitions"><summary>指标口径说明</summary><dl><template v-for="(definition, key) in dashboard.definitions" :key="key"><dt>{{ definitionLabel(key) }}</dt><dd>{{ definition }}</dd></template></dl></details>
@@ -96,6 +96,8 @@ import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, RefreshCw } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import { goBackTo } from '@/oa/returnNavigation'
+import { taskDetailLocation, taskReturnSource } from '@/oa/taskNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
 import DesignDepartmentTrendChart from '@/components/dashboard/DesignDepartmentTrendChart.vue'
 import DesignDepartmentBreakdownChart from '@/components/dashboard/DesignDepartmentBreakdownChart.vue'
@@ -103,8 +105,19 @@ import { tasksApi } from '@/services/api/tasksApi'
 import type { DesignDepartmentDashboard, DesignDepartmentDashboardBreakdown, DesignDepartmentPersonMetric, DesignDepartmentTaskRow } from '@/types/dashboard'
 
 const router = useRouter()
+function returnToTaskBoard() {
+  const source = taskReturnSource(router.currentRoute?.value.query.taskBoardFrom)
+  const previous = taskReturnSource(window.history.state?.back)
+  const target = [source, previous].find((entry) => entry?.split(/[?#]/, 1)[0] === '/')
+  void goBackTo(router, target || '/?workspace=tasks')
+}
+async function openTask(id: number) {
+  await rememberDesignFilters(appliedFilters)
+  void router.push(taskDetailLocation(id, router.currentRoute?.value.fullPath || '/design-dashboard'))
+}
+const entryQuery = router.currentRoute?.value.query ?? {}
 const dashboard = ref<DesignDepartmentDashboard | null>(null)
-const showFilters = ref(false)
+const showFilters = ref(entryQuery.design_filters === '1')
 const departmentTitle = computed(() => {
   const department = dashboard.value?.department_name
   if (oaEnabled && dashboard.value && (!dashboard.value.department_id || !department || department === '未分配')) return '跨部门设计产能看板（全部可见范围）'
@@ -112,9 +125,9 @@ const departmentTitle = computed(() => {
 })
 const loading = ref(false)
 const error = ref('')
-const peopleKeyword = ref('')
-const taskKeyword = ref('')
-const overdueOnly = ref(false)
+const peopleKeyword = ref(entryText(entryQuery.design_people_search))
+const taskKeyword = ref(entryText(entryQuery.design_task_search))
+const overdueOnly = ref(entryQuery.design_overdue === '1')
 const taskSection = ref<HTMLElement>()
 function toggleOverdue() {
   overdueOnly.value = !overdueOnly.value
@@ -126,8 +139,14 @@ const priorityOptions = ref<DesignDepartmentDashboardBreakdown[]>([])
 const teamOptions = ref<Array<{ id: string; label: string }>>([])
 const peopleSort = ref<'task_count' | 'design_file_count' | 'completed_task_count' | 'average_turnaround_hours'>('task_count')
 const presets = [{ days: 7, label: '近7天' }, { days: 30, label: '近30天' }, { days: 90, label: '近90天' }]
-const selectedPreset = ref(30)
+const selectedPreset = ref([7, 30, 90].includes(Number(entryQuery.design_period)) ? Number(entryQuery.design_period) : 30)
 let controller: AbortController | null = null
+
+function entryText(value: unknown) { return typeof value === 'string' ? value : '' }
+function entryDate(value: unknown, fallback: string) {
+  const text = entryText(value)
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : fallback
+}
 
 function beijingDate(offsetDays = 0) {
   const now = new Date(Date.now() + offsetDays * 86400000)
@@ -144,26 +163,73 @@ const filters = reactive<{
   status: string
   priority: string
   business_lane: string
-}>({ start_date: beijingDate(-29), end_date: beijingDate(), date_basis: 'created', granularity: 'day', designer_id: '', team_id: '', task_type: '', status: '', priority: '', business_lane: '' })
+}>({
+  start_date: entryDate(entryQuery.design_start, beijingDate(-29)),
+  end_date: entryDate(entryQuery.design_end, beijingDate()),
+  date_basis: entryQuery.design_basis === 'completed' || entryQuery.design_basis === 'deadline' ? entryQuery.design_basis : 'created',
+  granularity: entryQuery.design_granularity === 'week' || entryQuery.design_granularity === 'month' ? entryQuery.design_granularity : 'day',
+  designer_id: entryText(entryQuery.design_person),
+  team_id: entryText(entryQuery.design_team),
+  task_type: entryText(entryQuery.design_type),
+  status: entryText(entryQuery.design_status),
+  priority: entryText(entryQuery.design_priority),
+  business_lane: entryText(entryQuery.design_lane),
+})
+let appliedFilters = { ...filters }
 const memberOptions = computed(() => dashboard.value?.options.members ?? [])
 
 async function load() {
-  controller?.abort(); controller = new AbortController(); loading.value = true; error.value = ''
+  controller?.abort(); const request = new AbortController(); controller = request; loading.value = true; error.value = ''
+  const requested = { ...filters }
   try {
-    const response = await tasksApi.designDepartmentDashboard({ start_date: filters.start_date, end_date: filters.end_date, date_basis: filters.date_basis, granularity: filters.granularity, designer_ids: filters.designer_id || undefined, team_ids: filters.team_id || undefined, task_types: filters.task_type || undefined, statuses: filters.status || undefined, priorities: filters.priority || undefined, business_lanes: filters.business_lane || undefined }, controller.signal)
+    const response = await tasksApi.designDepartmentDashboard({ start_date: requested.start_date, end_date: requested.end_date, date_basis: requested.date_basis, granularity: requested.granularity, designer_ids: requested.designer_id || undefined, team_ids: requested.team_id || undefined, task_types: requested.task_type || undefined, statuses: requested.status || undefined, priorities: requested.priority || undefined, business_lanes: requested.business_lane || undefined }, request.signal)
+    if (request.signal.aborted || controller !== request) return
     dashboard.value = response.data.data
+    appliedFilters = requested
     taskTypeOptions.value = mergeBreakdownOptions(taskTypeOptions.value, optionBreakdowns(dashboard.value.options.task_types, dashboard.value.task_types, taskTypeLabel))
     statusOptions.value = mergeBreakdownOptions(statusOptions.value, optionBreakdowns(dashboard.value.options.statuses, dashboard.value.statuses, taskStatusLabel))
     priorityOptions.value = mergeBreakdownOptions(priorityOptions.value, optionBreakdowns(dashboard.value.options.priorities, dashboard.value.priorities, priorityLabel))
     teamOptions.value = mergeSimpleOptions(teamOptions.value, dashboard.value.options.teams)
   } catch (cause) {
-    if (controller.signal.aborted) return
+    if (request.signal.aborted || controller !== request) return
     error.value = cause instanceof Error ? cause.message : '设计部看板加载失败，请稍后重试。'
-  } finally { loading.value = false }
+  } finally { if (controller === request) loading.value = false }
 }
-function applyPreset(days: number) { selectedPreset.value = days; filters.end_date = beijingDate(); filters.start_date = beijingDate(-(days - 1)); void load() }
-function resetFilters() { selectedPreset.value = 30; Object.assign(filters, { start_date: beijingDate(-29), end_date: beijingDate(), date_basis: 'created', granularity: 'day', designer_id: '', team_id: '', task_type: '', status: '', priority: '', business_lane: '' }); void load() }
-function selectPerson(id: number) { filters.designer_id = String(id); void load() }
+async function rememberDesignFilters(savedFilters = filters) {
+  const current = router.currentRoute?.value
+  if (!oaEnabled || current?.name !== 'DesignDepartmentDashboard') return
+  const query = {
+    ...current.query,
+    design_period: String(selectedPreset.value),
+    design_start: savedFilters.start_date,
+    design_end: savedFilters.end_date,
+    design_basis: savedFilters.date_basis,
+    design_granularity: savedFilters.granularity,
+    design_person: savedFilters.designer_id || undefined,
+    design_team: savedFilters.team_id || undefined,
+    design_type: savedFilters.task_type || undefined,
+    design_status: savedFilters.status || undefined,
+    design_priority: savedFilters.priority || undefined,
+    design_lane: savedFilters.business_lane || undefined,
+    design_filters: showFilters.value ? '1' : undefined,
+    design_people_search: peopleKeyword.value || undefined,
+    design_task_search: taskKeyword.value || undefined,
+    design_overdue: overdueOnly.value ? '1' : undefined,
+  }
+  await router.replace({ query })
+}
+function applyDesignFilters() {
+  void rememberDesignFilters()
+  void load()
+}
+function applyPreset(days: number) {
+  selectedPreset.value = days
+  filters.end_date = beijingDate()
+  filters.start_date = beijingDate(-(days - 1))
+  applyDesignFilters()
+}
+function resetFilters() { selectedPreset.value = 30; Object.assign(filters, { start_date: beijingDate(-29), end_date: beijingDate(), date_basis: 'created', granularity: 'day', designer_id: '', team_id: '', task_type: '', status: '', priority: '', business_lane: '' }); applyDesignFilters() }
+function selectPerson(id: number) { filters.designer_id = String(id); applyDesignFilters() }
 function mergeBreakdownOptions(current: DesignDepartmentDashboardBreakdown[], next: DesignDepartmentDashboardBreakdown[]) { const map = new Map(current.map((item) => [item.key, item])); for (const item of next) map.set(item.key, item); return Array.from(map.values()) }
 function mergeSimpleOptions(current: Array<{ id: string; label: string }>, next: Array<{ id: string; label: string }>) { const map = new Map(current.map((item) => [item.id, item])); for (const item of next) map.set(item.id, item); return Array.from(map.values()) }
 function optionBreakdowns(keys: string[], populated: DesignDepartmentDashboardBreakdown[], label: (key: string) => string) { const map = new Map(populated.map((item) => [item.key, item])); return keys.map((key) => map.get(key) ?? { key, label: label(key), task_count: 0, design_file_count: 0, sku_count: 0, share: 0 }) }

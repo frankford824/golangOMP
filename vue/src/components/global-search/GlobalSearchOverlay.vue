@@ -140,7 +140,7 @@ import {
   type V1GlobalSearchScope,
 } from '@/domain/global-search'
 import { searchApi } from '@/services/api/searchApi'
-import { useOAAccess } from '@/oa/access'
+import { oaEnabled, useOAAccess } from '@/oa/access'
 import { dateInChina } from '@/oa/api'
 import { usePermission } from '@/composables/usePermission'
 import { PermissionEnum } from '@/types'
@@ -465,11 +465,9 @@ function isNavigable(groupKey: string): boolean {
 
 function goResult(result: GlobalSearchOverlayHit, groupKey: string): void {
   if (!isNavigable(groupKey)) return
-  if (groupKey === 'tasks') {
-    void router.push(`/tasks/${result.id}`)
-  } else if (groupKey === 'assets') {
-    void router.push(`/asset-center/${result.id}`)
-  }
+  const path = groupKey === 'tasks' ? '/tasks/' + result.id : '/asset-center/' + result.id
+  if (oaEnabled) void router.push({ path, query: { globalFrom: router.currentRoute.value.fullPath } })
+  else void router.push(path)
   close()
 }
 

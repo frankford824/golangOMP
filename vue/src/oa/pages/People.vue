@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import OAEmpty from '../components/OAEmpty.vue'
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import OAReturnLink from '../components/OAReturnLink.vue'
+import { directoryQuery, peopleReturnSource, positiveQueryNumber } from '../peopleNavigation'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
 import PageHead from '../components/PageHead.vue'
 import PersonnelTerms from '../components/PersonnelTerms.vue'
@@ -11,6 +13,7 @@ import '../styles.css'
 
 const { can, currentProfile } = useOAAccess()
 const route = useRoute()
+const router = useRouter()
 
 type Person = { id: number; name: string; employee_no?: number | null; department?: string; team?: string }
 type PreviewRow = { row: number; name?: string; error?: string; change?: string; status?: string; sheet?: string; failure?: string; result?: 'applied' | 'unchanged'; employee_no?: number; previous_employee_no?: number; new_name?: string; previous_name?: string; employment_type?: string; shop_id?: string; from?: string }
@@ -20,11 +23,21 @@ const allowed = computed(() => can('people.manage'))
 const query = ref(typeof route.query.q === 'string' ? route.query.q : '')
 const applied = ref(query.value)
 const items = ref<Person[]>([])
+const hasLoadedList = ref(false)
 const selected = computed(() => typeof route.query.user_id === 'string' && /^[1-9][0-9]*$/.test(route.query.user_id) ? route.query.user_id : undefined)
-const backQuery = computed(() => ({
-  ...(typeof route.query.q === 'string' ? { q: route.query.q } : {}),
-  ...(selected.value ? { user_id: selected.value, tab: 'terms' } : {}),
-}))
+const rosterReturnTarget = computed(() => peopleReturnSource(route.query.peopleFrom)
+  ?? peopleReturnSource(window.history.state?.back)
+  ?? { path: '/users', query: {
+    q: typeof route.query.q === 'string' ? route.query.q : undefined,
+    department: route.query.department,
+    team: route.query.team,
+    status: route.query.status,
+    page: route.query.page,
+    page_size: route.query.page_size,
+    user_id: selected.value,
+    tab: selected.value ? 'terms' : undefined,
+  } })
+const directoryTarget = computed(() => ({ path: '/users', query: directoryQuery(route.query) }))
 const selectedRecord = ref<{ id: number; name: string }>()
 const selectedName = computed(() => String(selectedRecord.value?.id) === selected.value ? selectedRecord.value?.name : items.value.find(item => String(item.id) === selected.value)?.name)
 const busy = ref(false)
@@ -33,7 +46,7 @@ const notice = ref('')
 const selectedFile = ref<File>()
 const preview = ref<Preview>()
 const pageSize = 20
-const page = ref(1)
+const page = ref(props.mode === 'people' ? positiveQueryNumber(route.query.page) : 1)
 const pageStart = computed(() => (page.value - 1) * pageSize)
 const employment = (kind?: string) => ({ full_time: '全职', part_time: '兼职' }[kind || ''] || kind || '—')
 const employeeNo = (no?: number | null) => no == null ? '—' : String(no).padStart(4, '0')
@@ -48,13 +61,14 @@ async function run(action: () => Promise<void>) {
   finally { busy.value = false }
 }
 
-async function refresh() {
+async function refresh(requestedPage = 1) {
   if (!allowed.value) return
   applied.value = query.value.trim()
   items.value = []
   const result = await api<{ items: Person[] }>('/oa-api/people/list?' + new URLSearchParams({ q: applied.value }))
   items.value = result.items ?? []
-  page.value = 1
+  hasLoadedList.value = true
+  page.value = Math.min(requestedPage, Math.max(1, Math.ceil(items.value.length / pageSize)))
 }
 
 function chooseFile(event: Event) {
@@ -104,17 +118,37 @@ function downloadConflicts() {
   const rows = [['工作表', '行号', '姓名', '冲突原因'], ...importErrors.value.map(row => [row.sheet || '人员', row.row, row.name, row.error || row.failure])]
   saveFile(new Blob(['\uFEFF', rows.map(row => row.map(quote).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), '花名册回导冲突.csv')
 }
-watch(selected, (value, old) => { if (old && !value && !items.value.length && props.mode === 'people') void run(refresh) })
-onMounted(() => { if (props.mode === 'people' && !selected.value) void run(refresh) })
+async function submitDirectorySearch() {
+  await run(refresh)
+  if (!error.value) await router.replace({ query: { ...route.query, q: applied.value || undefined, page: undefined } })
+}
+
+function changeDirectoryPage(next: number) {
+  page.value = next
+  void router.replace({ query: { ...route.query, page: next > 1 ? String(next) : undefined } })
+}
+
+watch(() => route.query, (current) => {
+  if (props.mode !== 'people' || route.path !== '/users' || selected.value) return
+  const nextKeyword = typeof current.q === 'string' ? current.q : ''
+  const nextPage = positiveQueryNumber(current.page)
+  if (nextKeyword === applied.value && hasLoadedList.value) {
+    page.value = Math.min(nextPage, Math.max(1, Math.ceil(items.value.length / pageSize)))
+    return
+  }
+  query.value = nextKeyword
+  void run(() => refresh(nextPage))
+})
+onMounted(() => { if (props.mode === 'people' && !selected.value) void run(() => refresh(page.value)) })
 </script>
 
 <template>
 <div class="oa-page">
   <PageHead :title="mode === 'roster' ? '人员花名册' : selectedName || (selected ? '人员详情' : '人员管理')">
-    <RouterLink v-if="mode === 'roster'" class="oa-button" :to="{ path: '/users', query: backQuery }">返回人员管理</RouterLink>
-    <RouterLink v-else-if="selected" class="oa-button" :to="{ path: '/users', query: { q: applied || undefined } }">返回目录</RouterLink>
-    <RouterLink v-else class="oa-button" :to="{ path: '/users/roster', query: { q: applied || undefined } }">人员花名册</RouterLink>
-    <RouterLink v-if="currentProfile?.super_admin" class="oa-button" :to="{ name: 'PeopleShopBindings', query: { user_id: selected || undefined } }">店铺人员绑定</RouterLink>
+    <OAReturnLink v-if="mode === 'roster'" class="oa-button" :to="rosterReturnTarget">返回人员管理</OAReturnLink>
+    <OAReturnLink v-else-if="selected" class="oa-button" :to="directoryTarget">返回目录</OAReturnLink>
+    <RouterLink v-else class="oa-button" :to="{ path: '/users/roster', query: { peopleFrom: route.fullPath } }">人员花名册</RouterLink>
+    <RouterLink v-if="currentProfile?.super_admin" class="oa-button" :to="{ name: 'PeopleShopBindings', query: { user_id: selected || undefined, peopleFrom: route.fullPath } }">店铺人员绑定</RouterLink>
   </PageHead>
   <p v-if="!allowed" class="oa-error" role="alert">当前账号没有人员管理权限。</p>
   <template v-else>
@@ -124,7 +158,7 @@ onMounted(() => { if (props.mode === 'people' && !selected.value) void run(refre
       <PersonnelTerms :key="selected" :user-id="selected" show-profile @loaded="selectedRecord = $event" />
     </section>
     <section v-else-if="mode === 'people'" class="oa-panel">
-      <form class="oa-actions oa-filter" @submit.prevent="run(refresh)">
+      <form class="oa-actions oa-filter" @submit.prevent="submitDirectorySearch">
         <input v-model="query" aria-label="搜索姓名或工号" placeholder="搜索姓名或工号" />
         <button :disabled="busy">搜索</button>
       </form>
@@ -132,12 +166,12 @@ onMounted(() => { if (props.mode === 'people' && !selected.value) void run(refre
       <OAEmpty v-else-if="!items.length && !error" kind="search" title="暂无匹配人员" description="试试其他姓名或工号，或清除搜索条件。" />
       <ul class="oa-list oa-link-list">
         <li v-for="item in items.slice(pageStart, pageStart + pageSize)" :key="item.id">
-          <RouterLink :to="{ path: '/users', query: { user_id: item.id, tab: 'terms', q: applied || undefined } }">
+          <RouterLink :to="{ path: '/users', query: { ...route.query, user_id: item.id, tab: 'terms', q: applied || undefined } }">
             <strong>{{ item.name }}</strong><span>{{ employeeNo(item.employee_no) }} · {{ item.team || item.department || '未分配' }}</span>
           </RouterLink>
         </li>
       </ul>
-      <BaseTablePager v-if="items.length > pageSize" v-model:page="page" :total="items.length" :page-size="pageSize" :show-page-size="false" compact />
+      <BaseTablePager v-if="items.length > pageSize" :page="page" @update:page="changeDirectoryPage" :total="items.length" :page-size="pageSize" :show-page-size="false" compact />
     </section>
     <template v-else>
       <div class="oa-split">

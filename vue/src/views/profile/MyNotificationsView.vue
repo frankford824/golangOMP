@@ -36,8 +36,8 @@
       <RouterLink v-if="showCostActivity" :to="{ name: 'MeNotifications', query: { section: 'cost' } }"
         :aria-current="section === 'cost' ? 'page' : undefined">成本复核</RouterLink>
     </nav>
-    <ExpenseNotifications v-if="section === 'expense'" :key="expenseTab" :initial-tab="expenseTab" />
-    <CostRequestInbox v-else-if="section === 'cost'" />
+    <ExpenseNotifications v-if="section === 'expense'" :key="expenseTab + ':' + expensePage" :initial-tab="expenseTab" :initial-page="expensePage" />
+    <CostRequestInbox v-else-if="section === 'cost'" :key="router.currentRoute.value.fullPath" />
     <div v-else class="notif-layout">
       <section class="notif-list-panel">
         <div class="notif-section-head">
@@ -65,7 +65,7 @@
               </div>
               <p>{{ displayContent(item) }}</p>
               <span v-if="!oaEnabled || displayType(item) !== displayTitle(item)" :class="oaEnabled && notificationTone(item)">{{ displayType(item) }}</span>
-              <RouterLink v-if="oaEnabled && notificationTaskID(item)" :to="{ name: 'TaskDetail', params: { id: notificationTaskID(item) } }" class="notif-task-link" @click="markNotificationRead(item)">查看任务</RouterLink>
+              <RouterLink v-if="oaEnabled && notificationTaskID(item)" :to="taskDetailLocation(notificationTaskID(item)!, router.currentRoute?.value.fullPath || '/me/notifications')" class="notif-task-link" @click="markNotificationRead(item)">查看任务</RouterLink>
             </div>
             <button
               v-if="!isRead(item)"
@@ -239,6 +239,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { taskDetailLocation } from '@/oa/taskNavigation'
 import {
   BellRing,
   CheckCircle2,
@@ -286,6 +287,10 @@ const section = computed(() => {
   if (requested === 'cost' && showCostActivity.value) return 'cost'
   return 'system'
 })
+const expensePage = computed(() => {
+  const raw = Number(router.currentRoute.value.query.expensePage)
+  return Number.isSafeInteger(raw) && raw >= 1 && raw <= 1_000_000 ? raw : 1
+})
 const expenseTab = computed(() => router.currentRoute.value.query.activity === 'results' ? 'results' : 'todos')
 const ExpenseNotifications = defineAsyncComponent(() => import('@/oa/components/ExpenseNotifications.vue'))
 const CostRequestInbox = defineAsyncComponent(() => import('@/oa/components/CostRequestInbox.vue'))
@@ -294,7 +299,14 @@ const permissionsStore = usePermissionsStore()
 const webPushStore = useWebPushStore()
 
 const items = computed(() => notificationsStore.items)
-const filter = ref<FilterMode>('all')
+const legacyFilter = ref<FilterMode>('all')
+const filter = computed<FilterMode>({
+  get: () => oaEnabled ? (router.currentRoute.value.query.filter === 'unread' ? 'unread' : 'all') : legacyFilter.value,
+  set: (value) => {
+    if (!oaEnabled) { legacyFilter.value = value; return }
+    void router.push({ path:'/me/notifications', query: { ...router.currentRoute.value.query, filter:value === 'unread' ? 'unread' : undefined } })
+  },
+})
 const toolPane = ref<'settings' | 'broadcast'>('settings')
 const broadcastAudience = ref<AudienceMode>('users')
 const broadcastTitle = ref('')

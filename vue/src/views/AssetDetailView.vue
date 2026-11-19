@@ -7,7 +7,7 @@
         <p>{{ asset ? fileName : '正在加载素材信息…' }}</p>
       </div>
       <div class="page-actions">
-        <BaseButton variant="secondary" size="sm" @click="goBack">返回资产中心</BaseButton>
+        <OAReturnLink class="return-link" :to="returnTo">{{ globalReturn ? '返回搜索来源' : '返回资产中心' }}</OAReturnLink>
         <BaseButton size="sm" :disabled="loading" @click="loadAsset">{{ loading ? '加载中…' : '刷新' }}</BaseButton>
       </div>
     </header>
@@ -47,7 +47,10 @@
 <script setup lang="ts">
 import OriginalImageDimensions from '@/components/media/OriginalImageDimensions.vue'
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
+import OAReturnLink from '@/oa/components/OAReturnLink.vue'
+import { workspaceOrigin } from '@/oa/returnNavigation'
+import { assetListReturn } from '@/oa/assetNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import { normalizeAssetDetailFromApi } from '@/domain/mappers/asset-detail-from-api'
@@ -57,7 +60,9 @@ import type { BackendAsset } from '@/services/apiTypes'
 import { formatDateTimeBeijing } from '@/utils/date'
 
 const route = useRoute()
-const router = useRouter()
+const originRouter = useRouter()
+const globalReturn = computed(() => workspaceOrigin(originRouter, route.query.globalFrom))
+const returnTo = computed(() => globalReturn.value || assetListReturn(route.query.assetFrom))
 const assetId = computed(() => String(route.params.id ?? '').trim())
 const loading = ref(false)
 const error = ref('')
@@ -92,7 +97,6 @@ function displayTime(value: unknown) {
   const raw = text(value, '')
   return raw ? formatDateTimeBeijing(raw) || raw : '—'
 }
-function goBack() { void router.push('/asset-center') }
 
 async function loadAsset() {
   if (!assetId.value.startsWith('ext-')) { asset.value = null; error.value = '该入口只展示外部素材；任务资源请从资源组详情查看。'; return }
@@ -123,4 +127,15 @@ onMounted(() => { void loadAsset() })
 
 <style scoped>
 .external-detail-page{max-width:1100px;margin:0 auto;padding:28px;display:grid;gap:20px}.page-header,.detail-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.page-header h1,.detail-card h2{margin:3px 0}.page-header p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.page-actions,.preview-actions{display:flex;gap:8px;flex-wrap:wrap}.state-card,.preview-card,.detail-card{border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));padding:20px}.state-card{min-height:180px;display:grid;place-items:center;color:rgb(var(--yb-text-muted))}.state-card.error{color:rgb(var(--yb-danger-text));background:rgb(var(--yb-danger-soft))}.preview-card{display:grid;gap:14px}.preview-card img{width:100%;max-height:520px;object-fit:contain;border-radius:12px;background:rgb(var(--yb-surface-soft))}.preview-placeholder{min-height:260px;display:grid;place-content:center;gap:8px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:12px;color:rgb(var(--yb-text-muted))}.preview-placeholder strong{color:rgb(var(--yb-text))}.preview-actions a{display:inline-flex;align-items:center;min-height:40px;padding:0 15px;border-radius:10px;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));text-decoration:none;font-weight:750}.status-pill{padding:6px 10px;border-radius:999px;background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong));font-size:12px}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:18px 0 0}.detail-grid>div{display:grid;grid-template-columns:110px 1fr;gap:12px;padding:13px 0;border-top:1px solid rgb(var(--yb-border))}.detail-grid .full{grid-column:1/-1}.detail-grid dt{color:rgb(var(--yb-text-muted))}.detail-grid dd{margin:0;overflow-wrap:anywhere}.mono{font-family:var(--yb-font-mono)}@media(max-width:720px){.external-detail-page{padding:16px}.page-header,.detail-card>header{flex-direction:column}.detail-grid{grid-template-columns:1fr}.detail-grid .full{grid-column:auto}.detail-grid>div{grid-template-columns:1fr;gap:5px}}
+ .return-link {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding-inline: 12px;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 6px;
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface));
+  text-decoration: none;
+}
 </style>

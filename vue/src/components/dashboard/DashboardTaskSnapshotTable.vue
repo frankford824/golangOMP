@@ -33,7 +33,7 @@
           role="row"
         >
           <span class="col-task" role="cell">
-            <RouterLink :to="{ name: 'TaskDetail', params: { id: row.id } }" :title="row.title">
+            <RouterLink :to="taskDetailLocation(row.id, router.currentRoute?.value.fullPath || '/?workspace=tasks')" :title="row.title">
               {{ row.title }}
             </RouterLink>
           </span>
@@ -48,6 +48,8 @@
 
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue'
+import { useRouter } from 'vue-router'
+import { taskDetailLocation } from '@/oa/taskNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
 import type { Task } from '@/domain/types/task'
@@ -56,6 +58,7 @@ import { getTaskStatusLabel } from '@/domain/enums/task-status'
 import { isDoneStatus, isInAuditQueue, isInCustomizationFlow } from '@/domain/task-actions'
 import { taskBeijingDateKey } from '@/utils/date'
 
+const router = useRouter()
 const props = defineProps<{
   tasks?: Task[]
   snapshots?: TaskOperationalRecentTask[]

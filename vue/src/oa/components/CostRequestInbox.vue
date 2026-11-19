@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getToken } from '@/services/http'
 import { usePermissionsStore } from '@/stores/permissions'
 import { useOAAccess } from '../access'
@@ -9,24 +9,50 @@ import { invalidateCostActivity } from '../costActivity'
 import { feeDateTime } from '../feeDisplay'
 import OAEmpty from './OAEmpty.vue'
 
-defineProps<{compact?: boolean}>()
+const props = defineProps<{compact?: boolean}>()
 defineEmits<{navigate:[]}>()
 const { can, currentProfile } = useOAAccess()
 const permissions = usePermissionsStore()
 const reviewer = computed(() => can('cost.request.handle'))
 const route=useRoute()
 type Queue='mine'|'pending'|'replies'
-const queue = ref<Queue>(route.query.costQueue==='mine'?'mine':reviewer.value?'pending':'mine')
+const router = useRouter()
+const fullPage = computed(() => !props.compact && route.path === '/me/notifications')
+function initialQueue(): Queue {
+  if (fullPage.value && route.query.costQueue === 'replies') return 'replies'
+  if (fullPage.value && route.query.costQueue === 'mine') return 'mine'
+  return reviewer.value ? 'pending' : 'mine'
+}
+const queue = ref<Queue>(initialQueue())
+function initialCursors() {
+  const raw = fullPage.value && route.query.costTrail
+  if (typeof raw !== 'string' || raw.length > 2048 || !/^0(?:,[1-9][0-9]*)*$/.test(raw)) return [0]
+  const ids = raw.split(',').map(Number)
+  if (ids.some((id,i) => !Number.isSafeInteger(id) || (i>1 && id>=ids[i-1]))) return [0]
+  return ids
+}
 const unread=ref(0)
 const activePending=ref(0)
 type Item = {id:number;created_at:string;unread:boolean;state:'pending'|'handled';shop_id:string;sku:string;sender:string;reason:string;reply?:string;handled_by?:string;handled_at?:string}
 type Page = {items:Item[];has_more:boolean;pending_count:number;reply_count:number}
 const rows=ref<Item[]>([])
 const busy=ref(false), acting=ref(false), error=ref(''), message=ref('')
-const hasMore=ref(false), history=ref<number[]>([0])
+const hasMore=ref(false), history=ref<number[]>(initialCursors())
 const selected=ref<number>(), reply=ref('')
 let sequence=0
-let chooseLanding=route.query.costQueue!=='mine'
+let chooseLanding=!fullPage.value || !route.query.costQueue
+function notificationLocation(target: Queue, cursors: number[]) {
+  return { path:'/me/notifications', query:{section:'cost', costQueue:target, costTrail:cursors.length>1?cursors.join(','):undefined} }
+}
+function sourceLink(path:string, sku:string) {
+  const fallback=router.resolve(notificationLocation(queue.value,history.value)).fullPath
+  return {path, query:{sku, returnFallback:fallback, returnTo:fullPage.value ? route.fullPath : fallback}}
+}
+function changePage(next:boolean) {
+  const cursors=next?[...history.value,rows.value.at(-1)!.id]:history.value.slice(0,-1)
+  if(fullPage.value){void router.push(notificationLocation(queue.value,cursors));return}
+  void load(cursors.at(-1),next?'next':'prev')
+}
 async function load(before=0, change?:'next'|'prev', background=false){
  const seq=++sequence
  const token=getToken()
@@ -54,6 +80,7 @@ async function load(before=0, change?:'next'|'prev', background=false){
 }
 function switchQueue(next:Queue){
  if(acting.value)return
+ if(fullPage.value && (next !== queue.value || history.value.length>1)){void router.push(notificationLocation(next,[0]));return}
  chooseLanding=false
  queue.value=next;rows.value=[];history.value=[0];selected.value=undefined;reply.value='';message.value=''
  void load()
@@ -89,7 +116,7 @@ let timer:number|undefined
 function visibleRefresh(){
  if(document.visibilityState==='visible' && !busy.value && !acting.value && !selected.value && history.value.length===1)void load(0,undefined,true)
 }
-onMounted(()=>{void load();window.addEventListener('focus',visibleRefresh);timer=window.setInterval(visibleRefresh,30000)})
+onMounted(()=>{void load(history.value.at(-1));window.addEventListener('focus',visibleRefresh);timer=window.setInterval(visibleRefresh,30000)})
 onUnmounted(()=>{sequence++;window.removeEventListener('focus',visibleRefresh);window.clearInterval(timer)})
 watch(()=>[currentProfile.value?.id,reviewer.value],()=>{
  ++sequence
@@ -114,8 +141,8 @@ watch(()=>[currentProfile.value?.id,reviewer.value],()=>{
    <p>{{ row.reason }}</p>
    <p v-if="row.reply"><strong>{{ row.handled_by }} 回复</strong>　{{ row.reply }}</p>
    <div v-if="queue==='pending'" class="cost-actions">
-    <RouterLink v-if="permissions.hasMenu('cost_rules')" :to="{path:'/cost-rules',query:{sku:row.sku}}" @click="$emit('navigate')">查看编码成本</RouterLink>
-    <RouterLink v-if="can('pricing.view')" :to="{path:'/operations/pricing',query:{sku:row.sku}}" @click="$emit('navigate')">查看试算依据</RouterLink>
+    <RouterLink v-if="permissions.hasMenu('cost_rules')" :to="sourceLink('/cost-rules',row.sku)" @click="$emit('navigate')">查看编码成本</RouterLink>
+    <RouterLink v-if="can('pricing.view')" :to="sourceLink('/operations/pricing',row.sku)" @click="$emit('navigate')">查看试算依据</RouterLink>
     <button type="button" @click="selected=row.id;reply=''" :disabled="acting">回复核对结果</button>
    </div>
    <form v-if="queue==='pending' && selected===row.id" @submit.prevent="respond(row.id)">
@@ -124,7 +151,7 @@ watch(()=>[currentProfile.value?.id,reviewer.value],()=>{
    </form>
    <button v-if="row.unread" :disabled="acting" type="button" @click="read(row)">标记已读</button>
   </article>
-  <footer v-if="hasMore || history.length>1"><button :disabled="busy || acting || history.length<2" @click="load(history.at(-2),'prev')">上一页</button><button :disabled="busy || acting || !hasMore" @click="load(rows.at(-1)?.id,'next')">下一页</button></footer>
+  <footer v-if="hasMore || history.length>1"><button :disabled="busy || acting || history.length<2" @click="changePage(false)">上一页</button><button :disabled="busy || acting || !hasMore" @click="changePage(true)">下一页</button></footer>
  </section>
 </template>
 <style scoped>

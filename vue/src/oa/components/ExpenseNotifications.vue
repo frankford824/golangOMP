@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { getToken } from '@/services/http'
 import OAEmpty from './OAEmpty.vue'
 import { api, errorText, send } from '../api'
@@ -7,12 +8,13 @@ import { expenseActivityURL, useExpenseActivity, type ExpenseActivityItem, type 
 import { feeDateTime } from '../feeDisplay'
 import '../styles.css'
 
-const props = defineProps<{ compact?: boolean; initialTab?: 'todos' | 'results' }>()
+const props = defineProps<{ compact?: boolean; initialTab?: 'todos' | 'results'; initialPage?: number }>()
 const emit = defineEmits<{ navigate: [] }>()
 const headingId = useId()
 const activity = useExpenseActivity()
 const tab = ref<'todos' | 'results'>(props.initialTab ?? 'todos')
-const page = ref(1)
+const router = useRouter()
+const page = ref(props.initialPage || 1)
 const data = ref<ExpenseActivityPage>()
 const error = ref('')
 const loading = ref(true)
@@ -39,6 +41,10 @@ async function load() {
     if (current !== request || token !== getToken()) return
     data.value = result
     if (page.value > totalPages.value) {
+      if (!props.compact && router.currentRoute.value.path === '/me/notifications') {
+        await router.replace(activityLocation(tab.value, totalPages.value))
+        return
+      }
       page.value = totalPages.value
       await load()
     }
@@ -51,13 +57,24 @@ async function load() {
     if (current === request) loading.value = false
   }
 }
+function activityLocation(kind: 'todos' | 'results', number: number) {
+  return { path: '/me/notifications', query: { section: 'expense', activity: kind === 'results' ? 'results' : undefined, expensePage: number > 1 ? String(number) : undefined } }
+}
+function documentLocation(item: ExpenseActivityItem) {
+  const origin = !props.compact && router.currentRoute.value.path === '/me/notifications'
+    ? router.currentRoute.value.fullPath : router.resolve(activityLocation(tab.value, 1)).fullPath
+  return { path: '/fees/document', query: { id: item.payload.document_id, from: 'notifications',
+    activity: tab.value === 'results' ? 'results' : undefined, expensePage: props.compact ? undefined : String(page.value), feeFrom: origin } }
+}
 function selectTab(value: typeof tab.value) {
   if (value === tab.value) return
+  if (!props.compact && router.currentRoute.value.path === '/me/notifications') { void router.push(activityLocation(value, 1)); return }
   tab.value = value
   page.value = 1
   void load()
 }
 function turnPage(value: number) {
+  if (!props.compact && router.currentRoute.value.path === '/me/notifications') { void router.push(activityLocation(tab.value, value)); return }
   page.value = value
   void load()
 }
@@ -109,7 +126,7 @@ watch(() => activity.revision, load)
     <div v-else-if="error" role="alert"><p>{{ error }}</p><button type="button" class="oa-button" @click="refresh">重新加载</button></div>
     <ul v-else-if="items.length">
       <li v-for="item in items" :key="item.payload.kind === 'result' ? item.id : item.payload.document_id">
-        <RouterLink :to="{ path: '/fees/document', query: { id: item.payload.document_id, from: 'notifications', ...(tab === 'results' ? { activity: 'results' } : {}) } }" @click="openItem($event, item)">
+        <RouterLink :to="documentLocation(item)" @click="openItem($event, item)">
           <strong>{{ item.payload.title || '费用单据' }} <span v-if="item.unread" class="expense-unread">未读</span></strong>
           <span :class="['expense-status', 'oa-state-' + item.payload.state]">
             {{ item.payload.kind === 'result' ? (resultLabels[item.payload.state] || '状态更新') : actionLabels[item.payload.kind] }}

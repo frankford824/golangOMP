@@ -9,7 +9,7 @@
         <button class="secondary-button" type="button" :disabled="savingDraft" @click="saveDraft">
           <Save :size="16" />{{ savingDraft ? '正在保存…' : '保存草稿' }}
         </button>
-        <button class="secondary-button" type="button" @click="exitCompose"><X :size="16" />返回任务中心</button>
+        <button class="secondary-button" type="button" @click="exitCompose"><X :size="16" />{{ composeReturnLabel }}</button>
       </div>
       </DesktopSlot>
     </header>
@@ -64,7 +64,7 @@
       <div class="result-heading">
         <div><p class="eyebrow">创建结果</p><h2>{{ resultTitle }}</h2><p>{{ resultSummary }}</p></div>
         <div class="result-heading-actions">
-          <button class="secondary-button" type="button" @click="router.push('/tasks')">返回任务中心</button>
+          <button class="secondary-button" type="button" @click="exitCompose">{{ composeReturnLabel }}</button>
           <button class="primary-button" type="button" @click="startAnother">继续创建</button>
         </div>
       </div>
@@ -103,7 +103,7 @@
         <article v-for="row in rows" :key="row.id" :class="['task-result', `is-${row.status || 'draft'}`]">
           <CheckCircle2 v-if="row.status === 'created'" :size="18" /><AlertTriangle v-else-if="!oaEnabled || validationRequested || submitError" :size="18" />
           <div><strong>{{ row.product_name || row.description_spec || row.design_requirement || '任务明细' }}</strong><small>{{ row.status === 'created' ? `任务 #${row.result_task_id}` : row.error }}</small></div>
-          <RouterLink v-if="row.result_task_id" :to="`/tasks/${row.result_task_id}`">查看</RouterLink>
+          <RouterLink v-if="row.result_task_id" :to="taskDetailLocation(row.result_task_id, composeReturnTarget)">查看</RouterLink>
         </article>
         <button v-if="failedRows.length" class="secondary-button retry-failed" type="button" @click="submit(true)">{{ intent === 'retouch' ? '只重试失败附件' : '只重试失败行' }}</button>
       </div>
@@ -242,6 +242,8 @@
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { linkOrderTask, orderTaskSource } from '@/oa/orderTask'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import { goBackTo } from '@/oa/returnNavigation'
+import { composeReturnSource, taskDetailLocation, taskReturnLabel } from '@/oa/taskNavigation'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { AlertTriangle, Barcode, CheckCircle2, FileArchive, FileImage, ImagePlus, PackageSearch, Paintbrush, Paperclip, Plus, Save, Scissors, Trash2, X } from 'lucide-vue-next'
@@ -454,7 +456,11 @@ function handleConfirmKeydown(event: KeyboardEvent) {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
 }
 
-function exitCompose() { void router.push('/tasks') }
+const composeReturnTarget = computed(() => composeReturnSource(route.query.taskFrom)
+  || composeReturnSource(window.history.state?.back)
+  || (route.query.draft_id ? '/me/task-drafts' : '/tasks'))
+const composeReturnLabel = computed(() => taskReturnLabel(composeReturnTarget.value))
+function exitCompose() { void goBackTo(router, composeReturnTarget.value) }
 
 async function selectIntent(next: ComposeIntent) {
   if (next === intent.value) return

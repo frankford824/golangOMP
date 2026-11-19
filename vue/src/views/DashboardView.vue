@@ -37,7 +37,7 @@
               type="button"
               variant="primary"
               size="sm"
-              @click="router.push('/design-dashboard')"
+              @click="openDesignDashboard"
             >
               设计部看板
             </BaseButton>
@@ -377,13 +377,22 @@ import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
 const DashboardTrendChart = defineAsyncComponent(() => import('@/components/dashboard/DashboardTrendChart.vue'))
 
 const router = useRouter()
+function openDesignDashboard() {
+  const source = router.currentRoute?.value.fullPath
+  void router.push(source ? { name: 'DesignDepartmentDashboard', query: { taskBoardFrom: source } } : '/design-dashboard')
+}
 const overviewSection = ref<HTMLElement>()
 const activitySection = ref<HTMLElement>()
 const riskSection = ref<HTMLElement>()
 
-const currentSection = ref<'overview' | 'activity' | 'risk'>('overview')
-function scrollBoard(key: typeof currentSection.value, section?: HTMLElement) {
+const sectionQuery = router.currentRoute?.value.query.taskSection
+const currentSection = ref<'overview' | 'activity' | 'risk'>(sectionQuery === 'activity' || sectionQuery === 'risk' ? sectionQuery : 'overview')
+async function scrollBoard(key: typeof currentSection.value, section?: HTMLElement) {
   currentSection.value = key
+  const current = router.currentRoute?.value
+  if (oaEnabled && current?.name === 'Dashboard') {
+    await router.replace({ query: { ...current.query, taskSection: key === 'overview' ? undefined : key } })
+  }
   section?.scrollIntoView({ block: 'start' })
 }
 const { can, hasRole } = usePermission()

@@ -281,3 +281,5 @@
 @media (min-width: 2200px) {
   .commerce-overview .commerce-results-layout { max-width: 1560px; }
 }
+
+.commerce-results .oa-table-wrap { overflow-anchor: none; }

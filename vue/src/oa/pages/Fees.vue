@@ -10,7 +10,7 @@ let savedApplication: {
 import { ArrowLeft, Check, ChevronDown, ChevronRight, CircleAlert, FileText, Wallet } from 'lucide-vue-next'
 import OAEmpty from '../components/OAEmpty.vue'
 import { computed, onBeforeUnmount, nextTick, onMounted, ref, watch, watchEffect } from 'vue'
-import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, RouterLink, useRoute, useRouter } from 'vue-router'
 import FeePersonSelect from '../components/FeePersonSelect.vue'
 import { searchFeePeople, approverLabel, type FeePerson as Approver } from '../feePeople'
 import { feeTabs } from '../routes'
@@ -20,6 +20,8 @@ import { api, dateInChina, download, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
 import { expenseActivityActions, useExpenseActivity } from '../expenseActivity'
 import { feeDateTime, feeStatus as status } from '../feeDisplay'
+import OAReturnLink from '../components/OAReturnLink.vue'
+import { goBackTo, safeReturnPath } from '../returnNavigation'
 import '../styles.css'
 
 const { can, currentProfile } = useOAAccess()
@@ -47,18 +49,35 @@ const accessMessage = computed(() => props.mode === 'home'
   : '当前账号没有' + title.value + '权限。如需开通，请联系财务管理员。')
 const isAdmin = computed(() => can('finance.admin'))
 const canPay = computed(() => can('finance.pay'))
-const queue = ref<'mine' | 'todo' | 'pay'>(props.mode === 'mine' ? 'mine' : props.mode === 'approval' && !can('finance.approve') ? 'pay' : 'todo')
+type FeeQueue = 'mine' | 'todo' | 'pay'
+const queue = ref<FeeQueue>(requestedQueue())
+function requestedQueue(): FeeQueue {
+  if (props.mode === 'mine') return 'mine'
+  return can('finance.pay') && (route.query.queue === 'pay' || !can('finance.approve')) ? 'pay' : 'todo'
+}
+function requestedPage(value: unknown) {
+  return typeof value === 'string' && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Math.max(1, Number(value)) : 1
+}
+function queueLocation(id?: string, nextQueue = queue.value, nextPage = page.value) {
+  return {
+    path: props.mode === 'mine' ? '/fees/mine' : '/fees/approval',
+    query: { queue: nextQueue === 'pay' ? 'pay' : undefined, page: nextPage > 1 ? String(nextPage) : undefined, id },
+  }
+}
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 const templates = ref<FeeTemplate[]>([])
 const docs = ref<FeeDoc[]>([])
-const page = ref(1)
+const page = ref(requestedPage(route.query.page))
 const pages = computed(() => Math.max(1, Math.ceil(docs.value.length / 15)))
 const visibleDocs = computed(() => docs.value.slice((page.value - 1) * 15, page.value * 15))
 const detail = ref<FeeDoc>()
+const updatedDocuments = new Map<string, FeeDoc>()
+let pendingLocationSync = false
+let disposed = false
 const report = ref<FeeReport>()
-const reportPage = ref(1)
+const reportPage = ref(requestedPage(route.query.page))
 const reportPages = computed(() => Math.max(1, Math.ceil((report.value?.items?.length ?? 0) / 15)))
 const visibleReport = computed(() => report.value?.items?.slice((reportPage.value - 1) * 15, reportPage.value * 15) ?? [])
 const edited = ref(false)
@@ -102,22 +121,43 @@ const queueGuide = computed(() => ({
   pay: '全部审批通过后，其他申请人的单据会出现在这里。',
 })[queue.value])
 const desktopApproval = ref(false)
+const inlineApproval = ref(false)
 const pinApproval = ref(false)
 const approvalClosed = ref(false)
 const queuePage = ref<HTMLElement>()
 let desktopQuery: MediaQueryList | undefined
+let inlineQuery: MediaQueryList | undefined
 let pinnedQuery: MediaQueryList | undefined
 const showQueue = computed(() => allowed.value && (!detail.value || desktopApproval.value) && ['mine', 'approval'].includes(props.mode))
-const openDocumentLink = (id: string) => ({ path: '/fees/document', query: { id, queue: queue.value } })
+const openDocumentLink = (id: string, keepSelection = false) => ({
+  path: '/fees/document',
+  query: { id, queue: queue.value, feeFrom: router.resolve(queueLocation(keepSelection ? id : undefined)).fullPath },
+})
+function selectDocument(id: string) {
+  if (busy.value) return
+  if (route.query.id === id) {
+    void run(() => open(id))
+  } else {
+    const target = queueLocation(id)
+    if (typeof route.query.id === 'string') void router.replace(target)
+    else void router.push(target)
+  }
+}
+function linkToInspector(event: MouseEvent, id: string) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  selectDocument(id)
+}
 function syncApprovalSize() {
   desktopApproval.value = Boolean(desktopQuery?.matches)
+  inlineApproval.value = Boolean(inlineQuery?.matches)
   pinApproval.value = Boolean(pinnedQuery?.matches)
   if (pinApproval.value && !approvalClosed.value && !detail.value && visibleDocs.value[0]) {
     void run(() => open(visibleDocs.value[0].id, false))
   }
 }
 function selectFeeRow(event: MouseEvent, id: string) {
-  if (desktopApproval.value && !(event.target as HTMLElement).closest('a,button,input,select,[role=button]')) void run(() => open(id))
+  if (desktopApproval.value && !(event.target as HTMLElement).closest('a,button,input,select,[role=button]')) selectDocument(id)
 }
 function navigateApproval(event: KeyboardEvent) {
   if (!desktopApproval.value || !detail.value || busy.value || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
@@ -131,25 +171,30 @@ function navigateApproval(event: KeyboardEvent) {
   if (!delta) return
   event.preventDefault()
   const target = visibleDocs.value[visibleDocs.value.findIndex(item => item.id === detail.value?.id) + delta]
-  if (target) void run(() => open(target.id))
+  if (target) selectDocument(target.id)
 }
-async function advanceApproval(id: string) {
-  if (!desktopApproval.value) return
+async function advanceApproval(id: string, source: string) {
+  if (!desktopApproval.value || disposed || route.path !== '/fees/approval' || route.fullPath !== source) return
   const index = docs.value.findIndex(item => item.id === id)
   const following = docs.value.slice(index + 1).map(item => item.id)
   await loadDocs(false)
   const nextID = following.find(candidate => docs.value.some(item => item.id === candidate))
     ?? docs.value.find(item => item.id !== id)?.id
+  if (disposed || route.fullPath !== source) return
   const nextIndex = docs.value.findIndex(item => item.id === nextID)
-  if (nextIndex >= 0) {
-    page.value = Math.floor(nextIndex / 15) + 1
-    await open(docs.value[nextIndex].id)
-  } else {
+  if (nextIndex < 0) {
+    approvalClosed.value = true
+    await goBackTo(router, queueLocation())
     detail.value = undefined
+    return
   }
+  const nextPage = Math.floor(nextIndex / 15) + 1
+  await router.replace(queueLocation(docs.value[nextIndex].id, queue.value, nextPage))
 }
-const requestedPeriod = route.query.period
-const period = ref(typeof requestedPeriod === 'string' && /^\d{4}(-\d{2}){0,2}$/.test(requestedPeriod) ? requestedPeriod : dateInChina().slice(0, 7))
+function readPeriod(value: unknown) {
+  return typeof value === 'string' && /^\d{4}(-\d{2}){0,2}$/.test(value) ? value : dateInChina().slice(0, 7)
+}
+const period = ref(readPeriod(route.query.period))
 const reportPeriod = ref(period.value)
 const defaultPeriodExample = dateInChina().slice(0, 7)
 const reportLoaded = ref(false)
@@ -226,8 +271,15 @@ const decisions: Record<string, string> = { approve: '同意', return: '退回�
 const active = computed(() => returnedTemplate.value || templates.value.find(item => item.id === form.value.template_id))
 const own = computed(() => String(detail.value?.applicant_id) === String(currentProfile.value?.id))
 const documentReturn = computed(() => {
+  const source = safeReturnPath(route.query.feeFrom, path => {
+    if (path === '/me/notifications') return canUseExpenseActivity.value
+    if (path === '/fees/report') return can('finance.report')
+    if (path === '/fees/mine') return can('finance.apply')
+    return path === '/fees/approval' && (can('finance.approve') || can('finance.pay'))
+  })
+  if (source) return source
   if (route.query.from === 'notifications' && canUseExpenseActivity.value) {
-    return { name: 'MeNotifications', query: { section: 'expense', ...(route.query.activity === 'results' ? { activity: 'results' } : {}) } }
+    return { name: 'MeNotifications', query: { section: 'expense', ...(route.query.activity === 'results' ? { activity: 'results' } : {}), expensePage: route.query.expensePage } }
   }
   if (route.query.from === 'report' && can('finance.report')) {
     return { path: '/fees/report', query: { period: route.query.period, page: route.query.page } }
@@ -250,6 +302,11 @@ const lastReturn = computed(() => [...(detail.value?.history || [])].reverse().f
 const showApprovalForm = computed(() => (queue.value === 'todo' || props.mode === 'document') && can('finance.approve') && mayDecide.value)
 const showPaymentForm = computed(() => (queue.value === 'pay' || props.mode === 'document') && !own.value && canPay.value && detail.value?.state === 'approved')
 const approvalButton = computed(() => ({ approve: '同意申请', return: '退回申请', reject: '拒绝申请' }[approval.value.decision]))
+function ignoreRepeatedAction(event: MouseEvent | KeyboardEvent) {
+  if (event instanceof MouseEvent ? event.detail > 1 : event.repeat && ['Enter', ' '].includes(event.key)) {
+    event.preventDefault()
+  }
+}
 const leaveForm = () => !edited.value || window.confirm('费用申请尚未提交。放弃已填内容并离开？')
 const draftOwner = computed(() => String(currentProfile.value?.id || ''))
 watch(draftOwner, (owner, previous) => {
@@ -267,6 +324,15 @@ function saveApplicationDraft() {
 }
 const leaveDraft = () => !draftEdited.value || window.confirm('模板更改尚未保存。放弃更改？')
 onBeforeRouteLeave(() => leaveForm() && leaveDraft())
+onBeforeRouteUpdate((to, from) => {
+  if (to.query.id === from.query.id) return true
+  if (!leaveForm() || !leaveDraft()) return false
+  edited.value = false
+  draftEdited.value = false
+  returned.value = undefined
+  returnedTemplate.value = undefined
+  return true
+})
 watchEffect(onCleanup => {
   if (!edited.value && !draftEdited.value) return
   const warnOnUnload = (event: BeforeUnloadEvent) => {
@@ -345,14 +411,20 @@ function cents(value: string) {
   if (!result || !Number.isSafeInteger(result)) throw new Error('申请金额必须大于零')
   return result
 }
-async function run(action: () => Promise<void>) {
+async function run(action: () => Promise<void>, clearNotice = true) {
   if (busy.value) return
   busy.value = true
   error.value = ''
-  notice.value = ''
+  if (clearNotice) notice.value = ''
   try { await action() }
   catch (cause) { error.value = errorText(cause) }
-  finally { busy.value = false }
+  finally {
+    busy.value = false
+    if (pendingLocationSync && !disposed) {
+      pendingLocationSync = false
+      queueMicrotask(syncLocation)
+    }
+  }
 }
 
 function changeChannel() {
@@ -409,22 +481,21 @@ async function loadDocs(reset = true) {
   if (reset && pinApproval.value && !approvalClosed.value && visibleDocs.value[0]) await open(visibleDocs.value[0].id, false)
 }
 function changeQueue(nextQueue: 'todo' | 'pay') {
-  if (!desktopApproval.value) {
-    queue.value = nextQueue
-    page.value = 1
-    return run(loadDocs)
-  }
-  if (nextQueue !== queue.value) docs.value = []
-  queue.value = nextQueue
-  page.value = 1
+  if (nextQueue === queue.value) return
   approvalClosed.value = false
-  return run(loadDocs)
+  void router.replace(queueLocation(undefined, nextQueue, 1))
+}
+function changePage(target: number) {
+  void router.replace(queueLocation(undefined, queue.value, target))
 }
 async function returnToQueue() {
   approvalClosed.value = true
+  if (typeof route.query.id === 'string') {
+    await goBackTo(router, queueLocation())
+    return
+  }
   detail.value = undefined
   revealed.value = false
-  if (route.query.id) await router.replace({ query: {} })
   if (approvalsChanged.value || !loadedDocs.value) await loadDocs()
   await nextTick()
   queuePage.value?.focus()
@@ -433,7 +504,9 @@ async function open(id: string, focus = true) {
   revealed.value = false
   touched.delete('date')
   delete fieldErrors.value.date
-  detail.value = await api<FeeDoc>('/oa-api/finance/documents/' + encodeURIComponent(id))
+  const snapshot = await api<FeeDoc>('/oa-api/finance/documents/' + encodeURIComponent(id))
+  const updated = updatedDocuments.get(id)
+  detail.value = updated && updated.version >= snapshot.version ? updated : snapshot
   approval.value = { decision: 'approve', comment: '' }
   payment.value = { date: dateInChina(), receipt: '', receiptName: '' }
   receiptError.value = ''
@@ -548,14 +621,16 @@ function editReturned() {
   })
 }
 async function act() {
-  if (!detail.value) return
+  if (!detail.value || !showApprovalForm.value) return
   const id = detail.value.id
+  const source = route.fullPath
   if (approval.value.decision !== 'approve') {
     const reject = approval.value.decision === 'reject'
     const subject = `${detail.value.template?.name || '费用申请'}（${id}），金额 ${major(detail.value.amount_cents)}`
     if (!window.confirm(reject ? `拒绝${subject}？拒绝将结束本次审批。` : `退回${subject}？申请人修改后可重新提交。`)) return
   }
   detail.value = await send<FeeDoc>(`/oa-api/finance/documents/${encodeURIComponent(id)}/decision`, { ...approval.value, current: detail.value.current, version: detail.value.version })
+  updatedDocuments.set(id, detail.value)
   expenseActivity.invalidate()
   approvalsChanged.value = true
   notice.value = ({
@@ -564,27 +639,41 @@ async function act() {
     returned: '已退回申请人修改',
     rejected: '已拒绝，审批已结束',
   } as Record<string, string>)[detail.value.state] || '审批结果已保存'
-  await advanceApproval(id)
+  await advanceApproval(id, source)
 }
 async function pay() {
-  if (!detail.value || !payment.value.receipt) return
+  if (!detail.value || !showPaymentForm.value || !payment.value.receipt || dateProblem()) return
   const id = detail.value.id
+  const source = route.fullPath
   if (!window.confirm(`为申请「${id}」登记实付 ${major(detail.value.amount_cents)}？\n收款对象：${detail.value.holder || '—'}\n实付日期：${payment.value.date}\n此记录将计入支出报表。`)) return
   detail.value = await send<FeeDoc>(`/oa-api/finance/documents/${encodeURIComponent(id)}/payment`, {
     date: payment.value.date, receipt: payment.value.receipt, amount_cents: detail.value.amount_cents,
   })
+  updatedDocuments.set(id, detail.value)
   expenseActivity.invalidate()
   revealed.value = false
   approvalsChanged.value = true
   notice.value = '付款已登记，回单已归档'
-  await advanceApproval(id)
+  await advanceApproval(id, source)
 }
-async function loadReport(initial = false) {
+function reportLocation(targetPeriod: string, targetPage = 1) {
+  return { path: '/fees/report', query: { period: targetPeriod, page: targetPage > 1 ? String(targetPage) : undefined } }
+}
+function searchReport() {
+  const target = reportLocation(period.value.trim())
+  if (router.resolve(target).fullPath === route.fullPath) void run(loadReport)
+  else void router.replace(target)
+}
+function changeReportPage(target: number) {
+  void router.replace(reportLocation(reportPeriod.value, target))
+}
+async function loadReport() {
+  const target = readPeriod(route.query.period)
   reportLoaded.value = false
-  report.value = await api<FeeReport>('/oa-api/finance/report?' + new URLSearchParams({ period: period.value.trim() }))
-  reportPeriod.value = period.value
-  const requested = Number(route.query.page)
-  reportPage.value = initial && Number.isInteger(requested) ? Math.min(Math.max(1, requested), reportPages.value) : 1
+  period.value = target
+  report.value = await api<FeeReport>('/oa-api/finance/report?' + new URLSearchParams({ period: target }))
+  reportPeriod.value = target
+  reportPage.value = Math.min(requestedPage(route.query.page), reportPages.value)
   reportLoaded.value = true
 }
 function beginTemplate(template?: FeeTemplate) {
@@ -649,33 +738,81 @@ onMounted(() => void run(async () => {
   if (!allowed.value) return
   if (props.mode === 'approval' && typeof window.matchMedia === 'function') {
     desktopQuery = window.matchMedia('(min-width: 1280px)')
+    inlineQuery = window.matchMedia('(min-width: 1920px)')
     pinnedQuery = window.matchMedia('(min-width: 2300px)')
     desktopQuery.addEventListener('change', syncApprovalSize)
+    inlineQuery.addEventListener('change', syncApprovalSize)
     pinnedQuery.addEventListener('change', syncApprovalSize)
     syncApprovalSize()
   }
   if (props.mode === 'apply' || props.mode === 'templates') await loadTemplates()
   if (props.mode === 'templates' && isAdmin.value && route.query.manage === 'publish') openGrantPanel(delegatePanel.value)
   if (props.mode === 'templates' && isAdmin.value) await loadGrants()
-  if (['mine', 'approval', 'document'].includes(props.mode) && typeof route.query.id === 'string') {
-    if (desktopApproval.value) await loadDocs(false)
-    await open(route.query.id)
-    if (props.mode === 'mine' && route.query.submitted === '1' && own.value) notice.value = '申请已提交，等待审批'
-  } else if (props.mode === 'approval' || props.mode === 'mine') {
-    await loadDocs()
-  }
-  if (props.mode === 'report') await loadReport(true)
+  await applyLocation(true)
   if (props.mode === 'templates' && canEditTemplate.value && route.query.new === '1') beginTemplate()
 }))
 onBeforeUnmount(() => {
+  disposed = true
   desktopQuery?.removeEventListener('change', syncApprovalSize)
+  inlineQuery?.removeEventListener('change', syncApprovalSize)
   pinnedQuery?.removeEventListener('change', syncApprovalSize)
 })
-watch(() => route.query.id, (id, previous) => {
-  if (props.mode !== 'document' || !allowed.value || typeof id !== 'string' || id === previous) return
-  detail.value = undefined
-  void run(() => open(id))
-})
+async function applyLocation(initial: boolean) {
+  if (props.mode === 'report') {
+    if (!reportLoaded.value || readPeriod(route.query.period) !== reportPeriod.value) await loadReport()
+    else reportPage.value = Math.min(requestedPage(route.query.page), reportPages.value)
+    return
+  }
+  const id = typeof route.query.id === 'string' ? route.query.id : undefined
+  if (props.mode === 'document') {
+    if (id !== detail.value?.id) {
+      detail.value = undefined
+      if (id) await open(id)
+    }
+    return
+  }
+  if (props.mode !== 'approval' && props.mode !== 'mine') return
+  const nextQueue = requestedQueue()
+  const queueChanged = nextQueue !== queue.value
+  const reload = !loadedDocs.value || queueChanged || approvalsChanged.value
+  if (queueChanged) docs.value = []
+  queue.value = nextQueue
+  const nextPage = requestedPage(route.query.page)
+  page.value = loadedDocs.value && !reload ? Math.min(nextPage, pages.value) : nextPage
+  if (!id) {
+    if (!initial && !queueChanged && detail.value) approvalClosed.value = true
+    detail.value = undefined
+    revealed.value = false
+  }
+  if (reload) {
+    try { await loadDocs(!id && (initial || !approvalClosed.value)) }
+    catch (cause) {
+      if (!id) throw cause
+      error.value = errorText(cause)
+    }
+  }
+  if (id && detail.value?.id !== id) {
+    detail.value = undefined
+    await open(id)
+  }
+  if (id && initial && props.mode === 'mine' && route.query.submitted === '1' && own.value) {
+    notice.value = '申请已提交，等待审批'
+  }
+  if (!id && !initial) {
+    await nextTick()
+    queuePage.value?.focus()
+  }
+}
+function syncLocation() {
+  if (disposed || !allowed.value || !['mine', 'approval', 'document', 'report'].includes(props.mode) ||
+      (route.path && route.path !== '/fees/' + props.mode)) return
+  if (busy.value) {
+    pendingLocationSync = true
+    return
+  }
+  void run(() => applyLocation(false), false)
+}
+watch(() => route.fullPath, syncLocation)
 </script>
 
 <template>
@@ -769,26 +906,26 @@ watch(() => route.query.id, (id, previous) => {
         :title="mode === 'document' ? '未选中费用单据' : queueEmpty"
         :description="mode === 'document' ? '请从费用列表或通知打开一张单据。' : queueGuide">
         <RouterLink v-if="mode === 'mine'" class="oa-button oa-button-primary" to="/fees/apply">发起费用申请</RouterLink>
-        <RouterLink v-else-if="mode === 'document'" class="oa-button" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : '返回费用列表' }}</RouterLink>
+        <OAReturnLink v-else-if="mode === 'document'" class="oa-button" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : '返回费用列表' }}</OAReturnLink>
       </OAEmpty>
       <div v-if="docs.length && (desktopApproval || (!busy && !error))" ref="queuePage" class="oa-table-wrap" role="region" aria-label="费用单据" tabindex="0">
         <table class="oa-table"><thead><tr><th>申请 / 单号</th><th>申请人</th><th class="oa-number">金额</th><th>来源</th><th>状态</th><th class="oa-action-col">操作</th></tr></thead><tbody>
-          <tr v-for="item in visibleDocs" :key="item.id" :class="{ 'fee-row-selected': detail?.id === item.id }" :aria-selected="desktopApproval ? detail?.id === item.id : undefined" @click="selectFeeRow($event, item.id)"><td><RouterLink v-if="desktopApproval" class="oa-ellipsis" :title="item.template?.name" :to="openDocumentLink(item.id)" @click.exact.prevent="run(() => open(item.id))">{{ item.template?.name }}</RouterLink><b v-else class="oa-ellipsis" :title="item.template?.name">{{ item.template?.name }}</b><small class="oa-muted oa-ellipsis" :title="item.id">{{ item.id }}</small></td><td>#{{ item.applicant_id }}</td><td class="oa-number">{{ major(item.amount_cents) }}</td><td>{{ item.site === 'asset' ? '资产办理区' : 'OA' }}</td><td><span :class="['oa-pill', 'oa-state-' + item.state]">{{ status(item.state) }}</span></td><td class="oa-action-col"><button :disabled="busy" @click="run(() => open(item.id))">{{ desktopApproval ? (queue === 'pay' ? '登记付款' : '去审批') : '打开单据' }}</button></td></tr>
+          <tr v-for="item in visibleDocs" :key="item.id" :class="{ 'fee-row-selected': detail?.id === item.id }" :aria-selected="desktopApproval ? detail?.id === item.id : undefined" @click="selectFeeRow($event, item.id)"><td><RouterLink v-if="desktopApproval" :to="openDocumentLink(item.id)" custom v-slot="{ href }"><a class="oa-ellipsis" :title="item.template?.name" :href="href" @click="linkToInspector($event, item.id)">{{ item.template?.name }}</a></RouterLink><b v-else class="oa-ellipsis" :title="item.template?.name">{{ item.template?.name }}</b><small class="oa-muted oa-ellipsis" :title="item.id">{{ item.id }}</small></td><td>#{{ item.applicant_id }}</td><td class="oa-number">{{ major(item.amount_cents) }}</td><td>{{ item.site === 'asset' ? '资产办理区' : 'OA' }}</td><td><span :class="['oa-pill', 'oa-state-' + item.state]">{{ status(item.state) }}</span></td><td class="oa-action-col"><button :disabled="busy" @click="selectDocument(item.id)">{{ desktopApproval ? (queue === 'pay' ? '登记付款' : '去审批') : '打开单据' }}</button></td></tr>
         </tbody></table>
       </div>
       <nav v-if="docs.length && (desktopApproval || (!busy && !error && pages > 1))" class="oa-actions fee-pager" aria-label="费用单据分页">
         <span>共 {{ docs.length }} 项 · {{ page }} / {{ pages }} 页</span>
-        <button :disabled="busy || page <= 1" @click="page--">上一页</button>
-        <button :disabled="busy || page >= pages" @click="page++">下一页</button>
+        <button :disabled="busy || page <= 1" @click="changePage(page - 1)">上一页</button>
+        <button :disabled="busy || page >= pages" @click="changePage(page + 1)">下一页</button>
       </nav>
     </section>
     <div v-if="detail && (!desktopApproval || !returned)" class="fee-inspector" :role="desktopApproval ? 'region' : undefined" :aria-label="desktopApproval ? '费用单据详情' : undefined">
-      <button v-if="desktopApproval" class="fee-inspector-backdrop" type="button" aria-label="关闭单据详情" @click="run(returnToQueue)"></button>
+      <button v-if="desktopApproval && !inlineApproval" class="fee-inspector-backdrop" type="button" aria-label="关闭单据详情" @click="run(returnToQueue)"></button>
       <div class="fee-inspector-body">
       <div class="oa-actions fee-back">
-        <RouterLink v-if="mode === 'document'" class="oa-button" :to="documentReturn"><ArrowLeft :size="15" aria-hidden="true" /> {{ route.query.from === 'notifications' ? '返回费用动态' : '返回列表' }}</RouterLink>
+        <OAReturnLink v-if="mode === 'document'" class="oa-button" :to="documentReturn"><ArrowLeft :size="15" aria-hidden="true" /> {{ route.query.from === 'notifications' ? '返回费用动态' : '返回列表' }}</OAReturnLink>
         <button v-else type="button" :disabled="busy" @click="run(returnToQueue)"><ArrowLeft :size="15" aria-hidden="true" /> 返回{{ returnLabel }}</button>
-        <RouterLink v-if="desktopApproval" class="oa-button" :to="openDocumentLink(detail.id)" target="_blank" rel="noopener">完整详情 ↗</RouterLink>
+        <RouterLink v-if="desktopApproval" class="oa-button" :to="openDocumentLink(detail.id, true)" target="_blank" rel="noopener">完整详情 ↗</RouterLink>
         <button v-if="own && detail.state === 'returned'" class="oa-button-primary" :disabled="busy" @click="editReturned">修改并重提</button>
       </div>
       <div class="oa-split fee-document">
@@ -812,7 +949,7 @@ watch(() => route.query.id, (id, previous) => {
         <form v-if="showApprovalForm" id="fee-approval-form" class="oa-form" @submit.prevent="run(act)">
           <label>审批结果<select v-model="approval.decision"><option v-for="(text, key) in decisions" :key="key" :value="key">{{ text }}</option></select></label>
           <label>审批意见<textarea v-model.trim="approval.comment" maxlength="2000" :required="approval.decision !== 'approve'" /></label>
-          <button v-if="!desktopApproval" :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy">{{ approvalButton }}</button>
+          <button v-if="!desktopApproval" :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy" @click="ignoreRepeatedAction" @keydown="ignoreRepeatedAction">{{ approvalButton }}</button>
         </form>
         <form v-if="showPaymentForm" id="fee-payment-form" class="oa-form" @submit.prevent="run(pay)">
           <label><span>实付日期<i aria-hidden="true">*</i></span><input v-model="payment.date" type="date" :max="dateInChina()" required v-bind="fieldAttrs('date', 'fee-date-help')" @blur="validateField('date', dateProblem, true)" @input="validateField('date', dateProblem)" /><small id="fee-date-help">填写实际付款日，最晚为今天。</small><small v-if="fieldErrors.date" id="fee-error-date" class="fee-error">{{ fieldErrors.date }}</small></label>
@@ -821,7 +958,7 @@ watch(() => route.query.id, (id, previous) => {
           <label>付款回单 *<input ref="receipt" type="file" accept=".pdf,.png,.jpg,.jpeg" :disabled="busy" aria-describedby="fee-receipt-help" @change="uploadReceipt" /><small id="fee-receipt-help">PDF、PNG、JPEG，单个文件不超过 10 MB。</small></label>
           <p v-if="receiptError" class="fee-error" role="alert">{{ receiptError }}</p>
           <div v-if="payment.receipt" class="oa-actions" role="status"><span>已上传：{{ payment.receiptName }}</span><button type="button" :disabled="busy" @click="payment.receipt = ''; payment.receiptName = ''">移除回单</button></div>
-          <button v-if="!desktopApproval" class="oa-button-primary" :disabled="busy || !payment.receipt || !!dateProblem()">确认登记实付</button>
+          <button v-if="!desktopApproval" class="oa-button-primary" :disabled="busy || !payment.receipt || !!dateProblem()" @click="ignoreRepeatedAction" @keydown="ignoreRepeatedAction">确认登记实付</button>
         </form>
         <template v-if="detail.payment">
           <dl class="oa-kv"><div><dt>实付日期</dt><dd>{{ detail.payment.date }}</dd></div><div><dt>实付金额</dt><dd>{{ major(detail.payment.amount_cents) }}</dd></div></dl>
@@ -834,8 +971,8 @@ watch(() => route.query.id, (id, previous) => {
       </section>
       </div>
       <footer v-if="desktopApproval && (showApprovalForm || showPaymentForm)" class="fee-inspector-footer">
-        <button v-if="showApprovalForm" type="submit" form="fee-approval-form" :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy">{{ approvalButton }}并下一条</button>
-        <button v-else type="submit" form="fee-payment-form" class="oa-button-primary" :disabled="busy || !payment.receipt || !!dateProblem()">登记实付并下一条</button>
+        <button v-if="showApprovalForm" type="submit" form="fee-approval-form" :class="approval.decision === 'reject' ? 'fee-danger' : 'oa-button-primary'" :disabled="busy" @click="ignoreRepeatedAction" @keydown="ignoreRepeatedAction">{{ approvalButton }}并下一条</button>
+        <button v-else type="submit" form="fee-payment-form" class="oa-button-primary" :disabled="busy || !payment.receipt || !!dateProblem()" @click="ignoreRepeatedAction" @keydown="ignoreRepeatedAction">登记实付并下一条</button>
       </footer>
     </div>
     </div>
@@ -944,14 +1081,14 @@ watch(() => route.query.id, (id, previous) => {
   <section v-else-if="mode === 'report'" class="oa-panel">
     <h2>按实付日期统计</h2>
     <p class="oa-muted">支持按年、月或日查询，例如 {{ defaultPeriodExample }}。</p>
-      <form class="oa-actions oa-filter" @submit.prevent="run(() => loadReport())"><label>期间（年 / 月 / 日）<input v-model.trim="period" pattern="[0-9]{4}(-[0-9]{2}){0,2}" required /></label><button :disabled="busy">查询</button></form>
+      <form class="oa-actions oa-filter" @submit.prevent="searchReport"><label>期间（年 / 月 / 日）<input v-model.trim="period" pattern="[0-9]{4}(-[0-9]{2}){0,2}" required /></label><button :disabled="busy">查询</button></form>
       <dl v-if="reportLoaded && report" class="fee-totals"><div><dt>期间实付</dt><dd>{{ major(report.amount_cents) }}</dd></div><div><dt>实付张数</dt><dd>{{ report.count }}</dd></div><div v-if="report.unpaid_cents != null"><dt>已批未付</dt><dd>{{ major(report.unpaid_cents) }}</dd></div></dl>
-      <div v-if="reportLoaded && visibleReport.length" class="oa-table-wrap"><table class="oa-table"><thead><tr><th>单号</th><th class="oa-number">实付日期</th><th class="oa-number">实付金额</th><th class="oa-action-col">操作</th></tr></thead><tbody><tr v-for="item in visibleReport" :key="item.id"><td><span class="oa-ellipsis" :title="item.id">{{ item.id }}</span></td><td class="oa-number">{{ item.payment?.date }}</td><td class="oa-number">{{ major(item.payment?.amount_cents) }}</td><td class="oa-action-col"><RouterLink class="fee-row-action" :to="{ path: '/fees/document', query: { id: item.id, from: 'report', period: reportPeriod, page: reportPage } }">打开单据</RouterLink></td></tr></tbody></table></div>
+      <div v-if="reportLoaded && visibleReport.length" class="oa-table-wrap"><table class="oa-table"><thead><tr><th>单号</th><th class="oa-number">实付日期</th><th class="oa-number">实付金额</th><th class="oa-action-col">操作</th></tr></thead><tbody><tr v-for="item in visibleReport" :key="item.id"><td><span class="oa-ellipsis" :title="item.id">{{ item.id }}</span></td><td class="oa-number">{{ item.payment?.date }}</td><td class="oa-number">{{ major(item.payment?.amount_cents) }}</td><td class="oa-action-col"><RouterLink class="fee-row-action" :to="{ path: '/fees/document', query: { id: item.id, from: 'report', period: reportPeriod, page: reportPage, feeFrom: route.fullPath } }">打开单据</RouterLink></td></tr></tbody></table></div>
       <OAEmpty v-if="reportLoaded && !visibleReport.length" kind="chart" title="这个期间暂无实付记录" description="请选择其他期间查询。只有已登记实付的单据计入实付明细。" />
       <nav v-if="reportLoaded && reportPages > 1" class="oa-actions fee-pager" aria-label="费用报表分页">
         <span>共 {{ report?.items?.length }} 项 · {{ reportPage }} / {{ reportPages }} 页</span>
-        <button :disabled="reportPage <= 1" @click="reportPage--">上一页</button>
-        <button :disabled="reportPage >= reportPages" @click="reportPage++">下一页</button>
+        <button :disabled="reportPage <= 1" @click="changeReportPage(reportPage - 1)">上一页</button>
+        <button :disabled="reportPage >= reportPages" @click="changeReportPage(reportPage + 1)">下一页</button>
       </nav>
   </section>
   </template>
@@ -1153,7 +1290,6 @@ watch(() => route.query.id, (id, previous) => {
     gap: 12px;
   }
   .fee-approval-page .fee-inspector { position: static; inset: auto; z-index: auto; display: contents; }
-  .fee-approval-page .fee-inspector button.fee-inspector-backdrop { display: none; }
   .fee-approval-page .fee-inspector-body { border: 1px solid rgb(var(--yb-border)); border-radius: 8px; }
 }
 

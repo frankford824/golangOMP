@@ -1,6 +1,6 @@
 <template>
   <main class="detail-page">
-    <nav class="breadcrumb" aria-label="当前位置"><button @click="router.push('/asset-center')">资产中心</button><span>/</span><span>{{ displaySKU }}</span></nav>
+    <nav class="breadcrumb" aria-label="当前位置"><OAReturnLink :to="returnTo">{{ globalReturn ? '返回搜索来源' : '资产中心' }}</OAReturnLink><span>/</span><span>{{ displaySKU }}</span></nav>
     <header class="detail-hero">
       <div>
         <div class="hero-badges"><span>{{ modeLabel }}</span><span v-if="group?.business_lane">{{ group.business_lane === 'customization' ? '定制' : '常规' }}</span></div>
@@ -9,7 +9,7 @@
         <p>当前生效资源已按运营参考、设计源文件和最终成品三个阶段整理。</p>
       </div>
       <div class="hero-actions">
-        <button v-if="group" class="secondary" @click="router.push(`/tasks/${group.task_id}`)">查看来源任务</button>
+        <RouterLink v-if="group" class="secondary" :to="{ name: 'TaskDetail', params: { id: group.task_id }, query: { assetDetailFrom: route.fullPath } }">查看来源任务</RouterLink>
         <button class="secondary" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button>
         <button class="primary" :disabled="downloading || !group || finalCount === 0" @click="downloadAll">{{ downloading ? '准备中…' : finalCount ? '下载全部成品' : '暂无成品可下载' }}</button>
       </div>
@@ -53,21 +53,26 @@
 
     <div v-if="error" class="state-card error" role="alert">{{ error }}</div>
     <div v-if="loading && !group" class="state-card">正在加载当前有效资源…</div>
-    <SkuResourceMatrix v-else-if="group" :bundle="{ task_id: group.task_id, workflow_revision: 0, groups: [group] }" show-default-style />
+    <SkuResourceMatrix v-else-if="group" :bundle="{ task_id: group.task_id, workflow_revision: 0, groups: [group] }" show-default-style enable-revision-history />
   </main>
 </template>
 
 <script setup lang="ts">
 import { yuanPrefix } from '@/utils/currency-display'
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRouter, useRoute } from 'vue-router'
+import OAReturnLink from '@/oa/components/OAReturnLink.vue'
+import { workspaceOrigin } from '@/oa/returnNavigation'
+import { assetListReturn } from '@/oa/assetNavigation'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
 import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import { resourceGroupsApi, type ProductCostReconciliation, type ResourceGroup } from '@/services/api/resourceGroupsApi'
 import { downloadBatchAsZip } from '@/utils/batchZipDownload'
 
 const route = useRoute()
-const router = useRouter()
+const originRouter = useRouter()
+const globalReturn = computed(() => workspaceOrigin(originRouter, route.query.globalFrom))
+const returnTo = computed(() => globalReturn.value || assetListReturn(route.query.assetFrom))
 const group = ref<ResourceGroup | null>(null)
 const loading = ref(false)
 const downloading = ref(false)
@@ -172,7 +177,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-.detail-page{max-width:1320px;margin:0 auto;padding:28px;display:grid;gap:20px}.breadcrumb{display:flex;align-items:center;gap:8px;color:rgb(var(--yb-text-muted));font-size:12px}.breadcrumb button{padding:0;border:0;background:transparent;color:rgb(var(--yb-brand));cursor:pointer}.detail-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;padding:22px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface))}.detail-hero h1{margin:4px 0;font-size:30px}.detail-hero p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{color:rgb(var(--yb-brand));font-size:12px;font-weight:900;letter-spacing:.08em}.hero-badges,.hero-actions{display:flex;gap:8px;flex-wrap:wrap}.hero-badges span{padding:5px 8px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-size:11px;font-weight:800}.hero-actions button{min-height:40px;padding:0 14px;border-radius:10px;cursor:pointer}.primary{border:1px solid rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.secondary{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.provenance-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid rgb(var(--yb-border));border-radius:15px;background:rgb(var(--yb-surface));overflow:hidden}.provenance-strip div{display:grid;gap:4px;padding:14px 17px}.provenance-strip div+div{border-left:1px solid rgb(var(--yb-border))}.provenance-strip span{color:rgb(var(--yb-text-muted));font-size:11px}.provenance-strip strong{font-size:13px}.state-card{padding:34px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:14px;color:rgb(var(--yb-text-muted))}.state-card.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}@media(max-width:760px){.detail-page{padding:16px}.detail-hero{flex-direction:column}.provenance-strip{grid-template-columns:1fr 1fr}.provenance-strip div+div{border-left:0}.provenance-strip div:nth-child(even){border-left:1px solid rgb(var(--yb-border))}.provenance-strip div:nth-child(n+3){border-top:1px solid rgb(var(--yb-border))}.hero-actions{width:100%}.hero-actions button{flex:1}}
+.detail-page{max-width:1320px;margin:0 auto;padding:28px;display:grid;gap:20px}.breadcrumb{display:flex;align-items:center;gap:8px;color:rgb(var(--yb-text-muted));font-size:12px}.breadcrumb a{padding:0;border:0;background:transparent;color:rgb(var(--yb-brand));cursor:pointer}.detail-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;padding:22px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface))}.detail-hero h1{margin:4px 0;font-size:30px}.detail-hero p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{color:rgb(var(--yb-brand));font-size:12px;font-weight:900;letter-spacing:.08em}.hero-badges,.hero-actions{display:flex;gap:8px;flex-wrap:wrap}.hero-badges span{padding:5px 8px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-size:11px;font-weight:800}.hero-actions :is(button,a){display:inline-flex;align-items:center;text-decoration:none;min-height:40px;padding:0 14px;border-radius:10px;cursor:pointer}.primary{border:1px solid rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.secondary{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.provenance-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid rgb(var(--yb-border));border-radius:15px;background:rgb(var(--yb-surface));overflow:hidden}.provenance-strip div{display:grid;gap:4px;padding:14px 17px}.provenance-strip div+div{border-left:1px solid rgb(var(--yb-border))}.provenance-strip span{color:rgb(var(--yb-text-muted));font-size:11px}.provenance-strip strong{font-size:13px}.state-card{padding:34px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:14px;color:rgb(var(--yb-text-muted))}.state-card.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}@media(max-width:760px){.detail-page{padding:16px}.detail-hero{flex-direction:column}.provenance-strip{grid-template-columns:1fr 1fr}.provenance-strip div+div{border-left:0}.provenance-strip div:nth-child(even){border-left:1px solid rgb(var(--yb-border))}.provenance-strip div:nth-child(n+3){border-top:1px solid rgb(var(--yb-border))}.hero-actions{width:100%}.hero-actions button{flex:1}}
 </style>
 
 <style scoped>

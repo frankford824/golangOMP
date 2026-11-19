@@ -1,7 +1,9 @@
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import OAReturnLink from '../components/OAReturnLink.vue'
+import { shopBindingReturnSource, positiveQueryNumber } from '../peopleNavigation'
 import type { HttpAppError } from '@/services/http'
 import { api, errorText, send } from '../api'
 import { useOAAccess } from '../access'
@@ -16,8 +18,12 @@ type Action = 'bind' | 'move' | 'unbind'
 
 const { currentProfile } = useOAAccess()
 const route = useRoute()
+const router = useRouter()
+const returnTarget = computed(() => shopBindingReturnSource(route.query.peopleFrom)
+  ?? shopBindingReturnSource(window.history.state?.back) ?? '/users')
+const returnLabel = computed(() => returnTarget.value.split(/[?#]/, 1)[0] === '/users/roster' ? '返回人员花名册' : '返回人员管理')
 const admin = computed(() => !!currentProfile.value?.super_admin)
-const search = ref('')
+const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
 const people = ref<Person[]>([])
 const personId = ref<number>()
 const person = computed(() => people.value.find(item => item.id === personId.value))
@@ -67,7 +73,7 @@ async function load() {
   result.value = undefined
   error.value = ''
   resetChange()
-  if (!id || !admin.value) return
+  if (!id || !admin.value) { busy.value = false; return }
   busy.value = true
   try {
     const value = await api<View>('/oa-api/people/' + id + '/shop-bindings')
@@ -100,33 +106,64 @@ async function apply() {
     } else error.value = errorText(cause)
   } finally { busy.value = false }
 }
+async function searchAndRemember() {
+  await searchPeople()
+  if (!searchError.value) await router.replace({ query: { ...route.query, q: search.value.trim() || undefined } })
+}
+
+async function selectAndRemember() {
+  notice.value = ''
+  void router.replace({ query: { ...route.query, user_id: personId.value ? String(personId.value) : undefined } })
+  await load()
+}
+
+async function restoreSelectedPerson() {
+  const id = positiveQueryNumber(route.query.user_id, 0)
+  if (!admin.value || personId.value === (id || undefined)) return
+  personId.value = id || undefined
+  const selection = ++request
+  result.value = undefined
+  error.value = ''
+  busy.value = false
+  resetChange()
+  if (id && !people.value.some(item => item.id === id)) {
+    try {
+      const selected = await api<Person>('/oa-api/people/' + id)
+      if (selection !== request || personId.value !== id) return
+      people.value.unshift(selected)
+    } catch (cause) {
+      if (selection === request && personId.value === id) searchError.value = errorText(cause)
+      return
+    }
+  }
+  await load()
+}
 onMounted(async () => {
   await searchPeople()
-  const id = Number(route.query.user_id)
-  if (admin.value && Number.isSafeInteger(id) && id > 0) {
-    if (!people.value.some(item => item.id === id)) {
-      try { people.value.unshift(await api<Person>('/oa-api/people/' + id)) }
-      catch (cause) { searchError.value = errorText(cause); return }
-    }
-    personId.value = id
-    await load()
-  }
+  await restoreSelectedPerson()
+})
+watch(() => route.query.user_id, () => { void restoreSelectedPerson() })
+watch(() => route.query.q, (q) => {
+  const next = typeof q === 'string' ? q : ''
+  if (search.value === next) return
+  search.value = next
+  void searchPeople()
 })
 </script>
 
 <template>
   <div class="oa-page shop-bindings">
     <PageHead title="店铺人员绑定">
-      <RouterLink to="/users" class="oa-button">返回人员管理</RouterLink>
+      <OAReturnLink :to="returnTarget" class="oa-button">{{ returnLabel }}</OAReturnLink>
     </PageHead>
     <p v-if="!admin" class="oa-error" role="alert">仅超级管理员可以管理店铺绑定。</p>
     <template v-else>
       <section class="oa-panel binding-search" aria-label="选择人员">
-        <form class="oa-actions oa-filter" @submit.prevent="searchPeople">
+        <form class="oa-actions oa-filter" @submit.prevent="searchAndRemember">
           <label>搜索人员<input v-model="search" placeholder="姓名或工号" /></label>
           <button type="submit" :disabled="searching || busy">搜索</button>
           <label>平台人员
-            <select v-model="personId" :disabled="busy" @change="notice = ''; load()">
+            <select v-model="personId" :disabled="busy" @change="selectAndRemember">
               <option :value="undefined">选择人员</option>
               <option v-for="candidate in people" :key="candidate.id" :value="candidate.id">
                 {{ candidate.name }} · {{ candidate.employee_no == null ? '未录工号' : String(candidate.employee_no).padStart(4, '0') }}{{ candidate.department ? ' · ' + candidate.department : '' }}

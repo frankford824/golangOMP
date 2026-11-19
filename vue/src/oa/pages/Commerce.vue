@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { orderFilters, rememberOrderFilters } from '../orderFilterMemory'
+import { orderFilters, orderOffset, orderReturnQuery, orderReturnSource, orderReturnTarget, orderVisit, rememberOrderFilters } from '../orderFilterMemory'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText } from 'lucide-vue-next'
+import OAReturnLink from '../components/OAReturnLink.vue'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import OAEmpty from '../components/OAEmpty.vue'
@@ -18,6 +19,7 @@ import '../styles.css'
 const { can, currentProfile } = useOAAccess()
 const permissions = usePermissionsStore()
 const route = useRoute()
+const router = useRouter()
 
 type Mode = 'overview' | 'products' | 'detail' | 'ranking' | 'personal'
 const props = defineProps<{ mode: Mode; productId?: string }>()
@@ -33,7 +35,13 @@ type TaskLink = { id: number; task_no: string; status: string }
 type Feedback = { id: number; shop_id: string; note: string; adjusted_on: string; task_id?: number }
 type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; scope_state?: 'unassigned'; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
 
-const restored = orderFilters(props.mode, route.query)
+type Visit = { filters: Record<string, string>; offset: number; scroll: number; row?: string; closed: boolean }
+let visit = orderVisit<Visit>(props.mode)
+const previousVisit = visit.read()
+const restored = previousVisit?.filters ?? orderFilters(props.mode, route.query)
+const resultRegion = ref<HTMLElement>()
+const returnTarget = computed(() => orderReturnTarget(route))
+const returnSource = computed(() => orderReturnSource(route))
 const today = dateInChina()
 const earliest = '2026-06-01'
 const periods = computed(() => [
@@ -48,8 +56,8 @@ function rangeStart(daysBack: number) {
   date.setUTCDate(date.getUTCDate() - daysBack)
   return [date.toISOString().slice(0, 10), earliest].sort()[1]
 }
-function routeDate(key: 'from' | 'to') {
-  const value = restored[key]
+function routeDate(key: 'from' | 'to', filters = restored) {
+  const value = filters[key]
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value < earliest || value > today) return ''
   const date = new Date(value + 'T12:00:00Z')
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : ''
@@ -107,13 +115,27 @@ function openProductLink(event: MouseEvent, row: DataRow, navigate: (event?: Mou
   event.preventDefault()
   openCost(row)
 }
+function returnQuery() {
+  return orderReturnQuery(router, route.path, {
+    ...navigationQuery.value,
+    ...(props.mode === 'products' ? { scope: appliedMine.value ? 'mine' : 'overview', exception: lowCoverageOnly.value ? 'coverage' : '' } : {}),
+    ...(props.mode === 'ranking' ? { group: appliedGroup.value } : {}),
+    ...(offset.value ? { offset: String(offset.value) } : {}),
+    ...(props.mode === 'detail' ? Object.fromEntries(Object.entries(route.query).filter(([key, value]) =>
+      ['scope', 'returnTo', 'returnFallback'].includes(key) && typeof value === 'string')) as Record<string, string> : {}),
+  }, route.fullPath)
+}
+function externalCostLink(path: string, sku: string) {
+  return { path, query: { sku, ...returnQuery() } }
+}
 function productLink(sku: string, shopId?: string) {
   return {
     path: '/operations/products/' + encodeURIComponent(sku),
     query: {
       ...navigationQuery.value,
       ...(shopId ? { shop_id: shopId } : {}),
-      ...(props.mode === 'overview' || new URLSearchParams(appliedQuery).get('mine') !== '1' ? { scope: 'overview' } : {}),
+      scope: props.mode === 'overview' || !appliedMine.value ? 'overview' : 'mine',
+      ...returnQuery(),
     },
   }
 }
@@ -144,7 +166,7 @@ async function copySKU(sku: string) {
 const comparison = ref<(DataRow & { phase?: string })[]>()
 const comparisonError = ref('')
 const comparisonBusy = ref(false)
-const offset = ref(0)
+const offset = ref(previousVisit?.offset ?? orderOffset(route.query.offset))
 const data = ref<OrderResult>()
 const summary = ref<OrderResult>()
 const hourlyTrend = ref<OrderResult>()
@@ -265,6 +287,7 @@ async function loadOverview(refresh = false, pageChange = false) {
 
 async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
   if (resetPage || props.mode === 'overview') offset.value = next
+  if (resultRegion.value) resultRegion.value.scrollTop = 0
   if (props.mode === 'overview') return loadOverview(false, !resetPage)
   if (!mayView.value) return
   if (props.mode === 'detail' && !selectedSku.value.trim()) return
@@ -372,9 +395,27 @@ const displayRows = computed(() => props.mode === 'overview'
   : lowCoverageOnly.value ? rows.value.filter(lowCoverage) : rows.value)
 const costNotice = ref('')
 const defaultInspector = ref(false)
-let inspectorPreferenceSet = false
+let inspectorPreferenceSet = previousVisit?.closed ?? false
+let restoringVisit = Boolean(previousVisit)
+const rowKey = (row: DataRow) => JSON.stringify([row.shop_id, row.shop_item_id, row.sku])
+function saveVisit() {
+  if (restoringVisit || !data.value || !appliedPeriod.value) return
+  visit.save({
+    filters: {
+      ...navigationQuery.value,
+      group: appliedGroup.value,
+      scope: appliedMine.value ? 'mine' : 'overview',
+      exception: lowCoverageOnly.value ? 'coverage' : '',
+    },
+    offset: offset.value,
+    scroll: resultRegion.value?.scrollTop ?? 0,
+    row: selectedProduct.value && rowKey(selectedProduct.value),
+    closed: inspectorPreferenceSet,
+  })
+}
+watch([data, offset, selectedProduct, lowCoverageOnly], saveVisit, { flush: 'post' })
 function openDefaultInspector() {
-  if (props.mode === 'products' && defaultInspector.value && !inspectorPreferenceSet && !selectedProduct.value && selectableProducts.value[0]) {
+  if (!restoringVisit && props.mode === 'products' && defaultInspector.value && !inspectorPreferenceSet && !selectedProduct.value && selectableProducts.value[0]) {
     openCost(selectableProducts.value[0], false)
   }
 }
@@ -430,7 +471,7 @@ const linkedTask = computed(() => {
   if (!filters || !rows.value.length || data.value?.stale) return ''
   const shop_id = filters.shop || (new Set(rows.value.map(row => row.shop_id)).size === 1 ? rows.value[0]?.shop_id : '')
   if (!shop_id) return ''
-  const query = new URLSearchParams({ intent: 'retouch', oa_shop: shop_id, oa_sku: filters.sku, oa_from: filters.from, oa_to: filters.to })
+  const query = new URLSearchParams({ intent: 'retouch', taskFrom: route.fullPath, oa_shop: shop_id, oa_sku: filters.sku, oa_from: filters.from, oa_to: filters.to })
   return '/tasks/create?' + query
 })
 const freshness = computed(() => {
@@ -736,6 +777,37 @@ function resetOverviewSession() {
 function onSessionStorage(event: StorageEvent) {
   if (event.key === TOKEN_STORAGE_KEY || event.key === null) resetOverviewSession()
 }
+const visitPath = route.path
+watch(() => route.fullPath, async () => {
+  if (route.path !== visitPath) return
+  visit = orderVisit<Visit>(props.mode)
+  const saved = visit.read()
+  const filters = saved?.filters ?? orderFilters(props.mode, route.query)
+  const start = routeDate('from', filters)
+  const end = routeDate('to', filters)
+  from.value = start && end && start <= end ? start : props.mode === 'personal' ? monthStart : props.mode === 'detail' ? rangeStart(6) : today
+  to.value = start && end && start <= end ? end : today
+  shop.value = typeof filters.shop_id === 'string' ? filters.shop_id : ''
+  includeBrush.value = filters.include_brush === '1'
+  productScope.value = filters.scope === 'overview' ? 'overview' : 'mine'
+  lowCoverageOnly.value = filters.exception === 'coverage'
+  if (typeof filters.group === 'string' && ['shop', 'platform', 'product', 'growth', ...(currentProfile.value?.super_admin ? ['person'] : [])].includes(filters.group)) group.value = filters.group
+  else group.value = 'shop'
+  restoringVisit = Boolean(saved)
+  inspectorPreferenceSet = saved?.closed ?? false
+  costAction.value?.dismiss()
+  const activeVisit = visit
+  await load(true, saved?.offset ?? orderOffset(route.query.offset))
+  if (activeVisit === visit && route.path === visitPath) await restoreResultVisit(saved)
+})
+async function restoreResultVisit(saved?: Visit) {
+  if (!saved) return
+  await nextTick()
+  const row = selectableProducts.value.find(item => rowKey(item) === saved.row)
+  if (row) openCost(row, false)
+  if (resultRegion.value) resultRegion.value.scrollTop = saved.scroll
+  restoringVisit = false
+}
 watch(() => props.productId, id => {
   if (props.mode !== 'detail') return
   selectedSku.value = id ?? ''
@@ -767,7 +839,7 @@ onMounted(() => {
   } else if (!useIncomingPeriod && props.mode === 'detail') {
     from.value = rangeStart(6)
   }
-  void load()
+  void load(true, offset.value).then(() => restoreResultVisit(previousVisit))
 })
 
 onUnmounted(() => {
@@ -783,7 +855,7 @@ onUnmounted(() => {
 <div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview', 'commerce-list': mode === 'products' || mode === 'ranking', 'commerce-products': mode === 'products' }]">
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
-    <RouterLink v-if="mode === 'detail'" class="oa-button" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }"><ChevronLeft :size="15" />返回商品</RouterLink>
+    <OAReturnLink v-if="mode === 'detail' || returnTarget" class="oa-button" :source="returnSource" :to="returnTarget || { path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }"><ChevronLeft :size="15" />{{ returnTarget?.split('?')[0] === '/operations' ? '返回总览' : '返回商品' }}</OAReturnLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
   <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" />
@@ -793,7 +865,7 @@ onUnmounted(() => {
     <form class="oa-panel commerce-filter" aria-label="经营筛选" @submit.prevent="load()">
       <div class="oa-actions oa-filter workspace-filters">
         <RouterLink v-if="mode === 'overview'" class="oa-button commerce-exception"
-          :to="{ path: '/operations/products', query: { ...navigationQuery, scope: 'overview', exception: 'coverage' } }">
+          :to="{ path: '/operations/products', query: { ...navigationQuery, scope: 'overview', exception: 'coverage', ...returnQuery() } }">
           待补成本 / 低覆盖商品
         </RouterLink>
         <button v-if="mode === 'products'" type="button" class="commerce-exception" :aria-pressed="lowCoverageOnly"
@@ -919,7 +991,7 @@ onUnmounted(() => {
         <div class="commerce-panel-heading"><div><h2>店铺表现</h2><p class="oa-muted">按订单应付排名 · 前 5</p></div></div>
         <ol v-if="leadingShops.length">
           <li v-for="(item, index) in leadingShops" :key="item.id">
-            <RouterLink :to="{ path: '/operations/orders/detail', query: { ...navigationQuery, shop_id: item.id } }">
+            <RouterLink :to="{ path: '/operations/orders/detail', query: { ...navigationQuery, shop_id: item.id, ...returnQuery() } }">
               <span class="commerce-rank">{{ index + 1 }}</span><span class="commerce-shop-name" :title="shopName(item.id)">{{ shopName(item.id) }}</span>
               <strong>{{ money(item.amount) }}</strong><ArrowUpRight :size="14" />
             </RouterLink>
@@ -934,14 +1006,14 @@ onUnmounted(() => {
     <section v-if="data" class="oa-panel commerce-results">
       <div class="commerce-panel-heading">
         <div><h2>{{ mode === 'ranking' ? rankingGroups[appliedGroup] + (appliedGroup === 'growth' ? '增长' : '') + '排名' : mode === 'personal' ? '实际商品销售额' : mode === 'detail' ? 'SKU 成交与成本' : mode === 'overview' ? '热销商品 Top 10' : '商品表现' }}</h2><p class="oa-muted">{{ periodLabel }}</p></div>
-        <RouterLink v-if="mode === 'overview'" class="workspace-row-action" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: 'overview' } }">查看全部商品表现 <ArrowRight :size="14" /></RouterLink>
+        <RouterLink v-if="mode === 'overview'" class="workspace-row-action" :to="{ path: '/operations/products', query: { ...navigationQuery, scope: 'overview', ...returnQuery() } }">查看全部商品表现 <ArrowRight :size="14" /></RouterLink>
         <span v-if="copyStatus" class="oa-muted" role="status">{{ copyStatus }}</span>
         <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ displayRows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
       </div>
       <OAEmpty v-if="!displayRows.length" :title="rows.length && lowCoverageOnly ? '本页暂无待补成本或低覆盖商品' : '所选范围暂无数据'" kind="search">
         <button v-if="mode === 'products' && !rows.length && appliedMine && !data.has_more" type="button" :disabled="busy" @click="showAllProducts">切换为全部可见商品</button>
       </OAEmpty>
-      <div v-else class="oa-table-wrap" tabindex="0" role="region" :aria-label="title + '数据表'">
+      <div v-else ref="resultRegion" class="oa-table-wrap" tabindex="0" @scroll="saveVisit" role="region" :aria-label="title + '数据表'">
         <table v-if="mode === 'ranking' || mode === 'personal'" :class="['oa-table', { 'commerce-ranking-table': mode === 'ranking' }]">
           <thead><tr><th v-if="mode === 'ranking'" class="oa-number">名次</th><th :class="{ 'oa-number': mode === 'personal' }">{{ mode === 'ranking' ? '归属' : '下单日' }}</th><th class="oa-number">{{ mode === 'ranking' && ['shop','platform','growth'].includes(appliedGroup) ? '订单应付' : '商品销售额' }}</th><template v-if="mode === 'ranking' && showRankingMetrics"><th class="oa-number">应付占比</th><th class="oa-number">有效订单数</th><th class="oa-number">核实毛利</th><th class="oa-number" title="核实毛利 ÷ 有核实成本的商品销售额">核实毛利率</th></template><th v-if="mode === 'ranking' && appliedGroup === 'growth'" class="oa-number">较同长度基期</th></tr></thead>
           <tbody>
@@ -950,7 +1022,7 @@ onUnmounted(() => {
               <td :class="{ 'oa-number': mode === 'personal' }">
                 <RouterLink v-if="mode === 'ranking' && ['shop', 'growth'].includes(appliedGroup) && row.key"
                   class="workspace-row-action commerce-rank-link"
-                  :to="{ path: '/operations/orders/detail', query: { ...navigationQuery, shop_id: row.key } }">
+                  :to="{ path: '/operations/orders/detail', query: { ...navigationQuery, shop_id: row.key, ...returnQuery() } }">
                   {{ shopName(row.key) }} <ArrowUpRight :size="14" />
                 </RouterLink>
                 <span v-else>{{ row.key || row.day || '—' }}</span>
@@ -1007,7 +1079,9 @@ onUnmounted(() => {
       <div v-if="mode !== 'overview' && (data.has_more || offset)" class="oa-actions workspace-pager" aria-label="列表分页"><span>第 {{ Math.floor(offset / 100) + 1 }} 页</span><button :disabled="!offset || busy" @click="load(false, offset - 100)"><ChevronLeft :size="15" />上一页</button><button :disabled="!data.has_more || offset >= 10000 || busy" @click="load(false, offset + 100)">下一页<ChevronRight :size="15" /></button></div>
     </section>
     <ProductCostAction ref="costAction" :split="mode === 'products'"
-      :detail-link="selectedProduct?.sku ? productLink(selectedProduct.sku, selectedProduct.shop_id) : undefined"
+       :detail-link="selectedProduct?.sku && mode !== 'detail' ? productLink(selectedProduct.sku, selectedProduct.shop_id) : undefined"
+      :pricing-link="selectedProduct?.sku ? externalCostLink('/operations/pricing', selectedProduct.sku) : undefined"
+      :maintenance-link="selectedProduct?.sku ? externalCostLink('/cost-rules', selectedProduct.sku) : undefined"
       @dismiss="closeCost" @closed="rememberClosed(selectedProduct)" @saved="savedCost" />
     </div>
     <template v-if="mode === 'detail' && data">

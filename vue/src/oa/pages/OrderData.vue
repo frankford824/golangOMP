@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { orderFilters, rememberOrderFilters } from '../orderFilterMemory'
+import { orderFilters, orderOffset, orderReturnSource, orderReturnTarget, orderVisit, rememberOrderFilters } from '../orderFilterMemory'
 import { computed, nextTick, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, Copy, X } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { orderState } from '../ordersDisplay'
+import OAReturnLink from '../components/OAReturnLink.vue'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
 import type { HttpAppError } from '@/services/http'
@@ -16,6 +17,8 @@ import '../styles.css'
 
 const { currentProfile, can } = useOAAccess()
 const route = useRoute()
+const returnTarget = computed(() => orderReturnTarget(route))
+const returnSource = computed(() => orderReturnSource(route))
 
 const props = defineProps<{ mode: 'detail' | 'refunds' | 'ledger' }>()
 type Cell = string | boolean | number | null
@@ -67,6 +70,23 @@ const copyStatus = ref('')
 const selected = ref<Row>()
 const dialog = ref<HTMLDialogElement>()
 const resultHeader = ref<HTMLElement>()
+const resultRegion = ref<HTMLElement>()
+type Visit = { filters: Record<string, string>; offset: number; scroll: number; row?: string }
+let visit = orderVisit<Visit>('orders-' + props.mode)
+let restoring = false
+function rowKey(row: Row) {
+  return JSON.stringify([row.shop_id, row.order_id, row.online_order_no, row.line_id, row.day, row.period, row.name])
+}
+function saveVisit() {
+  if (restoring || !data.value || !applied.value) return
+  visit.save({
+    filters: Object.fromEntries(new URLSearchParams(applied.value)),
+    offset: offset.value,
+    scroll: resultRegion.value?.scrollTop ?? 0,
+    row: selected.value && rowKey(selected.value),
+  })
+}
+watch([data, offset, selected], saveVisit, { flush: 'post' })
 const visibleRows = computed(() => {
   const rows = data.value?.rows ?? []
   return props.mode === 'refunds' ? rows.slice(offset.value, offset.value + pageSize) : rows
@@ -106,8 +126,8 @@ function resetFilters() {
   includeBrush.value = true
 }
 
-function restoreRouteFilters() {
-  const saved = orderFilters('orders-' + props.mode, route.query)
+function restoreRouteFilters(filters?: Record<string,string>) {
+  const saved = filters ?? orderFilters('orders-' + props.mode, route.query)
   const { from: start, to: end, shop_id: shopId, platform: platformCode } = saved
   const validDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && value >= firstDay && value <= today && new Date(value).toJSON()?.slice(0, 10) === value
   if (validDate(start) && validDate(end) && start <= end) {
@@ -145,7 +165,7 @@ async function load(next = 0, filters = filterQuery()) {
   failedRequest.value = undefined
   try {
     const query = new URLSearchParams(filters)
-    query.set('offset', String(next))
+    query.set('offset', String(props.mode === 'refunds' ? 0 : next))
     const result = await api<OrderData>('/oa-api/orders/' + mode + '?' + query)
     if (requestId !== currentRequest) return
     data.value = result
@@ -175,7 +195,10 @@ async function load(next = 0, filters = filterQuery()) {
 async function changePage(next: number) {
   if (props.mode === 'refunds') offset.value = next
   else await load(next, applied.value)
-  if (!error.value) resultHeader.value?.focus()
+  if (!error.value) {
+    if (resultRegion.value) resultRegion.value.scrollTop = 0
+    resultHeader.value?.focus()
+  }
 }
 
 async function openDetails(row: Row) {
@@ -244,7 +267,13 @@ watch([scope, allowed], async () => {
   }
 }, { immediate: true, flush: 'sync' })
 
-watch([() => props.mode, () => route.query, scope, allowed], () => {
+const visitPath = route.path
+watch([() => props.mode, () => route.query, scope, allowed], async () => {
+  if (route.path !== visitPath) return
+  visit = orderVisit<Visit>('orders-' + props.mode)
+  const previous = visit.read()
+  restoring = Boolean(previous)
+  const activeVisit = visit
   ++requestId
   closeDetails()
   busy.value = false
@@ -254,14 +283,24 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
   applied.value = ''
   offset.value = 0
   resetFilters()
-  restoreRouteFilters()
-  void load()
+  restoreRouteFilters(previous?.filters)
+  await load(previous?.offset ?? orderOffset(route.query.offset))
+  if (activeVisit !== visit || route.path !== visitPath) return
+  if (previous) {
+    await nextTick()
+    const row = visibleRows.value.find(item => rowKey(item) === previous.row)
+    if (row) await openDetails(row)
+    if (resultRegion.value) resultRegion.value.scrollTop = previous.scroll
+  }
+  restoring = false
 }, { immediate: true })
 </script>
 
 <template>
   <div class="oa-page order-data">
-    <PageHead :title="title" :subtitle="subtitle" />
+    <PageHead :title="title" :subtitle="subtitle">
+      <OAReturnLink v-if="returnTarget" class="oa-button" :to="returnTarget" :source="returnSource"><ChevronLeft :size="15" />{{ returnTarget.split('?')[0] === '/operations/rankings' ? '返回经营排行' : '返回总览' }}</OAReturnLink>
+    </PageHead>
     <OperationNav :query="navigationQuery" />
 
     <div class="order-data-body" role="region" :aria-label="title + '工作区'">
@@ -303,7 +342,7 @@ watch([() => props.mode, () => route.query, scope, allowed], () => {
         </header>
         <OAEmpty v-if="data.scope_state === 'unassigned'" title="暂无经营归属" description="当前账号没有分配可访问店铺。" kind="list" />
         <OAEmpty v-else-if="!visibleRows.length" :title="'所选范围暂无' + title + '数据'" kind="search" />
-        <div v-else class="oa-table-wrap" tabindex="0" role="region" :aria-label="title + '数据表'">
+        <div v-else ref="resultRegion" class="oa-table-wrap" tabindex="0" @scroll="saveVisit" role="region" :aria-label="title + '数据表'">
           <table class="oa-table order-data-table" :class="`order-data-table-${mode}`">
             <thead>
               <tr>

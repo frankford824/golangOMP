@@ -83,7 +83,7 @@ import { Bell, Inbox } from 'lucide-vue-next'
 import { formatNotification } from '@/domain/notification-text'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
 import { formatDateTimeBeijing, taskInstantMs } from '@/utils/date'
-import { useOAAccess } from '@/oa/access'
+import { oaEnabled, useOAAccess } from '@/oa/access'
 import { useCostActivity } from '@/oa/costActivity'
 import { expenseActivityActions, useExpenseActivity } from '@/oa/expenseActivity'
 
@@ -173,7 +173,7 @@ async function openNotification(item: NotificationItem): Promise<void> {
   const payload = (item.payload ?? {}) as Record<string, unknown>
   const taskId = Number(payload.task_id)
   if (!Number.isFinite(taskId) || taskId <= 0) return
-  void router.push(`/tasks/${taskId}`)
+  void router.push(oaEnabled ? { path: `/tasks/${taskId}`, query: { globalFrom: router.currentRoute.value.fullPath } } : `/tasks/${taskId}`)
   close()
 }
 

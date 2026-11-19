@@ -7,12 +7,44 @@ const { feeAPI, send, push, profile, actions, query } = vi.hoisted(() => ({
   feeAPI: vi.fn(), send: vi.fn(), push: vi.fn(), profile: { id: '7' },
   actions: new Set<string>(['finance.apply']), query: {} as Record<string, unknown>,
 }))
-vi.mock('vue-router', () => ({
-  RouterLink: { template: '<a><slot /></a>' },
-  onBeforeRouteLeave: vi.fn(),
-  useRoute: () => ({ query }),
-  useRouter: () => ({ push, replace: vi.fn() }),
-}))
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  type Target = { path: string; query?: Record<string, string | undefined> }
+  const route = reactive({ fullPath: '', path: '', query })
+  const resolve = (to: Target) => {
+    const params = new URLSearchParams(Object.entries(to.query ?? {}).flatMap(([key, value]) => value === undefined ? [] : [[key, value]]))
+    return { fullPath: to.path + (params.size ? '?' + params.toString() : ''), path: to.path, query: to.query ?? {} }
+  }
+  const stack: Target[] = []
+  const apply = (target: Target) => { Object.assign(route, resolve(target)) }
+  const history = { state: {} as { back?: string } }
+  return {
+    RouterLink: { template: `<a><slot href="#/fixture" /></a>` },
+    onBeforeRouteLeave: vi.fn(),
+    onBeforeRouteUpdate: vi.fn(),
+    useRoute: () => {
+      Object.assign(route, { fullPath: '', path: '', query: { ...query } })
+      stack.length = 0
+      return route
+    },
+    useRouter: () => ({
+      options: { history },
+      resolve,
+      push(target: Target) {
+        push(target)
+        stack.push({ path: target.path, query: { ...route.query } as Record<string, string> })
+        history.state.back = resolve(stack.at(-1)!).fullPath
+        apply(target)
+      },
+      replace: apply,
+      back() {
+        const previous = stack.pop()
+        if (previous) apply(previous)
+      },
+    }),
+  }
+})
+vi.mock('../components/OAReturnLink.vue', () => ({ default: { template: '<a><slot /></a>' } }))
 vi.mock('../access', () => ({
   oaEnabled: true,
   useOAAccess: () => ({ can: (action: string) => actions.has(action), currentProfile: { value: profile } }),

@@ -24,7 +24,13 @@ vi.mock('@/domain/asset-access', async (loadOriginal) => ({
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => mocks.route,
-  useRouter: () => ({ push: mocks.push, back: mocks.back }),
+  useRouter: () => ({ push: mocks.push, back: mocks.back,
+    replace: mocks.push,
+    resolve: (fullPath: string) => {
+      const url = new URL(fullPath, 'https://test.invalid')
+      return { path: url.pathname, fullPath, query: Object.fromEntries(url.searchParams), hash: url.hash }
+    },
+    options: { history: { state: window.history.state } } }),
   onBeforeRouteLeave: vi.fn(),
   onBeforeRouteUpdate: vi.fn(),
 }))
@@ -64,6 +70,7 @@ function mountView() {
     global: {
       stubs: {
         RouterLink: true,
+        OAReturnLink: true,
         WorkflowProgress: { template: '<div class="progress-stub">四步流程</div>' },
         TaskStatusTag: { template: '<span class="status-stub">状态</span>' },
         SkuResourceMatrix: { props: ['taskReferences','skuItems'], emits: ['refreshReferences'], template: '<div class="matrix-stub" :data-sku-references="JSON.stringify(skuItems?.map(item => item.reference_file_refs))" :data-sku-costs="JSON.stringify(skuItems?.map(item => item.cost_price))">资源矩阵 {{ taskReferences?.length || 0 }}<button class="matrix-refresh" @click="$emit(\'refreshReferences\')">刷新参考图</button></div>' },
@@ -192,7 +199,7 @@ describe('TaskDetailV8View business context', () => {
     await flushPromises()
 
     const backButton = wrapper.get('.back-button')
-    expect(backButton.text()).toBe('返回')
+    expect(backButton.text()).toBe('返回任务看板')
     await backButton.trigger('click')
     expect(mocks.back).toHaveBeenCalledOnce()
   })

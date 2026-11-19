@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { taskDetailLocation } from '@/oa/taskNavigation'
 import { api, dateInChina, errorText, send } from '../api'
 import '../styles.css'
 
@@ -10,7 +12,13 @@ type Person = { id: number; name: string; version: number; left?: string; terms?
 type Candidate = { id: number; name: string; employee_no?: number | null }
 type Kind = 'shop_transfer' | 'handover'
 
+const route = useRoute()
+const router = useRouter()
 const props = defineProps<{ userId: string | number; showProfile?: boolean }>()
+const personnelTaskSource = computed(() => router.resolve({
+  path: '/users',
+  query: { ...route.query, user_id: String(props.userId), tab: 'terms' },
+}).fullPath)
 const emit = defineEmits<{ loaded: [person: Person] }>()
 const person = ref<Person>()
 const handover = ref<{ items: Task[]; shops: string[] }>()
@@ -145,7 +153,7 @@ onMounted(loadDetail)
       <section class="term-section">
         <h4>待交接任务</h4>
         <p v-if="taskError" class="oa-error" role="alert">{{ taskError }}</p>
-        <dl v-else-if="handover?.items?.length" class="oa-kv"><div v-for="task in handover.items" :key="task.id"><dt>{{ task.task_no }} · {{ task.title || task.status }}</dt><dd><RouterLink :to="'/tasks/' + task.id">打开任务办理</RouterLink></dd></div></dl>
+        <dl v-else-if="handover?.items?.length" class="oa-kv"><div v-for="task in handover.items" :key="task.id"><dt>{{ task.task_no }} · {{ task.title || task.status }}</dt><dd><RouterLink :to="taskDetailLocation(task.id, personnelTaskSource)">打开任务办理</RouterLink></dd></div></dl>
         <p v-else-if="handover" class="oa-muted">暂无待交接任务</p>
         <p v-if="handover?.shops?.length" class="oa-muted">待交接店铺 {{ handover.shops.join('、') }}</p>
       </section>

@@ -245,9 +245,9 @@
           </tr></thead>
           <tbody><tr v-for="task in pagedList" :key="task.id" :data-task-row="task.id" :class="{ 'is-selected': selectedIds.has(task.id), 'is-inspected': peekId === task.id }" @click="openTaskRow($event, task)">
             <td><input type="checkbox" :aria-label="`选择任务 ${task.taskNo}`" :checked="selectedIds.has(task.id)" @change="toggleSelect(task.id)" /></td>
-            <td class="oa-task-number" :title="task.taskNo"><RouterLink :to="`/tasks/${task.id}`" @click.stop="saveState">{{ task.taskNo }}</RouterLink></td>
+            <td class="oa-task-number" :title="task.taskNo"><RouterLink :to="detailLocation(task)" @click.stop>{{ task.taskNo }}</RouterLink></td>
             <td><div class="task-name-actions">
-              <RouterLink class="oa-task-name" :to="`/tasks/${task.id}`" @click.stop="saveState">
+              <RouterLink class="oa-task-name" :to="detailLocation(task)" @click.stop>
                 <img v-if="task.referenceFileRefs?.[0]?.thumbnail_url" :src="task.referenceFileRefs[0].thumbnail_url" alt="" loading="lazy" />
                 <span :title="taskCardTitle(task)">{{ taskCardTitle(task) }}</span>
               </RouterLink>
@@ -265,6 +265,7 @@
             v-for="task in pagedList"
             :key="task.id"
             :task="task"
+            :detail-to="detailLocation(task)"
             :selected="selectedIds.has(task.id)"
             :class="{ 'is-inspected': oaEnabled && peekId === task.id }"
             :data-task-row="task.id"
@@ -313,7 +314,7 @@
         @cancel.prevent="closePeek" @click="closePeekFromBackdrop" @keydown="onPeekKeydown">
           <header>
             <h2 id="oa-task-peek-title">任务速览</h2>
-            <RouterLink :to="`/tasks/${peekTask.id}`" target="_blank" rel="noopener" @click="saveState">新标签页打开完整详情 ↗</RouterLink>
+            <RouterLink :to="detailLocation(peekTask)" target="_blank" rel="noopener">新标签页打开完整详情 ↗</RouterLink>
             <button type="button" aria-label="关闭任务速览" @click="closePeek()">×</button>
           </header>
           <section class="oa-task-peek-body">
@@ -711,6 +712,7 @@ import type { TaskListFilters } from '@/components/task/TaskFilterPanel.vue'
 import TaskFilterPanel from '@/components/task/TaskFilterPanel.vue'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import { taskDetailLocation } from '@/oa/taskNavigation'
 import { errorText, send } from '@/oa/api'
 import { Copy } from 'lucide-vue-next'
 import TaskTypeBadge from '@/components/task/TaskTypeBadge.vue'
@@ -758,7 +760,6 @@ const permissionsStore = usePermissionsStore()
 const { can, canAccessAction } = usePermission()
 
 // ── 列表初始状态：只接受当前路由 query；避免登录落地页恢复旧筛选 ─────────────
-const STORAGE_KEY = 'task-list-state'
 type TaskListTab = 'all' | 'pool' | 'mine' | 'archived' | 'terminated'
 type TaskOperationalBucket =
   | 'active_tasks'
@@ -832,33 +833,23 @@ function parseTaskTab(value: unknown): TaskListTab {
     : 'all'
 }
 
-function saveState() {
-  try {
-    sessionStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        searchKeyword: searchKeyword.value,
-        activeTab: activeTab.value,
-        filters: filters.value,
-        page: page.value,
-        pageSize: pageSize.value,
-        sortKey: sortKey.value,
-        sortOrder: sortOrder.value,
-      }),
-    )
-  } catch {
-    // ignore
-  }
-}
-
-const searchKeyword = ref((route.query.q as string) || '')
+const searchKeyword = ref(queryString(route.query.q))
 const activeTab = ref<TaskListTab>(parseTaskTab(route.query.tab))
 type TaskSortKey = 'taskNo' | 'updatedAt' | 'createdAt' | 'dueAt'
 const sortKey = ref<TaskSortKey>('updatedAt')
 const sortOrder = ref<'asc' | 'desc'>('desc')
-const page = ref(1)
+function queryPage(value: unknown) {
+  const n = Number(queryString(value))
+  return Number.isSafeInteger(n) && n > 0 ? n : 1
+}
+function queryPageSize(value: unknown) {
+  const n = Number(queryString(value))
+  return pageSizeOptions.some((option) => option.value === n) ? n : 20
+}
+let restoringListQuery = false
+const page = ref(oaEnabled ? queryPage(route.query.page) : 1)
 const taskCardsViewport = ref<HTMLElement | null>(null)
-const pageSize = ref(20)
+const pageSize = ref(oaEnabled ? queryPageSize(route.query.page_size) : 20)
 const showBatchAssign = ref(false)
 const showBatchAuditHandover = ref(false)
 const batchReminding = ref(false)
@@ -1335,7 +1326,7 @@ function onFilterReset(nextFilters: TaskListFilters, nextKeyword: string) {
 const totalPages = computed(() => Math.max(1, Math.ceil(tasksStore.listTotal / pageSize.value)))
 
 const pagedList = computed(() => filteredList.value)
-const taskView = ref<'table' | 'cards'>('table')
+const taskView = ref<'table' | 'cards'>(route.query.view === 'cards' ? 'cards' : 'table')
 const allPageSelected = computed(() => pagedList.value.length > 0 && pagedList.value.every((task) => selectedIds.has(task.id)))
 const somePageSelected = computed(() => pagedList.value.some((task) => selectedIds.has(task.id)))
 const peekPanel = ref<HTMLElement>()
@@ -2061,7 +2052,7 @@ async function claimTask(task: Task, advance = false) {
     })
     assigned = true
     if (!advance) {
-      await router.push('/tasks/' + task.id)
+      await router.push(detailLocation(task))
       return
     }
     peekCommittedId.value = task.id
@@ -2109,13 +2100,15 @@ function formatUpdatedDate(iso: string): string {
 
 function goCreate() {
   if (!can('task.create')) return
-  saveState()
-  void router.push({ name: 'TaskCreate' })
+  void router.push({ name: 'TaskCreate', query: oaEnabled ? { taskFrom: route.fullPath } : undefined })
+}
+
+function detailLocation(task: Task) {
+  return oaEnabled ? taskDetailLocation(task.id, route.fullPath) : '/tasks/' + task.id
 }
 
 function goDetail(task: Task) {
-  saveState()
-  void router.push(`/tasks/${task.id}`)
+  void router.push(detailLocation(task))
 }
 
 /** 翻页：请求指定页并替换列表（不追加） */
@@ -2124,7 +2117,6 @@ async function goToPage(p: number) {
   const targetPage = Math.min(maxP, Math.max(1, p))
   if (targetPage === page.value && tasksStore.list.length > 0) return
   page.value = targetPage
-  saveState()
   const seq = ++listActionSeq
   refreshingList.value = true
   listActionError.value = ''
@@ -2151,14 +2143,17 @@ function jumpToPage() {
 }
 
 /** 方案 B：服务端分页 + 搜索，统一走 loadTaskListForView */
-async function refreshList(_force?: boolean) {
+async function refreshList(_force?: boolean, requestedPage = 1) {
   const seq = ++listActionSeq
   refreshingList.value = true
   listActionError.value = ''
   try {
-    page.value = 1
-    saveState()
-    await tasksStore.loadTaskListForView(buildListParams({ page: 1 }))
+    page.value = requestedPage
+    await tasksStore.loadTaskListForView(buildListParams({ page: requestedPage }))
+    if (seq === listActionSeq && requestedPage > totalPages.value) {
+      page.value = totalPages.value
+      await tasksStore.loadTaskListForView(buildListParams({ page: page.value }))
+    }
   } catch (error) {
     if (seq === listActionSeq) {
       listActionError.value = error instanceof Error ? error.message : '刷新任务列表失败'
@@ -2173,7 +2168,7 @@ async function refreshList(_force?: boolean) {
 onMounted(async () => {
   wideInspector?.addEventListener('change', syncDefaultPeek)
   overlayMedia?.addEventListener('change', syncPeekMode)
-  await refreshList(true)
+  await refreshList(true, page.value)
   await loadAuditHandoverEntryCount()
 })
 
@@ -2200,13 +2195,12 @@ watch(
 watch(
   pageSize,
   () => {
+    if (restoringListQuery) return
     page.value = 1
-    saveState()
     refreshList(true)
   },
 )
 
-watch([searchKeyword, activeTab, sortKey, sortOrder, page], saveState)
 watch(page, (value) => {
   jumpPage.value = value
 })
@@ -2214,19 +2208,20 @@ watch([page, pageSize, searchKeyword, activeTab, sortKey, sortOrder], () => {
   if (taskCardsViewport.value) taskCardsViewport.value.scrollTop = 0
 }, { flush: 'post' })
 watch([sortKey, sortOrder], () => {
+  if (restoringListQuery) return
   refreshList(true)
 })
 
 watch(activeTab, () => {
+  if (restoringListQuery) return
   page.value = 1
-  saveState()
   refreshList(true)
 })
 
 watch(
-  () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value, operationalBucket.value] as const,
+  () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value, operationalBucket.value, page.value, pageSize.value, taskView.value] as const,
   () => {
-    if (oaEnabled && route.name !== 'TaskList') return
+    if (oaEnabled && (route.name !== 'TaskList' || restoringListQuery)) return
     const q = { ...route.query } as Record<string, string | string[] | undefined>
     const kw = searchKeyword.value.trim()
     if (kw) q.q = kw
@@ -2264,6 +2259,14 @@ watch(
       dueAt: 'due_at',
     }
     q.sort = `${sortOrder.value === 'desc' ? '-' : ''}${sortMap[sortKey.value]}`
+    if (oaEnabled) {
+      if (page.value > 1) q.page = String(page.value)
+      else delete q.page
+      if (pageSize.value !== 20) q.page_size = String(pageSize.value)
+      else delete q.page_size
+      if (taskView.value === 'cards') q.view = 'cards'
+      else delete q.view
+    }
     router.replace({ path: route.path, query: q })
   },
   { deep: true },
@@ -2273,6 +2276,10 @@ watch(
   () => route.query,
   (query) => {
     if (oaEnabled && route.name !== 'TaskList') return
+    if (oaEnabled) {
+      restoringListQuery = true
+      void nextTick(() => { restoringListQuery = false })
+    }
     const nextTab = parseTaskTab(query.tab)
     const nextOperationalBucket = parseOperationalBucket(query.operational_bucket)
     const nextFilters = {
@@ -2305,6 +2312,7 @@ watch(
     }
     if (searchKeyword.value !== nextKeyword) {
       searchKeyword.value = nextKeyword
+      quickKeyword.value = nextKeyword
       changed = true
       filterChanged = true
     }
@@ -2322,6 +2330,10 @@ watch(
         sortOrder.value = direction
         changed = true
       }
+    } else if (oaEnabled && (sortKey.value !== 'updatedAt' || sortOrder.value !== 'desc')) {
+      sortKey.value = 'updatedAt'
+      sortOrder.value = 'desc'
+      changed = true
     }
     if (JSON.stringify(filters.value) !== JSON.stringify(nextFilters)) {
       filters.value = nextFilters
@@ -2330,8 +2342,17 @@ watch(
       changed = true
       filterChanged = true
     }
-    if (changed) page.value = 1
-    if (filterChanged) void refreshList(true)
+    if (oaEnabled) {
+      const nextPage = queryPage(query.page)
+      const nextSize = queryPageSize(query.page_size)
+      taskView.value = query.view === 'cards' ? 'cards' : 'table'
+      if (pageSize.value !== nextSize || page.value !== nextPage) changed = true
+      pageSize.value = nextSize
+      if (changed) void refreshList(true, nextPage)
+    } else {
+      if (changed) page.value = 1
+      if (filterChanged) void refreshList(true)
+    }
   },
 )
 

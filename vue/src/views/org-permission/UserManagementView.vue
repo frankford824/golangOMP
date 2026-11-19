@@ -7,8 +7,8 @@
           <component :is="oaEnabled ? 'h1' : 'h2'" class="directory-title">{{ oaEnabled ? '人员管理' : '用户与角色管理' }}</component>
         </div>
         <DesktopSlot target="actions"><div class="directory-header-action">
-          <RouterLink v-if="oaProfile?.super_admin" class="um-btn um-btn--ghost" :to="{ name: 'PeopleShopBindings' }">店铺人员绑定</RouterLink>
-          <RouterLink v-if="canManagePeople" class="um-btn um-btn--ghost" :to="{ name: 'PeopleRoster', query: { q: appliedKeyword || undefined } }">人员花名册</RouterLink>
+          <RouterLink v-if="oaProfile?.super_admin" class="um-btn um-btn--ghost" :to="{ name: 'PeopleShopBindings', query: { peopleFrom: oaRoute?.fullPath } }">店铺人员绑定</RouterLink>
+          <RouterLink v-if="canManagePeople" class="um-btn um-btn--ghost" :to="{ name: 'PeopleRoster', query: { peopleFrom: oaRoute?.fullPath } }">人员花名册</RouterLink>
           <BaseButton
             v-if="canCreateUser"
             class="oa-new-user" variant="primary"
@@ -321,7 +321,8 @@
         :status-submitting="statusSubmitting"
         :action-message="detailActionMessage"
         :can-view-terms="canManagePeople"
-        :initial-tab="oaRoute?.query.tab === 'terms' ? 'terms' : undefined"
+        :initial-tab="requestedDetailTab"
+        @change-tab="rememberDetailTab"
         v-model:selected-roles="selectedAccessRoleCodes"
         v-model:new-password="resetPasswordValue"
         @close="closeDetail"
@@ -450,7 +451,7 @@ import { desktopChromeKey } from '@/oa/desktopChrome'
 const directoryChrome = inject(desktopChromeKey, null)
 const desktopDirectory = computed(() => Boolean(directoryChrome?.desktop.value))
 
-import { ref, computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { usersApi } from '@/services/api/usersApi'
@@ -490,7 +491,9 @@ import {
   type UserRow,
 } from './userManagementTypes'
 import { usePermissionsStore } from '@/stores/permissions'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter, type LocationQuery } from 'vue-router'
+import { goBackTo } from '@/oa/returnNavigation'
+import { directoryQuery, positiveQueryNumber } from '@/oa/peopleNavigation'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import { coreUserRoleGroups, planOARoleReplacement } from '@/oa/userRoles'
 import { usePermission } from '@/composables/usePermission'
@@ -605,18 +608,25 @@ let listSeq = 0
 
 const auditPageSize = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
 const defaultPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? auditPageSize : 20
-const page = ref(1)
-const pageSize = ref(defaultPageSize)
+function queryText(value: unknown) { return typeof value === 'string' ? value : '' }
+function listPageSize(value: unknown) {
+  const requested = positiveQueryNumber(value, defaultPageSize)
+  return [20, 50, 100, defaultPageSize].includes(requested) ? requested : defaultPageSize
+}
+function listStatus(value: unknown) { return value === 'active' || value === 'disabled' ? value : '' }
+let restoringDirectoryQuery = false
+const page = ref(positiveQueryNumber(oaRoute?.query.page))
+const pageSize = ref(listPageSize(oaRoute?.query.page_size))
 const pagination = ref({ total: 0, page: 1, page_size: defaultPageSize })
 // keyword 是输入框实时值;appliedKeyword 才是列表实际生效的关键词。
 // 分开维护是为了避免"输入到一半、还没点查询,切换组织/翻页时半截关键词
 // 被悄悄带进请求"的联动怪象。
 const keyword = ref(typeof oaRoute?.query.q === 'string' ? oaRoute.query.q : '')
 const appliedKeyword = ref(keyword.value)
-const statusFilter = ref('')
+const statusFilter = ref(listStatus(oaRoute?.query.status))
 // 单一组织选中态:左侧树的选中即列表筛选,不再维护"树选中"与"下拉筛选"两套状态。
-const departmentFilter = ref('')
-const teamFilter = ref('')
+const departmentFilter = ref(queryText(oaRoute?.query.department))
+const teamFilter = ref(queryText(oaRoute?.query.team))
 
 const departmentOptions = ref<Array<{ value: string; label: string }>>([])
 const teamOptions = ref<Array<{ value: string; label: string; department?: string }>>([])
@@ -1226,7 +1236,7 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
         {
           type: 'button',
           class: 'link-btn',
-          onClick: () => openDetail(row),
+          onClick: () => navigateToDetail(row),
         },
         '管理',
       ),
@@ -1624,6 +1634,10 @@ async function loadUsers() {
       page: typeof p.page === 'number' ? p.page : page.value,
       page_size: typeof p.page_size === 'number' ? p.page_size : pageSize.value,
     }
+    if (oaRoute && page.value > totalPages.value) {
+      page.value = totalPages.value
+      await loadUsers()
+    }
   } catch (e) {
     if (abortController.signal.aborted || seq !== listSeq) return
     listError.value = e instanceof Error ? e.message : '加载用户列表失败'
@@ -1664,8 +1678,10 @@ async function readUserDetail(id: string) {
   return mapRawUser(body)
 }
 
+let detailTargetId = ''
 async function openDetail(u: UserRow | string) {
   const userId = typeof u === 'string' ? u : u.id
+  detailTargetId = userId
   const sequence = ++detailSequence
   detailUser.value = typeof u === 'string' ? null : u
   detailFailed.value = false
@@ -1708,15 +1724,45 @@ async function openDetail(u: UserRow | string) {
   }
 }
 
-function closeDetail() {
+type PersonDetailTab = 'profile' | 'roles' | 'terms' | 'security'
+const requestedDetailTab = computed<PersonDetailTab>(() => {
+  const tab = oaRoute?.query.tab
+  return tab === 'roles' || tab === 'terms' || tab === 'security' ? tab : 'profile'
+})
+
+function listLocationQuery() {
+  return {
+    ...directoryQuery(oaRoute?.query ?? {}),
+    q: appliedKeyword.value || undefined,
+    department: departmentFilter.value || undefined,
+    team: teamFilter.value || undefined,
+    status: statusFilter.value || undefined,
+    page: page.value > 1 ? String(page.value) : undefined,
+    page_size: pageSize.value !== defaultPageSize ? String(pageSize.value) : undefined,
+  }
+}
+
+function navigateToDetail(user: UserRow) {
+  if (!oaRouter || !oaRoute) return void openDetail(user)
+  void oaRouter.push({ name: 'UserManagement', query: { ...listLocationQuery(), user_id: user.id } })
+}
+
+function rememberDetailTab(tab: PersonDetailTab) {
+  if (!oaRouter || !oaRoute?.query.user_id) return
+  void oaRouter.replace({ query: { ...oaRoute.query, tab: tab === 'profile' ? undefined : tab } })
+}
+
+function clearDetail() {
+  detailTargetId = ''
   detailSequence += 1
   detailUser.value = null
+  detailLoading.value = false
+}
+
+function closeDetail() {
   if (oaRoute?.query.user_id && oaRouter) {
-    const query = { ...oaRoute.query }
-    delete query.user_id
-    delete query.tab
-    void oaRouter.replace({ query })
-  }
+    void goBackTo(oaRouter, { name: 'UserManagement', query: directoryQuery(oaRoute.query) })
+  } else clearDetail()
 }
 
 async function refreshDetailAndList(userId: string, section: 'basic' | 'membership' | 'status') {
@@ -2253,6 +2299,7 @@ function onSearchEnter(event: KeyboardEvent) {
 
 // 清空输入框即恢复全量:不必再点一次"查询"才能取消关键词过滤。
 watch(keyword, () => {
+  if (restoringDirectoryQuery) return
   if (keyword.value.trim() === '' && appliedKeyword.value !== '') {
     appliedKeyword.value = ''
     page.value = 1
@@ -2268,6 +2315,7 @@ function goPage(next: number) {
 }
 
 watch(departmentFilter, () => {
+  if (restoringDirectoryQuery) return
   if (!departmentFilter.value || !teamFilter.value) return
   // 树中的停用小组也允许保留(治理场景);仅当小组既不在活跃选项、
   // 也不在树里时才清空。
@@ -2281,17 +2329,23 @@ watch(departmentFilter, () => {
 })
 
 watch([statusFilter, departmentFilter, teamFilter], () => {
+  if (restoringDirectoryQuery) return
   page.value = 1
   void loadUsers()
 })
 
 watch(pageSize, () => {
+  if (restoringDirectoryQuery) return
   page.value = 1
   void loadUsers()
 })
 
 watch([page, pageSize, appliedKeyword, statusFilter, departmentFilter, teamFilter], () => {
   batchSelectedIDs.value = []
+  if (oaRoute?.name === 'UserManagement' && oaRouter && !restoringDirectoryQuery && !restrictedPeople.value) {
+    const query = { ...listLocationQuery(), user_id: oaRoute.query.user_id, tab: oaRoute.query.tab }
+    void oaRouter.replace({ query })
+  }
 })
 
 watch(
@@ -2326,10 +2380,30 @@ watch(
   },
 )
 
-watch(() => oaRoute?.query.user_id, focus => {
-  if (restrictedPeople.value || !canManage.value) return
-  if (typeof focus === 'string' && /^[1-9][0-9]*$/.test(focus) && detailUser.value?.id !== focus) void openDetail(focus)
-  else if (!focus && detailUser.value) closeDetail()
+watch(() => oaRoute?.query, (query?: LocationQuery) => {
+  if (!query || oaRoute?.name !== 'UserManagement' || restrictedPeople.value || !canManage.value) return
+  const q = queryText(query.q)
+  const department = queryText(query.department)
+  const team = queryText(query.team)
+  const status = listStatus(query.status)
+  const nextPage = positiveQueryNumber(query.page)
+  const nextSize = listPageSize(query.page_size)
+  if (q !== appliedKeyword.value || department !== departmentFilter.value || team !== teamFilter.value ||
+      status !== statusFilter.value || nextPage !== page.value || nextSize !== pageSize.value) {
+    restoringDirectoryQuery = true
+    keyword.value = q
+    appliedKeyword.value = q
+    departmentFilter.value = department
+    teamFilter.value = team
+    statusFilter.value = status
+    page.value = nextPage
+    pageSize.value = nextSize
+    void nextTick(() => { restoringDirectoryQuery = false })
+    void loadUsers()
+  }
+  const focus = queryText(query.user_id)
+  if (/^[1-9][0-9]*$/.test(focus) && detailTargetId !== focus) void openDetail(focus)
+  else if (!focus && detailTargetId) clearDetail()
 })
 
 onMounted(() => {

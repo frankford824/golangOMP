@@ -40,6 +40,7 @@ import type { RecentEvent } from '@/types/dashboard'
 import StatusSkeleton from '@/components/common/StatusSkeleton.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
 import { useRouter } from 'vue-router'
+import { taskDetailLocation } from '@/oa/taskNavigation'
 
 withDefaults(
   defineProps<{
@@ -72,7 +73,7 @@ function isNavigable(ev: RecentEvent): boolean {
 function onSelect(ev: RecentEvent) {
   emit('select', ev)
   if (isNavigable(ev)) {
-    void router.push(`/tasks/${ev.refId}`)
+    void router.push(taskDetailLocation(ev.refId, router.currentRoute?.value.fullPath || '/?workspace=tasks'))
   }
 }
 </script>

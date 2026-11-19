@@ -320,7 +320,8 @@ async function handleLogin() {
     // 登录成功，跳转
     const redirect = (route.query.redirect as string | undefined) ?? undefined
     const landing = resolvePostLoginLandingRoute(router, permissionsStore, redirect)
-    await router.push(landing)
+    if (oaEnabled) await router.replace(landing)
+    else await router.push(landing)
   } catch (err: unknown) {
     errorMessage.value = formatAuthPageError(err)
   } finally {
@@ -385,7 +386,8 @@ async function handleRegister() {
     // 登录成功，跳转
     const redirect = (route.query.redirect as string | undefined) ?? undefined
     const landing = resolvePostLoginLandingRoute(router, permissionsStore, redirect)
-    await router.push(landing)
+    if (oaEnabled) await router.replace(landing)
+    else await router.push(landing)
   } catch (err: unknown) {
     errorMessage.value = formatAuthPageError(err)
   } finally {

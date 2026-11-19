@@ -5,7 +5,8 @@
     <template v-else-if="task">
       <DesktopSlot v-if="oaEnabled && task.task_no" target="title">
         <nav class="task-detail-breadcrumb" aria-label="面包屑">
-          <RouterLink to="/tasks">任务中心</RouterLink>
+          <OAReturnLink v-if="returnToTaskCenter" :to="returnTarget">任务中心</OAReturnLink>
+          <RouterLink v-else to="/tasks">任务中心</RouterLink>
           <span aria-hidden="true">/</span>
           <span aria-current="page">{{ task.task_no }}</span>
         </nav>
@@ -398,6 +399,10 @@
 
 <script setup lang="ts">
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import { workspaceOrigin } from '@/oa/returnNavigation'
+import OAReturnLink from '@/oa/components/OAReturnLink.vue'
+import { goBackTo } from '@/oa/returnNavigation'
+import { assetTaskReturnSource, taskReturnLabel, taskReturnSource } from '@/oa/taskNavigation'
 import { oaEnabled } from '@/oa/access'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
@@ -471,12 +476,17 @@ type WorkspaceMode = 'workflow' | 'defaultStyle' | 'resources' | 'attachments' |
 
 const route = useRoute()
 const router = useRouter()
-const backButtonLabel = computed(() => {
-  const backState = window.history.state?.back
-  return typeof backState === 'string' && backState.startsWith('/') && !backState.startsWith('/tasks')
-    ? '返回'
-    : '返回任务中心'
+const globalReturn = computed(() => workspaceOrigin(router, route.query?.globalFrom))
+const returnTarget = computed(() => {
+  return globalReturn.value || assetTaskReturnSource(route.query?.assetDetailFrom)
+    || taskReturnSource(route.query?.taskFrom)
+    || assetTaskReturnSource(window.history.state?.back)
+    || taskReturnSource(window.history.state?.back)
+    || (route.query?.from === 'design-dashboard' ? '/design-dashboard' : undefined)
+    || '/tasks'
 })
+const backButtonLabel = computed(() => globalReturn.value ? '返回来源页面' : taskReturnLabel(returnTarget.value))
+const returnToTaskCenter = computed(() => returnTarget.value.split(/[?#]/, 1)[0] === '/tasks')
 const { can } = usePermission()
 const permissionsStore = usePermissionsStore()
 const { loading: cancelLoading, needForceConfirm, cancel } = useTaskCancel()
@@ -946,11 +956,7 @@ async function load() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '任务加载失败。' }
   finally { loading.value = false }
 }
-function goBack() {
-  const backState = window.history.state?.back
-  if (typeof backState === 'string' && backState.startsWith('/')) router.back()
-  else void router.push('/tasks')
-}
+function goBack() { void goBackTo(router, returnTarget.value) }
 function openWorkspace(mode: WorkspaceMode) {
   workspaceReturnFocus.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
   workspaceMode.value = mode

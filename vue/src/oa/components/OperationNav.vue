@@ -5,7 +5,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useOAAccess } from '../access'
 
 defineOptions({ inheritAttrs: false })
-defineProps<{ query?: Record<string, string> }>()
+const props = defineProps<{ query?: Record<string, string> }>()
 const route = useRoute()
 const { currentProfile, can } = useOAAccess()
 const nav = ref<HTMLElement>()
@@ -22,6 +22,9 @@ const links = computed(() => [
 function active(path: string) {
   return route.path === path || (path === '/operations/products' && route.path.startsWith(path + '/'))
 }
+function tabTarget(path: string) {
+  return route.path === path ? route.fullPath : { path, query: props.query }
+}
 watch(() => route.path, async () => {
   await nextTick()
   const el = nav.value
@@ -35,7 +38,7 @@ watch(() => route.path, async () => {
 <template>
   <DesktopSlot target="tabs">
   <nav v-bind="$attrs" ref="nav" class="operation-nav" aria-label="经营工作区">
-    <RouterLink v-for="link in links" :key="link.path" :to="{ path: link.path, query }"
+    <RouterLink v-for="link in links" :key="link.path" :to="tabTarget(link.path)"
       :class="{ selected: active(link.path) }" :aria-current="active(link.path) ? 'page' : undefined">{{ link.title }}</RouterLink>
   </nav>
   </DesktopSlot>
