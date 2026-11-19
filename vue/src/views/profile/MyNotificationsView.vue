@@ -30,13 +30,15 @@
       </div>
     </header>
 
-    <nav v-if="showExpenseActivity || showCostActivity" class="notif-oa-segment" aria-label="通知分类">
-      <RouterLink :to="{ name: 'MeNotifications' }" :aria-current="section === 'system' ? 'page' : undefined">系统通知</RouterLink>
-      <RouterLink v-if="showExpenseActivity" :to="{ name: 'MeNotifications', query: { section: 'expense' } }"
-        :aria-current="section === 'expense' ? 'page' : undefined">费用动态</RouterLink>
-      <RouterLink v-if="showCostActivity" :to="{ name: 'MeNotifications', query: { section: 'cost' } }"
-        :aria-current="section === 'cost' ? 'page' : undefined">成本复核</RouterLink>
-    </nav>
+    <DesktopSlot v-if="oaEnabled && (showExpenseActivity || showCostActivity)" target="tabs">
+      <nav class="notif-oa-segment" aria-label="通知分类">
+        <RouterLink :to="{ name: 'MeNotifications' }" :aria-current="section === 'system' ? 'page' : undefined">系统通知</RouterLink>
+        <RouterLink v-if="showExpenseActivity" :to="{ name: 'MeNotifications', query: { section: 'expense' } }"
+          :aria-current="section === 'expense' ? 'page' : undefined">费用动态</RouterLink>
+        <RouterLink v-if="showCostActivity" :to="{ name: 'MeNotifications', query: { section: 'cost' } }"
+          :aria-current="section === 'cost' ? 'page' : undefined">成本复核</RouterLink>
+      </nav>
+    </DesktopSlot>
     <ExpenseNotifications v-if="section === 'expense'" :key="expenseTab + ':' + expensePage" :initial-tab="expenseTab" :initial-page="expensePage" />
     <CostRequestInbox v-else-if="section === 'cost'" :key="router.currentRoute.value.fullPath" />
     <div v-else class="notif-layout">
@@ -259,6 +261,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import { taskDetailLocation } from '@/oa/taskNavigation'
 import {
   BellRing,
@@ -796,7 +799,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.notif-oa-segment { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 8px; }
+.notif-oa-segment { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
 .notif-oa-segment a { display: inline-flex; align-items: center; min-height: 40px; padding-inline: 12px; border-bottom: 2px solid transparent; }
 .notif-oa-segment a[aria-current='page'] { border-color: var(--oa-accent); color: var(--oa-accent); font-weight: 600; }
 .notif-page {

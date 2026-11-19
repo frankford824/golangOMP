@@ -2,6 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { TOKEN_STORAGE_KEY } from '@/services/http'
 
 const mocks = vi.hoisted(() => ({
   login: vi.fn(),
@@ -52,7 +53,7 @@ describe('permissions login recovery', () => {
         data: {
           session: { token: 'login-token' },
           user: {
-            id: '17', username: 'designer-17', display_name: '设计十七', department: '设计部', team: '常规组', roles: ['designer'],
+            id: '17', username: 'designer-17', display_name: '设计十七', department: '设计部', department_id: 23, team: '常规组', roles: ['designer'],
             frontend_access: { menus: ['task_list'], pages: ['task_list'], actions: ['task.view'], roles: ['designer'] },
           },
         },
@@ -65,7 +66,9 @@ describe('permissions login recovery', () => {
     expect(mocks.me).not.toHaveBeenCalled()
     expect(store.currentUser?.name).toBe('设计十七')
     expect(store.actions).toContain('task.view')
-    expect(localStorage.getItem('access_token')).toBe('login-token')
+    expect(store.actorDepartmentId).toBe(23)
+    expect(store.actorDepartment).toBe('设计部')
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('login-token')
     expect(mocks.startRealtime).toHaveBeenCalledTimes(1)
   })
 
@@ -76,7 +79,7 @@ describe('permissions login recovery', () => {
     const store = usePermissionsStore()
     await expect(store.loginWithCredentials('legacy-user', 'password-value')).rejects.toMatchObject({ status: 429 })
 
-    expect(localStorage.getItem('access_token')).toBe('keep-on-429')
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('keep-on-429')
   })
 
   it('clears a newly issued token when compatibility /auth/me returns 401', async () => {
@@ -86,6 +89,6 @@ describe('permissions login recovery', () => {
     const store = usePermissionsStore()
     await expect(store.loginWithCredentials('legacy-user', 'password-value')).rejects.toMatchObject({ status: 401 })
 
-    expect(localStorage.getItem('access_token')).toBeNull()
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
   })
 })

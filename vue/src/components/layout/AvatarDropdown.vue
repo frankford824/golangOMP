@@ -1,12 +1,14 @@
 <template>
   <div ref="rootEl" class="relative">
     <button
+      ref="triggerEl"
       type="button"
       class="avatar-trigger"
       :class="{ 'avatar-trigger--oa': oaEnabled }"
       :data-initial="oaEnabled && !userAvatar ? userInitial : undefined"
       :style="oaEnabled && userAvatar ? { '--account-photo': 'url(' + JSON.stringify(userAvatar) + ')' } : undefined"
       :aria-label="`${userName}，账户菜单`"
+      :title="oaEnabled ? userName : undefined"
       :aria-expanded="open"
       aria-haspopup="menu"
       :aria-controls="open ? userMenuId : undefined"
@@ -20,15 +22,15 @@
       <ChevronDown v-if="!oaEnabled" class="avatar-trigger__chevron" :size="15" aria-hidden="true" />
     </button>
 
-    <div v-show="open" :id="userMenuId" role="menu" class="avatar-dropdown-menu">
-      <div class="avatar-summary" aria-hidden="true">
-        <span class="avatar-summary__photo">
+    <div v-show="open" :id="userMenuId" role="menu" class="avatar-dropdown-menu" :class="{ 'avatar-dropdown-menu--oa': oaEnabled }">
+      <div class="avatar-summary" :aria-hidden="!oaEnabled">
+        <span class="avatar-summary__photo" aria-hidden="true">
           <img v-if="userAvatar" :src="userAvatar" alt="" />
           <span v-else>{{ userInitial }}</span>
         </span>
         <div>
           <strong>{{ userName }}</strong>
-          <small>{{ accountLabel }}</small>
+          <small>{{ oaEnabled ? roleLabel + ' / ' + accountLabel : accountLabel }}</small>
         </div>
       </div>
 
@@ -43,12 +45,12 @@
           exact-active-class=""
           @click="closeMenu"
         >
-          <component :is="item.icon" :size="15" aria-hidden="true" />
+          <component v-if="!oaEnabled" :is="item.icon" :size="15" aria-hidden="true" />
           <span>{{ item.label }}</span>
         </router-link>
       </section>
 
-      <section class="avatar-task-group" aria-label="我的任务">
+      <section v-if="!oaEnabled" class="avatar-task-group" aria-label="我的任务">
         <div class="avatar-task-group__title">
           <ClipboardList :size="15" aria-hidden="true" />
           <span>我的任务</span>
@@ -70,7 +72,7 @@
       </section>
 
       <button type="button" role="menuitem" class="avatar-menu-logout" @click="logout">
-        <LogOut :size="15" aria-hidden="true" />
+        <LogOut v-if="!oaEnabled" :size="15" aria-hidden="true" />
         <span>退出登录</span>
       </button>
     </div>
@@ -91,6 +93,7 @@ import {
   UserRound,
 } from 'lucide-vue-next'
 import { usePermissionsStore } from '@/stores/permissions'
+import { formatUserRoleForDisplay } from '@/domain/user-workflow-roles'
 
 interface TaskStatusItem {
   key: string
@@ -105,6 +108,7 @@ const router = useRouter()
 const permissionsStore = usePermissionsStore()
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
+const triggerEl = ref<HTMLButtonElement | null>(null)
 const userMenuId = 'avatar-user-menu'
 
 const userName = computed(() => permissionsStore.currentUser?.name ?? '未登录')
@@ -114,11 +118,15 @@ const accountLabel = computed(
   () => permissionsStore.currentUser?.account || permissionsStore.currentUser?.username || permissionsStore.currentUser?.id || '账号',
 )
 
+const roleLabel = computed(() => formatUserRoleForDisplay(permissionsStore.currentUser?.role))
+
 const accountItems = [
   { label: '个人中心', to: '/me', icon: UserRound },
   { label: '安全设置', to: '/me/security', icon: LockKeyhole },
   { label: '我的组织', to: '/me/org', icon: Building2 },
-  { label: '通知中心', to: '/me/notifications', icon: Bell },
+  oaEnabled
+    ? { label: '我的任务草稿', to: '/me/task-drafts' }
+    : { label: '通知中心', to: '/me/notifications', icon: Bell },
 ]
 
 const taskStatusItems: TaskStatusItem[] = [
@@ -173,6 +181,7 @@ function onDocumentKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     event.preventDefault()
     closeMenu()
+    if (oaEnabled) triggerEl.value?.focus()
   }
 }
 
@@ -464,13 +473,77 @@ function logout(): void {
   }
 }
 
-.avatar-trigger--oa { border-radius:6px; min-height:32px; border:1px solid var(--yb-line-control); }
-.avatar-trigger--oa::before {
-  content:attr(data-initial); display:grid; place-items:center; flex:0 0 22px; height:22px; border-radius:50%;
-  font:500 12px/1 var(--oa-font); color:rgb(var(--yb-text-inverse));
-  background:var(--oa-accent) var(--account-photo,none) center / cover no-repeat;
+.avatar-trigger--oa {
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--yb-line-control);
+  border-radius: 6px;
+  box-shadow: none;
 }
-.avatar-trigger--oa::after { content:''; width:6px; height:6px; border-right:1px solid currentColor; border-bottom:1px solid currentColor; transform:rotate(45deg); margin:-3px 2px 0 0; }
-.avatar-trigger--oa .avatar-trigger__name { line-height:normal; }
-@media (max-width:767px) { .avatar-trigger--oa::after {display:none;} }
+
+.avatar-trigger--oa .avatar-trigger__name { display: none; }
+
+.avatar-trigger--oa::before {
+  content: attr(data-initial);
+  display: grid;
+  place-items: center;
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  font: 500 12px/1 var(--oa-font);
+  color: rgb(var(--yb-text-inverse));
+  background: var(--oa-accent) var(--account-photo, none) center / cover no-repeat;
+}
+
+.avatar-dropdown-menu--oa {
+  box-sizing: border-box;
+  right: 0;
+  width: 208px;
+  gap: 0;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.avatar-dropdown-menu--oa .avatar-summary {
+  min-height: 52px;
+  padding: 6px 8px;
+  gap: 8px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.avatar-dropdown-menu--oa .avatar-summary__photo {
+  width: 32px;
+  height: 32px;
+  background: var(--oa-accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.avatar-dropdown-menu--oa .avatar-summary strong { font-weight: 600; }
+.avatar-dropdown-menu--oa .avatar-summary small { margin-top: 2px; }
+.avatar-dropdown-menu--oa .avatar-menu-group { display: flex; flex-direction: column; gap: 0; }
+
+#app .avatar-dropdown-menu--oa :is(.avatar-menu-row, .avatar-menu-logout) {
+  box-sizing: border-box;
+  display: flex;
+  justify-content: flex-start;
+  min-height: 34px;
+  height: 34px;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.avatar-dropdown-menu--oa .avatar-menu-row:is(:hover, :focus-visible, .avatar-menu-row--current) { background: rgb(var(--yb-surface-hover)); }
+.avatar-dropdown-menu--oa .avatar-menu-group { padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px solid rgb(var(--yb-border-slate)); }
+.avatar-dropdown-menu--oa .avatar-menu-logout { color: var(--oa-destructive-text); }
+.avatar-dropdown-menu--oa .avatar-menu-logout:is(:hover, :focus-visible) { background: var(--oa-alert-tint); }
 </style>

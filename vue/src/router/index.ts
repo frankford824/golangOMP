@@ -10,6 +10,7 @@ import {
 } from '@/router/home-fallback'
 import { installUsageTelemetry } from '@/shared/telemetry/usage'
 import { ensureOAAccess, oaEnabled, useOAAccess } from '@/oa/access'
+import { isUnassignedDesignDepartment } from '@/oa/taskBoardAccess'
 import { feeTabs, oaRoutes } from '@/oa/routes'
 
 /**
@@ -198,6 +199,15 @@ router.beforeEach(async (to, _from, next) => {
   if (oaEnabled && currentUser) {
     await ensureOAAccess()
     const { can } = useOAAccess()
+    if (to.name === 'MeTaskDrafts' && permissionsStore.hasMenu('task_list') && permissionsStore.hasAction('task.create')) {
+      next({ name: 'TaskList', query: { ...to.query, tab: 'drafts' }, hash: to.hash })
+      return
+    }
+    if (to.name === 'DesignDepartmentDashboard' && isUnassignedDesignDepartment(permissionsStore)
+      && permissionsStore.hasMenu('dashboard') && permissionsStore.hasAction('task.view')) {
+      next({ name: 'Dashboard', query: { workspace: 'tasks', designScope: 'all' } })
+      return
+    }
     if (to.name === 'FeesHome') {
       const defaultTab = feeTabs.find(tab => tab.actions.some(can))
       if (defaultTab) {

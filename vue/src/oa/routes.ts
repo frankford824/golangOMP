@@ -12,8 +12,8 @@ const peopleMeta = { requiresAuth: true, oaAction: 'people.manage', oaFallback: 
 export const feeTabs = [
   { mode: 'approval', label: '审批待办', actions: ['finance.approve', 'finance.pay'] },
   { mode: 'mine', label: '我的申请', actions: ['finance.apply'] },
-  { mode: 'report', label: '费用报表', actions: ['finance.report'] },
   { mode: 'templates', label: '模板与授权', actions: ['finance.templates', 'finance.admin'] },
+  { mode: 'report', label: '费用报表', actions: ['finance.report'] },
 ] as const
 
 export const oaRoutes: RouteRecordRaw[] = oaEnabled ? [

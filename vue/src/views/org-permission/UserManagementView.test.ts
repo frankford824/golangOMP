@@ -18,6 +18,7 @@ import { patchUserMembership } from '@/composables/useOrgPermissionData'
 import { usePermissionsStore } from '@/stores/permissions'
 import { DataScopeEnum, RoleEnum, type PermissionUser } from '@/types'
 import { accessPolicyApi } from '@/services/api/accessPolicyApi'
+import { oaEnabled } from '@/oa/access'
 
 const permissionMock = vi.hoisted(() => ({
   allowedActions: new Set<string>(),
@@ -370,17 +371,22 @@ describe('UserManagementView role governance', () => {
       }
       await flushPromises()
     }
-    await click('批量删除')
+    const deleteLabel = oaEnabled ? '批量删除' : '删除所选'
+    if (oaEnabled) {
+      expect(wrapper.findAll('button').some((item) => item.text() === deleteLabel)).toBe(false)
+    } else {
+      await click('批量删除')
+    }
     const checkbox = (label: string) => wrapper.get<HTMLInputElement>(`input[aria-label="${label}"]`)
     expect(checkbox('选择账号 current').element.disabled).toBe(true)
     expect(checkbox('选择账号 protected').element.disabled).toBe(true)
     await checkbox('选择本页可删除账号').setValue(true)
-    expect(wrapper.text()).toContain('已选本页 2 个账号')
-    await click('删除所选')
+    expect(wrapper.text()).toContain(import.meta.env.VITE_OA_FEATURES === 'true' ? '已选 2 人' : '已选本页 2 个账号')
+    await click(deleteLabel)
     expect(document.body.querySelector('[aria-label="待删除账号"]')?.textContent).toContain('批量甲（batch-ok）')
     await click('取消')
     expect(usersApi.remove).not.toHaveBeenCalled()
-    await click('删除所选')
+    await click(deleteLabel)
     await click('确认批量删除')
     expect(vi.mocked(usersApi.remove).mock.calls.map(([id]) => id)).toEqual(['2', '3'])
     const result = document.body.querySelector('[role="dialog"]')

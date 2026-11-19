@@ -131,10 +131,9 @@
 </template>
 
 <script setup lang="ts">
-import { oaEnabled } from '@/oa/access'
+import { oaEnabled, useOAAccess } from '@/oa/access'
 import { computed, onMounted, ref, watch } from 'vue'
 import { usePermissionsStore } from '@/stores/permissions'
-import { useOAAccess } from '@/oa/access'
 import { useRouter } from 'vue-router'
 import { Camera, LogOut, Save, Trash2, Upload, UserRound } from 'lucide-vue-next'
 import { meApi } from '@/services/api/meApi'
@@ -184,8 +183,8 @@ const { can: canOA } = useOAAccess()
 const panels = computed<Panel[]>(() => [
   { title: '安全设置', to: '/me/security', desc: '密码与登录安全' },
   { title: '我的组织', to: '/me/org', desc: '部门、团队与角色' },
-  { title: '通知中心', to: '/me/notifications', desc: '系统消息' },
-  { title: '我的草稿', to: '/me/task-drafts', desc: '未提交任务' },
+  ...(!oaEnabled ? [{ title: '通知中心', to: '/me/notifications', desc: '系统消息' }] : []),
+  ...(!oaEnabled || permissionsStore.hasAction('task.create') ? [{ title: '我的草稿', to: oaEnabled && permissionsStore.hasMenu('task_list') ? '/tasks?tab=drafts' : '/me/task-drafts', desc: '未提交任务' }] : []),
   { title: '我的任务', to: '/tasks?tab=mine', desc: '任务状态筛选' },
   ...(canOA('orders.view') ? [{ title: '我的业绩', to: '/me/performance', desc: '实际销售与月末预估' }] : []),
   ...(canOA('finance.apply') ? [{ title: '我的费用申请', to: '/fees/mine', desc: '申请、审批与付款记录' }] : []),

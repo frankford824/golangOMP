@@ -7,8 +7,6 @@
           <component :is="oaEnabled ? 'h1' : 'h2'" class="directory-title">{{ oaEnabled ? '人员管理' : '用户与角色管理' }}</component>
         </div>
         <DesktopSlot target="actions"><div class="directory-header-action">
-          <RouterLink v-if="oaProfile?.super_admin" class="um-btn um-btn--ghost" :to="{ name: 'PeopleShopBindings', query: { peopleFrom: oaRoute?.fullPath } }">店铺人员绑定</RouterLink>
-          <RouterLink v-if="canManagePeople" class="um-btn um-btn--ghost" :to="{ name: 'PeopleRoster', query: { peopleFrom: oaRoute?.fullPath } }">人员花名册</RouterLink>
           <BaseButton
             v-if="canCreateUser"
             class="oa-new-user" variant="primary"
@@ -16,7 +14,7 @@
             size="sm"
             @click="showCreateModal = true"
           >
-            新增用户
+            <Plus v-if="oaEnabled" :size="16" aria-hidden="true" />新增用户
           </BaseButton>
         </div></DesktopSlot>
       </header>
@@ -175,7 +173,7 @@
               </div>
               <div class="directory-actions">
                 <BaseButton
-                  v-if="canManageAccess && !batchSelectMode"
+                  v-if="!oaEnabled && canManageAccess && !batchSelectMode"
                   variant="secondary"
                   size="sm"
                   :disabled="listLoading || !eligibleBatchUsers.length"
@@ -183,8 +181,9 @@
                 >批量删除</BaseButton>
               </div>
             </div>
-            <div v-if="batchSelectMode" class="batch-selection-bar">
-              <span>已选本页 {{ selectedBatchUsers.length }} 个账号</span>
+            <div v-if="oaEnabled ? selectedBatchUsers.length > 0 : batchSelectMode" class="batch-selection-bar">
+              <span v-if="oaEnabled">已选 {{ selectedBatchUsers.length }} 人</span>
+              <span v-else>已选本页 {{ selectedBatchUsers.length }} 个账号</span>
               <div class="directory-actions">
                 <BaseButton variant="ghost" size="sm" @click="exitBatchSelect">取消选择</BaseButton>
                 <BaseButton
@@ -192,7 +191,7 @@
                   size="sm"
                   :disabled="listLoading || !selectedBatchUsers.length"
                   @click="openBatchDelete"
-                >删除所选</BaseButton>
+                >{{ oaEnabled ? '批量删除' : '删除所选' }}</BaseButton>
               </div>
             </div>
             <div class="toolbar">
@@ -452,7 +451,7 @@ const directoryChrome = inject(desktopChromeKey, null)
 const desktopDirectory = computed(() => Boolean(directoryChrome?.desktop.value))
 
 import { ref, computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
-import { ChevronDown } from 'lucide-vue-next'
+import { Plus, ChevronDown } from 'lucide-vue-next'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { usersApi } from '@/services/api/usersApi'
 import {
@@ -491,7 +490,7 @@ import {
   type UserRow,
 } from './userManagementTypes'
 import { usePermissionsStore } from '@/stores/permissions'
-import { RouterLink, useRoute, useRouter, type LocationQuery } from 'vue-router'
+import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { goBackTo } from '@/oa/returnNavigation'
 import { directoryQuery, positiveQueryNumber } from '@/oa/peopleNavigation'
 import { oaEnabled, useOAAccess } from '@/oa/access'
@@ -510,7 +509,7 @@ import BaseTablePager from '@/components/base/BaseTablePager.vue'
 const permissionsStore = usePermissionsStore()
 const oaRoute = oaEnabled ? useRoute() : undefined
 const oaRouter = oaEnabled ? useRouter() : undefined
-const { can: canOA, currentProfile: oaProfile } = useOAAccess()
+const { can: canOA } = useOAAccess()
 const canManagePeople = computed(() => canOA('people.manage'))
 const RestrictedPeople = defineAsyncComponent(() => import('@/oa/pages/People.vue'))
 const { can } = usePermission()
@@ -563,7 +562,7 @@ const orgFiltersOpen = ref(false)
 let directoryResize: ResizeObserver | undefined
 const batchSelectMode = ref(false)
 const directoryScrollWidth = computed(() =>
-  (compactDirectory.value ? 240 : 744) + (batchSelectMode.value ? 42 : 0),
+  (compactDirectory.value ? 240 : 744) + ((batchSelectMode.value || (oaEnabled && selectedBatchUsers.value.length > 0)) ? 42 : 0),
 )
 const batchSelectedIDs = ref<string[]>([])
 const eligibleBatchUsers = computed(() => users.value.filter(canSelectForDeletion))
@@ -1116,7 +1115,7 @@ const orgActionConfirmText = computed(() => {
   return '确认停用'
 })
 const userTableColumns = computed<DataTableColumns<UserRow>>(() => {
-  const selectionColumn: DataTableColumns<UserRow> = batchSelectMode.value ? [{
+  const selectionColumn: DataTableColumns<UserRow> = (batchSelectMode.value || (oaEnabled && canManageAccess.value)) ? [{
     key: 'batch-selection',
     width: 42,
     fixed: 'left',
@@ -2524,6 +2523,8 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 0.55rem;
 }
+
+.oa-new-user :deep(> span) { display: inline-flex; align-items: center; gap: 6px; }
 
 .directory-header-action {
   display: flex;

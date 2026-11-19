@@ -7,6 +7,7 @@
     :class="{ 'oa-task-board': oaEnabled }"
     class="dashboard-shell w-full min-w-0 max-w-full bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]"
   >
+    <TaskBoardTabs v-if="oaEnabled" active="overview" />
     <div v-if="error" class="dashboard-error mx-auto max-w-lg p-8 text-center">
       <p>{{ error }}</p>
       <BaseButton variant="primary" size="sm" @click="load()">重试</BaseButton>
@@ -23,7 +24,7 @@
         >
           <div class="board-header-content yb-page-heading-copy">
             <h1 class="board-header-title yb-page-title">
-              任务运营主页总览
+              {{ oaEnabled ? '任务运营总览' : '任务运营主页总览' }}
             </h1>
             <p class="board-header-subtitle yb-page-subtitle">
               先看今日是否正常，再判断队列积压、质量风险和下一步处理入口。
@@ -33,7 +34,7 @@
             <DesktopSlot target="actions">
               <div class="dashboard-top-actions">
             <BaseButton
-              v-if="canOpenDepartmentDashboard"
+              v-if="!oaEnabled && canOpenDepartmentDashboard"
               type="button"
               variant="primary"
               size="sm"
@@ -58,6 +59,9 @@
           </div>
         </header>
 
+        <p v-if="usingAllVisibleScope" class="dashboard-scope-note" role="status">
+          当前账号未归属部门，显示任务运营总览的全部可见范围。
+        </p>
         <p v-if="refreshWarning" class="dashboard-refresh-warning" role="status">
           {{ refreshWarning }}；当前保留上次成功数据。
         </p>
@@ -96,13 +100,11 @@
           </div>
         </div>
 
-        <DesktopSlot target="tabs">
-          <nav class="dashboard-section-nav" aria-label="看板内容">
-            <button type="button" :aria-current="currentSection === 'overview' ? 'location' : undefined" @click="scrollBoard('overview', overviewSection)">趋势与状态</button>
-            <button type="button" :aria-current="currentSection === 'activity' ? 'location' : undefined" @click="scrollBoard('activity', activitySection)">任务与动态</button>
-            <button type="button" :aria-current="currentSection === 'risk' ? 'location' : undefined" @click="scrollBoard('risk', riskSection)">风险提醒</button>
-          </nav>
-        </DesktopSlot>
+        <nav class="dashboard-section-nav" aria-label="看板内容">
+          <button type="button" :aria-current="currentSection === 'overview' ? 'location' : undefined" @click="scrollBoard('overview', overviewSection)">趋势与状态</button>
+          <button type="button" :aria-current="currentSection === 'activity' ? 'location' : undefined" @click="scrollBoard('activity', activitySection)">任务与动态</button>
+          <button type="button" :aria-current="currentSection === 'risk' ? 'location' : undefined" @click="scrollBoard('risk', riskSection)">风险提醒</button>
+        </nav>
 
         <!-- 任务经营指标与任务看板共用 task.view 权限。 -->
         <section
@@ -370,6 +372,9 @@ import RiskListCard from '@/components/dashboard/RiskListCard.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import TaskBoardTabs from '@/oa/components/TaskBoardTabs.vue'
+import { isUnassignedDesignDepartment } from '@/oa/taskBoardAccess'
+import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
 import { formatDateBeijing } from '@/utils/date'
 import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
@@ -377,6 +382,9 @@ import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
 const DashboardTrendChart = defineAsyncComponent(() => import('@/components/dashboard/DashboardTrendChart.vue'))
 
 const router = useRouter()
+const usingAllVisibleScope = computed(() => oaEnabled && router.currentRoute?.value.query.designScope === 'all' &&
+  isUnassignedDesignDepartment(usePermissionsStore()),
+)
 function openDesignDashboard() {
   const source = router.currentRoute?.value.fullPath
   void router.push(source ? { name: 'DesignDepartmentDashboard', query: { taskBoardFrom: source } } : '/design-dashboard')
@@ -1726,6 +1734,10 @@ onBeforeUnmount(stopRefreshLoop)
     transition: none;
   }
 }
+.oa-task-board .dashboard-section-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.oa-task-board .dashboard-section-nav button { min-height: 32px; padding-inline: 8px; color: rgb(var(--yb-text-muted-strong)); }
+.oa-task-board .dashboard-section-nav button[aria-current=location] { background: rgb(var(--yb-brand-soft)); color: var(--oa-accent); }
+.dashboard-scope-note { font-size: 13px; color: rgb(var(--yb-text-muted-strong)); }
 .oa-task-board .board-header-title { font-size: 18px; font-weight: 600; }
 .oa-task-board .dashboard-panel-heading { font-size: 13px; font-weight: 500; }
 .oa-task-board .chart-panel-sub, .oa-task-board .trend-summary-label { font-size: 12px; }
@@ -1755,10 +1767,7 @@ onBeforeUnmount(stopRefreshLoop)
 @media (min-width: 1280px) {
   .oa-task-board .board-header, .oa-task-board .board-header-aside { display: contents; }
   .oa-task-board .board-header-content { display: none; }
-  .dashboard-section-nav { border-bottom: 0; align-self: stretch; }
-  .dashboard-section-nav button { padding-inline: 8px; }
-  .dashboard-section-nav button[aria-current=location] { border-bottom-color: var(--oa-accent); border-radius: 0; color: var(--oa-accent); font-weight: 500; }
-  .dashboard-section-nav button:hover, .dashboard-section-nav button:focus-visible { border-bottom-color: rgb(var(--yb-brand)); color: rgb(var(--yb-brand)); }
+  .oa-task-board .dashboard-section-nav { border: 0; }
   .dashboard-top-actions { flex-wrap: nowrap; }
   .dashboard-top-actions :deep(button) { min-height: 28px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
   .oa-task-board .board-header-updated { white-space: nowrap; font-size: 12px; }
@@ -1789,7 +1798,6 @@ onBeforeUnmount(stopRefreshLoop)
 :global(html.oa-live-ui #app .content .oa-task-board .dashboard-panel-heading) { font-size: 13px; font-weight: 500; }
 :global(html.oa-live-ui #app .content .oa-task-board :is(strong,b)) { font-weight: 500; }
 :global(html.oa-live-ui #app .content .oa-task-board :is(button,input:not([type=checkbox],[type=file]))) { border-radius: 6px; }
-:global(html.oa-live-ui #app .oa-bar-tabs .dashboard-section-nav button) { border-radius: 0; }
 :global(html.oa-live-ui #app .oa-bar-page-actions .dashboard-top-actions button) { border-radius: 6px; }
 :global(html.oa-live-ui #app .oa-bar-page-actions .dashboard-top-actions button > span) { display: contents; }
 </style>

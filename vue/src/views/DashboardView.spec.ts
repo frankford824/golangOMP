@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { oaEnabled } from '@/oa/access'
 import type { TaskOperationalOverview } from '@/types/dashboard'
 
 const { operationalOverview, push } = vi.hoisted(() => ({
@@ -100,6 +101,7 @@ describe('DashboardView authoritative refresh', () => {
         stubs: {
           DashboardKpiCard: { template: '<div class="kpi-stub" :data-title="title" :data-route="route">{{ title }} {{ value }}</div>', props: ['title', 'value', 'route'] },
           DashboardTrendChart: true,
+          TaskBoardTabs: true,
           DashboardTaskSnapshotTable: true,
           RouterLink: true,
           RecentEventStream: true,
@@ -115,10 +117,14 @@ describe('DashboardView authoritative refresh', () => {
     expect(wrapper.text()).toContain('本周完成率 20.0%')
     expect(wrapper.text()).toContain('今日结单')
     expect(wrapper.get('.dashboard-baseline').text()).toBe('昨日全天 6')
-	const departmentBoardButton = wrapper.findAll('button').find((button) => button.text().includes('设计部看板'))
-	expect(departmentBoardButton).toBeTruthy()
-	await departmentBoardButton!.trigger('click')
-	expect(push).toHaveBeenCalledWith('/design-dashboard')
+    if (oaEnabled) {
+      expect(wrapper.find('task-board-tabs-stub').attributes('active')).toBe('overview')
+    } else {
+      const departmentBoardButton = wrapper.findAll('button').find((button) => button.text().includes('设计部看板'))
+      expect(departmentBoardButton).toBeTruthy()
+      await departmentBoardButton!.trigger('click')
+      expect(push).toHaveBeenCalledWith('/design-dashboard')
+    }
     expect(wrapper.text()).not.toContain('待仓库')
     expect(wrapper.text()).not.toContain('待结单')
     const routesByTitle = Object.fromEntries(

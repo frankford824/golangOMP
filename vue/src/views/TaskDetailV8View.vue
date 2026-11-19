@@ -6,9 +6,7 @@
       {{ error }}
     </div>
     <template v-else-if="task">
-      <DesktopSlot v-if="oaEnabled && task.task_no" target="title">
-        <span class="task-detail-context">任务详情 <span aria-hidden="true">/</span> {{ task.task_no }}</span>
-      </DesktopSlot>
+      <DetailBreadcrumb v-if="oaEnabled" module="任务中心" :identifier="task.task_no" />
       <section class="task-hero" :class="{ 'is-terminal': isTerminal }">
         <TaskDetailAtmosphere v-if="!oaEnabled" />
         <div class="hero-content">
@@ -396,8 +394,8 @@
 </template>
 
 <script setup lang="ts">
-import DesktopSlot from '@/oa/components/DesktopSlot.vue'
-import { workspaceOrigin } from '@/oa/returnNavigation'
+import DetailBreadcrumb from '@/oa/components/DetailBreadcrumb.vue'
+import { detailReturnTarget } from '@/oa/returnNavigation'
 import { oaReturnLabel } from '@/oa/pageTitle'
 import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import { goBackTo } from '@/oa/returnNavigation'
@@ -475,16 +473,16 @@ type WorkspaceMode = 'workflow' | 'defaultStyle' | 'resources' | 'attachments' |
 
 const route = useRoute()
 const router = useRouter()
-const globalReturn = computed(() => workspaceOrigin(router, route.query?.globalFrom))
 const returnTarget = computed(() => {
-  return globalReturn.value || assetTaskReturnSource(route.query?.assetDetailFrom)
+  if (oaEnabled) return detailReturnTarget(router, route.fullPath, '/tasks')
+  return assetTaskReturnSource(route.query?.assetDetailFrom)
     || taskReturnSource(route.query?.taskFrom)
     || assetTaskReturnSource(window.history.state?.back)
     || taskReturnSource(window.history.state?.back)
     || (route.query?.from === 'design-dashboard' ? '/design-dashboard' : undefined)
     || '/tasks'
 })
-const backButtonLabel = computed(() => globalReturn.value ? oaReturnLabel(globalReturn.value) : taskReturnLabel(returnTarget.value))
+const backButtonLabel = computed(() => oaEnabled ? oaReturnLabel(returnTarget.value) : taskReturnLabel(returnTarget.value))
 const { can } = usePermission()
 const permissionsStore = usePermissionsStore()
 const { loading: cancelLoading, needForceConfirm, cancel } = useTaskCancel()
@@ -1414,7 +1412,6 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .oa-task-detail .stage-copy, .oa-task-detail .brief-card, .oa-task-detail .resource-story { font-size: 13px; }
 .oa-task-detail .hero-facts dd { font-weight: 500; }
 .oa-task-detail .hero-facts :is(dt,dd) { white-space: nowrap; }
-.task-detail-context { display: none; }
 .oa-task-detail .hero-actions { margin-inline-start: auto; }
 .oa-task-detail .brief-card :is(strong,button,.section-label,.detail-chips span),
 .oa-task-detail .stage-copy :is(.stage-label,strong),
@@ -1422,7 +1419,6 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .oa-task-detail .brief-card :is(.card-heading p,small,.clamped-copy,.muted-copy) { font-size: 12px; }
 
 @media (min-width: 1280px) {
-  .task-detail-context { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 13px; font-weight: 500; }
   .oa-task-detail .overview-grid { grid-template-columns: minmax(0, 1.618fr) minmax(0, 1fr); }
   .oa-task-detail .hero-facts { flex-basis: min(550px, 46vw); grid-template-columns: minmax(90px, 1fr) max-content minmax(90px, 1fr) max-content; }
 }

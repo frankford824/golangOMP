@@ -2,8 +2,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import OAPageReturn from '../components/OAPageReturn.vue'
-import { shopBindingReturnSource, positiveQueryNumber } from '../peopleNavigation'
+import { positiveQueryNumber } from '../peopleNavigation'
 import type { HttpAppError } from '@/services/http'
 import { api, errorText, send } from '../api'
 import { useOAAccess } from '../access'
@@ -19,9 +18,6 @@ type Action = 'bind' | 'move' | 'unbind'
 const { currentProfile } = useOAAccess()
 const route = useRoute()
 const router = useRouter()
-const returnTarget = computed(() => shopBindingReturnSource(route.query.peopleFrom)
-  ?? shopBindingReturnSource(window.history.state?.back) ?? '/users')
-const returnLabel = computed(() => returnTarget.value.split(/[?#]/, 1)[0] === '/users/roster' ? '返回人员花名册' : '返回人员管理')
 const admin = computed(() => !!currentProfile.value?.super_admin)
 const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
 const people = ref<Person[]>([])
@@ -154,7 +150,6 @@ watch(() => route.query.q, (q) => {
 
 <template>
   <div class="oa-page shop-bindings">
-    <OAPageReturn :to="returnTarget">{{ returnLabel }}</OAPageReturn>
     <PageHead title="店铺人员绑定" />
     <p v-if="!admin" class="oa-error" role="alert">仅超级管理员可以管理店铺绑定。</p>
     <template v-else>

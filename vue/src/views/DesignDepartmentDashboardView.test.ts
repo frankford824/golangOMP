@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { oaEnabled } from '@/oa/access'
+import { usePermissionsStore } from '@/stores/permissions'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ dashboard: vi.fn(), push: vi.fn() }))
+const mocks = vi.hoisted(() => ({ dashboard: vi.fn() }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: { designDepartmentDashboard: mocks.dashboard } }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
 
 import DesignDepartmentDashboardView from './DesignDepartmentDashboardView.vue'
 
@@ -23,10 +26,37 @@ const payload = {
   definitions: { task_count: '任务去重' },
 }
 
+async function mountDesignDashboard() {
+  const pinia = createPinia()
+  const permissions = usePermissionsStore(pinia)
+  permissions.setCurrentUser({
+    id: '17', name: '测试部门管理员', role: 'dept_admin', departmentId: '14',
+    groupId: '', dataScope: 'department', permissions: ['task.view', 'report.view'],
+  })
+  permissions.menus = ['dashboard']
+  permissions.roles = ['department_admin']
+  permissions.actorDepartmentId = 14
+  permissions.actorDepartment = '视觉研创部'
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', name: 'Dashboard', component: { template: '<div />' } },
+      { path: '/design-dashboard', name: 'DesignDepartmentDashboard', component: DesignDepartmentDashboardView },
+    ],
+  })
+  await router.push('/design-dashboard')
+  return mount(DesignDepartmentDashboardView, {
+    global: {
+      plugins: [pinia, router],
+      stubs: { DesignDepartmentTrendChart: true, DesignDepartmentBreakdownChart: true },
+    },
+  })
+}
+
 describe('DesignDepartmentDashboardView', () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.dashboard.mockResolvedValue({ data: { data: payload } }) })
   it('renders department KPIs, people and task detail from the authoritative endpoint', async () => {
-    const wrapper = mount(DesignDepartmentDashboardView, { global: { stubs: { DesignDepartmentTrendChart: true, DesignDepartmentBreakdownChart: true } } })
+    const wrapper = await mountDesignDashboard()
     await flushPromises()
     expect(mocks.dashboard).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('视觉研创部数据看板')
@@ -35,11 +65,16 @@ describe('DesignDepartmentDashboardView', () => {
     expect(wrapper.text()).toContain('王亚琳')
     expect(wrapper.text()).toContain('RW-1')
     expect(wrapper.text()).toContain('一次通过率')
+    if (oaEnabled) {
+      const tabs = wrapper.get('nav[aria-label="任务看板"]')
+      expect(tabs.get('a[href="/?workspace=tasks"]').text()).toBe('任务运营总览')
+      expect(tabs.get('a[aria-current="page"]').text()).toBe('设计部门产能')
+    }
     wrapper.unmount()
   })
 
   it('applies person and period filters to the same endpoint', async () => {
-    const wrapper = mount(DesignDepartmentDashboardView, { global: { stubs: { DesignDepartmentTrendChart: true, DesignDepartmentBreakdownChart: true } } })
+    const wrapper = await mountDesignDashboard()
     await flushPromises()
     await wrapper.get('.person-link').trigger('click')
     await flushPromises()

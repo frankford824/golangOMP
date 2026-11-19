@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import OAEmpty from '../components/OAEmpty.vue'
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import OAPageReturn from '../components/OAPageReturn.vue'
-import { directoryQuery, peopleReturnSource, positiveQueryNumber } from '../peopleNavigation'
+import { directoryQuery, positiveQueryNumber } from '../peopleNavigation'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
 import PageHead from '../components/PageHead.vue'
 import PersonnelTerms from '../components/PersonnelTerms.vue'
@@ -25,18 +25,6 @@ const applied = ref(query.value)
 const items = ref<Person[]>([])
 const hasLoadedList = ref(false)
 const selected = computed(() => typeof route.query.user_id === 'string' && /^[1-9][0-9]*$/.test(route.query.user_id) ? route.query.user_id : undefined)
-const rosterReturnTarget = computed(() => peopleReturnSource(route.query.peopleFrom)
-  ?? peopleReturnSource(window.history.state?.back)
-  ?? { path: '/users', query: {
-    q: typeof route.query.q === 'string' ? route.query.q : undefined,
-    department: route.query.department,
-    team: route.query.team,
-    status: route.query.status,
-    page: route.query.page,
-    page_size: route.query.page_size,
-    user_id: selected.value,
-    tab: selected.value ? 'terms' : undefined,
-  } })
 const directoryTarget = computed(() => ({ path: '/users', query: directoryQuery(route.query) }))
 const selectedRecord = ref<{ id: number; name: string }>()
 const selectedName = computed(() => String(selectedRecord.value?.id) === selected.value ? selectedRecord.value?.name : items.value.find(item => String(item.id) === selected.value)?.name)
@@ -144,11 +132,9 @@ onMounted(() => { if (props.mode === 'people' && !selected.value) void run(() =>
 
 <template>
 <div class="oa-page">
-  <OAPageReturn v-if="mode === 'roster'" :to="rosterReturnTarget">返回人员管理</OAPageReturn>
-  <OAPageReturn v-else-if="selected" :to="directoryTarget">返回目录</OAPageReturn>
+  <OAPageReturn v-if="selected && mode !== 'roster'" :to="directoryTarget">返回目录</OAPageReturn>
   <PageHead :title="mode === 'roster' ? '人员花名册' : selectedName || (selected ? '人员详情' : '人员管理')">
-    <RouterLink v-if="mode !== 'roster' && !selected" class="oa-button" :to="{ path: '/users/roster', query: { peopleFrom: route.fullPath } }">人员花名册</RouterLink>
-    <RouterLink v-if="currentProfile?.super_admin" class="oa-button" :to="{ name: 'PeopleShopBindings', query: { user_id: selected || undefined, peopleFrom: route.fullPath } }">店铺人员绑定</RouterLink>
+    <RouterLink v-if="selected && mode !== 'roster' && currentProfile?.super_admin" class="oa-button" :to="{ name: 'PeopleShopBindings', query: { user_id: selected || undefined, peopleFrom: route.fullPath } }">店铺人员绑定</RouterLink>
   </PageHead>
   <p v-if="!allowed" class="oa-error" role="alert">当前账号没有人员管理权限。</p>
   <template v-else>

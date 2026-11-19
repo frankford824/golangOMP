@@ -21,6 +21,13 @@ export function workspaceOrigin(router: Router, value: unknown): string | undefi
   })
 }
 
+// Vue Router stores the preceding in-app entry (including its filters) in history.state.back.
+export function detailReturnTarget(router: Router, currentPath: string, listPath: string): string {
+  const back = router.options.history.state?.back
+  const previous = safeReturnPath(back, path => router.resolve(path).matched.some(record => !record.redirect))
+  return previous && previous !== currentPath ? previous : listPath
+}
+
 export function goBackTo(router: Router, to: RouteLocationRaw, source?: string) {
   const target = router.resolve(to)
   const back = router.options.history.state?.back

@@ -4,7 +4,7 @@
     <div class="header-card" :class="{ 'yb-page-surface': !oaEnabled }" data-page-header="task-center">
       <div class="page-header" :class="{ 'yb-page-header-row': !oaEnabled }">
         <component :is="oaEnabled ? 'h1' : 'h2'" class="page-title task-list-page-title yb-page-title">任务中心</component>
-        <DesktopSlot target="actions">
+        <DesktopSlot v-if="!draftsSelected" target="actions">
         <div class="page-header-actions">
           <div v-if="oaEnabled" class="oa-task-views" role="group" aria-label="任务视图">
             <button type="button" :aria-pressed="taskView === 'table'" @click="taskView = 'table'">表格</button>
@@ -42,23 +42,11 @@
         </DesktopSlot>
       </div>
       <DesktopSlot target="tabs">
-      <nav class="task-tabs" aria-label="任务中心列表范围">
-        <BaseButton
-          v-for="tab in taskTabs"
-          :key="tab.value"
-          size="sm"
-          :variant="activeTab === tab.value ? 'secondary' : 'ghost'"
-          :class="{ 'task-tab-active': activeTab === tab.value }"
-          :aria-pressed="activeTab === tab.value"
-          @click="setTaskTab(tab.value)"
-        >
-          {{ tab.label }}
-        </BaseButton>
-      </nav>
+      <TaskCenterTabs :active="visibleTab" @select="openTaskCenterTab" />
       </DesktopSlot>
+      <template v-if="!draftsSelected">
       <div class="toolbar">
         <div v-if="oaEnabled" class="task-exception-filters" aria-label="任务异常筛选">
-          <button type="button" :aria-pressed="activeTab === 'pool' && !filters.status.length" @click="filterUnassigned">未指派</button>
           <button type="button" :aria-pressed="filters.overdueOnly" @click="filterOverdue">已逾期</button>
         </div>
         <BaseInput
@@ -127,8 +115,11 @@
       <p v-if="tabStatusScopeHint" class="tab-status-scope-hint" role="status">
         {{ tabStatusScopeHint }}
       </p>
+      </template>
     </div>
 
+    <MyDraftsView v-if="draftsSelected" :task-center-source="route.fullPath" />
+    <template v-else>
     <Teleport to="body">
       <div v-if="advancedFilterOpen" class="task-filter-drawer-layer">
         <button class="task-filter-backdrop" aria-label="关闭高级筛选" @click="advancedFilterOpen = false" />
@@ -696,11 +687,12 @@
         </div>
       </div>
     </BaseModal>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount, onMounted, onDeactivated, nextTick, reactive, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, onDeactivated, nextTick, reactive, watch, defineAsyncComponent } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -712,7 +704,8 @@ import type { TaskListFilters } from '@/components/task/TaskFilterPanel.vue'
 import TaskFilterPanel from '@/components/task/TaskFilterPanel.vue'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
-import { taskDetailLocation } from '@/oa/taskNavigation'
+import { listTabFromQuery, taskCenterTabLocation, taskDetailLocation, type TaskCenterTab, type TaskListTab } from '@/oa/taskNavigation'
+import TaskCenterTabs from '@/oa/components/TaskCenterTabs.vue'
 import { errorText, send } from '@/oa/api'
 import { Copy } from 'lucide-vue-next'
 import TaskTypeBadge from '@/components/task/TaskTypeBadge.vue'
@@ -760,7 +753,7 @@ const permissionsStore = usePermissionsStore()
 const { can, canAccessAction } = usePermission()
 
 // ── 列表初始状态：只接受当前路由 query；避免登录落地页恢复旧筛选 ─────────────
-type TaskListTab = 'all' | 'pool' | 'mine' | 'archived' | 'terminated'
+const MyDraftsView = defineAsyncComponent(() => import('@/views/profile/MyDraftsView.vue'))
 type TaskOperationalBucket =
   | 'active_tasks'
   | 'design_pending'
@@ -783,13 +776,9 @@ const operationalBucketLabels: Record<TaskOperationalBucket, string> = {
 }
 const operationalBucket = ref<TaskOperationalBucket | ''>(parseOperationalBucket(route.query.operational_bucket))
 
-const taskTabs: Array<{ label: string; value: TaskListTab }> = [
-  { label: '全任务', value: 'all' },
-  { label: '未指派任务', value: 'pool' },
-  { label: '我的任务', value: 'mine' },
-  { label: '已归档', value: 'archived' },
-  { label: '已终止', value: 'terminated' },
-]
+const canUseDrafts = computed(() => oaEnabled && can('task.create'))
+const draftsSelected = computed(() => canUseDrafts.value && route.name === 'TaskList' && route.query.tab === 'drafts')
+const visibleTab = computed<TaskCenterTab>(() => draftsSelected.value ? 'drafts' : activeTab.value)
 
 const emptyDescription = computed(() => {
   if (activeTab.value === 'terminated') return '当前暂无已终止任务'
@@ -826,15 +815,8 @@ function parseStatusQuery(value: unknown): ActiveTaskStatus[] {
     .filter(Boolean) as ActiveTaskStatus[]
 }
 
-function parseTaskTab(value: unknown): TaskListTab {
-  const raw = queryString(value)
-  return raw === 'pool' || raw === 'mine' || raw === 'archived' || raw === 'terminated'
-    ? raw
-    : 'all'
-}
-
 const searchKeyword = ref(queryString(route.query.q))
-const activeTab = ref<TaskListTab>(parseTaskTab(route.query.tab))
+const activeTab = ref<TaskListTab>(listTabFromQuery(route.query, canUseDrafts.value))
 type TaskSortKey = 'taskNo' | 'updatedAt' | 'createdAt' | 'dueAt'
 const sortKey = ref<TaskSortKey>('updatedAt')
 const sortOrder = ref<'asc' | 'desc'>('desc')
@@ -1203,8 +1185,23 @@ function setTaskTab(tab: TaskListTab) {
   operationalBucket.value = ''
   if (filters.value.status.length > 0) {
     filters.value = { ...filters.value, status: [] }
+    quickStatus.value = ''
   }
   activeTab.value = tab
+}
+
+function openTaskCenterTab(tab: TaskCenterTab) {
+  if (tab === visibleTab.value) return
+  if (tab === 'drafts') {
+    if (peekId.value) closePeek()
+    void router.push(taskCenterTabLocation(tab, route.query, activeTab.value, route.hash))
+    return
+  }
+  if (!draftsSelected.value) {
+    setTaskTab(tab)
+    return
+  }
+  void router.push(taskCenterTabLocation(tab, route.query, activeTab.value, route.hash))
 }
 
 const tabStatusScopeHint = computed(() => {
@@ -1377,7 +1374,7 @@ watch(peekId, async (id, _previous, onCleanup) => {
 })
 const wideInspector = oaEnabled ? window.matchMedia('(min-width: 2300px)') : undefined
 function syncDefaultPeek() {
-  if (!oaEnabled || tasksStore.loading || claimingTaskId.value || route.name !== 'TaskList') return
+  if (!oaEnabled || draftsSelected.value || tasksStore.loading || claimingTaskId.value || route.name !== 'TaskList') return
   if (!peekTask.value) peekId.value = ''
   if (!peekId.value && !inspectorAutoDismissed.value && wideInspector?.matches) {
     peekId.value = pagedList.value[0]?.id ?? ''
@@ -1403,13 +1400,6 @@ function selectTaskPage() {
     if (clear) selectedIds.delete(task.id)
     else selectedIds.add(task.id)
   }
-}
-
-function filterUnassigned() {
-  operationalBucket.value = ''
-  quickStatus.value = ''
-  if (activeTab.value !== 'pool') setTaskTab('pool')
-  else removeActiveFilter('status')
 }
 
 function filterOverdue() {
@@ -2144,6 +2134,7 @@ function jumpToPage() {
 
 /** 方案 B：服务端分页 + 搜索，统一走 loadTaskListForView */
 async function refreshList(_force?: boolean, requestedPage = 1) {
+  if (draftsSelected.value) return
   const seq = ++listActionSeq
   refreshingList.value = true
   listActionError.value = ''
@@ -2169,7 +2160,7 @@ onMounted(async () => {
   wideInspector?.addEventListener('change', syncDefaultPeek)
   overlayMedia?.addEventListener('change', syncPeekMode)
   await refreshList(true, page.value)
-  await loadAuditHandoverEntryCount()
+  if (!draftsSelected.value) await loadAuditHandoverEntryCount()
 })
 
 onBeforeUnmount(() => {
@@ -2221,7 +2212,7 @@ watch(activeTab, () => {
 watch(
   () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value, operationalBucket.value, page.value, pageSize.value, taskView.value] as const,
   () => {
-    if (oaEnabled && (route.name !== 'TaskList' || restoringListQuery)) return
+    if (oaEnabled && (route.name !== 'TaskList' || draftsSelected.value || restoringListQuery)) return
     const q = { ...route.query } as Record<string, string | string[] | undefined>
     const kw = searchKeyword.value.trim()
     if (kw) q.q = kw
@@ -2274,13 +2265,13 @@ watch(
 
 watch(
   () => route.query,
-  (query) => {
+  (query, previousQuery) => {
     if (oaEnabled && route.name !== 'TaskList') return
     if (oaEnabled) {
       restoringListQuery = true
       void nextTick(() => { restoringListQuery = false })
     }
-    const nextTab = parseTaskTab(query.tab)
+    const nextTab = listTabFromQuery(query, canUseDrafts.value)
     const nextOperationalBucket = parseOperationalBucket(query.operational_bucket)
     const nextFilters = {
       ...filters.value,
@@ -2348,7 +2339,10 @@ watch(
       taskView.value = query.view === 'cards' ? 'cards' : 'table'
       if (pageSize.value !== nextSize || page.value !== nextPage) changed = true
       pageSize.value = nextSize
-      if (changed) void refreshList(true, nextPage)
+      if (!draftsSelected.value && (changed || previousQuery.tab === 'drafts')) {
+        void refreshList(true, nextPage)
+        if (previousQuery.tab === 'drafts') void loadAuditHandoverEntryCount()
+      }
     } else {
       if (changed) page.value = 1
       if (filterChanged) void refreshList(true)
@@ -2357,7 +2351,7 @@ watch(
 )
 
 watch(totalPages, (value) => {
-  if (page.value > value) page.value = value
+  if (!draftsSelected.value && page.value > value) page.value = value
 })
 </script>
 
@@ -3656,6 +3650,7 @@ watch(totalPages, (value) => {
   outline-offset: 2px;
 }
 .oa-task-list .task-list-page-title { font-size: 18px; font-weight: 600; }
+.oa-task-list :deep(.task-center-drafts) { overflow: auto; min-block-size: 0; }
 .oa-task-views { display: inline-flex; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; overflow: hidden; }
 .oa-task-views button, .oa-task-peek button { padding: 6px 12px; min-height: 32px; font-size: 13px; font-weight: 500; }
 .oa-task-views button[aria-pressed=true] { background: rgb(var(--yb-bg-page)); color: rgb(var(--yb-brand)); }
@@ -3746,12 +3741,6 @@ dialog.oa-task-peek::backdrop { background: var(--oa-inspector-scrim); }
   .oa-task-list .task-sort-order { flex-basis: 7rem; }
   .oa-task-list .task-results { min-block-size: 0; max-block-size: none; padding: 0; border: 1px solid rgb(var(--yb-border)); border-radius: 6px; scroll-padding-top: 40px; }
   .oa-task-list .footer-card { min-block-size: 40px; padding-block: 0; border-radius: 6px; }
-  .task-tabs { align-self: stretch; gap: 0; white-space: nowrap; }
-  .task-tabs :deep(button) { min-height: 100%; padding: 0 8px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; box-shadow: none; }
-  :global(html.oa-live-ui #app .oa-bar-tabs .task-tabs .task-tab-active) {
-    border: 0; border-bottom: 2px solid rgb(var(--yb-brand)); border-radius: 0; background: transparent; color: rgb(var(--yb-brand)); box-shadow: none;
-  }
-  :global(html.oa-live-ui #app .oa-bar-tabs .task-tabs button:not(.task-tab-active):hover) { color: rgb(var(--yb-brand)); background: rgb(var(--yb-brand-soft)); border-color: transparent; }
   .oa-task-list :is(.toolbar,.footer-card) :deep(.relative > .h-11) { height: 32px; border-radius: 6px; }
   .oa-task-list .toolbar :deep(.base-select-trigger-button) { min-height: 0; block-size: auto; border: 0; }
   .oa-task-list .footer-card :deep(.page-jump-input input) { min-height: 32px; block-size: 32px; }
@@ -3775,8 +3764,6 @@ dialog.oa-task-peek::backdrop { background: var(--oa-inspector-scrim); }
 :global(html.oa-live-ui #app .content .oa-task-list :is(button,input:not([type=checkbox],[type=file]))) { border-radius: 6px; }
 :global(html.oa-live-ui .oa-task-peek button) { border-radius: 6px; }
 .oa-task-list :deep(button.inline-flex > span:last-child) { display: contents; }
-:global(html.oa-live-ui #app .oa-bar-tabs .task-tabs button) { border-radius: 0; }
-:global(html.oa-live-ui #app .oa-bar-tabs .task-tabs button > span),
 :global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button > span) { display: contents; }
 :global(html.oa-live-ui #app .oa-bar-page-actions .task-list-action-button),
 :global(html.oa-live-ui #app .oa-bar-page-actions .oa-task-views button) { border-radius: 6px; }

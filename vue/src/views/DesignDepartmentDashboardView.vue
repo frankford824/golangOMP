@@ -1,6 +1,6 @@
 <template>
   <div class="design-board-page" :class="{ 'oa-design-board': oaEnabled }">
-    <OAPageReturn v-if="oaEnabled" :to="returnTarget">返回主页</OAPageReturn>
+    <TaskBoardTabs v-if="oaEnabled" active="design" :overview-target="returnTarget" />
     <header class="design-board-header">
       <div>
         <h1>{{ departmentTitle }}</h1>
@@ -97,7 +97,7 @@ import { useRouter } from 'vue-router'
 import { ArrowLeft, Download, RefreshCw } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
-import OAPageReturn from '@/oa/components/OAPageReturn.vue'
+import TaskBoardTabs from '@/oa/components/TaskBoardTabs.vue'
 import { goBackTo } from '@/oa/returnNavigation'
 import { taskDetailLocation, taskReturnSource } from '@/oa/taskNavigation'
 import BaseButton from '@/components/base/BaseButton.vue'
@@ -122,7 +122,6 @@ const dashboard = ref<DesignDepartmentDashboard | null>(null)
 const showFilters = ref(entryQuery.design_filters === '1')
 const departmentTitle = computed(() => {
   const department = dashboard.value?.department_name
-  if (oaEnabled && dashboard.value && (!dashboard.value.department_id || !department || department === '未分配')) return '跨部门设计产能看板（全部可见范围）'
   return `${department || '设计部'}数据看板`
 })
 const loading = ref(false)
@@ -178,7 +177,7 @@ const filters = reactive<{
   business_lane: entryText(entryQuery.design_lane),
 })
 let appliedFilters = { ...filters }
-const memberOptions = computed(() => dashboard.value?.options.members ?? [])
+const memberOptions = computed(() => dashboard.value?.options?.members ?? [])
 
 async function load() {
   controller?.abort(); const request = new AbortController(); controller = request; loading.value = true; error.value = ''

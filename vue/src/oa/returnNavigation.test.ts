@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { goBackTo, safeReturnPath, workspaceOrigin } from './returnNavigation'
+import { detailReturnTarget, goBackTo, safeReturnPath, workspaceOrigin } from './returnNavigation'
 
 const assets = (path: string) => path === '/asset-center'
 describe('OA return navigation', () => {
@@ -8,6 +8,17 @@ describe('OA return navigation', () => {
     expect(safeReturnPath('/asset-center?page=2#sku',assets)).toBe('/asset-center?page=2#sku')
     for (const path of ['https://example.org', '//example.org', '/users', '/asset-center%5cfoo','/x/..//outside']) {
       expect(safeReturnPath(path, assets)).toBeUndefined()
+    }
+  })
+  it('prefers the previous workspace entry, with a safe list fallback for bookmarks', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: ['/tasks/:id', '/me/notifications'].map(path => ({ path, component: {} })) })
+    await router.push('/tasks/4')
+    const state = router.options.history.state
+    Object.assign(state, { back: '/me/notifications?filter=unread&page=2#rows' })
+    expect(detailReturnTarget(router, '/tasks/4', '/tasks')).toBe('/me/notifications?filter=unread&page=2#rows')
+    for (const back of [null, '//external.example', '/tasks/4']) {
+      Object.assign(state, { back })
+      expect(detailReturnTarget(router, '/tasks/4', '/tasks')).toBe('/tasks')
     }
   })
   it('uses browser back for a known predecessor and replaces an independent detail entry', async () => {

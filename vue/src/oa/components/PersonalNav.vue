@@ -14,8 +14,6 @@ const links = [
   { name: 'Me', label: '基本资料' },
   { name: 'MeSecurity', label: '安全设置' },
   { name: 'MeOrg', label: '我的组织' },
-  { name: 'MeNotifications', label: '通知中心' },
-  { name: 'MeTaskDrafts', label: '任务草稿' },
 ]
 </script>
 

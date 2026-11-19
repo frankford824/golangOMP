@@ -65,6 +65,7 @@ export interface BackendUser {
   name?: string
   real_name?: string
   department: string
+  department_id?: number | null
   team: string
   roles: string[]
   frontend_access: FrontendAccess

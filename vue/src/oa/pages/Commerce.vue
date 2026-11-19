@@ -4,6 +4,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText } from 'lucide-vue-next'
 import { oaReturnLabel } from '@/oa/pageTitle'
+import DetailBreadcrumb from '../components/DetailBreadcrumb.vue'
+import { detailReturnTarget } from '../returnNavigation'
 import OAPageReturn from '../components/OAPageReturn.vue'
 import OrderDateField from '../components/OrderDateField.vue'
 import OperationNav from '../components/OperationNav.vue'
@@ -41,7 +43,9 @@ let visit = orderVisit<Visit>(props.mode)
 const previousVisit = visit.read()
 const restored = previousVisit?.filters ?? orderFilters(props.mode, route.query)
 const resultRegion = ref<HTMLElement>()
-const returnTarget = computed(() => orderReturnTarget(route))
+const returnTarget = computed(() => props.mode === 'detail'
+  ? detailReturnTarget(router, route.fullPath, '/operations/products')
+  : orderReturnTarget(route))
 const returnSource = computed(() => orderReturnSource(route))
 const today = dateInChina()
 const earliest = '2026-06-01'
@@ -854,7 +858,8 @@ onUnmounted(() => {
 
 <template>
 <div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview', 'commerce-list': mode === 'products' || mode === 'ranking', 'commerce-products': mode === 'products' }]">
-  <OAPageReturn v-if="mode === 'detail' || returnTarget" :source="returnSource" :to="returnTarget || { path: '/operations/products', query: { ...navigationQuery, scope: route.query.scope } }">{{ oaReturnLabel(returnTarget || '/operations/products') }}</OAPageReturn>
+  <OAPageReturn v-if="returnTarget" :source="mode === 'detail' ? undefined : returnSource" :to="returnTarget">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
+  <DetailBreadcrumb v-if="mode === 'detail'" module="经营中心" :identifier="productId" />
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>

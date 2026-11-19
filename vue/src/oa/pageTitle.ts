@@ -19,6 +19,8 @@ export function oaPageTitle(path: string) {
 
 export function oaReturnLabel(path: string) {
   const url = new URL(path, 'https://oa.invalid')
+  if (url.pathname === '/tasks' && url.searchParams.get('tab') === 'drafts') return '返回草稿箱'
+  if (url.pathname === '/users' && url.searchParams.has('user_id')) return '返回人员详情'
   if (url.pathname === '/asset-center') return url.searchParams.get('view') === 'ledger' ? '返回规格台账' : '返回资产中心'
   if (url.pathname === '/me/notifications') {
     if (url.searchParams.get('section') === 'cost') return '返回成本复核'

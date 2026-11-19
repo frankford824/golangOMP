@@ -883,9 +883,6 @@ watch(() => route.fullPath, syncLocation)
   <nav class="fee-tabs" aria-label="费用中心">
     <RouterLink v-for="tab in feeTabs.filter(item => item.actions.some(can))" :key="tab.mode" :to="'/fees/' + tab.mode"
       :aria-current="mode === tab.mode ? 'page' : undefined">{{ tab.mode === 'approval' && !can('finance.approve') ? '待付款' : tab.label }}</RouterLink>
-    <RouterLink v-if="canUseExpenseActivity" :to="{ name: 'MeNotifications', query: { section: 'expense' } }">
-      费用动态<span v-if="expenseActivity.todoCount"> · {{ expenseActivity.todoCount }} 项待办</span>
-    </RouterLink>
   </nav>
   </DesktopSlot>
   <section v-if="!allowed" class="oa-panel">

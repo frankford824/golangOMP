@@ -30,6 +30,8 @@ interface CurrentUserProfileMeta {
   username?: string
   avatar?: string
   avatar_url?: string
+  department_id?: number | null
+  department?: string | null
 }
 
 function normalizeUniqueKeys(keys: unknown): string[] {
@@ -154,6 +156,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
   const managedDepartments = ref<string[]>([])
   const managedTeams = ref<string[]>([])
   const actorDepartment = ref<string>('')
+  const actorDepartmentId = ref<number | null>(null)
   const actorTeam = ref<string>('')
 
   /**
@@ -224,6 +227,8 @@ export const usePermissionsStore = defineStore('permissions', () => {
         username: rawUser.username,
         avatar: rawUser.avatar,
         avatar_url: rawUser.avatar_url,
+        department_id: rawUser.department_id,
+        department: rawUser.department,
       },
     )
   }
@@ -335,7 +340,9 @@ export const usePermissionsStore = defineStore('permissions', () => {
       ...(access.managed_teams ?? []),
       ...(access.team_codes ?? []),
     ])
-    actorDepartment.value = String(access.department ?? '').trim()
+    actorDepartment.value = String(access.department || profile.department || '').trim()
+    const stableDepartmentId = Number(profile.department_id)
+    actorDepartmentId.value = Number.isSafeInteger(stableDepartmentId) && stableDepartmentId > 0 ? stableDepartmentId : null
     actorTeam.value = String(access.team ?? '').trim()
   }
 
@@ -359,6 +366,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
     managedDepartments.value = []
     managedTeams.value = []
     actorDepartment.value = ''
+    actorDepartmentId.value = null
     actorTeam.value = ''
     useTasksStore().resetToInitialState()
   }
@@ -521,6 +529,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
     managedDepartments,
     managedTeams,
     actorDepartment,
+    actorDepartmentId,
     actorTeam,
     loginWithCredentials,
     restoreSession,

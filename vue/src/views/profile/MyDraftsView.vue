@@ -1,10 +1,10 @@
 <template>
-  <section class="space-y-4">
-    <OAPageReturn v-if="oaEnabled" to="/me">返回个人中心</OAPageReturn>
+  <section class="space-y-4" :class="{ 'task-center-drafts': taskCenterSource }">
+    <OAPageReturn v-if="oaEnabled && !taskCenterSource" to="/me">返回个人中心</OAPageReturn>
     <div class="rounded-xl border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] p-4">
       <div class="flex items-center justify-between gap-2">
         <div>
-          <h1 :class="{ 'oa-draft-title': oaEnabled }" class="text-base font-semibold text-[var(--v1-text-primary)]">任务草稿</h1>
+          <component :is="taskCenterSource ? 'h2' : 'h1'" :class="{ 'oa-draft-title': oaEnabled }" class="text-base font-semibold text-[var(--v1-text-primary)]">{{ taskCenterSource ? '草稿箱' : '任务草稿' }}</component>
           <p class="mt-1 text-xs text-[var(--v1-text-secondary)]">
             管理当前账号的未提交草稿（最多 20 条，7 天过期）。
           </p>
@@ -20,7 +20,7 @@
           </button>
           <router-link
             class="inline-flex min-h-9 items-center justify-center rounded bg-[var(--v1-bg-primary)] px-3 text-xs text-[rgb(var(--yb-text-inverse))]"
-            :to="{ name: 'TaskCreate', query: { create: '1', taskFrom: '/me/task-drafts' } }"
+            :to="composeLocation()"
           >
             创建任务
           </router-link>
@@ -48,7 +48,7 @@
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="text-sm font-semibold text-[var(--v1-text-primary)]">
-                {{ taskTypeLabel(draft.task_type) }}
+                {{ draftLabel(draft) }}
                 <span class="ml-2 text-xs font-normal text-[var(--v1-text-secondary)]">#{{ draft.id }}</span>
               </p>
               <p class="mt-1 text-xs text-[var(--v1-text-secondary)]">
@@ -63,7 +63,7 @@
               <router-link
                 v-if="!group.expired"
                 class="inline-flex min-h-8 items-center justify-center rounded border border-[var(--v1-border)] px-2 text-xs text-[var(--v1-text-secondary)]"
-                :to="{ name: 'TaskCreate', query: { create: '1', draft_id: draft.id, taskFrom: '/me/task-drafts' } }"
+                :to="composeLocation(draft.id)"
               >
                 继续编辑
               </router-link>
@@ -91,6 +91,7 @@ import { computed, onMounted, ref } from 'vue'
 import { oaEnabled } from '@/oa/access'
 import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
+import { COMPOSE_INTENT_META, type ComposeIntent } from '@/domain/unified-task-compose'
 import { useTaskDraft } from '@/composables/useTaskDraft'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { formatDateTimeBeijing } from '@/utils/date'
@@ -102,6 +103,15 @@ interface DraftLike {
   created_at?: string
   updated_at?: string
   expires_at?: string
+}
+
+const props = defineProps<{ taskCenterSource?: string }>()
+
+function composeLocation(draftId?: string) {
+  return {
+    name: 'TaskCreate',
+    query: { create: '1', draft_id: draftId, taskFrom: props.taskCenterSource || '/me/task-drafts' },
+  }
 }
 
 const { drafts, load, remove } = useTaskDraft()
@@ -128,8 +138,11 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   RETOUCH_TASK: 'P 图任务',
 }
 
-function taskTypeLabel(taskType: string): string {
-  return TASK_TYPE_LABELS[taskType] ?? taskType ?? '未命名草稿'
+function draftLabel(draft: DraftLike): string {
+  if (draft.task_type === 'unified_task_compose') {
+    return COMPOSE_INTENT_META[draft.payload.intent as ComposeIntent]?.title ?? '任务草稿'
+  }
+  return (TASK_TYPE_LABELS[draft.task_type] ?? draft.task_type) || '未命名草稿'
 }
 
 function displayTime(value?: string): string {
@@ -139,6 +152,12 @@ function displayTime(value?: string): string {
 }
 
 function pickFormValue(draft: DraftLike, key: string): string {
+  if (draft.task_type === 'unified_task_compose') {
+    const row = Array.isArray(draft.payload.rows) ? draft.payload.rows[0] : undefined
+    const common = draft.payload.common as Record<string, unknown> | undefined
+    const fields = { sku: row?.erp_sku, productName: row?.product_name, note: common?.note, designRequirement: row?.design_requirement }
+    return String(fields[key as keyof typeof fields] ?? '')
+  }
   const form = draft.payload?.form
   if (!form || typeof form !== 'object') return ''
   const raw = (form as Record<string, unknown>)[key]

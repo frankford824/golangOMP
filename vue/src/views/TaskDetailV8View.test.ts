@@ -28,7 +28,7 @@ vi.mock('vue-router', () => ({
     replace: mocks.push,
     resolve: (fullPath: string) => {
       const url = new URL(fullPath, 'https://test.invalid')
-      return { path: url.pathname, fullPath, query: Object.fromEntries(url.searchParams), hash: url.hash }
+      return { matched: [{ path: url.pathname }], path: url.pathname, fullPath, query: Object.fromEntries(url.searchParams), hash: url.hash }
     },
     options: { history: { state: window.history.state } } }),
   onBeforeRouteLeave: vi.fn(),

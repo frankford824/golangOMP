@@ -22,8 +22,8 @@
           <div v-for="menu in workbenchMenus" :key="menu.key" class="nav-entry">
           <router-link
             :aria-label="menuLabel(menu)"
-            @pointerenter="showTip(menu, $event)"
-            @focus="showTip(menu, $event)"
+            @pointerenter="showTip(menuLabel(menu), $event)"
+            @focus="showTip(menuLabel(menu), $event)"
             @blur="tip = null"
             @pointerleave="tip = null"
             :to="resolveMenuTo(menu)"
@@ -47,8 +47,8 @@
           <div v-for="menu in businessMenus" :key="menu.key" class="nav-entry">
           <router-link
             :aria-label="menuLabel(menu)"
-            @pointerenter="showTip(menu, $event)"
-            @focus="showTip(menu, $event)"
+            @pointerenter="showTip(menuLabel(menu), $event)"
+            @focus="showTip(menuLabel(menu), $event)"
             @blur="tip = null"
             @pointerleave="tip = null"
             :to="menu.to"
@@ -70,8 +70,8 @@
           <div v-for="menu in dataMenus" :key="menu.key" class="nav-entry">
           <router-link
             :aria-label="menuLabel(menu)"
-            @pointerenter="showTip(menu, $event)"
-            @focus="showTip(menu, $event)"
+            @pointerenter="showTip(menuLabel(menu), $event)"
+            @focus="showTip(menuLabel(menu), $event)"
             @blur="tip = null"
             @pointerleave="tip = null"
             :to="menu.to"
@@ -90,8 +90,8 @@
           </div>
         </template>
       </nav>
-      <button v-if="oaEnabled" type="button" class="oa-sidebar-pin" :aria-pressed="sidebarPinned" :aria-label="sidebarPinned ? '收起导航' : '展开导航'" :title="sidebarPinned ? '收起导航' : '展开导航'" @click="toggleSidebar">
-        <PanelLeftClose v-if="sidebarPinned" :size="18"/><PanelLeftOpen v-else :size="18"/><span v-if="sidebarPinned">收起导航</span>
+      <button v-if="oaEnabled" type="button" class="oa-sidebar-pin" :aria-pressed="sidebarPinned" :aria-label="sidebarPinned ? '收起导航' : '展开导航'" @pointerenter="showTip('展开导航', $event)" @focus="showTip('展开导航', $event)" @blur="tip = null" @pointerleave="tip = null" @click="toggleSidebar">
+        <PanelLeftClose v-if="sidebarPinned" :size="18" aria-hidden="true" /><PanelLeftOpen v-else :size="18" aria-hidden="true" /><span v-if="sidebarPinned">收起导航</span>
       </button>
       <div v-else class="mt-auto p-4" />
     </aside>
@@ -118,11 +118,15 @@
           </span>
 
         </div>
-        <div v-if="oaEnabled" ref="desktopTabs" class="oa-bar-tabs" />
-        <div class="app-topbar__actions">
+        <div v-if="oaEnabled" ref="desktopTabs" class="oa-bar-tabs">
+          <PeopleNav v-if="desktop && personnelWorkspace" />
+          <TaskCenterTabs v-if="desktop && taskCenterSubpage" />
+        </div>
+        <div v-if="oaEnabled" class="oa-bar-local">
           <RouterLink v-if="showHomeExpenseLink" :to="{ path: '/fees/apply', query: { applyFrom: $route.fullPath } }" class="oa-expense-shortcut" aria-label="发起费用申请" title="发起费用申请">报销 / 付款</RouterLink>
-          <div v-if="oaEnabled" ref="desktopActions" class="oa-bar-page-actions" />
-          <div v-if="oaEnabled" ref="desktopStatus" class="oa-bar-status" />
+          <div ref="desktopActions" class="oa-bar-page-actions" />
+        </div>
+        <div class="app-topbar__actions">
           <button type="button" class="topbar-icon topbar-search" aria-label="全局搜索" aria-keyshortcuts="Control+K Meta+K" title="全局搜索" @click="openSearch">
             <Search :size="18" aria-hidden="true" />
             <span class="topbar-search__label">{{ oaEnabled ? '查找页面、任务、SKU' : '搜索任务、SKU、产品' }}</span><kbd v-if="oaEnabled" class="oa-search-key">Ctrl K</kbd>
@@ -134,9 +138,12 @@
       </header>
 
       <div v-if="oaEnabled" ref="compactBack" class="oa-bar-return oa-compact-return" />
+      <PeopleNav v-if="oaEnabled && !desktop && personnelWorkspace" class="oa-compact-people-nav" />
+      <TaskCenterTabs v-if="oaEnabled && !desktop && taskCenterSubpage" />
+      <div v-if="oaEnabled" ref="desktopStatus" class="oa-page-status" />
       <div ref="contentScroller" :class="{ 'oa-dashboard-viewport': oaEnabled && ($route.path === '/operations' || $route.path.startsWith('/operations/') || $route.path === '/me/performance' || $route.name === 'Dashboard') }" class="app-page-scroll flex-1 overflow-auto custom-scrollbar isolate" :data-workspace="desktopWorkspace">
         <main class="content">
-          <PersonalNav v-if="oaEnabled && ($route.path === '/me' || $route.path.startsWith('/me/')) && $route.path !== '/me/performance'" />
+          <PersonalNav v-if="oaEnabled && ['/me', '/me/security', '/me/org'].includes($route.path)" />
           <router-view v-slot="{ Component, route }">
             <KeepAlive :max="8">
               <CachedWorkspace v-if="oaEnabled && Component && route.meta.keepAlive" :key="String(route.name || route.path)">
@@ -213,6 +220,8 @@ import NotificationBadge from '@/components/notification/NotificationBadge.vue'
 import MediaPreparationPanel from '@/components/media/MediaPreparationPanel.vue'
 import NotificationCenter from '@/components/notification/NotificationCenter.vue'
 import PersonalNav from '@/oa/components/PersonalNav.vue'
+import PeopleNav from '@/oa/components/PeopleNav.vue'
+import TaskCenterTabs from '@/oa/components/TaskCenterTabs.vue'
 import CachedWorkspace from '@/oa/components/CachedWorkspace.vue'
 import { desktopChromeKey } from '@/oa/desktopChrome'
 import { useExpenseActivity } from '@/oa/expenseActivity'
@@ -255,6 +264,7 @@ const showHomeExpenseLink = computed(() => {
   if (!oaEnabled || !can('finance.apply')) return false
   const current = router.currentRoute.value.path
   if (current === '/' || current === '/operations' || current === '/me') return true
+  if (current === '/users') return false
   const home = resolveFirstAccessibleHomeRoute(permissionsStore)
   return home != null && current === router.resolve(home).path
 })
@@ -294,18 +304,29 @@ function repeatShortcut(menu: MenuConfig) {
 function menuLabel(menu: MenuConfig) {
   return menu.key === 'dashboard' && can('orders.view') ? '任务看板' : menu.label
 }
-function showTip(menu: MenuConfig, event: Event) {
+function showTip(label: string, event: Event) {
   if (!oaEnabled || sidebarPinned.value) return
   const box = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  tip.value = { label: menuLabel(menu), top: box.top + box.height / 2, left: box.right + 12 }
+  tip.value = { label, top: box.top + box.height / 2, left: box.right + 12 }
 }
 const pageTitle = computed(() => oaPageTitle(router.currentRoute.value.path))
+const personnelWorkspace = computed(() => {
+  const path = router.currentRoute.value.path
+  return path === '/users' || path === '/users/roster' || path === '/users/shop-bindings'
+})
+const taskCenterSubpage = computed(() => {
+  const name = router.currentRoute.value.name
+  return name === 'TaskDetail' || name === 'TaskCreate' || name === 'TaskAssets' || name === 'MeTaskDrafts'
+})
 const moduleName = computed(() => {
   const path = router.currentRoute.value.path
   if (path.startsWith('/operations') || path === '/me/performance') return '经营中心'
   if (path.startsWith('/fees')) return '费用中心'
   if (path === '/cost-rules') return '成本规则'
-  if (path === '/') return '任务看板'
+  if (path === '/' || path === '/design-dashboard') return '任务看板'
+  if (personnelWorkspace.value) return '人员管理'
+  if (path === '/me/task-drafts') return '任务中心'
+  if (path === '/me/notifications') return '通知中心'
   if (path.startsWith('/me')) return '个人中心'
   if (path.startsWith('/tasks/')) return '任务中心'
   return ''
@@ -403,7 +424,7 @@ const visibleMenus = computed(() => {
 })
 
 function isPersonnelSubpage(menu: MenuConfig) {
-  return menu.key === 'user_admin' && router.currentRoute.value.path === '/users/roster'
+  return menu.key === 'user_admin' && personnelWorkspace.value
 }
 
 const workbenchMenus = computed(() => visibleMenus.value.filter((m) => m.section === 'workbench'))
@@ -1101,13 +1122,25 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 .oa-sidebar.sidebar.oa-sidebar-open .opacity-0 { opacity: 1; }
 .oa-sidebar.sidebar.oa-sidebar-open .nav-section-label { padding: 4px 8px; font-size: 12px; letter-spacing: 0; white-space: nowrap; }
 .oa-sidebar.sidebar > div:first-child { width: auto; }
-.oa-sidebar-pin { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; margin: 8px; border-radius: 6px; color: var(--oa-secondary); }
+#app .oa-sidebar .oa-sidebar-pin { display: flex; align-items: center; justify-content: center; gap: 10px; flex: none; height: 40px; padding-inline: 16px; border-top: 1px solid var(--yb-line-hairline); color: var(--oa-secondary); }
+.oa-compact-people-nav { padding-inline: 12px; background: var(--oa-surface); flex: none; }
+#app .oa-sidebar:not(.oa-sidebar-open) .oa-sidebar-pin { padding-inline: 0; }
+#app .oa-sidebar.oa-sidebar-open .oa-sidebar-pin { justify-content: flex-start; }
 .oa-sidebar-pin:hover { background: rgb(var(--yb-surface-muted)); }
 .oa-sidebar-tip { position: fixed; z-index: 130; transform: translateY(-50%); padding: 4px 8px; border: 1px solid var(--oa-line); border-radius: 6px; background: var(--oa-surface); color: var(--oa-ink); pointer-events: none; font-size: 14px; }
 .oa-breadcrumb { font-size: 14px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .oa-breadcrumb > span { color: var(--oa-secondary); font-weight: 400; }
 .oa-search-key { display:none; }
-.oa-search-key { margin-left:auto; color:var(--oa-secondary); font:13px/normal var(--yb-font-mono); }
+#app .oa-search-key {
+  box-sizing: border-box;
+  margin-left: 8px;
+  padding: 2px 5px;
+  border: 1px solid rgb(var(--yb-border-slate));
+  border-radius: 4px;
+  background: rgb(var(--yb-surface-hover));
+  color: var(--oa-keycap-text);
+  font: 11px/1.2 var(--yb-font-mono);
+}
 @media (max-width: 600px) { .oa-breadcrumb > span { display:none; } }
 
 .oa-sidebar:not(.oa-sidebar-open) .nav-item { flex-direction: column; justify-content: center; gap: 0; padding: 4px; }
@@ -1139,27 +1172,59 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 }
 .oa-expense-shortcut:hover, .oa-expense-shortcut:focus-visible { border-color: var(--oa-accent); }
 .oa-bar-title { font: 600 15px/1.4 var(--oa-font); white-space: nowrap; }
-.oa-bar-tabs,.oa-bar-status,.oa-bar-page-actions { display:none; }
+.oa-bar-tabs,.oa-page-status,.oa-bar-page-actions { display:none; }
+.oa-client-shell .app-topbar { --topbar-control-size: 32px; }
+.oa-client-shell .app-topbar :deep(.topbar-icon) { border: 1px solid var(--yb-line-control); border-radius: 6px; }
+.oa-client-shell .app-topbar__actions { margin-left: auto; gap: 6px; }
+.oa-bar-local { display: flex; align-items: center; flex: none; gap: 8px; margin-left: auto; }
+.oa-bar-local:has(button, a, input, select) + .app-topbar__actions { margin-left: 0; }
+.oa-bar-local:not(:has(button, a, input, select)) { display: none; }
+.oa-bar-local::after {
+  content: '';
+  display: block;
+  inline-size: 1px;
+  block-size: 16px;
+  margin-inline: 2px;
+  background: var(--oa-line);
+}
+
 @media (min-width:1280px) {
   .oa-client-shell .oa-sidebar.sidebar { --sidebar-rail:56px; --sidebar-drawer:172px; margin:0; height:100%; border:0; border-right:1px solid var(--oa-chrome-divider); border-radius:0; clip-path:none; background:var(--oa-surface); box-shadow:none; }
   .oa-client-shell .oa-sidebar::before,.oa-client-shell .oa-sidebar::after { display:none; }
   .oa-client-shell .oa-sidebar.sidebar > div:first-child { margin:0 0 8px; min-height:44px; height:44px; padding-inline:12px; }
   .oa-client-shell .oa-sidebar.sidebar .nav-entry { margin-block:2px; }
   .oa-client-shell .oa-sidebar.sidebar .nav-item { flex-direction:row; height:34px; min-height:34px; padding-block:0; }
+  .oa-client-shell .oa-sidebar.sidebar.oa-sidebar-open .nav-item { padding-inline:7px; }
+  .oa-client-shell .oa-sidebar.oa-sidebar-open .oa-sidebar-pin > svg { width:32px; }
+  .oa-client-shell .oa-sidebar.oa-sidebar-open .oa-sidebar-pin > span { margin-inline-start:-2px; }
   .oa-client-shell .oa-sidebar .oa-rail-caption { display:none; }
   .oa-client-shell .oa-sidebar:not(.oa-sidebar-open) > nav { padding-inline:4px; }
   .oa-client-shell .oa-sidebar.oa-sidebar-open .nav-section-label { font-size:var(--oa-nav-label-size); line-height:14px; padding-block:4px; }
   .oa-client-shell .app-topbar { margin:0; height:44px; min-height:44px; padding:0 16px; gap:12px; border:0; border-bottom:1px solid var(--oa-chrome-divider); border-radius:0; justify-content:initial; box-shadow:none; box-sizing:border-box; --topbar-control-size:32px; }
   .oa-client-shell .app-topbar__brand, .oa-client-shell .app-topbar__actions { flex:none; gap:6px; }
-  .oa-client-shell .app-topbar__actions { margin-left:auto; }
-  .oa-client-shell .app-topbar :deep(.topbar-icon) { border-radius:6px; }
-  .oa-client-shell .app-topbar button.topbar-search { display:inline-flex; align-items:center; justify-content:flex-start; width:auto; min-width:220px; height:32px; flex:0 0 auto; gap:8px; padding:0 10px; border:1px solid var(--yb-line-control); border-radius:6px; }
+  .oa-client-shell :is(.app-topbar__actions, .oa-bar-local) { margin-left:0; }
+  .oa-client-shell .app-topbar button.topbar-search { display:inline-flex; align-items:center; justify-content:flex-start; width:auto; min-width:220px; height:32px; flex:0 0 auto; gap:0; padding:0 10px; border:1px solid var(--yb-line-control); border-radius:6px; }
   .oa-client-shell .app-topbar .topbar-search > svg { flex-shrink:0; display:block; }
-  .oa-client-shell .app-topbar .topbar-search__label { white-space:nowrap; }
+  .oa-client-shell .app-topbar .topbar-search__label { white-space:nowrap; margin-inline-start:8px; }
 
-  .oa-bar-page-actions,.oa-bar-status { display:flex; align-items:center; gap:4px; min-width:0; }
-  .oa-bar-page-actions:not(:has(button,a,input,select)),.oa-bar-status:not(:has(time,[role=status])) { display:none; }
-  .oa-bar-tabs { flex:1 1 auto; min-width:0; display:flex; align-items:stretch; height:100%; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
+  .oa-bar-page-actions { display:flex; align-items:center; gap:4px; min-width:0; }
+  .oa-bar-page-actions:not(:has(button,a,input,select)) { display:none; }
+  .oa-page-status:has(> [role=status]) {
+    display:flex;
+    flex:none;
+    align-items:center;
+    justify-content:flex-end;
+    gap:8px;
+    min-height:24px;
+    padding:2px 16px;
+    border-bottom:1px solid var(--oa-chrome-divider);
+    background:var(--oa-surface);
+    color:var(--oa-secondary);
+    font:400 12px/1.5 var(--oa-font);
+  }
+  .oa-page-status :deep(.oa-watermark) { margin:0; }
+  .oa-page-status :deep(.oa-watermark-warn) { color:rgb(var(--yb-warning-text)); }
+  .oa-bar-tabs { flex:1 1 0; min-width:0; display:flex; align-items:stretch; height:100%; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
   .oa-client-shell .content { width:100%; inline-size:100%; max-width:none; margin:0; padding:12px 16px; box-sizing:border-box; }
   .oa-client-shell .app-page-scroll[data-workspace] { min-height:0; overflow:auto; }
   .oa-client-shell .app-page-scroll[data-workspace] > .content { height:auto; min-height:100%; overflow:visible; }
@@ -1167,7 +1232,7 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   .oa-client-shell .app-page-scroll[data-workspace=list] > .content { height:100%; min-height:0; }
 }
 @media (min-width:1440px) {
-  .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:inline; line-height:16px; font-size:13px; }
+  .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:inline; }
 }
 @media (max-width:1439px) {
   .oa-client-shell .app-topbar button.topbar-search { width:32px; min-width:32px; height:32px; flex:0 0 32px; padding:0; gap:0; justify-content:center; border:1px solid var(--yb-line-control); border-radius:6px; }
@@ -1187,8 +1252,8 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 
 .oa-search-key { white-space:nowrap; flex-shrink:0; }
 @media (min-width:1280px) {
-  .oa-client-shell .app-topbar__brand:has(.oa-bar-title) + .oa-bar-tabs:has(.operation-nav)::before {
-    content:""; align-self:center; flex:0 0 1px; height:14px; background:var(--oa-chrome-divider); margin-inline-end:6px;
+  .oa-client-shell .app-topbar__brand + .oa-bar-tabs:has(nav)::before {
+    content:""; align-self:center; flex:0 0 1px; height:14px; background:var(--oa-line); margin-inline-end:12px;
   }
 }
 
@@ -1200,8 +1265,8 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 .oa-context-title { white-space:nowrap; }
 
 @media (min-width:1440px) {
-  #app .oa-client-shell .app-topbar button.topbar-search { width:auto; min-width:220px; }
-  #app .oa-client-shell .app-topbar button.topbar-search > :is(.topbar-search__label,.oa-search-key) { font-size:13px; line-height:normal; }
+  #app .oa-client-shell .app-topbar button.topbar-search { width:232px; min-width:232px; justify-content:flex-start; gap:0; }
+  #app .oa-client-shell .app-topbar button.topbar-search > .topbar-search__label { font-size:13px; line-height:normal; }
   #app .oa-client-shell .app-topbar button.topbar-search > svg { width:16px; height:16px; }
 }
 </style>
