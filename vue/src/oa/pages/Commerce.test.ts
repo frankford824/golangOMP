@@ -3,13 +3,14 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Commerce from './Commerce.vue'
 
-const { orderAPI } = vi.hoisted(() => ({ orderAPI: vi.fn() }))
+const { orderAPI, routeQuery } = vi.hoisted(() => ({ orderAPI: vi.fn(), routeQuery: {} as Record<string, string> }))
 vi.mock('vue-router', () => ({
   RouterLink: { template: '<a><slot /></a>' },
-  useRoute: () => ({ path: '/operations', fullPath: '/operations', query: {} }),
+  useRoute: () => ({ path: '/operations', fullPath: '/operations', query: routeQuery }),
   useRouter: () => ({ resolve: ({ path }: { path: string }) => ({ fullPath: path }) }),
 }))
 vi.mock('@/services/http', () => ({ getToken: () => 'test-session' }))
+vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: () => false }) }))
 vi.mock('@/stores/permissions', () => ({ usePermissionsStore: () => ({ hasMenu: () => false }) }))
 vi.mock('../access', () => ({
   useOAAccess: () => ({ can: (action: string) => action === 'orders.view', currentProfile: { value: { id: '7' } } }),
@@ -95,4 +96,28 @@ it.each([
   await flushPromises()
   expect(wrapper.find('.commerce-comparison').exists()).toBe(false)
   wrapper.unmount()
+})
+
+it('falls back after an unassigned ownership response and preserves an explicit ownership filter', async () => {
+  orderAPI.mockClear()
+  orderAPI.mockImplementation(async (path: string) =>
+    path.includes('/products?') && path.includes('mine=1') ? { rows: [], scope_state: 'unassigned' } : { rows: [] })
+  const initial = mount(Commerce, { props: { mode: 'products' } })
+  await flushPromises()
+  expect((initial.get('select[name="product-scope"]').element as HTMLSelectElement).value).toBe('overview')
+  expect(orderAPI.mock.calls.filter(([path]) => path.includes('/products?')).map(([path]) => new URL(path, 'http://localhost').searchParams.get('mine'))).toEqual(['1', null])
+  initial.unmount()
+
+  routeQuery.scope = 'mine'
+  const explicit = mount(Commerce, { props: { mode: 'products' } })
+  await flushPromises()
+  expect((explicit.get('select[name="product-scope"]').element as HTMLSelectElement).value).toBe('mine')
+  expect(explicit.text()).toContain('暂无经营归属')
+  expect(orderAPI.mock.calls.filter(([path]) => path.includes('/products?')).map(([path]) => new URL(path, 'http://localhost').searchParams.get('mine'))).toEqual(['1', null, '1'])
+  await explicit.findAll('button').find(button => button.text() === '切换为全部可见范围')!.trigger('click')
+  await flushPromises()
+  expect((explicit.get('select[name="product-scope"]').element as HTMLSelectElement).value).toBe('overview')
+  expect(orderAPI.mock.calls.filter(([path]) => path.includes('/products?')).map(([path]) => new URL(path, 'http://localhost').searchParams.get('mine'))).toEqual(['1', null, '1', null])
+  explicit.unmount()
+  delete routeQuery.scope
 })

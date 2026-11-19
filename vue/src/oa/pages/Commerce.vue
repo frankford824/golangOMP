@@ -109,16 +109,10 @@ function openCost(row: DataRow, focus = true) {
     sku: row.sku, shop: row.shop_id, shopName: shopName(row.shop_id),
     from: query.from, to: query.to, includeBrush: query.include_brush === '1',
     productName: row.product_name || row.shop_item_id || row.sku,
-    quantity: row.quantity, sales: row.item_pay_total, today: query.from === today && query.to === today,
+    quantity: row.quantity, sales: row.item_pay_total,
+    coverage: row.verified_coverage == null ? undefined : percent(Number(row.verified_coverage)),
+    today: query.from === today && query.to === today,
   }, focus)
-}
-function openProductLink(event: MouseEvent, row: DataRow, navigate: (event?: MouseEvent) => unknown) {
-  if (props.mode !== 'products' || !row.shop_id) {
-    navigate(event)
-    return
-  }
-  event.preventDefault()
-  openCost(row)
 }
 function returnQuery() {
   return orderReturnQuery(router, route.path, {
@@ -149,6 +143,7 @@ const group = ref(typeof restored.group === 'string' && ['shop', 'platform', 'pr
 const appliedGroup = ref('shop')
 let appliedQuery = ''
 const productScope = ref(restored.scope === 'overview' ? 'overview' : 'mine')
+let automaticProductScope = !previousVisit && route.query.scope == null
 const includeBrush = ref(restored.include_brush === '1')
 const loadedDetail = ref<{ shop: string; sku: string; from: string; to: string; includeBrush: boolean }>()
 const shopOptions = ref<DataRow[]>([])
@@ -330,11 +325,11 @@ async function load(resetPage = true, next = resetPage ? 0 : offset.value) {
     ) ? api<OrderResult>('/oa-api/orders/summary?' + summaryQuery).catch(() => undefined) : undefined
     const [firstResult, supplemental] = await Promise.all([api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`), dimensions])
     let result = firstResult
-    if (sequence !== latest.value) return
-    if (props.mode === 'products' && applied.get('mine') === '1' && result.scope_state === 'unassigned') {
+    if (sequence === latest.value && props.mode === 'products' && automaticProductScope &&
+        applied.get('mine') === '1' && result.scope_state === 'unassigned') {
       applied.delete('mine')
       applied.set('offset', '0')
-      result = await api<OrderResult>(`/oa-api/orders/${endpoint}?${applied}`)
+      result = await api<OrderResult>(`/oa-api/orders/products?${applied}`)
       if (sequence !== latest.value) return
       next = 0
       applied.delete('offset')
@@ -794,6 +789,7 @@ watch(() => route.fullPath, async () => {
   to.value = start && end && start <= end ? end : today
   shop.value = typeof filters.shop_id === 'string' ? filters.shop_id : ''
   includeBrush.value = filters.include_brush === '1'
+  automaticProductScope = !saved && route.query.scope == null
   productScope.value = filters.scope === 'overview' ? 'overview' : 'mine'
   lowCoverageOnly.value = filters.exception === 'coverage'
   if (typeof filters.group === 'string' && ['shop', 'platform', 'product', 'growth', ...(currentProfile.value?.super_admin ? ['person'] : [])].includes(filters.group)) group.value = filters.group
@@ -882,7 +878,7 @@ onUnmounted(() => {
             :aria-pressed="from === rangeStart(period.daysBack) && to === today" @click="range(period.daysBack)">{{ period.label }}</button>
         </div>
       <label v-if="mode === 'ranking'"><span class="filter-prefix">排名维度</span><select v-model="group"><option value="shop">店铺</option><option value="growth">店铺增长</option><option v-if="currentProfile?.super_admin" value="person">人员</option><option value="platform">平台</option><option value="product">商品</option></select></label>
-      <label v-if="mode === 'products'"><span class="filter-prefix">商品范围</span><select v-model="productScope" name="product-scope"><option value="mine">归属我的商品</option><option value="overview">全部可见商品</option></select></label>
+      <label v-if="mode === 'products'"><span class="filter-prefix">商品范围</span><select v-model="productScope" name="product-scope" @change="automaticProductScope = false"><option value="mine">归属我的商品</option><option value="overview">全部可见范围</option></select></label>
       <label v-if="mode === 'detail'"><span class="filter-prefix">SKU</span><input v-model="selectedSku" required /></label>
       <label v-if="mode !== 'personal'"><span class="filter-prefix">店铺</span><select v-if="shopOptions.length" v-model="shop" class="commerce-shop-select" aria-label="店铺"><option value="">全部可见店铺</option><option v-if="shop && !shopOptions.some(item => item.shop_id === shop)" :value="shop">{{ shop }}</option><option v-for="item in shopOptions" :key="item.shop_id" :value="item.shop_id">{{ item.shop_name || item.shop_id }}</option></select><input v-else v-model="shop" aria-label="店铺" placeholder="全部可见店铺" /></label>
       <label><span class="filter-prefix">日期</span><OrderDateField v-model="from" label="开始日期" :max="to" :min="earliest" /></label>
@@ -894,7 +890,9 @@ onUnmounted(() => {
     <p v-if="shopError" class="oa-watermark">{{ shopError }}</p>
     <p v-if="error" class="oa-error" role="alert">{{ error }} <button @click="failedPage == null ? load() : load(false, failedPage)">重试</button></p>
     <p v-else-if="busy && !summary && !data" class="oa-panel oa-empty" role="status">正在读取经营数据…</p>
-    <OAEmpty v-if="(summary || data)?.scope_state === 'unassigned'" title="暂无经营归属" description="当前账号没有可用的归属范围，请核对人员工号和可访问店铺。" kind="list" />
+    <OAEmpty v-if="(summary || data)?.scope_state === 'unassigned'" title="暂无经营归属" description="当前账号没有可用的归属范围，请核对人员工号和可访问店铺。" kind="list">
+      <button v-if="mode === 'products' && appliedMine" type="button" :disabled="busy" @click="showAllProducts">切换为全部可见范围</button>
+    </OAEmpty>
     <template v-else>
     <section v-if="mode === 'overview' && summary" class="oa-kpis commerce-metrics" aria-label="经营指标">
       <div v-for="(metric, index) in kpis" :key="metric.name" :class="['oa-kpi', { 'commerce-metric-primary': index === 0 }]">
@@ -1017,7 +1015,7 @@ onUnmounted(() => {
         <span v-else-if="mode !== 'overview' && rows.length" class="oa-muted">{{ displayRows.length }} 条{{ data.has_more ? ' · 还有更多' : '' }}</span>
       </div>
       <OAEmpty v-if="!displayRows.length" :title="rows.length && lowCoverageOnly ? '本页暂无待补成本或低覆盖商品' : '所选范围暂无数据'" kind="search">
-        <button v-if="mode === 'products' && !rows.length && appliedMine && !data.has_more" type="button" :disabled="busy" @click="showAllProducts">切换为全部可见商品</button>
+        <button v-if="mode === 'products' && !rows.length && appliedMine && !data.has_more" type="button" :disabled="busy" @click="showAllProducts">切换为全部可见范围</button>
       </OAEmpty>
       <div v-else ref="resultRegion" class="oa-table-wrap" tabindex="0" @scroll="saveVisit" role="region" :aria-label="title + '数据表'">
         <table v-if="mode === 'ranking' || mode === 'personal'" :class="['oa-table', { 'commerce-ranking-table': mode === 'ranking' }]">
@@ -1061,10 +1059,9 @@ onUnmounted(() => {
             :class="{ 'is-selected': selectedProduct === row, 'is-selectable': mode === 'products' && row.sku && row.shop_id }"
             @click="mode === 'products' && !($event.target as HTMLElement).closest('a,button') && openCost(row)">
             <td>
-              <RouterLink v-if="mode !== 'detail' && row.sku" :to="productLink(row.sku, row.shop_id)" custom v-slot="{ href, navigate }">
-                <a class="commerce-product-name" :href="href" :target="mode === 'products' && row.shop_id ? '_blank' : undefined"
-                  rel="noopener" :title="row.product_name || row.shop_item_id || row.sku"
-                  @click.exact="openProductLink($event, row, navigate)">{{ row.product_name || row.shop_item_id || row.sku }}</a>
+              <RouterLink v-if="mode !== 'detail' && row.sku" class="commerce-product-name"
+                :to="productLink(row.sku, row.shop_id)" :title="row.product_name || row.shop_item_id || row.sku">
+                {{ row.product_name || row.shop_item_id || row.sku }}
               </RouterLink>
               <b v-else class="oa-ellipsis" :title="row.product_name || row.shop_item_id || row.sku">{{ row.product_name || row.shop_item_id || row.sku || '—' }}</b>
               <small v-if="row.sku" class="commerce-sku">{{ row.sku }} <button type="button" class="workspace-copy" :aria-label="'复制 SKU ' + row.sku" title="复制 SKU" @click="copySKU(row.sku)"><Copy :size="14" /></button></small>
@@ -1087,7 +1084,6 @@ onUnmounted(() => {
     <ProductCostAction ref="costAction" :split="mode === 'products'"
        :detail-link="selectedProduct?.sku && mode !== 'detail' ? productLink(selectedProduct.sku, selectedProduct.shop_id) : undefined"
       :pricing-link="selectedProduct?.sku ? externalCostLink('/operations/pricing', selectedProduct.sku) : undefined"
-      :maintenance-link="selectedProduct?.sku ? externalCostLink('/cost-rules', selectedProduct.sku) : undefined"
       @dismiss="closeCost" @closed="rememberClosed(selectedProduct)" @saved="savedCost" />
     </div>
     <template v-if="mode === 'detail' && data">

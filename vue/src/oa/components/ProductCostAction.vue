@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
-import { usePermissionsStore } from '@/stores/permissions'
+import { usePermission } from '@/composables/usePermission'
+import { getToken } from '@/services/http'
+import { costMaintenanceApi, maintenanceStatuses, type MaintenanceRow } from '@/services/api/costMaintenanceApi'
 import { useOAAccess } from '../access'
 import { errorText, money, send } from '../api'
 import { invalidateCostActivity } from '../costActivity'
 export type CostTarget = {
   sku: string; shop: string; shopName: string; from: string; to: string; includeBrush: boolean
-  productName: string; quantity?: string; sales?: string; today: boolean
+  productName: string; quantity?: string; sales?: string; coverage?: string; today: boolean
 }
 const { can, currentProfile } = useOAAccess()
-const permissions=usePermissionsStore()
-const mayMaintain=computed(()=>permissions.hasMenu('cost_rules') && can('cost.request.handle'))
-const props = defineProps<{ split?: boolean; detailLink?: RouteLocationRaw; pricingLink?: RouteLocationRaw; maintenanceLink?: RouteLocationRaw }>()
+const { can: hasNativePermission } = usePermission()
+const mayReadCost = computed(() => hasNativePermission('catalog.view'))
+const mayMaintain = computed(() => can('cost.request.handle'))
+const props = defineProps<{ split?: boolean; detailLink?: RouteLocationRaw; pricingLink?: RouteLocationRaw }>()
 const emit = defineEmits<{ dismiss: []; closed: []; saved: [message: string] }>()
 const heading = ref<HTMLElement>()
 const panel = ref<HTMLElement>()
@@ -27,7 +30,10 @@ onMounted(() => {
   syncViewport()
   media?.addEventListener('change', syncViewport)
 })
-onUnmounted(() => media?.removeEventListener('change', syncViewport))
+onUnmounted(() => {
+  media?.removeEventListener('change', syncViewport)
+  readController?.abort()
+})
 watch(panel, element => {
   if (element instanceof HTMLDialogElement && !element.open) {
     element.showModal()
@@ -41,17 +47,114 @@ function backdropClick(event: MouseEvent) {
 }
 const subject=ref<CostTarget>()
 const reason=ref(''), message=ref(''), error=ref(''), busy=ref(false)
-let key=''
+const currentCost = ref<MaintenanceRow>()
+const loadingCost = ref(false)
+const costReadError = ref('')
+const staleCost = ref(false)
+const editingPrice = ref(false)
+const price = ref<number | string>('')
+const priceReason = ref('')
+const maintenanceMessage = ref('')
+const canMaintainRow = computed(() => mayReadCost.value && mayMaintain.value && (currentCost.value?.revision ?? 0) >= 1)
+const priceValue = computed(() => Number(price.value))
+const priceChanged = computed(() => price.value !== '' && Number.isFinite(priceValue.value) &&
+  priceValue.value >= 0 && priceValue.value <= 1e9 &&
+  (currentCost.value?.cost_price == null ||
+    Math.round(priceValue.value * 10_000) !== Math.round(currentCost.value.cost_price * 10_000)))
+let readController: AbortController | undefined
+let key = ''
+const costAmount = (value?: number | null) => value == null ? '—' : '¥' + value.toString()
+
+async function loadCurrentCost() {
+  readController?.abort()
+  currentCost.value = undefined
+  costReadError.value = ''
+  staleCost.value = false
+  editingPrice.value = false
+  error.value = ''
+  const sku = subject.value?.sku
+  loadingCost.value = Boolean(sku && mayReadCost.value)
+  if (!sku || !mayReadCost.value) return
+  const token = getToken()
+  const controller = new AbortController()
+  readController = controller
+  try {
+    let cursor = 0
+    // Keyword search also matches names. Only use the exact canonical SKU.
+    for (let page = 0; page < 20; page++) {
+      const result = await costMaintenanceApi.list({
+        keyword: sku, review_state: 'all', page_size: 100, ...(cursor ? { before_id: cursor } : {}),
+      }, controller.signal)
+      if (controller.signal.aborted || token !== getToken()) return
+      const row = result.data.find(item => item.sku_code === sku)
+      if (row || result.next_before_id === 0) {
+        currentCost.value = row
+        return
+      }
+      if (result.next_before_id < 0 || (cursor && result.next_before_id >= cursor)) break
+      cursor = result.next_before_id
+    }
+    costReadError.value = '暂时无法定位编码成本，请刷新后重试。'
+  } catch (cause) {
+    if (!controller.signal.aborted && token === getToken()) costReadError.value = errorText(cause)
+  } finally {
+    if (!controller.signal.aborted && token === getToken()) loadingCost.value = false
+  }
+}
+
+function editPrice() {
+  if (busy.value || staleCost.value || !canMaintainRow.value || !currentCost.value) return
+  price.value = String(currentCost.value.cost_price ?? '')
+  priceReason.value = ''
+  error.value = ''
+  maintenanceMessage.value = ''
+  editingPrice.value = true
+}
+
+async function maintain(action: 'confirm' | 'modify') {
+  const row = currentCost.value
+  const target = subject.value
+  if (!row || !target || !canMaintainRow.value || busy.value || staleCost.value) return
+  if (action === 'confirm' ? row.cost_price == null : !priceChanged.value || !priceReason.value.trim()) return
+  const token = getToken()
+  busy.value = true
+  error.value = ''
+  maintenanceMessage.value = ''
+  try {
+    const updated = await costMaintenanceApi.maintain(row.id, {
+      action,
+      token: row.token,
+      revision: row.revision,
+      erp_cost: row.erp_cost,
+      ...(action === 'modify' ? { cost_price: priceValue.value, reason_code: 'cost_incorrect', reason_detail: priceReason.value.trim() } : {}),
+    })
+    invalidateCostActivity()
+    if (target !== subject.value || token !== getToken()) return
+    currentCost.value = updated
+    editingPrice.value = false
+    maintenanceMessage.value = '系统成本已' + (action === 'confirm' ? '确认' : '保存') + '，ERP 同步状态以回读结果为准。'
+  } catch (cause) {
+    if (target !== subject.value || token !== getToken()) return
+    error.value = errorText(cause)
+    staleCost.value = (cause as { status?: number } | null)?.status === 409
+  } finally {
+    busy.value = false
+  }
+}
+
 function open(target: CostTarget, focus = true) {
   if (busy.value) return
   subject.value = target
   reason.value = ''
   message.value = ''
   error.value = ''
+  maintenanceMessage.value = ''
   key = crypto.randomUUID()
+  void loadCurrentCost()
   if (focus) void nextTick(() => heading.value?.focus())
 }
 function dismiss() {
+  readController?.abort()
   subject.value = undefined
   emit('dismiss')
 }
@@ -77,6 +180,9 @@ async function submit() {
  finally{busy.value=false}
 }
 watch(() => currentProfile.value?.id, dismiss)
+watch(mayReadCost, () => {
+  if (subject.value) void loadCurrentCost()
+})
 defineExpose({ open, close, dismiss, pending: busy })
 </script>
 <template>
@@ -94,17 +200,54 @@ defineExpose({ open, close, dismiss, pending: busy })
       <dl>
         <div><dt>{{ subject.today ? '今日销量' : '所选期间销量' }}</dt><dd>{{ subject.quantity ?? '—' }}</dd></div>
         <div><dt>{{ subject.today ? '今日销售额' : '所选期间销售额' }}</dt><dd>{{ money(subject.sales) }}</dd></div>
+        <div><dt>成交成本核实覆盖率</dt><dd>{{ subject.coverage ?? '—' }}</dd></div>
       </dl>
     </section>
-    <p class="sku-hint">经营报表使用成交时的成本。编码当前成本由成本中心维护。</p>
+    <section class="sku-summary sku-current-cost" aria-label="当前编码成本">
+      <h3>当前编码成本</h3>
+      <p v-if="loadingCost" role="status">正在读取当前成本…</p>
+      <p v-else-if="!mayReadCost">当前账号无编码成本查看权限。</p>
+      <template v-else-if="costReadError">
+        <p role="alert" class="oa-error">{{ costReadError }}</p>
+        <button type="button" @click="loadCurrentCost">重新读取成本</button>
+      </template>
+      <p v-else-if="!currentCost">暂无系统成本维护记录。</p>
+      <template v-else>
+        <dl>
+          <div><dt>系统单位成本</dt><dd>{{ costAmount(currentCost.cost_price) }}</dd></div>
+          <div><dt>ERP 最近观测单位成本</dt><dd>{{ costAmount(currentCost.erp_cost) }}</dd></div>
+        </dl>
+        <p>{{ maintenanceStatuses[currentCost.status] ?? currentCost.status }}</p>
+      </template>
+    </section>
+    <p class="sku-hint">成交成本核实覆盖率按所选期间计算。当前编码成本用于日常维护。</p>
     <div class="sku-actions">
-      <RouterLink v-if="detailLink" class="oa-button" :to="detailLink" target="_blank" rel="noopener">打开完整详情 ↗</RouterLink>
-      <RouterLink v-if="mayMaintain" class="oa-button" :to="maintenanceLink || { path: '/cost-rules', query: { sku: subject.sku } }"
-        target="_blank" rel="noopener">维护当前编码成本 ↗</RouterLink>
-      <RouterLink v-if="can('pricing.view')" class="oa-button" :to="pricingLink || { path: '/operations/pricing', query: { sku: subject.sku } }"
-        target="_blank" rel="noopener">查看试算依据 ↗</RouterLink>
+      <RouterLink v-if="detailLink" class="oa-button" :to="detailLink">查看商品详情</RouterLink>
+      <RouterLink v-if="can('pricing.view')" class="oa-button" :to="pricingLink || { path: '/operations/pricing', query: { sku: subject.sku } }">查看试算依据</RouterLink>
     </div>
-    <form v-if="!message" @submit.prevent="submit">
+    <template v-if="canMaintainRow">
+      <p v-if="maintenanceMessage" role="status">{{ maintenanceMessage }}</p>
+      <p v-if="error" role="alert" class="oa-error">{{ error }}</p>
+      <button v-if="staleCost" type="button" :disabled="busy" @click="loadCurrentCost">刷新当前成本</button>
+      <form v-else-if="editingPrice" @submit.prevent="maintain('modify')">
+        <label>新系统单位成本
+          <input v-model="price" type="number" min="0" max="1000000000" step="0.0001" required :disabled="busy" />
+        </label>
+        <label>修改原因
+          <textarea v-model.trim="priceReason" maxlength="200" required :disabled="busy" />
+        </label>
+        <div class="sku-actions">
+          <button type="button" :disabled="busy" @click="editingPrice = false; error = ''">取消修改</button>
+          <button type="submit" class="oa-button-primary" :disabled="busy || !priceChanged || !priceReason">{{ busy ? '保存中…' : '保存成本' }}</button>
+        </div>
+      </form>
+      <div v-else class="sku-actions sku-maintenance-actions">
+        <button type="button" :disabled="busy" @click="editPrice">修改成本</button>
+        <button v-if="currentCost?.cost_price != null && (!currentCost.reviewed || currentCost.status === 'conflict')"
+          type="button" class="oa-button-primary" :disabled="busy" @click="maintain('confirm')">确认当前系统成本</button>
+      </div>
+    </template>
+    <form v-else-if="!loadingCost && !message" @submit.prevent="submit">
       <label>核价原因
         <textarea v-model.trim="reason" maxlength="300" required
           placeholder="例如：已更换材质，请核对这个编码的维护成本" @keydown.enter.exact.prevent="submit" />
@@ -112,7 +255,7 @@ defineExpose({ open, close, dismiss, pending: busy })
       <p v-if="error" role="alert" class="oa-error">{{ error }}</p>
       <button type="submit" class="oa-button-primary" :disabled="busy || !reason">{{ busy ? '正在发送…' : split ? '提交核价请求并下一条' : '推送核价' }}</button>
     </form>
-    <div v-else role="status">
+    <div v-else-if="message" role="status">
       <p>{{ message }}</p>
       <RouterLink class="oa-button" :to="{ path: '/me/notifications', query: { section: 'cost', costQueue: 'mine' } }" @click="close">查看我的请求</RouterLink>
     </div>
@@ -129,6 +272,7 @@ defineExpose({ open, close, dismiss, pending: busy })
 }
 .sku-inspector::backdrop { background: var(--oa-inspector-scrim); }
 .sku-inspector .sku-summary { padding: 12px; border-radius: 6px; background: rgb(var(--yb-surface-muted)); }
+.sku-current-cost, .sku-maintenance-actions { margin-top: 12px; }
 .sku-summary h3 { overflow-wrap: anywhere; }
 .sku-inspector .sku-summary p { margin: 4px 0; color: var(--oa-secondary); font-size: 12px; }
 .sku-summary dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 0; }
