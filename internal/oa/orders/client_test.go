@@ -103,7 +103,7 @@ func TestCacheCoalescesAndRejectsUnauthorizedStaleData(t *testing.T) {
 	s := &server{ch: useEndpoint(t, endpoint), cache: map[string]cached{}, active: map[string]*flight{}}
 	results := make(chan error, 8)
 	for range 8 {
-		go func() { _, err := s.load(context.Background(), "same", "SELECT 1", nil); results <- err }()
+		go func() { _, err := s.load(context.Background(), "same", "summary", "SELECT 1", nil); results <- err }()
 	}
 	for range 8 {
 		if err := <-results; err != nil {
@@ -117,14 +117,14 @@ func TestCacheCoalescesAndRejectsUnauthorizedStaleData(t *testing.T) {
 	previous.fetched = time.Now().Add(-time.Minute)
 	s.cache["same"] = previous
 	code.Store(503)
-	if data, err := s.load(context.Background(), "same", "SELECT 1", nil); err != nil || !data.Stale {
+	if data, err := s.load(context.Background(), "same", "summary", "SELECT 1", nil); err != nil || !data.Stale {
 		t.Fatalf("expected same-key stale result, got %v %v", data.Stale, err)
 	}
-	if _, err := s.load(context.Background(), "new", "SELECT 1", nil); !errors.Is(err, errUnavailable) {
+	if _, err := s.load(context.Background(), "new", "summary", "SELECT 1", nil); !errors.Is(err, errUnavailable) {
 		t.Fatalf("fresh key inherited data: %v", err)
 	}
 	code.Store(403)
-	if _, err := s.load(context.Background(), "same", "SELECT 1", nil); !errors.Is(err, errDenied) || len(s.cache) != 0 {
+	if _, err := s.load(context.Background(), "same", "summary", "SELECT 1", nil); !errors.Is(err, errDenied) || len(s.cache) != 0 {
 		t.Fatalf("expected cache purge and denial, got %v", err)
 	}
 }

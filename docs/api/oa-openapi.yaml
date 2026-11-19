@@ -633,7 +633,10 @@ paths:
   /oa-api/orders/rankings:
     get:
       summary: 经营排行
-      description: 人员排行限超级管理员，增长基期为等长紧邻区间，零基期不计算增长率。
+      description: |
+        当前账号可见范围内先分组、排序、分页，再关联名称。店铺按 shop_id，宝贝按 shop_id 加 shop_item_id，SKU 按 shop_id 加 sku_id，人员按 person_id。
+        人员排行限超级管理员；同一商品行可归属多人。增长基期为等长紧邻区间，零基期不计算增长率。
+        缺值排在末尾，同值按完整分组键升序。稳定数据区间内跨页不重复、不漏行。在途同步可能改变不同请求所见数据。
       parameters:
       - in: query
         name: from
@@ -674,13 +677,25 @@ paths:
           - product
           - person
           - growth
+          - sku
+      - in: query
+        name: sort
+        schema: { type: string, enum: [amount, count, gross, grossRate, growth, quantity] }
+        description: |
+          amount 对店铺、平台和增长榜为应付，对宝贝、SKU、人员为商品销售额。
+          count、gross 和 grossRate 仅适用店铺、平台和增长榜；growth 仅适用增长榜，quantity 仅适用 SKU 榜。
+          缺省取 amount，增长榜缺省取 growth。非法字段及不适用的组合返回 400。
+      - in: query
+        name: order
+        schema: { type: string, enum: [asc, desc], default: desc }
+        description: 数据库在分页前排序。仅接受小写 asc 或 desc。
       - in: query
         name: offset
         schema:
           type: integer
           minimum: 0
-          maximum: 10000
-        description: 每页最多 100 条；has_more 指示后续页
+          maximum: 4294967295
+        description: 每页最多 100 条；total_rows 为筛选后分组总数，has_more 指示后续页
       responses:
         '200':
           description: 成功
@@ -694,6 +709,10 @@ paths:
                     - $ref: '#/components/schemas/OrderResult'
                     - type: object
                       properties:
+                        total_rows:
+                          type: integer
+                          format: int64
+                          description: 包括末页和越界空页在内，均返回所选范围的总组数。
                         rows:
                           type: array
                           items:
@@ -703,6 +722,49 @@ paths:
                                 type: string
                               shop_id:
                                 type: string
+                              shop_item_id:
+                                type: string
+                                description: 宝贝榜平台宝贝 ID；key 仍返回相同标识。
+                              title:
+                                type: string
+                                description: 宝贝榜当前在 v_listings 的标题，按店铺和宝贝 ID 关联；缺名回退至宝贝 ID。
+                              person_id:
+                                type: string
+                              name:
+                                type: string
+                                description: 人员榜名册姓名，缺名回退至 person_id。
+                              archived:
+                                type: integer
+                                enum: [0, 1, null]
+                                nullable: true
+                                description: 1 为已归档；未找到名册记录时为 null。
+                              sku:
+                                type: string
+                              sku_id:
+                                type: string
+                              product_name:
+                                type: string
+                                description: 仅 SKU 榜的 SKU 名称。
+                              quantity:
+                                type: string
+                              platform:
+                                type: string
+                              order_count:
+                                oneOf: [{type: integer}, {type: string, pattern: '^[0-9]+$'}]
+                              item_pay_verified_total:
+                                type: string
+                              cost_verified_total:
+                                type: string
+                                nullable: true
+                              verified_gross:
+                                type: string
+                                nullable: true
+                              verified_gross_rate:
+                                type: number
+                                nullable: true
+                              verified_coverage:
+                                type: number
+                                nullable: true
                               growth_status:
                                 type: string
                               item_pay_total:

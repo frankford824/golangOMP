@@ -22,12 +22,13 @@ var beijing = time.FixedZone("Asia/Shanghai", 8*3600)
 var firstDay = time.Date(2026, 6, 1, 0, 0, 0, 0, beijing)
 
 type result struct {
-	Cache      string `json:"-"`
-	Rows       []row  `json:"rows"`
-	Freshness  row    `json:"freshness"`
-	Stale      bool   `json:"stale"`
-	HasMore    bool   `json:"has_more"`
-	ScopeState string `json:"scope_state,omitempty"`
+	TotalRows  *uint64 `json:"total_rows,omitempty"`
+	Cache      string  `json:"-"`
+	Rows       []row   `json:"rows"`
+	Freshness  row     `json:"freshness"`
+	Stale      bool    `json:"stale"`
+	HasMore    bool    `json:"has_more"`
+	ScopeState string  `json:"scope_state,omitempty"`
 }
 
 type cached struct {
@@ -235,15 +236,15 @@ func filters(r *http.Request, name string, now time.Time) (url.Values, error) {
 	if (name == "sku" || name == "cost-history") && params.Get("param_sku") == "" {
 		return nil, errors.New("请选择 SKU")
 	}
-	offset := 0
+	var offset uint64
 	if raw := query.Get("offset"); raw != "" {
 		var err error
-		offset, err = strconv.Atoi(raw)
-		if err != nil || offset < 0 || offset > 10000 {
+		offset, err = strconv.ParseUint(raw, 10, 32)
+		if err != nil || (name != "rankings" && offset > 10000) {
 			return nil, errors.New("分页位置无效")
 		}
 	}
-	params.Set("param_offset", strconv.Itoa(offset))
+	params.Set("param_offset", strconv.FormatUint(offset, 10))
 	params.Set("param_brush", "0")
 	if query.Get("include_brush") == "1" || (name == "detail" && query.Get("include_brush") == "") {
 		params.Set("param_brush", "1")
@@ -273,14 +274,36 @@ func (s *server) read(w http.ResponseWriter, r *http.Request, name string) {
 		params.Set("param_order_no", number)
 		query = exactOrderDetailSQL
 	}
+	var sortBy, direction string
 	if name == "rankings" {
-		query = map[string]string{"": shopRankingSQL, "shop": shopRankingSQL, "platform": platformRankingSQL, "product": productRankingSQL, "person": personRankingSQL, "growth": growthSQL}[group]
-		if query == "" {
-			platform.Error(w, 400, "排行类型无效")
+		values, parseErr := url.ParseQuery(r.URL.RawQuery)
+		if parseErr != nil {
+			platform.Error(w, 400, "排行参数格式无效")
 			return
 		}
 		if group == "person" && !actor.SuperAdmin {
 			platform.Error(w, 403, "当前账号无人员排行权限")
+			return
+		}
+		if group == "" {
+			group = "shop"
+		}
+		for _, field := range []string{"sort", "order"} {
+			if v, supplied := values[field]; supplied && (len(v) != 1 || v[0] == "") {
+				platform.Error(w, 400, "排序指标和方向应各有一个有效值")
+				return
+			}
+		}
+		sortBy, direction = values.Get("sort"), values.Get("order")
+		if sortBy == "" {
+			sortBy = defaultRankingMetric(group)
+		}
+		if direction == "" {
+			direction = "desc"
+		}
+		query, err = rankingQuery(group, sortBy, direction, params.Get("param_brush") == "1")
+		if err != nil {
+			platform.Error(w, 400, err.Error())
 			return
 		}
 	}
@@ -311,18 +334,8 @@ func (s *server) read(w http.ResponseWriter, r *http.Request, name string) {
 		params.Set("param_from", day.AddDate(0, 0, -days).Format(time.DateOnly))
 		params.Set("param_until", day.AddDate(0, 0, days).Format(time.DateOnly))
 	}
-	if params.Get("param_brush") == "1" {
-		switch query {
-		case summarySQL:
-			query = brushSummarySQL
-		case shopRankingSQL:
-			query = brushShopRankSQL
-		case platformRankingSQL:
-			query = brushPlatformRankSQL
-		case growthSQL:
-			platform.Error(w, 400, "增长排行使用剔除刷单的固定口径")
-			return
-		}
+	if name == "summary" && params.Get("param_brush") == "1" {
+		query = brushSummarySQL
 	}
 	own := name == "personal" || (name == "products" && r.URL.Query().Get("mine") == "1")
 	if own && name == "products" {
@@ -338,11 +351,18 @@ func (s *server) read(w http.ResponseWriter, r *http.Request, name string) {
 		return
 	}
 	if state == scopeUnassigned {
-		platform.JSON(w, 200, result{Rows: []row{}, ScopeState: string(state)})
+		empty := result{Rows: []row{}, ScopeState: string(state)}
+		if name == "rankings" {
+			empty.TotalRows = new(uint64)
+		}
+		platform.JSON(w, 200, empty)
 		return
 	}
 	key := fmt.Sprintf("%d/%s/%s/%t/%s", actor.ID, name, group, own, params.Encode())
-	data, err := s.load(r.Context(), key, query, params)
+	if name == "rankings" {
+		key += "/" + sortBy + "/" + direction
+	}
+	data, err := s.load(r.Context(), key, name, query, params)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -367,7 +387,7 @@ func writeError(w http.ResponseWriter, err error) {
 	platform.Error(w, code, err.Error())
 }
 
-func (s *server) load(ctx context.Context, key, query string, params url.Values) (result, error) {
+func (s *server) load(ctx context.Context, key, name, query string, params url.Values) (result, error) {
 	s.mu.Lock()
 	previous := s.cache[key]
 	if time.Since(previous.fetched) < 30*time.Second {
@@ -396,8 +416,12 @@ func (s *server) load(ctx context.Context, key, query string, params url.Values)
 	defer cancel()
 	freshness, err := s.freshness(readCtx)
 	var rows []row
+	var total *uint64
 	if err == nil && len(freshness) == 1 {
 		rows, err = s.ch.rows(readCtx, query, params)
+		if err == nil && name == "rankings" {
+			total, err = s.rankingTotal(readCtx, query, params, rows)
+		}
 		if err == nil && query == summarySQL {
 			err = s.markVerifiedZero(readCtx, params, rows)
 		}
@@ -418,7 +442,11 @@ func (s *server) load(ctx context.Context, key, query string, params url.Values)
 		pending.err = err
 		return result{}, err
 	}
-	pending.result = result{Cache: "miss", Rows: rows, Freshness: freshness[0], HasMore: len(rows) == 101 && (query == productsSQL || query == historySQL || query == skuSQL || query == myProductsSQL || query == personRankingSQL || query == productRankingSQL || query == shopRankingSQL || query == platformRankingSQL || query == brushShopRankSQL || query == brushPlatformRankSQL || query == growthSQL || query == ledgerSQL || query == orderDetailSQL || query == exactOrderDetailSQL)}
+	pending.result = result{Cache: "miss", Rows: rows, Freshness: freshness[0], TotalRows: total}
+	switch name {
+	case "rankings", "products", "sku", "cost-history", "ledger", "detail":
+		pending.result.HasMore = len(rows) == 101
+	}
 	if pending.result.HasMore {
 		pending.result.Rows = rows[:100]
 	}
@@ -427,6 +455,34 @@ func (s *server) load(ctx context.Context, key, query string, params url.Values)
 	}
 	s.cache[key] = cached{result: pending.result, fetched: time.Now()}
 	return pending.result, nil
+}
+
+// count() OVER () is computed before LIMIT. An out-of-range offset has no
+// carrier row; read only the count from the first page under the same scope.
+func (s *server) rankingTotal(ctx context.Context, query string, params url.Values, rows []row) (*uint64, error) {
+	countRows := rows
+	if len(countRows) == 0 && params.Get("param_offset") != "0" {
+		first := make(url.Values, len(params))
+		for k, v := range params {
+			first[k] = v
+		}
+		first.Set("param_offset", "0")
+		var err error
+		countRows, err = s.ch.rows(ctx, "SELECT total_rows FROM ("+query+") LIMIT 1", first)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var total uint64
+	if len(countRows) > 0 {
+		if err := json.Unmarshal(countRows[0]["total_rows"], &total); err != nil || string(countRows[0]["total_rows"]) == "null" {
+			return nil, errUnavailable
+		}
+	}
+	for _, item := range rows {
+		delete(item, "total_rows")
+	}
+	return &total, nil
 }
 
 func (s *server) markVerifiedZero(ctx context.Context, params url.Values, rows []row) error {

@@ -37,14 +37,13 @@ func TestFormalOrderReadProbe(t *testing.T) {
 			"param_all":   {"1"}, "param_shops": {"[]"},
 			"param_shop": {""}, "param_platform": {""}, "param_offset": {"0"},
 		}
-		for _, ranking := range []struct{ name, query string }{
-			{"shop", shopRankingSQL},
-			{"platform", platformRankingSQL},
-		} {
-			t.Run(ranking.name, func(t *testing.T) {
-				// ClickHouse must resolve payable_amount in the numeric aggregate
-				// against the view rather than the string response alias.
-				if _, err := ch.rows(ctx, ranking.query, params); err != nil {
+		for _, group := range []string{"shop", "platform"} {
+			t.Run(group, func(t *testing.T) {
+				query, err := rankingQuery(group, "", "", false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := ch.rows(ctx, query, params); err != nil {
 					t.Fatal(err)
 				}
 			})
