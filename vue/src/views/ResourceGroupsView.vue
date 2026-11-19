@@ -9,7 +9,7 @@
           <button type="button" class="quiet-button" :aria-pressed="!showLedger" @click="setLedger(false)">图库网格</button>
           <button type="button" class="quiet-button" :aria-pressed="showLedger" @click="setLedger(true)">规格台账</button>
         </div>
-        <button class="quiet-button asset-refresh" :disabled="loading" @click="load">
+        <button class="quiet-button asset-refresh" :disabled="loading" @click="load()">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
       </div></DesktopSlot>
@@ -35,7 +35,7 @@
     </section>
 
     <div ref="resultsViewport" class="asset-results-region desktop-region-scroll" role="region" aria-label="资产检索结果" tabindex="0">
-    <div v-if="error" class="error" role="alert"><span>{{ error }}</span><button @click="load">重试</button></div>
+    <div v-if="error" class="error" role="alert"><span>{{ error }}</span><button @click="load()">重试</button></div>
     <div v-if="loading && !result.items.length && !result.flat_items.length && !externalItems.length" class="empty loading-state" role="status">
       <span class="loading-spinner" aria-hidden="true" />正在检索 SKU 与资源…
     </div>
@@ -244,8 +244,8 @@
 <script setup lang="ts">
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
-import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter, type LocationQuery } from 'vue-router'
+import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue'
+import { onBeforeRouteLeave, RouterLink, useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { ImageIcon } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
@@ -345,6 +345,30 @@ const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).
   return [{ key, label: `${filterLabels[key]}：${display}` }]
 }))
 
+// Keep the selected row and scroll on the list's own browser history entry.
+onBeforeRouteLeave((to) => {
+  const viewport = resultsViewport.value
+  if (!oaEnabled || !viewport || window.history.state?.current !== route.fullPath || !['AssetDetail', 'ExternalAssetDetail'].includes(String(to.name))) return
+  const href = router.resolve(to).href
+  const anchor = Array.from(viewport.querySelectorAll<HTMLAnchorElement>('a[href]'))
+    .find(link => link.getAttribute('href') === href)
+  window.history.replaceState({ ...window.history.state, oaAssetListPosition: {
+    path: route.fullPath, top: viewport.scrollTop, href: anchor?.getAttribute('href'),
+  } }, '')
+})
+function restoreListPosition() {
+  if (!oaEnabled || route.name !== 'AssetsIndex') return
+  const position = window.history.state?.oaAssetListPosition
+  const viewport = resultsViewport.value
+  if (!viewport || position?.path !== route.fullPath || !Number.isFinite(position.top)) return
+  viewport.scrollTop = position.top
+  if (position.href) {
+    Array.from(viewport.querySelectorAll<HTMLAnchorElement>('a[href]'))
+      .find(link => link.getAttribute('href') === position.href)?.focus({ preventScroll: true })
+  }
+}
+onActivated(() => { void nextTick(restoreListPosition) })
+
 function assetDetailTarget(id: number | string) {
   return {
     name: typeof id === 'number' ? 'AssetDetail' : 'ExternalAssetDetail',
@@ -425,9 +449,9 @@ watch(() => route.name === 'AssetsIndex' ? route.query : null, (query, previous)
   Object.assign(applied, next)
   Object.assign(filters, next)
   void nextTick(() => { if (resultsViewport.value) resultsViewport.value.scrollTop = 0 })
-  void load()
+  void load(true)
 }, { immediate: true })
-async function load() {
+async function load(restoreScroll = false) {
   const requestVersion = ++liveCostRequestVersion
   liveCosts.value = new Map()
   loading.value = true
@@ -468,7 +492,10 @@ async function load() {
     externalItems.value = []
     error.value = cause instanceof Error ? cause.message : '资产中心加载失败。'
   } finally {
-    if (requestVersion === liveCostRequestVersion) loading.value = false
+    if (requestVersion === liveCostRequestVersion) {
+      loading.value = false
+      if (restoreScroll) void nextTick(restoreListPosition)
+    }
   }
 }
 async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number) {

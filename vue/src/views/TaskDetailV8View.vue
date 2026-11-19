@@ -1,7 +1,10 @@
 <template>
   <main class="task-page task-detail-view" :class="{ 'oa-task-detail': oaEnabled }">
     <div v-if="loading && !task" class="state">正在打开任务…</div>
-    <div v-else-if="error && !task" class="state error" role="alert">{{ error }}</div>
+    <div v-else-if="error && !task" class="state error" role="alert">
+      {{ error }}
+      <OAReturnLink v-if="oaEnabled" :to="returnTarget">{{ backButtonLabel }}</OAReturnLink>
+    </div>
     <template v-else-if="task">
       <DesktopSlot v-if="oaEnabled && task.task_no" target="title">
         <nav class="task-detail-breadcrumb" aria-label="面包屑">
@@ -15,7 +18,7 @@
         <TaskDetailAtmosphere v-if="!oaEnabled" />
         <div class="hero-content">
           <nav class="hero-nav" aria-label="页面位置">
-            <button class="back-button" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>{{ backButtonLabel }}</span></button>
+            <button class="back-button" :aria-label="backButtonLabel" :title="backButtonLabel" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>{{ backButtonLabel }}</span></button>
             <div class="hero-actions">
               <TaskStatusTag :status="task.task_status" />
               <button v-if="bundle?.groups.length" type="button" class="default-style-entry"

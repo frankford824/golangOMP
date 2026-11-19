@@ -1,6 +1,7 @@
 <template>
   <main class="detail-page">
-    <nav class="breadcrumb" aria-label="当前位置"><OAReturnLink :to="returnTo">{{ globalReturn ? '返回搜索来源' : '资产中心' }}</OAReturnLink><span>/</span><span>{{ displaySKU }}</span></nav>
+    <AssetDetailNavigation v-if="oaEnabled" :code="group ? displaySKU : undefined" />
+    <nav v-else class="breadcrumb" aria-label="当前位置"><OAReturnLink :to="returnTo">{{ globalReturn ? '返回搜索来源' : '资产中心' }}</OAReturnLink><span>/</span><span>{{ displaySKU }}</span></nav>
     <header class="detail-hero">
       <div>
         <div class="hero-badges"><span>{{ modeLabel }}</span><span v-if="group?.business_lane">{{ group.business_lane === 'customization' ? '定制' : '常规' }}</span></div>
@@ -61,6 +62,8 @@
 import { yuanPrefix } from '@/utils/currency-display'
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
+import AssetDetailNavigation from '@/oa/components/AssetDetailNavigation.vue'
+import { oaEnabled } from '@/oa/access'
 import OAReturnLink from '@/oa/components/OAReturnLink.vue'
 import { workspaceOrigin } from '@/oa/returnNavigation'
 import { assetListReturn } from '@/oa/assetNavigation'

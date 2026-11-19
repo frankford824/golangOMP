@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), costReconciliation: vi.fn(), batchDownload: vi.fn(), downloadBatchAsZip: vi.fn() }))
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ currentRoute: { value: { path: '/asset-center/8' } } }),
+  useRouter: () => ({ options: { history: { state: {} } }, currentRoute: { value: { path: '/asset-center/8' } } }),
   useRoute: () => ({ params: { id: '8' }, fullPath: '/asset-center/8', query: {} }),
   RouterLink: { props: ['to'], template: '<a :data-target="JSON.stringify(to)"><slot /></a>' },
 }))

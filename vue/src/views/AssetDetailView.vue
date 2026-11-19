@@ -1,5 +1,6 @@
 <template>
   <main class="external-detail-page">
+    <AssetDetailNavigation v-if="oaEnabled" :code="asset ? (asset.sku_code || resourceID) : undefined" />
     <header class="page-header">
       <div>
         <p class="eyebrow">外部素材库</p>
@@ -7,7 +8,7 @@
         <p>{{ asset ? fileName : '正在加载素材信息…' }}</p>
       </div>
       <div class="page-actions">
-        <OAReturnLink class="return-link" :to="returnTo">{{ globalReturn ? '返回搜索来源' : '返回资产中心' }}</OAReturnLink>
+        <OAReturnLink v-if="!oaEnabled" class="return-link" :to="returnTo">{{ globalReturn ? '返回搜索来源' : '返回资产中心' }}</OAReturnLink>
         <BaseButton size="sm" :disabled="loading" @click="loadAsset">{{ loading ? '加载中…' : '刷新' }}</BaseButton>
       </div>
     </header>
@@ -48,6 +49,8 @@
 import OriginalImageDimensions from '@/components/media/OriginalImageDimensions.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import AssetDetailNavigation from '@/oa/components/AssetDetailNavigation.vue'
+import { oaEnabled } from '@/oa/access'
 import OAReturnLink from '@/oa/components/OAReturnLink.vue'
 import { workspaceOrigin } from '@/oa/returnNavigation'
 import { assetListReturn } from '@/oa/assetNavigation'

@@ -144,7 +144,7 @@
       </div>
     </main>
     <GlobalSearchOverlay v-model:open="searchOpen" :pages="oaEnabled ? quickPages : undefined" />
-    <NotificationCenter v-model:open="notificationOpen" />
+    <NotificationCenter v-if="!oaEnabled" v-model:open="notificationOpen" />
     <transition name="route-progress">
       <div v-if="routeLoading" class="route-progress" role="status" aria-live="polite">
         <span class="route-progress__bar" />

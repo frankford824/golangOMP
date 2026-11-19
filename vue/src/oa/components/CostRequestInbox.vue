@@ -65,8 +65,13 @@ async function load(before=0, change?:'next'|'prev', background=false){
   if(seq!==sequence || token!==getToken())return
   if (chooseLanding) {
     chooseLanding=false
-    if(result.reply_count && !result.pending_count && queue.value!=='replies') {
-      queue.value='replies'
+    const landing = result.reply_count && !result.pending_count ? 'replies' : queue.value
+    if (fullPage.value && !route.query.costQueue) {
+      await router.replace(notificationLocation(landing, history.value))
+      return
+    }
+    if (queue.value !== landing) {
+      queue.value=landing
       await load()
       return
     }
@@ -140,10 +145,10 @@ watch(()=>[currentProfile.value?.id,reviewer.value],()=>{
    <p class="cost-meta">{{ row.sender }} · 店铺 {{ row.shop_id }} · {{ feeDateTime(row.created_at) }}</p>
    <p>{{ row.reason }}</p>
    <p v-if="row.reply"><strong>{{ row.handled_by }} 回复</strong>　{{ row.reply }}</p>
-   <div v-if="queue==='pending'" class="cost-actions">
+   <div v-if="queue==='pending' || permissions.hasMenu('cost_rules') || can('pricing.view')" class="cost-actions">
     <RouterLink v-if="permissions.hasMenu('cost_rules')" :to="sourceLink('/cost-rules',row.sku)" @click="$emit('navigate')">查看编码成本</RouterLink>
     <RouterLink v-if="can('pricing.view')" :to="sourceLink('/operations/pricing',row.sku)" @click="$emit('navigate')">查看试算依据</RouterLink>
-    <button type="button" @click="selected=row.id;reply=''" :disabled="acting">回复核对结果</button>
+    <button v-if="queue==='pending' && reviewer" type="button" @click="selected=row.id;reply=''" :disabled="acting">回复核对结果</button>
    </div>
    <form v-if="queue==='pending' && selected===row.id" @submit.prevent="respond(row.id)">
     <label>核对结果<textarea v-model.trim="reply" maxlength="300" required placeholder="说明核对依据、是否已在成本中心处理" /></label>

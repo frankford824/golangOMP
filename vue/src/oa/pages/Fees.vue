@@ -838,6 +838,7 @@ watch(() => route.fullPath, syncLocation)
     <button v-if="mode === 'apply' && !loadedTemplates" type="button" @click="run(loadTemplates)">重试加载模板</button>
     <button v-else-if="mode === 'templates' && !loadedTemplates" type="button" @click="run(loadTemplates)">重试加载模板</button>
     <button v-else-if="mode === 'document' && !detail && typeof route.query.id === 'string'" type="button" @click="run(() => open(String(route.query.id)))">重试读取单据</button>
+    <OAReturnLink v-if="mode === 'document' && !detail" class="oa-button" :to="documentReturn">{{ route.query.from === 'notifications' ? '返回费用动态' : '返回费用列表' }}</OAReturnLink>
   </div>
   <p v-if="notice" class="fee-banner fee-banner-success" role="status"><Check :size="17" aria-hidden="true" /> {{ notice }}</p>
   <p v-if="busy && !showQueue" class="oa-muted" role="status">{{ detail ? '正在办理单据…' : '正在处理…' }}</p>

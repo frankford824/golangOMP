@@ -22,6 +22,7 @@ vi.mock('vue-router', async () => {
     return { fullPath: query ? `${path}?${query}` : path }
   }
   return {
+    onBeforeRouteLeave: vi.fn(),
     RouterLink: { props: ['to'], methods: { resolve }, template: '<a :href="resolve(to).fullPath"><slot /></a>' },
     useRoute: () => {
       Object.assign(route, { fullPath: '/asset-center', query: {} })

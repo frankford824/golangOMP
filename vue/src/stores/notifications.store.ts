@@ -34,31 +34,44 @@ export const useNotificationsStore = defineStore('notifications', () => {
   const unreadCount = ref(0)
   const loading = ref(false)
 
+  let listGeneration = 0
+  let countGeneration = 0
+  const pagedOA = import.meta.env.VITE_OA_FEATURES === 'true'
+
   const unreadItems = computed(() => items.value.filter((item) => !(item.read ?? item.is_read)))
 
   async function load(): Promise<void> {
+    const generation = ++listGeneration
     loading.value = true
     try {
       const res = await notificationsApi.list()
+      if (generation !== listGeneration) return
       const nextItems = unwrapItems(res.data)
       items.value = nextItems
-      unreadCount.value = unreadFromRaw(res.data, nextItems)
+      if (pagedOA) await refreshUnreadCount()
+      else unreadCount.value = unreadFromRaw(res.data, nextItems)
     } finally {
-      loading.value = false
+      if (generation === listGeneration) loading.value = false
     }
   }
 
   async function refreshUnreadCount(): Promise<void> {
+    const generation = ++countGeneration
     const res = await notificationsApi.unreadCount()
-    unreadCount.value = unreadFromRaw(res.data, items.value)
+    if (generation === countGeneration) unreadCount.value = unreadFromRaw(res.data, items.value)
   }
 
   function applyUnreadCount(value: unknown): void {
     const n = Number(value)
-    if (Number.isFinite(n)) unreadCount.value = n
+    if (value != null && Number.isFinite(n)) {
+      countGeneration++
+      unreadCount.value = n
+    }
   }
 
   function reset(): void {
+    listGeneration++
+    countGeneration++
     items.value = []
     unreadCount.value = 0
     loading.value = false

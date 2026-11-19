@@ -2,6 +2,7 @@
 import { RouterLink, useRouter, type RouteLocationRaw } from 'vue-router'
 import { goBackTo } from '../returnNavigation'
 
+defineOptions({ inheritAttrs: false })
 const props = defineProps<{ to: RouteLocationRaw; source?: string }>()
 const router = useRouter()
 function follow(event: MouseEvent) {
@@ -14,5 +15,5 @@ function follow(event: MouseEvent) {
 </script>
 
 <template>
-  <RouterLink v-slot="{ href }" :to="to" custom><a :href="href" @click="follow"><slot /></a></RouterLink>
+  <RouterLink v-slot="{ href }" :to="to" custom><a v-bind="$attrs" :href="href" @click="follow"><slot /></a></RouterLink>
 </template>

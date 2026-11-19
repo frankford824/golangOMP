@@ -19,12 +19,14 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { Bell } from 'lucide-vue-next'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import { useCostActivity } from '@/oa/costActivity'
 import { expenseActivityActions, useExpenseActivity } from '@/oa/expenseActivity'
 import { useNotificationsStore } from '@/stores/notifications.store'
 
+const router = useRouter()
 const emit = defineEmits<{ open: [] }>()
 const notificationsStore = useNotificationsStore()
 const unreadCount = computed(() => notificationsStore.unreadCount)
@@ -61,11 +63,17 @@ function syncOAActivity() {
 }
 
 async function openNotifications(): Promise<void> {
-  emit('open')
+  if (!oaEnabled) { emit('open'); return }
+  if (router.currentRoute.value.name === 'MeNotifications') return
+  const expense = expenseTodoCount.value > 0 || expenseResultCount.value > 0
+  const query = expense
+    ? { section: 'expense', activity: expenseTodoCount.value ? undefined : 'results' }
+    : costActivityCount.value ? { section: 'cost' } : {}
+  await router.push({ name: 'MeNotifications', query })
 }
 
 function syncNotifications(): void {
-  void notificationsStore.load()
+  void (oaEnabled ? notificationsStore.refreshUnreadCount() : notificationsStore.load()).catch(() => undefined)
   syncOAActivity()
 }
 

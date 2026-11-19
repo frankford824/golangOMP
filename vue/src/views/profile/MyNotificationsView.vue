@@ -3,7 +3,7 @@
     <header v-if="!oaEnabled || section === 'system'" class="notif-hero" :class="{ 'notif-toolbar': oaEnabled }">
       <div>
         <h1 v-if="!oaEnabled">通知中心</h1>
-        <p v-if="section === 'system'">共 {{ items.length }} 条 · {{ unreadCount }} 条未读</p>
+        <p v-if="section === 'system'">{{ oaEnabled ? "本页" : "共" }} {{ visibleTotal }} 条 · {{ unreadCount }} 条未读</p>
       </div>
       <div v-if="section === 'system'" class="notif-hero-actions">
         <div class="notif-segment">
@@ -12,6 +12,7 @@
             :key="option.value"
             type="button"
             :class="{ 'is-active': filter === option.value }"
+            :aria-pressed="filter === option.value"
             @click="filter = option.value"
           >
             {{ option.label }}
@@ -20,7 +21,7 @@
         <button
           type="button"
           class="notif-btn notif-btn--ghost"
-          :disabled="unreadCount === 0"
+          :disabled="unreadCount === 0 || markingRead"
           @click="markAllRead"
         >
           <CheckCircle2 class="h-4 w-4" />
@@ -39,14 +40,19 @@
     <ExpenseNotifications v-if="section === 'expense'" :key="expenseTab + ':' + expensePage" :initial-tab="expenseTab" :initial-page="expensePage" />
     <CostRequestInbox v-else-if="section === 'cost'" :key="router.currentRoute.value.fullPath" />
     <div v-else class="notif-layout">
-      <section class="notif-list-panel">
+      <section class="notif-list-panel" :aria-busy="oaEnabled ? pageLoading : undefined">
         <div class="notif-section-head">
           <div>
             <h2>通知记录</h2>
           </div>
         </div>
 
-        <div v-if="visibleItems.length" class="notif-list desktop-region-scroll" role="region" aria-label="通知记录" tabindex="0">
+        <div v-if="oaEnabled && pageError" class="notif-empty" role="alert">
+          <p>{{ pageError }}</p>
+          <button type="button" class="notif-btn notif-btn--ghost" @click="reloadPage">重试</button>
+        </div>
+        <p v-else-if="oaEnabled && pageLoading" class="notif-empty" role="status">正在加载通知…</p>
+        <div v-else-if="visibleItems.length" class="notif-list desktop-region-scroll" role="region" aria-label="通知记录" tabindex="0">
           <article
             v-for="item in visibleItems"
             :key="item.id"
@@ -65,12 +71,20 @@
               </div>
               <p>{{ displayContent(item) }}</p>
               <span v-if="!oaEnabled || displayType(item) !== displayTitle(item)" :class="oaEnabled && notificationTone(item)">{{ displayType(item) }}</span>
-              <RouterLink v-if="oaEnabled && notificationTaskID(item)" :to="taskDetailLocation(notificationTaskID(item)!, router.currentRoute?.value.fullPath || '/me/notifications')" class="notif-task-link" @click="markNotificationRead(item)">查看任务</RouterLink>
+              <RouterLink
+                v-if="oaEnabled && notificationTaskID(item)"
+                v-slot="{ href }"
+                :to="taskDetailLocation(notificationTaskID(item)!, route.fullPath)"
+                custom
+              >
+                <a :href="href" class="notif-task-link" @click="openOATask($event, item)">查看任务</a>
+              </RouterLink>
             </div>
             <button
               v-if="!isRead(item)"
               type="button"
               class="notif-mini-btn"
+              :disabled="markingRead"
               @click.stop="markRead(item.id)"
             >
               标为已读
@@ -82,6 +96,12 @@
           <Inbox class="h-8 w-8" />
           <p>{{ emptyText }}</p>
         </div>
+        <p v-if="oaEnabled && actionError" class="notif-action-error" role="alert">{{ actionError }}</p>
+        <nav v-if="oaEnabled && (pageNumber > 1 || nextCursor)" class="notif-pagination" aria-label="系统通知分页">
+          <button type="button" class="notif-btn notif-btn--ghost" :disabled="pageNumber === 1 || pageLoading || markingRead" @click="openPreviousPage">{{ previousPageLabel }}</button>
+          <span aria-live="polite">第 {{ pageNumber }} 页</span>
+          <button type="button" class="notif-btn notif-btn--ghost" :disabled="!nextCursor || pageLoading || markingRead" @click="openPage(pageNumber + 1, nextCursor)">下一页</button>
+        </nav>
       </section>
 
       <aside class="notification-tools desktop-region-scroll" aria-label="通知设置与广播" tabindex="0">
@@ -237,8 +257,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, defineAsyncComponent, onMounted, onScopeDispose, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { taskDetailLocation } from '@/oa/taskNavigation'
 import {
   BellRing,
@@ -252,7 +272,6 @@ import {
   Users,
 } from 'lucide-vue-next'
 import { formatNotification } from '@/domain/notification-text'
-import { defineAsyncComponent } from 'vue'
 import type { TaskSKUSyncFailedPayload } from '@/services/v1Types'
 import { oaEnabled, useOAAccess } from '@/oa/access'
 import { expenseActivityActions } from '@/oa/expenseActivity'
@@ -278,20 +297,21 @@ interface DirectoryUser {
 }
 
 const router = useRouter()
-const { can: canOA } = useOAAccess()
+const route = useRoute()
+const { can: canOA, currentProfile } = useOAAccess()
 const showExpenseActivity = computed(() => expenseActivityActions.some(canOA))
 const showCostActivity = computed(() => canOA('orders.view') || canOA('cost.request.handle'))
 const section = computed(() => {
-  const requested = router.currentRoute.value.query.section
+  const requested = route.query.section
   if (requested === 'expense' && showExpenseActivity.value) return 'expense'
   if (requested === 'cost' && showCostActivity.value) return 'cost'
   return 'system'
 })
 const expensePage = computed(() => {
-  const raw = Number(router.currentRoute.value.query.expensePage)
+  const raw = Number(route.query.expensePage)
   return Number.isSafeInteger(raw) && raw >= 1 && raw <= 1_000_000 ? raw : 1
 })
-const expenseTab = computed(() => router.currentRoute.value.query.activity === 'results' ? 'results' : 'todos')
+const expenseTab = computed(() => route.query.activity === 'results' ? 'results' : 'todos')
 const ExpenseNotifications = defineAsyncComponent(() => import('@/oa/components/ExpenseNotifications.vue'))
 const CostRequestInbox = defineAsyncComponent(() => import('@/oa/components/CostRequestInbox.vue'))
 const notificationsStore = useNotificationsStore()
@@ -301,10 +321,12 @@ const webPushStore = useWebPushStore()
 const items = computed(() => notificationsStore.items)
 const legacyFilter = ref<FilterMode>('all')
 const filter = computed<FilterMode>({
-  get: () => oaEnabled ? (router.currentRoute.value.query.filter === 'unread' ? 'unread' : 'all') : legacyFilter.value,
+  get: () => oaEnabled ? (route.query.filter === 'unread' ? 'unread' : 'all') : legacyFilter.value,
   set: (value) => {
     if (!oaEnabled) { legacyFilter.value = value; return }
-    void router.push({ path:'/me/notifications', query: { ...router.currentRoute.value.query, filter:value === 'unread' ? 'unread' : undefined } })
+    if (value !== filter.value) {
+      void router.push({ name: 'MeNotifications', query: { filter: value === 'unread' ? 'unread' : undefined } })
+    }
   },
 })
 const toolPane = ref<'settings' | 'broadcast'>('settings')
@@ -326,10 +348,39 @@ const filterOptions: Array<{ label: string; value: FilterMode }> = [
   { label: '未读', value: 'unread' },
 ]
 
+const pageSize = 20
+const pageItems = ref<NotificationItem[]>([])
+const nextCursor = ref('')
+const pageLoading = ref(false)
+const pageError = ref('')
+const actionError = ref('')
+const markingRead = ref(false)
+const pageCursor = computed(() => typeof route.query.cursor === 'string' ? route.query.cursor : '')
+const pageNumber = computed(() => {
+  const value = typeof route.query.page === 'string' ? Number(route.query.page) : 1
+  return pageCursor.value && Number.isSafeInteger(value) && value > 1 ? value : 1
+})
+const activeCursor = computed(() => pageNumber.value > 1 ? pageCursor.value : '')
+const cursorHistoryLimit = 48
+const cursorHistoryKey = computed(() => {
+  const id = currentProfile.value?.id
+  return id ? 'oa-notification-cursors:' + id : undefined
+})
+const previousCursor = computed(() => {
+  const value = route.query.previousCursor
+  return typeof value === 'string' && value && value !== activeCursor.value
+    ? value
+    : readCursorHistory(pageNumber.value, activeCursor.value)
+})
+const previousPageLabel = computed(() => pageNumber.value > 2 && !previousCursor.value ? '回到首页' : '上一页')
+let pageRequest: AbortController | undefined
+
 const unreadCount = computed(() => notificationsStore.unreadCount)
-const visibleItems = computed(() =>
-  filter.value === 'unread' ? notificationsStore.unreadItems : items.value,
-)
+const visibleItems = computed(() => {
+  if (oaEnabled) return pageItems.value
+  return filter.value === 'unread' ? notificationsStore.unreadItems : items.value
+})
+const visibleTotal = computed(() => oaEnabled ? pageItems.value.length : items.value.length)
 const emptyText = computed(() => (filter.value === 'unread' ? '暂无未读通知' : '暂无通知'))
 const canBroadcast = computed(() => permissionsStore.hasAction(PermissionEnum.SYSTEM_MANAGE))
 const canBroadcastAll = canBroadcast
@@ -408,8 +459,121 @@ function notificationTaskID(item: NotificationItem): number | undefined {
   return Number.isSafeInteger(taskId) && taskId > 0 ? taskId : undefined
 }
 
-function markNotificationRead(item: NotificationItem): void {
-  if (!isRead(item)) void notificationsStore.markRead(item.id).catch(() => undefined)
+async function fetchPage(mode: FilterMode, cursor: string, signal: AbortSignal) {
+  const { data: body } = await notificationsApi.list({
+    limit: pageSize,
+    is_read: mode === 'unread' ? false : undefined,
+    cursor: cursor || undefined,
+  }, signal)
+  return {
+    items: Array.isArray(body?.data) ? body.data as NotificationItem[] : [],
+    next: typeof body?.next_cursor === 'string' ? body.next_cursor : '',
+  }
+}
+
+function cursorHistory() {
+  try {
+    const key = cursorHistoryKey.value
+    if (key) {
+      const saved: unknown = JSON.parse(sessionStorage.getItem(key) ?? '{}')
+      if (saved && typeof saved === 'object' && !Array.isArray(saved)) return saved as Record<string, string>
+    }
+  } catch {
+    // Links carry one previous cursor even when browser storage is unavailable.
+  }
+  return {}
+}
+
+function cursorKey(page: number, cursor: string): string {
+  return filter.value + ':' + page + ':' + cursor
+}
+
+function readCursorHistory(page: number, cursor: string): string | undefined {
+  const previous = cursorHistory()[cursorKey(page, cursor)]
+  return typeof previous === 'string' && previous !== cursor ? previous : undefined
+}
+
+function rememberPreviousCursor(page: number, current: string, previous: string): void {
+  const key = cursorHistoryKey.value
+  if (!key) return
+  try {
+    const history = cursorHistory()
+    const entry = cursorKey(page, current)
+    delete history[entry]
+    history[entry] = previous
+    sessionStorage.setItem(key, JSON.stringify(Object.fromEntries(Object.entries(history).slice(-cursorHistoryLimit))))
+  } catch {
+    // The previous cursor remains available through this page's URL.
+  }
+}
+
+async function reloadPage(): Promise<void> {
+  pageRequest?.abort()
+  if (!oaEnabled || route.name !== 'MeNotifications' || section.value !== 'system') return
+
+  const request = new AbortController()
+  pageRequest = request
+  const mode = filter.value
+  const cursor = activeCursor.value
+  pageLoading.value = true
+  pageError.value = ''
+  pageItems.value = []
+  nextCursor.value = ''
+  try {
+    const result = await fetchPage(mode, cursor, request.signal)
+    if (request.signal.aborted) return
+    pageItems.value = result.items
+    nextCursor.value = result.next
+    if (result.next) rememberPreviousCursor(pageNumber.value + 1, result.next, cursor)
+  } catch (err) {
+    if (!request.signal.aborted) pageError.value = errorMessage(err, '通知加载失败')
+  } finally {
+    if (!request.signal.aborted) pageLoading.value = false
+  }
+}
+
+function openPage(page: number, cursor = '') {
+  const previous = page === pageNumber.value + 1 ? activeCursor.value : readCursorHistory(page, cursor)
+  return router.push({
+    name: 'MeNotifications',
+    query: {
+      filter: filter.value === 'unread' ? 'unread' : undefined,
+      page: cursor ? String(page) : undefined,
+      cursor: cursor || undefined,
+      previousCursor: page > 2 ? previous || undefined : undefined,
+    },
+  })
+}
+
+function openPreviousPage() {
+  if (pageNumber.value > 2 && previousCursor.value) {
+    return openPage(pageNumber.value - 1, previousCursor.value)
+  }
+  return openPage(1)
+}
+
+async function openOATask(event: MouseEvent, item: NotificationItem): Promise<void> {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  const taskId = notificationTaskID(item)
+  if (!taskId || markingRead.value) return
+  const source = route.fullPath
+  if (!isRead(item)) {
+    markingRead.value = true
+    try {
+      await notificationsApi.markRead(item.id)
+      void refreshNotificationCount()
+    } catch {
+      // Task access is independent of marking the reminder read.
+    } finally {
+      markingRead.value = false
+    }
+  }
+  if (route.fullPath === source) await router.push(taskDetailLocation(taskId, source))
+}
+
+async function refreshNotificationCount(): Promise<void> {
+  await notificationsStore.refreshUnreadCount().catch(() => undefined)
 }
 
 function displayTime(createdAt: string | undefined): string {
@@ -512,7 +676,8 @@ async function sendBroadcast(): Promise<void> {
     broadcastTitle.value = ''
     broadcastContent.value = ''
     if (broadcastAudience.value === 'users') selectedUserIds.value = []
-    await notificationsStore.load()
+    if (oaEnabled) await Promise.all([reloadPage(), refreshNotificationCount()])
+    else await notificationsStore.load()
   } catch (err) {
     broadcastMessageType.value = 'error'
     broadcastMessage.value = errorMessage(err, '广播发送失败')
@@ -533,11 +698,33 @@ async function openNotification(item: NotificationItem): Promise<void> {
 }
 
 async function markRead(id: number): Promise<void> {
-  await notificationsStore.markRead(id)
+  if (!oaEnabled) {
+    await notificationsStore.markRead(id)
+    return
+  }
+  await updateReadState(() => notificationsApi.markRead(id), '标为已读失败')
 }
 
 async function markAllRead(): Promise<void> {
-  await notificationsStore.readAll()
+  if (!oaEnabled) {
+    await notificationsStore.readAll()
+    return
+  }
+  await updateReadState(() => notificationsApi.readAll(), '全部标为已读失败')
+}
+
+async function updateReadState(update: () => Promise<unknown>, fallback: string): Promise<void> {
+  if (markingRead.value) return
+  markingRead.value = true
+  actionError.value = ''
+  try {
+    await update()
+    await Promise.all([reloadPage(), refreshNotificationCount()])
+  } catch (err) {
+    actionError.value = errorMessage(err, fallback)
+  } finally {
+    markingRead.value = false
+  }
 }
 
 async function enableWebPush(): Promise<void> {
@@ -584,8 +771,23 @@ function errorMessage(err: unknown, fallback: string): string {
   return typeof message === 'string' && message.trim() ? message : fallback
 }
 
+if (oaEnabled) {
+  watch([() => route.name, section, filter, pageNumber, activeCursor], () => {
+    actionError.value = ''
+    void reloadPage()
+  }, { immediate: true })
+  const recentNotificationState = computed(() => notificationsStore.items
+    .map((item) => item.id + ':' + isRead(item))
+    .join(','))
+  watch([unreadCount, recentNotificationState], () => {
+    if (!markingRead.value) void reloadPage()
+  })
+  onScopeDispose(() => pageRequest?.abort())
+}
+
 onMounted(() => {
-  void notificationsStore.load()
+  if (oaEnabled) void refreshNotificationCount()
+  else void notificationsStore.load()
   void webPushStore.refresh().catch(() => undefined)
   if (canBroadcast.value) {
     void searchUsers()
@@ -1376,6 +1578,16 @@ onMounted(() => {
 html.oa-live-ui .notif-row { cursor: default; }
 html.oa-live-ui .notif-row .notif-type-error { background: rgb(var(--yb-danger-soft)); color: rgb(var(--yb-danger-text)); }
 html.oa-live-ui .notif-row .notif-type-warning { background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
+.notif-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  font-size: 0.8125rem;
+}
+.notif-action-error { color: rgb(var(--yb-danger-text)); }
 .notif-task-link { margin-left: 8px; font-size: 13px; color: var(--oa-primary, rgb(var(--yb-brand))); }
 
 .notif-page .notif-toolbar { background:transparent; padding:0; margin:0; border:0; border-radius:0; box-shadow:none; min-height:32px; }
