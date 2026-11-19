@@ -1,23 +1,27 @@
-# OA 人事与财务 API
+# OA 人事与财务
 
-身份集成由入口在主站鉴权成功后调用 `office.ApplyIdentity(r.Context(), extensionDB, sourceReadOnly, actor)`。人员档案读主站用户和有效角色，扩展库只保存 OA 自有记录。
+OA 使用主站会话。人员身份、组织、有效角色及账号启停由主站维护，OA 档案和费用记录由 OA 扩展表维护。费用出纳和报表分别需要 `finance.pay` 和 `finance.report`，费用管理员身份本身不会授予这两项权限。
 
-费用节点 `manager` 取人员 `manager_id`，指定人员写 `fixed:<用户ID>`；无可用直属负责人时使用环境变量 `OA_FALLBACK_APPROVER_ID`。费用文档 `route` 为账号 ID 数组，`current` 从 0 开始。模板管理可请求 `/templates?draft=1`，委托列表 `/delegates`。
+## 人事档案
 
-人员动作 `people.manage`，财务动作 `finance.pay`、`finance.report`。超管设置模板委托 `draft` / `publish`。
+- `GET /oa-api/people/roster` 按组织权限分页。支持姓名或工号、账号状态、部门、小组、用工类型及缺少工号、入职日期或有效负责人的筛选。读取详情仍使用 `GET /oa-api/people/{id}`。
+- `PUT /oa-api/people/{id}/profile` 更新 OA 入职日期、岗位、职级、成本中心和个人负责人覆盖。请求 `version` 取自人员的 `profile_version`。入职日期可留空。版本冲突返回 409。
+- `GET /oa-api/people/org-managers` 列出管理范围内的有效组织。 `PUT /oa-api/people/org-managers/{kind}/{id}` 提交 `{version,manager_id}`，其中 `kind` 为 `department` 或 `team`，`manager_id=0` 清除设置。组织负责人须为本组织的在职人员。写入校验本人汇报和循环汇报。
+- 有效负责人按个人覆盖、小组负责人、部门负责人解析。小组负责人本人继承部门负责人，部门负责人本人跳过本部门自动汇报。明确设置的个人负责人失效时显示负责人未解析。当前来源通过 `manager_source` 返回。
+- 名册导出使用 `GET /oa-api/people/export`，含人员和店铺任职两个工作表。上传至 `POST /oa-api/people/preview` 获取行级预览和确认令牌，确认使用 `POST /oa-api/people/confirm`。确认按原账号匹配、管理范围和版本校验更新，并返回逐行处理结果。
 
-开户、组织、角色、姓名、工号、启停由主站原生授权接口维护。入职、离职、返聘需要先完成主站账号操作，再登记当日 OA 任职元数据。Excel 确认仅写 OA 用工备注与店铺任职。超管可用 PUT `/oa-api/finance/actions/{id}` 写入 `{pay,report}`，付款、报表和模板发布均需独立授权。
+## 费用办理
 
-费用收件箱使用 OA 扩展表，通过 GET `/oa-api/finance/notifications` 返回当前账号通知，负载为 `{document_id,state,site,title}`。
+- 模板节点 `manager` 使用有效直属负责人。无可用直属负责人时取已配置且有效的 `OA_FALLBACK_APPROVER_ID`。`fixed:<用户ID>` 使用指定在职人员。申请和重提确定审批路线，`current` 从 0 开始。
+- `GET /oa-api/finance/documents` 支持本人申请 `mine`、当前审批 `todo`、待付款 `pay`、已办 `done`、抄送 `cc` 与全局台账 `all`（同 `ledger`）。已办使用不可变事件中的实际经办人，抄送使用明确的收件人。模板自动抄送规则留待后续阶段。
+- `POST /oa-api/finance/documents/{id}/{operation}` 支持重提、撤回、审批、作废和付款。申请人在首个待审批节点可撤回。退回或撤回后可按原模板重提。费用管理员作为当前审批人通过时可下调核准金额，须填原因和当前版本。已批准待付款可由符合权限的出纳或费用管理员作废，须填写原因。
+- 付款登记填写核准金额、北京时间实际付款日、银行或付款平台的真实交易流水及本人上传的回单。历史已批准单缺少核准金额时用申请金额。已有付款 URL 保持，首次登记必须包含 `bank_reference`，历史流水缺失时按未记录显示。
+- 新事件与单据版本在同一事务追加审计，记录经办人、节点、动作、时间及状态和金额的变化。历史事件只显示已经保存的字段。附件上传和读取使用 `/oa-api/finance/files`，已授权 PDF、PNG、JPEG 可用 `inline=1` 内联读取。
 
-订单范围集成调用 `office.ShopOverrides(ctx, extensionDB, actorID)`，按店铺覆盖基础经营范围。原生业务角色以主站有效授予为准。
+## 费用报表与兼容
 
-- GET `/oa-api/people/list` → `{items:[{id,name,employee_no,department_id,team_id,employment_type,joined,left,roles,management,version}]}`，可选 `q`。
-- GET `/oa-api/people/export` 下载 xlsx。POST `/oa-api/people/preview` multipart `file` → `{token,items:[{row,name,error}]}`。POST `/oa-api/people/confirm` JSON `{token}` → `{count}`。
-- GET `/oa-api/people/{id}` → 人员对象含 `terms`, `events`。POST `/oa-api/people/{id}/change` JSON `{kind,effective_date,department_id,team_id,shop_id,target_id,roles,management,employment_type,version}`。`kind` 为 `hire`, `transfer`, `shop_transfer`, `leave`, `handover`, `rehire`, `roles`。
-- GET `/oa-api/finance/templates` → `{items:[{id,name,type,channels,fields,required,evidence,nodes,threshold_cents,extra,version}]}`。PUT `/oa-api/finance/templates/{id}` 提交模板字段并传 `publish`。PUT `/oa-api/finance/delegates/{id}` JSON `{level}`，`level` 为 `none` / `draft` / `publish`。
-- GET `/oa-api/finance/documents?queue=mine|todo|pay` → `{items:[文档]}`。POST `/oa-api/finance/documents` JSON `{request_id,template_id,amount_cents,reason,channel,holder,account,bank,extra,files,site}`。`site` 为 `main` / `asset`，`files` 为上传返回的 ID 数组。
-- POST `/oa-api/finance/files` multipart `file` → `{id,name}`。GET `/oa-api/finance/files/{id}` 下载。
-- GET `/oa-api/finance/documents/{id}` → `{id,applicant_id,template,amount_cents,reason,channel,holder,account,bank,extra,files,site,state,route,current,history,payment}`。
-- POST `/oa-api/finance/documents/{id}/resubmit` 使用同一申请输入结构。POST `/oa-api/finance/documents/{id}/decision` JSON `{decision,comment,current}`，决策为 `approve` / `return` / `reject`。POST `/oa-api/finance/documents/{id}/payment` JSON `{amount_cents,date,receipt}`。
-- GET `/oa-api/finance/report?period=YYYY[-MM[-DD]]` → `{amount_cents,count,items:[文档]}`。
+`GET /oa-api/finance/report` 支持按首次提交、完成审批或实际付款日期查询。起止日均含当日，日期按北京时间计算。筛选范围内的已批未付款按核准金额汇总，待审批和退回待修改的在途申请按申请金额汇总。实付日期口径只统计已有付款记录的单据。分组可选部门、小组、申请人、归属、费用模板、收款方、渠道或状态。费用类型（报销或付款）和模板名称分别筛选，并可组合。两者均来自申请保存的模板快照，历史类型缺失时显示未记录。
+
+新调用显式传入分页参数。报表明细按页返回，汇总和分组覆盖全部匹配记录。金额以十进制分字符串返回。向报表传 `format=xlsx` 下载包含汇总、分组和完整明细的三个工作表，使用相同筛选。报表和台账查询投影不包含账号及凭证 ID。旧队列仅传原 `queue` 参数时继续返回原完整列表。旧报表无查询参数或仅传 `period=YYYY[-MM[-DD]]` 时继续返回原已付款单据和整数分汇总，账号按原规则脱敏。
+
+请求及响应字段见 [OA OpenAPI](../api/oa-openapi.yaml)。

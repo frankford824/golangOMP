@@ -41,27 +41,51 @@ type application struct {
 	Site       string            `json:"site"`
 }
 type payment struct {
-	Amount  int64  `json:"amount_cents"`
-	Date    string `json:"date"`
-	Receipt string `json:"receipt"`
+	Amount        int64  `json:"amount_cents"`
+	Date          string `json:"date"`
+	Receipt       string `json:"receipt"`
+	BankReference string `json:"bank_reference,omitempty"`
 }
 type history struct {
-	Actor   int64     `json:"actor_id"`
-	Action  string    `json:"action"`
-	Comment string    `json:"comment"`
-	At      time.Time `json:"at"`
+	Actor              int64      `json:"actor_id"`
+	Action             string     `json:"action"`
+	Comment            string     `json:"comment"`
+	At                 time.Time  `json:"at"`
+	OperatorID         int64      `json:"operator_id,omitempty"`
+	OperatorName       string     `json:"operator_name,omitempty"`
+	OperatorNo         *int       `json:"operator_no,omitempty"`
+	OperatorDepartment string     `json:"operator_department,omitempty"`
+	NodeName           string     `json:"node_name,omitempty"`
+	BeforeAmount       *int64     `json:"before_amount_cents,omitempty"`
+	AfterAmount        *int64     `json:"after_amount_cents,omitempty"`
+	BeforeState        string     `json:"before_state,omitempty"`
+	AfterState         string     `json:"after_state,omitempty"`
+	CreatedAt          *time.Time `json:"created_at,omitempty"`
+	AdjustmentReason   string     `json:"adjustment_reason,omitempty"`
+	BankReference      string     `json:"bank_reference,omitempty"`
+	Receipt            string     `json:"receipt,omitempty"`
+	PaymentDate        string     `json:"payment_date,omitempty"`
 }
 type document struct {
 	application
-	ID        string    `json:"id"`
-	Applicant int64     `json:"applicant_id"`
-	Template  template  `json:"template"`
-	State     string    `json:"state"`
-	Route     []int64   `json:"route"`
-	Current   int       `json:"current"`
-	Version   int       `json:"version"`
-	History   []history `json:"history"`
-	Payment   *payment  `json:"payment"`
+	ID                  string     `json:"id"`
+	Applicant           int64      `json:"applicant_id"`
+	ApplicantName       string     `json:"applicant_name,omitempty"`
+	ApplicantEmployeeNo *int       `json:"applicant_employee_no,omitempty"`
+	DepartmentID        int64      `json:"department_id,omitempty"`
+	DepartmentName      string     `json:"department_name,omitempty"`
+	TeamName            string     `json:"team_name,omitempty"`
+	SubmittedAt         *time.Time `json:"submitted_at,omitempty"`
+	ApprovedAt          *time.Time `json:"approved_at,omitempty"`
+	ApprovedAmount      *int64     `json:"approved_amount_cents,omitempty"`
+	Template            template   `json:"template"`
+	State               string     `json:"state"`
+	Route               []int64    `json:"route"`
+	RouteNodes          []string   `json:"route_nodes,omitempty"`
+	Current             int        `json:"current"`
+	Version             int        `json:"version"`
+	History             []history  `json:"history"`
+	Payment             *payment   `json:"payment"`
 }
 
 func (app office) mountFinance(mux *http.ServeMux) {
@@ -77,7 +101,7 @@ func (app office) mountFinance(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+path+"grants", app.financeGrants)
 	mux.HandleFunc("PUT "+path+"delegates/{id}", app.saveDelegate)
 	mux.HandleFunc("PUT "+path+"actions/{id}", app.saveFinanceActions)
-	mux.HandleFunc("GET "+path+"documents", app.documents)
+	mux.HandleFunc("GET "+path+"documents", app.queryFinanceDocuments)
 	mux.HandleFunc("POST "+path+"documents", app.submit)
 	mux.HandleFunc("GET "+path+"documents/{id}", app.detail)
 	mux.HandleFunc("POST "+path+"documents/{id}/{operation}", app.mutateDocument)
@@ -439,31 +463,41 @@ func (app office) active(r *http.Request, id int64) bool {
 	}
 	return true
 }
-func (app office) approvalRoute(r *http.Request, t template, amount, applicant int64) ([]int64, bool) {
+func (app office) approvalRoute(r *http.Request, t template, amount, applicant int64) ([]int64, []string, bool) {
 	nodes := slices.Clone(t.Nodes)
 	if t.Threshold > 0 && amount >= t.Threshold {
 		nodes = append(nodes, t.Extra)
 	}
 	route := []int64{}
-	for _, node := range nodes {
+	routeNodes := []string{}
+	for index, node := range nodes {
 		id := number(strings.TrimPrefix(node, "fixed:"))
 		if node == "manager" || id == applicant {
-			person, err := app.readPerson(r, applicant)
-			if err == nil {
-				id = person.ManagerID
+			manager, err := app.effectiveManager(r, applicant)
+			if err != nil {
+				return nil, nil, false
 			}
+			id = manager
 			if id == 0 {
 				id = number(templateFallback())
 			}
 		}
 		if id == applicant || !app.active(r, id) {
-			return nil, false
+			return nil, nil, false
 		}
 		if !slices.Contains(route, id) {
 			route = append(route, id)
+			name := "指定审批"
+			switch {
+			case index >= len(t.Nodes):
+				name = "金额加签"
+			case node == "manager" || number(strings.TrimPrefix(node, "fixed:")) == applicant:
+				name = "直属负责人审批"
+			}
+			routeNodes = append(routeNodes, name)
 		}
 	}
-	return route, len(route) > 0
+	return route, routeNodes, len(route) > 0
 }
 func validateApplication(input application, t template) bool {
 	if input.Amount <= 0 || input.Amount > 100000000000 || !textOK(input.Reason, 2000) || !slices.Contains(t.Channels, input.Channel) || !textOK(input.Holder, 240) || !textOK(input.Account, 128) || !textOK(input.Bank, 240) || len(input.Files) == 0 || len(input.Files) > 15 || !slices.Contains([]string{"main", "asset"}, input.Site) {
@@ -515,92 +549,29 @@ func (app office) detail(w http.ResponseWriter, r *http.Request) {
 		internal(w)
 		return
 	}
+	w.Header().Set("Cache-Control", "private, no-store")
 	if !doc.canRead(actor) {
-		deny(w)
-		return
-	}
-	platform.JSON(w, 200, doc.visible(actor, r.URL.Query().Get("reveal") == "1"))
-}
-func (app office) documents(w http.ResponseWriter, r *http.Request) {
-	actor := platform.ActorFrom(r)
-	where := "applicant=?"
-	args := []any{actor.ID}
-	switch r.URL.Query().Get("queue") {
-	case "", "mine":
-	case "todo":
-		where = "state='waiting' AND approver=?"
-	case "pay":
-		if !permit(actor, "finance.pay") {
-			deny(w)
+		if doc.State == "approved" && financeAdmin(actor) {
+			platform.JSON(w, 200, doc.limitedDetail())
 			return
 		}
-		where = "state='approved' AND applicant<>?"
-	default:
-		bad(w, "队列无效")
-		return
-	}
-	app.selectDocuments(w, r, where, args, false)
-}
-func (app office) report(w http.ResponseWriter, r *http.Request) {
-	if !permit(platform.ActorFrom(r), "finance.report") {
-		deny(w)
-		return
-	}
-	value := r.URL.Query().Get("period")
-	if value == "" {
-		value = businessDate().Format("2006-01")
-	}
-	var format string
-	switch len(value) {
-	case 4:
-		format = "2006"
-	case 7:
-		format = "2006-01"
-	case 10:
-		format = "2006-01-02"
-	default:
-		bad(w, "统计期间无效")
-		return
-	}
-	start, err := time.Parse(format, value)
-	if err != nil {
-		bad(w, "统计期间无效")
-		return
-	}
-	end := start.AddDate(0, 0, 1)
-	if len(value) == 4 {
-		end = start.AddDate(1, 0, 0)
-	} else if len(value) == 7 {
-		end = start.AddDate(0, 1, 0)
-	}
-	app.selectDocuments(w, r, "paid_date>=? AND paid_date<?", []any{start.Format(time.DateOnly), end.Format(time.DateOnly)}, true)
-}
-func (app office) selectDocuments(w http.ResponseWriter, r *http.Request, where string, args []any, isReport bool) {
-	actor := platform.ActorFrom(r)
-	rows, err := app.db.QueryContext(r.Context(), "SELECT payload FROM oa_office_documents WHERE "+where+" ORDER BY paid_date DESC,id", args...)
-	if err != nil {
-		internal(w)
-		return
-	}
-	defer rows.Close()
-	items := []document{}
-	var sum int64
-	for rows.Next() {
-		doc, err := scanDocument(rows)
+		allowed, err := hasFinanceReadEvent(r.Context(), app.db, actor.ID, doc.ID)
 		if err != nil {
 			internal(w)
 			return
 		}
-		items = append(items, doc.visible(actor, false))
-		if isReport && doc.Payment != nil {
-			sum += doc.Payment.Amount
+		if !allowed {
+			deny(w)
+			return
 		}
+		platform.JSON(w, 200, doc.limitedDetail())
+		return
 	}
-	if rows.Err() != nil {
+	if err := app.readDocumentEvents(r.Context(), &doc); err != nil {
 		internal(w)
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"items": items, "amount_cents": sum, "count": len(items)})
+	platform.JSON(w, 200, doc.visible(actor, r.URL.Query().Get("reveal") == "1"))
 }
 func (app office) submit(w http.ResponseWriter, r *http.Request) {
 	actor := platform.ActorFrom(r)
@@ -659,17 +630,26 @@ func (app office) submit(w http.ResponseWriter, r *http.Request) {
 		bad(w, "请核对金额、用途、收款信息、模板必填字段和附件")
 		return
 	}
-	route, ok := app.approvalRoute(r, t, input.Amount, actor.ID)
+	route, routeNodes, ok := app.approvalRoute(r, t, input.Amount, actor.ID)
 	if !ok {
 		bad(w, "审批路线尚未配置有效负责人")
 		return
 	}
-	doc := document{application: input, ID: id, Applicant: actor.ID, Template: t, State: "waiting", Route: route, Version: 1, History: []history{{actor.ID, "submit", "", time.Now().UTC()}}}
+	entry := newFinanceHistory(actor, "submit")
+	entry.NodeName = "发起申请"
+	entry.AfterAmount = &input.Amount
+	entry.AfterState = "waiting"
+	doc := document{
+		application: input, ID: id, Applicant: actor.ID, ApplicantName: actor.Name,
+		ApplicantEmployeeNo: actor.EmployeeNo, DepartmentID: actor.DepartmentID,
+		DepartmentName: actor.Department, TeamName: actor.Team, SubmittedAt: entry.CreatedAt,
+		Template: t, State: "waiting", Route: route, RouteNodes: routeNodes, Version: 1, History: []history{entry},
+	}
 	if !linkFiles(r, tx, input.Files, actor.ID, id) {
 		bad(w, "附件无效或已用于其他单据")
 		return
 	}
-	if persistDocument(r, tx, doc) != nil || tx.Commit() != nil {
+	if persistDocument(r, tx, doc) != nil || appendDocumentEvent(ctx, tx, doc, entry) != nil || tx.Commit() != nil {
 		internal(w)
 		return
 	}
@@ -706,14 +686,17 @@ func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	operation := r.PathValue("operation")
-	entry := history{Actor: actor.ID, Action: operation, At: time.Now().UTC()}
+	entry := newFinanceHistory(actor, operation)
+	entry.BeforeState = doc.State
+	beforeAmount := doc.payableAmount()
+	entry.BeforeAmount = &beforeAmount
 	switch operation {
 	case "resubmit":
 		if doc.Applicant != actor.ID {
 			deny(w)
 			return
 		}
-		if doc.State != "returned" {
+		if doc.State != "returned" && doc.State != "withdrawn" {
 			conflict(w)
 			return
 		}
@@ -731,7 +714,7 @@ func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 			bad(w, "请按原模板版本补全申请")
 			return
 		}
-		route, ok := app.approvalRoute(r, doc.Template, input.Amount, actor.ID)
+		route, routeNodes, ok := app.approvalRoute(r, doc.Template, input.Amount, actor.ID)
 		if !ok {
 			bad(w, "审批路线尚未配置有效负责人")
 			return
@@ -742,22 +725,76 @@ func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		doc.application = input
 		doc.Route = route
+		doc.RouteNodes = routeNodes
+		doc.ApprovedAmount = nil
+		doc.ApprovedAt = nil
+		entry.NodeName = "重新提交"
 		doc.Current = 0
 		doc.State = "waiting"
+	case "withdraw":
+		if doc.Applicant != actor.ID {
+			deny(w)
+			return
+		}
+		if doc.State != "waiting" || doc.Current != 0 {
+			conflict(w)
+			return
+		}
+		var input struct {
+			Version int `json:"version"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.Version != doc.Version {
+			conflict(w)
+			return
+		}
+		entry.NodeName = "撤回申请"
+		doc.State = "withdrawn"
+	case "void":
+		if !financeAdmin(actor) && (!permit(actor, "finance.pay") || actor.ID == doc.Applicant) {
+			deny(w)
+			return
+		}
+		if doc.State != "approved" {
+			conflict(w)
+			return
+		}
+		var input struct {
+			Version int    `json:"version"`
+			Reason  string `json:"reason"`
+		}
+		if !decode(w, r, &input) {
+			return
+		}
+		if input.Version != doc.Version {
+			conflict(w)
+			return
+		}
+		if !textOK(input.Reason, 2000) {
+			bad(w, "请填写有效作废原因")
+			return
+		}
+		entry.NodeName = "财务作废"
+		entry.Comment = strings.TrimSpace(input.Reason)
+		doc.State = "voided"
 	case "decision":
 		if doc.State != "waiting" {
 			conflict(w)
 			return
 		}
-		if doc.Applicant == actor.ID || doc.Route[doc.Current] != actor.ID {
+		if doc.Applicant == actor.ID || doc.Current < 0 || doc.Current >= len(doc.Route) || doc.Route[doc.Current] != actor.ID {
 			deny(w)
 			return
 		}
 		var input struct {
-			Decision string `json:"decision"`
-			Comment  string `json:"comment"`
-			Current  *int   `json:"current"`
-			Version  *int   `json:"version"`
+			Decision         string `json:"decision"`
+			Comment          string `json:"comment"`
+			Current          *int   `json:"current"`
+			Version          *int   `json:"version"`
+			ApprovedAmount   *int64 `json:"approved_amount_cents"`
+			AdjustmentReason string `json:"adjustment_reason"`
 		}
 		if !decode(w, r, &input) {
 			return
@@ -770,13 +807,36 @@ func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 			bad(w, "请填写有效审批意见")
 			return
 		}
+		if input.ApprovedAmount != nil || input.AdjustmentReason != "" {
+			if !financeAdmin(actor) {
+				deny(w)
+				return
+			}
+			if input.Version == nil || input.Decision != "approve" || input.ApprovedAmount == nil ||
+				*input.ApprovedAmount <= 0 || *input.ApprovedAmount >= doc.payableAmount() ||
+				!textOK(input.AdjustmentReason, 2000) {
+				bad(w, "核减需填写低于当前核准金额的正金额和原因")
+				return
+			}
+			doc.ApprovedAmount = input.ApprovedAmount
+			entry.AdjustmentReason = strings.TrimSpace(input.AdjustmentReason)
+		}
 		entry.Action = input.Decision
 		entry.Comment = input.Comment
+		entry.NodeName = "审批"
+		if doc.Current < len(doc.RouteNodes) && doc.RouteNodes[doc.Current] != "" {
+			entry.NodeName = doc.RouteNodes[doc.Current]
+		}
 		switch input.Decision {
 		case "approve":
 			doc.Current++
 			if doc.Current == len(doc.Route) {
 				doc.State = "approved"
+				doc.ApprovedAt = entry.CreatedAt
+				if doc.ApprovedAmount == nil {
+					amount := doc.Amount
+					doc.ApprovedAmount = &amount
+				}
 			}
 		case "return":
 			doc.State = "returned"
@@ -795,6 +855,7 @@ func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &input) {
 			return
 		}
+		input.BankReference = strings.TrimSpace(input.BankReference)
 		if doc.State == "paid" && doc.Payment != nil && *doc.Payment == input {
 			platform.JSON(w, 200, doc.visible(actor, false))
 			return
@@ -804,20 +865,31 @@ func (app office) mutateDocument(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		paidDay, err := time.Parse(time.DateOnly, input.Date)
-		if err != nil || paidDay.Format(time.DateOnly) > businessDate().Format(time.DateOnly) || input.Amount != doc.Amount || !linkFiles(r, tx, []string{input.Receipt}, actor.ID, doc.ID) {
-			bad(w, "须提供审批金额、有效实付日及本人上传的回单")
+		if err != nil || paidDay.Format(time.DateOnly) > businessDate().Format(time.DateOnly) || input.Amount != doc.payableAmount() || !textOK(input.BankReference, 128) || !linkFiles(r, tx, []string{input.Receipt}, actor.ID, doc.ID) {
+			bad(w, "须提供核准金额、有效实付日、银行或收款平台交易流水号及本人上传的回单")
 			return
 		}
 		doc.Payment = &input
+		entry.NodeName = "出纳付款"
+		entry.BankReference = input.BankReference
+		entry.Receipt = input.Receipt
+		entry.PaymentDate = input.Date
 		doc.State = "paid"
 	default:
 		missing(w)
 		return
 	}
 	doc.Version++
+	afterAmount := doc.payableAmount()
+	entry.AfterAmount = &afterAmount
+	entry.AfterState = doc.State
 	doc.History = append(doc.History, entry)
-	if persistDocument(r, tx, doc) != nil || recordFinanceResult(ctx, tx, doc) != nil || tx.Commit() != nil {
+	if persistDocument(r, tx, doc) != nil || appendDocumentEvent(ctx, tx, doc, entry) != nil || recordFinanceResult(ctx, tx, doc) != nil || tx.Commit() != nil {
 		internal(w)
+		return
+	}
+	if !doc.canRead(actor) {
+		platform.JSON(w, 200, doc.limitedDetail())
 		return
 	}
 	platform.JSON(w, 200, doc.visible(actor, false))

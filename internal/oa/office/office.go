@@ -23,12 +23,12 @@ type office struct {
 
 func CheckSchema(ctx context.Context, db *sql.DB) error {
 	var count int
-	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('oa_office_templates','oa_office_template_versions','oa_office_delegates','oa_office_finance_actions','oa_office_documents','oa_office_files','oa_office_people','oa_office_notifications','oa_office_imports')`).Scan(&count)
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('oa_office_templates','oa_office_template_versions','oa_office_delegates','oa_office_finance_actions','oa_office_documents','oa_office_files','oa_office_people','oa_office_notifications','oa_office_imports','oa_office_document_events','oa_office_person_profiles','oa_office_org_managers')`).Scan(&count)
 	if err != nil {
 		return err
 	}
-	if count != 9 {
-		return fmt.Errorf("OA office schema incomplete: found %d of 9 tables", count)
+	if count != 12 {
+		return fmt.Errorf("OA office schema incomplete: found %d of 12 tables", count)
 	}
 	return nil
 }

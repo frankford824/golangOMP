@@ -107,20 +107,26 @@ func (app office) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := platform.ActorFrom(r)
-	if actor.ID != owner {
-		if !linked.Valid {
-			deny(w)
-			return
-		}
+	if linked.Valid {
 		doc, err := scanDocument(app.db.QueryRowContext(r.Context(), "SELECT payload FROM oa_office_documents WHERE id=?", linked.String))
 		if err != nil || !doc.canRead(actor) {
 			deny(w)
 			return
 		}
+	} else if actor.ID != owner {
+		deny(w)
+		return
+	}
+	disposition := "attachment"
+	if r.URL.Query().Get("inline") == "1" {
+		switch kind {
+		case "application/pdf", "image/png", "image/jpeg":
+			disposition = "inline"
+		}
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", kind)
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
 	http.ServeFile(w, r, filepath.Join(dir, id))
 }

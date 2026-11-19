@@ -17,8 +17,9 @@ export async function send<T>(url: string, data: unknown, method = 'POST'): Prom
 
 export async function download(url: string, filename: string) {
   const response = await http.get<Blob>(url, { responseType: 'blob' })
-  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(String(response.headers['content-disposition'] || ''))?.[1]
-  let receivedName = ''
+  const disposition = String(response.headers['content-disposition'] || '')
+  const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  let receivedName = /(?:^|;)\s*filename="([^"\r\n]+)"/i.exec(disposition)?.[1] || /(?:^|;)\s*filename=([^;\s]+)/i.exec(disposition)?.[1] || ''
   if (encodedName) {
     try { receivedName = decodeURIComponent(encodedName) } catch { /* Use the caller's fallback. */ }
   }

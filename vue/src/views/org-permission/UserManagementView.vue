@@ -135,6 +135,10 @@
                 <button v-if="canManageAccess" type="button" class="org-icon-btn org-icon-btn--policy" @click.stop="openSelectedOrgAccess">设置默认角色</button>
               </div>
             </div>
+            <details v-if="oaEnabled && canManagePeople && selectedOrgDepartment?.enabled && selectedOrgDepartment.id && (!selectedOrgTeam || selectedOrgTeam.enabled && selectedOrgTeam.id)" class="org-selected-actions">
+              <summary>组织默认负责人</summary>
+              <OrganizationManager :kind="selectedOrgTeam ? 'team' : 'department'" :id="Number(selectedOrgTeam?.id || selectedOrgDepartment.id)" />
+            </details>
             <OrgTreePanel
               :enabled-tree="enabledOrgTree"
               :disabled-tree="disabledOrgTree"
@@ -343,7 +347,12 @@
         :team-options="createTeamOptions"
         :error="createError"
         :submitting="createSubmitting"
-        @close="showCreateModal = false"
+        :oa-onboarding="oaEnabled && canManagePeople"
+        :created-user-id="onboardingID"
+        v-model:manager-id="onboardingManager"
+        v-model:joined="onboardingJoined"
+        v-model:employment-type="onboardingEmployment"
+        @close="closeCreateUser"
         @submit="createUser"
       />
 
@@ -494,6 +503,7 @@ import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { goBackTo } from '@/oa/returnNavigation'
 import { directoryQuery, positiveQueryNumber } from '@/oa/peopleNavigation'
 import { oaEnabled, useOAAccess } from '@/oa/access'
+import { api as oaApi, dateInChina, send as oaSend } from '@/oa/api'
 import { coreUserRoleGroups, planOARoleReplacement } from '@/oa/userRoles'
 import { usePermission } from '@/composables/usePermission'
 import { patchUserMembership, clearUserMembership } from '@/composables/useOrgPermissionData'
@@ -851,7 +861,25 @@ const removableDisabledOrgNames = computed(() => {
   return parts
 })
 
+const OrganizationManager = defineAsyncComponent(() => import('@/oa/components/OrganizationManager.vue'))
 const showCreateModal = ref(false)
+const onboardingManager = ref(0)
+const onboardingJoined = ref('')
+const onboardingEmployment = ref('')
+const onboardingID = ref('')
+function closeCreateUser() {
+  if (createSubmitting.value) return
+  if (onboardingID.value) {
+    directoryMessage.value = '账号已创建。请在人员详情补齐人事档案，再启用账号。'
+    createForm.value = emptyCreateForm()
+    onboardingID.value = ''
+    onboardingManager.value = 0
+    onboardingJoined.value = ''
+    onboardingEmployment.value = ''
+    createError.value = ''
+  }
+  showCreateModal.value = false
+}
 const createSubmitting = ref(false)
 const createError = ref('')
 const createForm = ref<CreateUserForm>({
@@ -2035,6 +2063,11 @@ function validateCreateForm(): string | null {
   if (!f.team) return '小组必选'
   if (!f.mobile.trim()) return '手机号必填'
   if (!f.password.trim()) return '初始密码必填'
+  if (oaEnabled && canManagePeople.value && f.status === 'active') {
+    if (!onboardingManager.value) return '请选择直属负责人'
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(onboardingJoined.value) || onboardingJoined.value < '1000-01-01' || onboardingJoined.value > dateInChina()) return '请选择今日或过去的入职日期'
+    if (!['full_time', 'part_time'].includes(onboardingEmployment.value)) return '请选择用工类型'
+  }
   return null
 }
 
@@ -2050,17 +2083,40 @@ async function createUser() {
     const f = createForm.value
     const employeeNo = parseEmployeeNoInput(f.employee_no)
     if (employeeNo == null) throw new Error('工号必须是 0 到 9999 之间的纯数字。')
-    await usersApi.create({
-      username: f.username.trim(),
-      employee_no: employeeNo,
-      display_name: f.display_name.trim(),
-      department: f.department,
-      team: f.team,
-      mobile: f.mobile.trim(),
-      email: f.email.trim() || undefined,
-      password: f.password,
-      status: f.status,
-    })
+    const requireOnboarding = oaEnabled && canManagePeople.value && f.status === 'active'
+    if (!onboardingID.value) {
+      const response = await usersApi.create({
+        username: f.username.trim(),
+        employee_no: employeeNo,
+        display_name: f.display_name.trim(),
+        department: f.department,
+        team: f.team,
+        mobile: f.mobile.trim(),
+        email: f.email.trim() || undefined,
+        password: f.password,
+        status: requireOnboarding ? 'disabled' : f.status,
+        ...(requireOnboarding ? { employment_type: onboardingEmployment.value } : {}),
+      })
+      if (requireOnboarding) {
+        const created = response.data?.data ?? response.data
+        if (!created?.id) throw new Error('主站未返回新账号 ID，请在目录核对后继续。')
+        onboardingID.value = String(created.id)
+      }
+    }
+    if (requireOnboarding) {
+      const saved = await oaApi<{ profile_version: number; manager_override_id: number; joined: string; job_title: string; job_level: string; cost_center: string }>('/oa-api/people/' + onboardingID.value)
+      if (saved.manager_override_id !== onboardingManager.value || saved.joined !== onboardingJoined.value) {
+        await oaSend('/oa-api/people/' + onboardingID.value + '/profile', {
+          version: saved.profile_version, manager_id: onboardingManager.value, joined: onboardingJoined.value,
+          job_title: saved.job_title, job_level: saved.job_level, cost_center: saved.cost_center,
+        }, 'PUT')
+      }
+      await usersApi.activate(onboardingID.value)
+    }
+    onboardingID.value = ''
+    onboardingManager.value = 0
+    onboardingJoined.value = ''
+    onboardingEmployment.value = ''
     showCreateModal.value = false
     createForm.value = emptyCreateForm()
     page.value = 1
@@ -2068,7 +2124,11 @@ async function createUser() {
     // 新用户入组后同步刷新树上的人数徽标。
     void loadOrgOptions()
   } catch (e) {
-    createError.value = e instanceof Error ? e.message : '创建用户失败'
+    const message = e instanceof Error ? e.message : '创建用户失败'
+    if (onboardingID.value) {
+      createError.value = '账号已创建，入职流程未完成。' + message
+      void loadUsers()
+    } else createError.value = message
   } finally {
     createSubmitting.value = false
   }

@@ -44,6 +44,13 @@ vi.mock('vue-router', async () => {
     }),
   }
 })
+vi.mock('../components/FeeConfirmModal.vue', () => ({
+  default: {
+    props: ['config'],
+    emits: ['finish'],
+    template: `<button v-if="config" data-test="fee-confirm" @click="$emit('finish', { reason: '付款复核' })">{{ config.confirmText }}</button>`,
+  },
+}))
 vi.mock('../components/OAReturnLink.vue', () => ({ default: { template: '<a><slot /></a>' } }))
 vi.mock('../access', () => ({
   oaEnabled: true,
@@ -83,8 +90,8 @@ it('moves an isolated request through application, two approvers, payment and re
     id: 'DEMO-FEE', applicant_id: 7, template, amount_cents: 12050, reason: '演示用途',
     channel: 'person', holder: '演示收款人', account: '•••• 1234', bank: '演示银行',
     extra: { 项目: '演示项目' }, files: ['demo-evidence'], site: 'main',
-    state: 'waiting', current: 0, version: 1, route: [8, 9],
-    payment: null as { amount_cents: number; date: string; receipt: string } | null,
+    state: 'waiting', current: 0, version: 1, route: [8, 9], approved_amount_cents: undefined as number | undefined,
+    payment: null as { amount_cents: number; date: string; receipt: string; bank_reference: string } | null,
   }
   feeAPI.mockImplementation(async (url: string, options?: { body?: FormData }) => {
     if (url.endsWith('/templates')) return { items: [template], level: 'none' }
@@ -92,7 +99,8 @@ it('moves an isolated request through application, two approvers, payment and re
       return { id: (options?.body?.get('file') as File).name.startsWith('receipt') ? 'demo-receipt' : 'demo-evidence', name: (options?.body?.get('file') as File).name }
     }
     if (url.includes('queue=')) {
-      return { items: url.includes('queue=pay') ? (domain.state === 'approved' ? [domain] : []) : (domain.state === 'waiting' ? [domain] : []) }
+      const items = url.includes('queue=pay') ? (domain.state === 'approved' ? [domain] : []) : (domain.state === 'waiting' ? [domain] : [])
+      return { items, total: items.length }
     }
     if (url.endsWith('DEMO-FEE')) return domain
     throw Error(url)
@@ -103,11 +111,12 @@ it('moves an isolated request through application, two approvers, payment and re
       expect(body.current).toBe(domain.current)
       expect(body.version).toBe(domain.version)
       const current = domain.current + 1
-      domain = { ...domain, current, state: current < 2 ? 'waiting' : 'approved', version: domain.version + 1 }
+      if (current === 2) expect(body).toMatchObject({ approved_amount_cents: 10000, adjustment_reason: '费用凭证核减' })
+      domain = { ...domain, current, state: current < 2 ? 'waiting' : 'approved', version: domain.version + 1, approved_amount_cents: body.approved_amount_cents as number | undefined }
       return domain
     }
     if (url.endsWith('/payment')) {
-      expect(body).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), amount_cents: 12050, receipt: 'demo-receipt' })
+      expect(body).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), amount_cents: 10000, receipt: 'demo-receipt', bank_reference: 'REF-DEMO' })
       domain = { ...domain, state: 'paid', version: domain.version + 1, payment: body as typeof domain.payment }
       return domain
     }
@@ -145,34 +154,74 @@ it('moves an isolated request through application, two approvers, payment and re
   actions.add('finance.approve')
   for (const [actor, feedback] of [['8', '申请已转交下一位审批人'], ['9', '单据已进入待付款']]) {
     profile.id = actor
+    if (actor === '9') actions.add('finance.admin')
     wrapper = mount(Fees, { props: { mode: 'approval' } })
     await flushPromises()
     await click(wrapper, '打开单据')
     const readCount = feeAPI.mock.calls.length
-    await wrapper.get('form').trigger('submit')
+    if (actor === '9') {
+      await wrapper.get('#fee-approval-form input[type=checkbox]').setValue(true)
+      await wrapper.get('input[placeholder="填写核减后的金额"]').setValue('100')
+      await wrapper.findAll('#fee-approval-form textarea').at(-1)!.setValue('费用凭证核减')
+    }
+    await wrapper.get('#fee-approval-form').trigger('submit')
     await flushPromises()
+    if (actor === '9') {
+      expect(wrapper.get('[data-test=fee-confirm]').text()).toBe('核减并同意')
+      await wrapper.get('[data-test=fee-confirm]').trigger('click')
+      await flushPromises()
+    }
     expect(wrapper.text()).toContain(feedback)
-    expect(feeAPI.mock.calls).toHaveLength(readCount)
+    expect(feeAPI.mock.calls.slice(readCount)).toContainEqual(['/oa-api/finance/documents?queue=todo&page=1&size=15'])
     wrapper.unmount()
   }
 
   profile.id = '10'
   actions.clear()
   actions.add('finance.pay')
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
   wrapper = mount(Fees, { props: { mode: 'approval' } })
   await flushPromises()
   await click(wrapper, '打开单据')
   expect(wrapper.text()).toContain('应付金额')
   await inputUpload(wrapper, 'receipt.pdf')
   expect(wrapper.text()).toContain('已上传：receipt.pdf')
+  await wrapper.get('input[placeholder="银行或收款平台交易流水号"]').setValue('REF-DEMO')
   await wrapper.get('form').trigger('submit')
   await flushPromises()
+  await wrapper.get('[data-test=fee-confirm]').trigger('click')
+  await flushPromises()
   expect(wrapper.text()).toContain('付款已登记，回单已归档')
-  expect(wrapper.text()).toContain('下载回单')
+  expect(wrapper.text()).toContain('付款回单')
+  expect(wrapper.text()).toContain('REF-DEMO')
   await click(wrapper, '返回待付款')
   expect(wrapper.text()).toContain('没有待付款单据')
-  expect(feeAPI).toHaveBeenLastCalledWith('/oa-api/finance/documents?queue=pay')
+  expect(feeAPI).toHaveBeenLastCalledWith('/oa-api/finance/documents?queue=pay&page=1&size=15')
   wrapper.unmount()
   vi.restoreAllMocks()
+})
+
+it('keeps the selected queue filters and fetches another page from the server', async () => {
+  actions.clear()
+  actions.add('finance.apply')
+  Object.assign(query, { q: '差旅' })
+  feeAPI.mockReset().mockImplementation(async (url: string) => {
+    const page = new URL(url, 'https://fixture.invalid').searchParams.get('page')
+    const item = {
+      id: 'DOC-' + page, applicant_id: 7, applicant_name: '李明',
+      department_name: '运营部', team_name: '运营一组', applicant_employee_no: 18,
+      template: { name: '差旅' }, amount_cents: 100, state: 'waiting', site: 'main',
+    }
+    return { total: 16, items: [item] }
+  })
+  const wrapper = mount(Fees, { props: { mode: 'mine' } })
+  await flushPromises()
+  expect(wrapper.text()).toContain('李明 · 运营部 / 运营一组（18）')
+  expect(wrapper.text()).toContain('共 16 项 · 1 / 2 页')
+  await wrapper.findAll('button').find(button => button.text() === '下一页')!.trigger('click')
+  await flushPromises()
+  expect(feeAPI).toHaveBeenLastCalledWith('/oa-api/finance/documents?queue=mine&page=2&size=15&q=%E5%B7%AE%E6%97%85')
+  expect(wrapper.text()).toContain('DOC-2')
+  expect(wrapper.text()).toContain('共 16 项 · 2 / 2 页')
+  wrapper.unmount()
+  delete query.q
 })

@@ -26,7 +26,7 @@ const count = computed(() => tab.value === 'todos' ? data.value?.todo_count ?? 0
 const totalPages = computed(() => Math.max(1, Math.ceil(count.value / limit)))
 const items = computed(() => tab.value === 'todos' ? data.value?.todos ?? [] : data.value?.items ?? [])
 const resultLabels: Record<string, string> = {
-  approved: '审批通过', returned: '退回修改', rejected: '申请已拒绝', paid: '付款已登记',
+  approved: '审批通过', returned: '退回修改', rejected: '申请已拒绝', paid: '付款已登记', voided: '单据已作废', withdrawn: '申请已撤回',
 }
 const actionLabels = { approve: '办理审批', pay: '登记付款', revise: '修改申请' }
 

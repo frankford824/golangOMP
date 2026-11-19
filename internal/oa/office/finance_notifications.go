@@ -38,7 +38,7 @@ type financeActivity struct {
 // assignee and do not create an inbox result.
 func recordFinanceResult(ctx context.Context, tx *sql.Tx, doc document) error {
 	switch doc.State {
-	case "approved", "returned", "rejected", "paid":
+	case "approved", "returned", "rejected", "paid", "voided":
 		payload := struct {
 			financeNoticePayload
 			NotifyUnread bool `json:"notify_unread"`
@@ -66,7 +66,7 @@ const financeTodoScope = ` FROM oa_office_documents d
 const financeResultJoin = ` oa_office_notifications n
 	JOIN oa_office_documents d ON d.id=JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.document_id')) AND d.applicant=n.user_id`
 const financeResultFilter = `
-	WHERE n.user_id=? AND JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.state')) IN ('approved','returned','rejected','paid')`
+	WHERE n.user_id=? AND JSON_UNQUOTE(JSON_EXTRACT(n.payload,'$.state')) IN ('approved','returned','rejected','paid','voided')`
 const financeResultScope = " FROM" + financeResultJoin + financeResultFilter
 
 // Only results created with unread tracking qualify. Return notices appear as

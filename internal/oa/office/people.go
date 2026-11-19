@@ -14,23 +14,30 @@ import (
 )
 
 type person struct {
-	ID             int64    `json:"id"`
-	Name           string   `json:"name"`
-	EmployeeNo     *int     `json:"employee_no"`
-	DepartmentID   int64    `json:"department_id"`
-	TeamID         int64    `json:"team_id"`
-	Department     string   `json:"department"`
-	Team           string   `json:"team"`
-	Status         string   `json:"status"`
-	EmploymentType string   `json:"employment_type"`
-	Joined         string   `json:"joined"`
-	Left           string   `json:"left"`
-	Roles          []string `json:"roles"`
-	Management     string   `json:"management"`
-	ManagerID      int64    `json:"manager_id"`
-	Version        int      `json:"version"`
-	Events         []change `json:"events"`
-	Terms          []term   `json:"terms"`
+	ID                int64    `json:"id"`
+	Name              string   `json:"name"`
+	EmployeeNo        *int     `json:"employee_no"`
+	DepartmentID      int64    `json:"department_id"`
+	TeamID            int64    `json:"team_id"`
+	Department        string   `json:"department"`
+	Team              string   `json:"team"`
+	Status            string   `json:"status"`
+	EmploymentType    string   `json:"employment_type"`
+	Joined            string   `json:"joined"`
+	Left              string   `json:"left"`
+	Roles             []string `json:"roles"`
+	Management        string   `json:"management"`
+	ManagerID         int64    `json:"manager_id"`
+	ManagerOverrideID int64    `json:"manager_override_id"`
+	ManagerName       string   `json:"manager_name"`
+	ManagerSource     string   `json:"manager_source"`
+	JobTitle          string   `json:"job_title"`
+	JobLevel          string   `json:"job_level"`
+	CostCenter        string   `json:"cost_center"`
+	ProfileVersion    int64    `json:"profile_version"`
+	Version           int      `json:"version"`
+	Events            []change `json:"events"`
+	Terms             []term   `json:"terms"`
 }
 type term struct {
 	ShopID          string `json:"shop_id"`
@@ -191,6 +198,10 @@ func ApplyIdentity(ctx context.Context, db, source *sql.DB, actor platform.Actor
 func (app office) mountPeople(mux *http.ServeMux) {
 	const path = "/oa-api/people/"
 	mux.HandleFunc("GET "+path+"list", app.peopleList)
+	mux.HandleFunc("GET "+path+"roster", app.rosterPeople)
+	mux.HandleFunc("GET "+path+"org-managers", app.orgManagers)
+	mux.HandleFunc("PUT "+path+"org-managers/{kind}/{id}", app.updateOrgManager)
+	mux.HandleFunc("PUT "+path+"{id}/profile", app.updateProfile)
 	mux.HandleFunc("GET "+path+"{id}", app.personDetail)
 	mux.HandleFunc("GET "+path+"{id}/handover", app.handoverItems)
 	mux.HandleFunc("GET "+path+"{id}/shop-bindings", app.readShopBindings)
@@ -308,6 +319,9 @@ func (app office) selectPeople(r *http.Request, actor platform.Actor) ([]person,
 			return nil, err
 		}
 		if scopePerson(actor, p) {
+			if err := app.applyProfile(r.Context(), &p); err != nil {
+				return nil, err
+			}
 			items = append(items, p)
 		}
 	}
@@ -327,6 +341,10 @@ func (app office) personDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	if id != actor.ID && !scopePerson(actor, p) {
 		deny(w)
+		return
+	}
+	if err := app.applyProfile(r.Context(), &p); err != nil {
+		internal(w)
 		return
 	}
 	platform.JSON(w, 200, p)
@@ -385,9 +403,15 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 	}
 	input.Roles = nil
 	input.Management = ""
-	if input.ManagerID != 0 && !app.active(r, input.ManagerID) {
-		bad(w, "直属负责人必须为在职人员")
-		return
+	if input.ManagerID != 0 {
+		if input.EffectiveDate != today {
+			bad(w, "请在生效日维护直属负责人")
+			return
+		}
+		if _, err := app.allowedManager(r, actor, input.ManagerID); err != nil {
+			profileFailure(w, err)
+			return
+		}
 	}
 	id := number(r.PathValue("id"))
 	if id == actor.ID && input.Kind == "leave" || input.ManagerID == id && id > 0 {
@@ -448,6 +472,21 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	if input.ManagerID != 0 {
+		if err := lockManagers(r.Context(), tx); err != nil {
+			internal(w)
+			return
+		}
+		var exists bool
+		if err := tx.QueryRowContext(r.Context(), "SELECT EXISTS(SELECT 1 FROM oa_office_person_profiles WHERE user_id=?)", id).Scan(&exists); err != nil {
+			internal(w)
+			return
+		}
+		if exists {
+			bad(w, "请在人员档案中维护直属负责人")
+			return
+		}
+	}
 	if target.ID > 0 && target.ID < p.ID {
 		target, err = lockPerson(r, tx, target)
 		if err != nil {
@@ -561,7 +600,17 @@ func (app office) changePerson(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if savePerson(r, tx, p) != nil || tx.Commit() != nil {
+	if savePerson(r, tx, p) != nil {
+		internal(w)
+		return
+	}
+	if input.ManagerID != 0 {
+		if err := checkManagerGraph(r.Context(), tx); err != nil {
+			profileFailure(w, err)
+			return
+		}
+	}
+	if tx.Commit() != nil {
 		internal(w)
 		return
 	}

@@ -12,8 +12,11 @@ const peopleMeta = { requiresAuth: true, oaAction: 'people.manage', oaFallback: 
 export const feeTabs = [
   { mode: 'approval', label: '审批待办', actions: ['finance.approve', 'finance.pay'] },
   { mode: 'mine', label: '我的申请', actions: ['finance.apply'] },
+  { mode: 'done', label: '已办', actions: ['finance.approve', 'finance.pay'] },
+  { mode: 'cc', label: '抄送给我', actions: ['finance.apply', 'finance.approve'] },
   { mode: 'templates', label: '模板与授权', actions: ['finance.templates', 'finance.admin'] },
   { mode: 'report', label: '费用报表', actions: ['finance.report'] },
+  { mode: 'ledger', label: '全局台账', actions: ['finance.admin', 'finance.report'] },
 ] as const
 
 export const oaRoutes: RouteRecordRaw[] = oaEnabled ? [

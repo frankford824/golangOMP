@@ -2229,16 +2229,139 @@ paths:
           $ref: '#/components/responses/HTTP503'
   /oa-api/finance/documents:
     get:
-      summary: 列出财务单据
+      summary: 列出本人申请、办理队列或全局费用台账
       parameters:
       - in: query
         name: queue
+        description: todo 为当前审批轮到本人，pay 需要 finance.pay 并排除本人申请。all 与 ledger 等价。
         schema:
           type: string
           enum:
           - mine
           - todo
           - pay
+          - done
+          - cc
+          - all
+          - ledger
+          default: mine
+      - in: query
+        name: page
+        description: 页码从 1 开始。
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          default: 1
+      - in: query
+        name: size
+        description: 每页条数。
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 15
+      - in: query
+        name: page_size
+        description: size 的别名。同时传入时使用 size。
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: basis
+        description: 筛选日期口径，有开始和结束日期时生效。
+        schema:
+          type: string
+          enum:
+          - submitted
+          - approved
+          - paid
+          default: submitted
+      - in: query
+        name: q
+        description: 匹配单号、人员、模板、部门、小组或归属。
+        schema:
+          type: string
+      - in: query
+        name: start
+        description: 北京时间自然日，含当日，与 end 一起传入。
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: end
+        description: 北京时间自然日，含当日。
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: state
+        description: 按当前单据状态筛选。
+        schema:
+          type: string
+          enum:
+          - waiting
+          - returned
+          - rejected
+          - approved
+          - paid
+          - withdrawn
+          - voided
+      - in: query
+        name: expense_type
+        description: 费用类型，来自单据保存的模板快照。
+        schema:
+          type: string
+          enum:
+          - reimbursement
+          - payment
+      - in: query
+        name: template
+        description: 精确匹配模板快照名称。
+        schema:
+          type: string
+      - in: query
+        name: department
+        description: 精确匹配申请部门快照名称。
+        schema:
+          type: string
+      - in: query
+        name: team
+        description: 精确匹配申请小组快照名称。
+        schema:
+          type: string
+      - in: query
+        name: person
+        description: 申请人账号 ID。
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: site
+        description: 精确匹配申请的归属值。
+        schema:
+          type: string
+      - in: query
+        name: channel
+        description: 精确匹配付款渠道。
+        schema:
+          type: string
+      - in: query
+        name: min_amount_cents
+        description: 申请金额下限，含边界，单位为分。
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - in: query
+        name: max_amount_cents
+        description: 申请金额上限，含边界，单位为分。
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
       responses:
         '200':
           description: 成功
@@ -2246,21 +2369,57 @@ paths:
             application/json:
               schema:
                 type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Document'
-                      amount_cents:
-                        type: integer
-                        format: int64
-                      count:
-                        type: integer
                 required:
                 - data
+                properties:
+                  data:
+                    anyOf:
+                    - type: object
+                      required:
+                      - items
+                      - amount_cents
+                      - total
+                      - count
+                      - page
+                      - size
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            oneOf:
+                            - $ref: '#/components/schemas/Document'
+                            - $ref: '#/components/schemas/FinanceRecord'
+                        amount_cents:
+                          type: integer
+                          description: 旧队列兼容字段，固定为 0。
+                        total:
+                          type: integer
+                          format: int64
+                          minimum: 0
+                        count:
+                          type: integer
+                          format: int64
+                          minimum: 0
+                          description: 符合条件的记录总数，与 total 一致。
+                        page:
+                          type: integer
+                        size:
+                          type: integer
+                    - type: object
+                      required:
+                      - items
+                      - amount_cents
+                      - count
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/Document'
+                        amount_cents:
+                          type: integer
+                          description: 旧兼容字段，固定为 0。
+                        count:
+                          type: integer
         '400':
           $ref: '#/components/responses/HTTP400'
         '401':
@@ -2273,6 +2432,8 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+      description: 已办按不可变事件中的实际经办人匹配。抄送按服务端通知记录的明确收件人匹配。全局台账需要费用管理员或报表权限，并只返回脱敏的查询字段。旧 mine/todo/pay（省略 queue
+        等同 mine）仅传 queue 或不带查询参数时返回完整列表。
     post:
       summary: 提交财务单据
       description: 同申请人同 request_id 可安全重试。金额单位为分。
@@ -2335,6 +2496,7 @@ paths:
           enum:
           - '0'
           - '1'
+        description: 仅有付款授权的非本人出纳可对待付款单据显式揭示账号。
       responses:
         '200':
           description: 成功
@@ -2359,10 +2521,12 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+      description: 经授权的出纳通过 reveal=1 查看待付款单据的完整账号，申请人本人仍脱敏。只凭已办、抄送或费用管理员作废权限访问时，返回受限详情，收款银行、账号、附件和审批意见等敏感字段留空。已有
+        finance.report 对已付款单据的详情和附件读取范围保持。
   /oa-api/finance/documents/{id}/{operation}:
     post:
-      summary: 重提、审批或登记付款
-      description: 操作决定请求结构。付款日期为北京时间自然日，amount_cents 为分。
+      summary: 重提、撤回、审批、作废或登记付款
+      description: 撤回仅限本人在首个节点尚未办结的待审批单，退回或撤回后可按原模板版本重提。只有当前审批节点经办人可审批；费用管理员作为当前审批人通过时可核减，并提供当前版本和理由。作废仅适用已批准待付款单据，由费用管理员或非申请人的出纳执行。付款仅限非申请人的授权出纳，使用当前核准金额、北京实际付款日期、真实交易流水及本人上传的回单。
       parameters:
       - in: path
         name: id
@@ -2376,34 +2540,37 @@ paths:
           type: string
           enum:
           - resubmit
+          - withdraw
           - decision
+          - void
           - payment
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              oneOf:
-              - $ref: '#/components/schemas/Application'
+              anyOf:
+              - $ref: '#/components/schemas/FinanceResubmission'
               - $ref: '#/components/schemas/Payment'
+              - $ref: '#/components/schemas/FinanceDecision'
               - type: object
+                required:
+                - version
                 properties:
-                  decision:
-                    type: string
-                    enum:
-                    - approve
-                    - return
-                    - reject
-                  comment:
-                    type: string
-                  current:
-                    type: integer
                   version:
                     type: integer
+                    minimum: 1
+              - type: object
                 required:
-                - decision
-                - current
                 - version
+                - reason
+                properties:
+                  version:
+                    type: integer
+                    minimum: 1
+                  reason:
+                    type: string
+                    minLength: 1
       responses:
         '200':
           description: 成功
@@ -2432,14 +2599,153 @@ paths:
           $ref: '#/components/responses/HTTP503'
   /oa-api/finance/report:
     get:
-      summary: 按实付期间查询付款
-      description: 需要显式费用报表授权。付款与费用管理权限不会授予报表权限。
+      summary: 分页查询或导出费用报表
+      description: 需要显式 finance.report 授权。JSON 明细按页返回，汇总和分组覆盖全部匹配记录。Excel 同样覆盖全部匹配记录，包含汇总、分组和单据明细。分页报表只返回报表字段，不提供账号、银行卡信息或凭证
+        ID。旧调用省略所有查询参数或仅传 period 时按实付日期查询，返回全量已付款单据与脱敏账号，金额为整数分，交易流水保持隐藏。
       parameters:
       - in: query
         name: period
+        description: 未指定 start 或 end 时接受 YYYY、YYYY-MM 或 YYYY-MM-DD，默认本月。
         schema:
           type: string
-        description: YYYY、YYYY-MM 或 YYYY-MM-DD
+      - in: query
+        name: basis
+        description: 首次提交、完成审批或实际付款日期。日期以北京时间计。
+        schema:
+          type: string
+          enum:
+          - submitted
+          - approved
+          - paid
+          default: paid
+      - in: query
+        name: group_by
+        schema:
+          type: string
+          enum:
+          - department
+          - team
+          - person
+          - site
+          - template
+          - channel
+          - status
+          - payee
+          default: department
+      - in: query
+        name: format
+        description: 省略时返回 JSON，xlsx 导出筛选后的全部记录。
+        schema:
+          type: string
+          enum:
+          - xlsx
+      - in: query
+        name: page
+        description: 页码从 1 开始。
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          default: 1
+      - in: query
+        name: size
+        description: 每页条数。
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 15
+      - in: query
+        name: page_size
+        description: size 的别名。同时传入时使用 size。
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: q
+        description: 匹配单号、人员、组织、模板、归属、用途摘要或收款方。
+        schema:
+          type: string
+      - in: query
+        name: start
+        description: 北京时间自然日，含当日，与 end 一起传入。
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: end
+        description: 北京时间自然日，含当日。
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: state
+        description: 按当前单据状态筛选。
+        schema:
+          type: string
+          enum:
+          - waiting
+          - returned
+          - rejected
+          - approved
+          - paid
+          - withdrawn
+          - voided
+      - in: query
+        name: expense_type
+        description: 费用类型，来自单据保存的模板快照。
+        schema:
+          type: string
+          enum:
+          - reimbursement
+          - payment
+      - in: query
+        name: template
+        description: 精确匹配模板快照名称。
+        schema:
+          type: string
+      - in: query
+        name: department
+        description: 精确匹配申请部门快照名称。
+        schema:
+          type: string
+      - in: query
+        name: team
+        description: 精确匹配申请小组快照名称。
+        schema:
+          type: string
+      - in: query
+        name: person
+        description: 申请人账号 ID。
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: site
+        description: 精确匹配申请的归属值。
+        schema:
+          type: string
+      - in: query
+        name: channel
+        description: 精确匹配付款渠道。
+        schema:
+          type: string
+      - in: query
+        name: min_amount_cents
+        description: 申请金额下限，含边界，单位为分。
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - in: query
+        name: max_amount_cents
+        description: 申请金额上限，含边界，单位为分。
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
       responses:
         '200':
           description: 成功
@@ -2447,21 +2753,31 @@ paths:
             application/json:
               schema:
                 type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      items:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/Document'
-                      amount_cents:
-                        type: integer
-                        format: int64
-                      count:
-                        type: integer
                 required:
                 - data
+                properties:
+                  data:
+                    anyOf:
+                    - $ref: '#/components/schemas/FinanceReport'
+                    - type: object
+                      required:
+                      - items
+                      - amount_cents
+                      - count
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/Document'
+                        amount_cents:
+                          type: integer
+                          format: int64
+                        count:
+                          type: integer
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
         '400':
           $ref: '#/components/responses/HTTP400'
         '401':
@@ -2522,23 +2838,50 @@ paths:
           $ref: '#/components/responses/HTTP503'
   /oa-api/finance/files/{id}:
     get:
-      summary: 下载已授权财务附件
+      summary: 下载或内联读取已授权财务附件
       parameters:
       - in: path
         name: id
         required: true
         schema:
           type: string
+      - in: query
+        name: inline
+        description: 通过同一授权校验后，PDF、PNG、JPEG 以 inline 返回；默认 attachment。
+        schema:
+          type: string
+          enum:
+          - '1'
       responses:
         '200':
           description: 成功
           content:
-            application/pdf: &id002
+            application/pdf:
               schema:
                 type: string
                 format: binary
-            image/png: *id002
-            image/jpeg: *id002
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - private, no-store
+            X-Content-Type-Options:
+              schema:
+                type: string
+                enum:
+                - nosniff
         '400':
           $ref: '#/components/responses/HTTP400'
         '401':
@@ -2551,6 +2894,7 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+      description: 未绑定的附件仅上传者可读取，已绑定附件使用单据附件权限。单凭已办、抄送、全局台账权限无法读取。
   /oa-api/people/list:
     get:
       summary: 搜索授权范围人员
@@ -2584,6 +2928,240 @@ paths:
           $ref: '#/components/responses/HTTP403'
         '404':
           $ref: '#/components/responses/HTTP404'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/roster:
+    get:
+      summary: 分页读取授权人员名册
+      description: 需要 people.manage 并按有效组织范围过滤。
+      parameters:
+      - in: query
+        name: page
+        description: 页码从 1 开始。
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          default: 1
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 25
+      - in: query
+        name: q
+        description: 匹配姓名或工号。
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - active
+          - disabled
+      - in: query
+        name: department_id
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: team_id
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - in: query
+        name: employment_type
+        schema:
+          type: string
+      - in: query
+        name: missing
+        description: 筛选未记录直属负责人、入职日期或工号。
+        schema:
+          type: string
+          enum:
+          - manager
+          - joined
+          - employee_no
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    type: object
+                    required:
+                    - items
+                    - total
+                    - page
+                    - page_size
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Person'
+                      total:
+                        type: integer
+                      page:
+                        type: integer
+                      page_size:
+                        type: integer
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/org-managers:
+    get:
+      summary: 列出授权范围内的有效部门和小组负责人配置
+      description: 需要 people.manage。没有配置的组织返回 version=0 与 manager_id=0。
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    type: object
+                    required:
+                    - items
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/OrgManager'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/org-managers/{kind}/{id}:
+    put:
+      summary: 设置或清除部门或小组负责人
+      description: 需要 people.manage 和组织范围。负责人须为本组织的有效在职账号，禁止循环汇报。manager_id=0 清除配置。
+      parameters:
+      - in: path
+        name: kind
+        required: true
+        schema:
+          type: string
+          enum:
+          - department
+          - team
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - version
+              - manager_id
+              properties:
+                version:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                manager_id:
+                  type: integer
+                  format: int64
+                  minimum: 0
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/OrgManager'
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
+        '500':
+          $ref: '#/components/responses/HTTP500'
+        '503':
+          $ref: '#/components/responses/HTTP503'
+  /oa-api/people/{id}/profile:
+    put:
+      summary: 更新 OA 人事档案
+      description: 需要 people.manage 和目标人员范围。请求 version 对应 Person.profile_version。manager_id=0 恢复组织继承。入职日期留空时标记未填写。
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonProfileUpdate'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Person'
+        '400':
+          $ref: '#/components/responses/HTTP400'
+        '401':
+          $ref: '#/components/responses/HTTP401'
+        '403':
+          $ref: '#/components/responses/HTTP403'
+        '404':
+          $ref: '#/components/responses/HTTP404'
+        '409':
+          $ref: '#/components/responses/HTTP409'
         '500':
           $ref: '#/components/responses/HTTP500'
         '503':
@@ -2797,6 +3375,7 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+      description: 导出人员信息和店铺任职两个工作表，含 OA 档案及有效负责人。
   /oa-api/people/preview:
     post:
       summary: 预览人员名册导入
@@ -2845,6 +3424,7 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+      description: 校验 Excel 并返回行级预览和确认 token，未修改档案。
   /oa-api/people/confirm:
     post:
       summary: 确认预览名册导入
@@ -2892,6 +3472,7 @@ paths:
           $ref: '#/components/responses/HTTP500'
         '503':
           $ref: '#/components/responses/HTTP503'
+      description: 使用本人预览 token 确认，返回行级结果。档案版本冲突需重新预览。
 components:
   securitySchemes:
     MainBearer:
@@ -3359,6 +3940,7 @@ components:
         manager_id:
           type: integer
           format: int64
+          description: 当前有效直属负责人 ID，0 表示未解析到有效负责人。
         name:
           type: string
         department:
@@ -3402,6 +3984,29 @@ components:
                 type: string
               pending_handover:
                 type: boolean
+        manager_override_id:
+          type: integer
+          format: int64
+          description: 个人档案的负责人覆盖 ID，0 表示使用组织配置。
+        manager_name:
+          type: string
+        manager_source:
+          type: string
+          enum:
+          - ''
+          - person
+          - team
+          - department
+        job_title:
+          type: string
+        job_level:
+          type: string
+        cost_center:
+          type: string
+        profile_version:
+          type: integer
+          format: int64
+          minimum: 0
     PersonChange:
       type: object
       properties:
@@ -3473,6 +4078,8 @@ components:
         id:
           type: integer
           format: int64
+        profile:
+          $ref: '#/components/schemas/PersonProfileUpdate'
     Template:
       type: object
       properties:
@@ -3502,6 +4109,7 @@ components:
           type: array
           items:
             type: string
+          description: manager 使用有效直属负责人，fixed:<用户ID> 使用指定在职人员。
         threshold_cents:
           type: integer
           format: int64
@@ -3526,9 +4134,14 @@ components:
           type: string
         site:
           type: string
+          enum:
+          - main
+          - asset
         amount_cents:
           type: integer
           format: int64
+          minimum: 1
+          maximum: 100000000000
         extra:
           type: object
           additionalProperties:
@@ -3537,77 +4150,549 @@ components:
           type: array
           items:
             type: string
+          minItems: 1
+          maxItems: 15
       required:
       - request_id
       - template_id
       - amount_cents
       - reason
       - channel
+      - holder
+      - account
+      - bank
+      - files
+      - site
     Payment:
       type: object
       properties:
         amount_cents:
           type: integer
           format: int64
+          description: 核准金额，单位为分。历史批准单据缺核准金额时使用其申请额。
         date:
           type: string
           format: date
         receipt:
           type: string
+        bank_reference:
+          type: string
+          minLength: 1
+          description: 真实银行或付款平台交易流水号，服务端校验 UTF-8 字节数不超过 128。
       required:
       - amount_cents
       - date
       - receipt
+      - bank_reference
     Document:
-      allOf:
-      - $ref: '#/components/schemas/Application'
-      - type: object
-        properties:
-          id:
+      type: object
+      properties:
+        request_id:
+          type: string
+        template_id:
+          type: string
+        reason:
+          type: string
+        channel:
+          type: string
+        holder:
+          type: string
+        account:
+          type: string
+        bank:
+          type: string
+        site:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100000000000
+        extra:
+          type: object
+          additionalProperties:
             type: string
-          applicant_id:
+        files:
+          type: array
+          items:
+            type: string
+          nullable: true
+        id:
+          type: string
+        applicant_id:
+          type: integer
+          format: int64
+        template:
+          $ref: '#/components/schemas/Template'
+        state:
+          type: string
+          enum:
+          - waiting
+          - returned
+          - rejected
+          - approved
+          - paid
+          - withdrawn
+          - voided
+        route:
+          type: array
+          items:
             type: integer
             format: int64
-          template:
-            $ref: '#/components/schemas/Template'
-          state:
-            type: string
-          route:
-            type: array
-            items:
-              type: integer
-              format: int64
-          current:
-            type: integer
-          version:
-            type: integer
-          history:
-            type: array
-            items:
-              type: object
-              properties:
-                actor_id:
-                  type: integer
-                  format: int64
-                action:
-                  type: string
-                comment:
-                  type: string
-                at:
-                  type: string
-                  format: date-time
-          payment:
+        current:
+          type: integer
+        version:
+          type: integer
+        history:
+          type: array
+          items:
             type: object
             properties:
-              amount_cents:
+              actor_id:
                 type: integer
                 format: int64
-              date:
+              action:
                 type: string
-                format: date
+                enum:
+                - submit
+                - resubmit
+                - withdraw
+                - approve
+                - return
+                - reject
+                - void
+                - payment
+              comment:
+                type: string
+              at:
+                type: string
+                format: date-time
+              operator_id:
+                type: integer
+                format: int64
+              operator_name:
+                type: string
+              operator_no:
+                type: integer
+              operator_department:
+                type: string
+              node_name:
+                type: string
+              before_amount_cents:
+                type: integer
+                format: int64
+              after_amount_cents:
+                type: integer
+                format: int64
+              before_state:
+                type: string
+                enum:
+                - waiting
+                - returned
+                - rejected
+                - approved
+                - paid
+                - withdrawn
+                - voided
+              after_state:
+                type: string
+                enum:
+                - waiting
+                - returned
+                - rejected
+                - approved
+                - paid
+                - withdrawn
+                - voided
+              created_at:
+                type: string
+                format: date-time
+              adjustment_reason:
+                type: string
+              bank_reference:
+                type: string
               receipt:
                 type: string
-            nullable: true
+              payment_date:
+                type: string
+                format: date
+          description: 新动作在单据事务中追加不可变审计记录。历史单据缺失的快照及审计字段保持未记录。
+        payment:
+          type: object
+          properties:
+            amount_cents:
+              type: integer
+              format: int64
+            date:
+              type: string
+              format: date
+            receipt:
+              type: string
+            bank_reference:
+              type: string
+              description: 登记时录入的真实交易流水，历史记录可能缺失。
+          nullable: true
+        applicant_name:
+          type: string
+        applicant_employee_no:
+          type: integer
+        department_id:
+          type: integer
+          format: int64
+        department_name:
+          type: string
+        team_name:
+          type: string
+        submitted_at:
+          type: string
+          format: date-time
+        approved_at:
+          type: string
+          format: date-time
+        approved_amount_cents:
+          type: integer
+          format: int64
+          description: 核准金额，单位为分。历史记录可能缺失。
+        route_nodes:
+          type: array
+          items:
+            type: string
+    PersonProfileUpdate:
+      type: object
+      required:
+      - version
+      - manager_id
+      - joined
+      - job_title
+      - job_level
+      - cost_center
+      properties:
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+        manager_id:
+          type: integer
+          format: int64
+          minimum: 0
+        joined:
+          type: string
+          description: YYYY-MM-DD，不能晚于北京时间今日，空字符串表示未填写。
+        job_title:
+          type: string
+          maxLength: 100
+        job_level:
+          type: string
+          maxLength: 100
+        cost_center:
+          type: string
+          maxLength: 100
+    OrgManager:
+      type: object
+      required:
+      - kind
+      - id
+      - name
+      - department_id
+      - version
+      - manager_id
+      properties:
+        kind:
+          type: string
+          enum:
+          - department
+          - team
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        department_id:
+          type: integer
+          format: int64
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+        manager_id:
+          type: integer
+          format: int64
+          minimum: 0
+        manager_name:
+          type: string
+    FinanceResubmission:
+      type: object
+      required:
+      - amount_cents
+      - reason
+      - channel
+      - holder
+      - bank
+      - files
+      properties:
+        reason:
+          type: string
+        channel:
+          type: string
+        holder:
+          type: string
+        account:
+          type: string
+        bank:
+          type: string
+        amount_cents:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100000000000
+        extra:
+          type: object
+          additionalProperties:
+            type: string
+        files:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 15
+      description: 继续使用原申请编号、归属和模板版本。同付款渠道未填写 account 时保留原账号。
+    FinanceDecision:
+      type: object
+      required:
+      - decision
+      - current
+      properties:
+        decision:
+          type: string
+          enum:
+          - approve
+          - return
+          - reject
+        comment:
+          type: string
+          description: 退回和拒绝必须填写意见。
+        current:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 1
+          description: 当前文档版本，核减时必填。
+        approved_amount_cents:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 费用管理员核减时填写，必须小于当前核准金额。
+        adjustment_reason:
+          type: string
+          description: 核减时必填。
+    FinanceRecord:
+      type: object
+      required:
+      - id
+      - applicant_id
+      - applicant_name
+      - applicant_employee_no
+      - department_name
+      - team_name
+      - site
+      - template_name
+      - expense_type
+      - channel
+      - submitted_date
+      - approved_date
+      - paid_date
+      - state
+      - requested_cents
+      - approved_cents
+      - paid_cents
+      properties:
+        id:
+          type: string
+        applicant_id:
+          type: string
+        applicant_name:
+          type: string
+        applicant_employee_no:
+          type: string
+        department_name:
+          type: string
+        team_name:
+          type: string
+        site:
+          type: string
+        expense_type:
+          type: string
+          description: 归一化的费用类型，历史缺失时为空字符串。
+          enum:
+          - reimbursement
+          - payment
+          - ''
+        template_name:
+          type: string
+        channel:
+          type: string
+        submitted_date:
+          type: string
+        approved_date:
+          type: string
+        paid_date:
+          type: string
+        state:
+          type: string
+          enum:
+          - waiting
+          - returned
+          - rejected
+          - approved
+          - paid
+          - withdrawn
+          - voided
+        requested_cents:
+          type: string
+          pattern: ^[0-9]+$
+        approved_cents:
+          type: string
+          pattern: ^[0-9]*$
+        paid_cents:
+          type: string
+          pattern: ^[0-9]*$
+        purpose_summary:
+          type: string
+          description: 仅报表提供，最多 240 字符。
+        payee:
+          type: string
+          description: 仅报表提供，收款人或供应商名称。
+        approval_status:
+          type: string
+          enum:
+          - waiting
+          - returned
+          - rejected
+          - withdrawn
+          - approved
+        payment_status:
+          type: string
+          enum:
+          - not_due
+          - pending
+          - paid
+          - voided
+        payment_operator_id:
+          type: string
+        payment_operator_name:
+          type: string
+      description: 查询专用元数据。日期使用 YYYY-MM-DD；空字符串表示未知或不适用。所有金额为十进制分字符串。
+    FinanceTotals:
+      type: object
+      required:
+      - count
+      - requested_cents
+      - approved_cents
+      - paid_cents
+      - unpaid_cents
+      - in_flight_cents
+      properties:
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+        requested_cents:
+          type: string
+          pattern: ^[0-9]+$
+        approved_cents:
+          type: string
+          pattern: ^[0-9]+$
+        paid_cents:
+          type: string
+          pattern: ^[0-9]+$
+        unpaid_cents:
+          type: string
+          pattern: ^[0-9]+$
+          description: 筛选范围内当前已批准待付款的核准金额。
+        in_flight_cents:
+          type: string
+          pattern: ^[0-9]+$
+          description: 筛选范围内当前待审批或退回待修改的申请金额。
+    FinanceGroup:
+      allOf:
+      - $ref: '#/components/schemas/FinanceTotals'
+      - type: object
+        required:
+        - key
+        - label
+        properties:
+          key:
+            type: string
+          label:
+            type: string
+    FinanceReport:
+      type: object
+      required:
+      - items
+      - summary
+      - groups
+      - total
+      - count
+      - page
+      - size
+      - start
+      - end
+      - basis
+      - group_by
+      - amount_cents
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FinanceRecord'
+        summary:
+          $ref: '#/components/schemas/FinanceTotals'
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/FinanceGroup'
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+        count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 符合条件的记录总数，与 total 一致。
+        page:
+          type: integer
+        size:
+          type: integer
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        basis:
+          type: string
+          enum:
+          - submitted
+          - approved
+          - paid
+        group_by:
+          type: string
+          enum:
+          - department
+          - team
+          - person
+          - site
+          - template
+          - channel
+          - status
+          - payee
+          default: department
+        amount_cents:
+          type: string
+          pattern: ^[0-9]+$
+          description: 与 summary.paid_cents 一致，单位为分。
   responses:
     ShopBindingResult:
       description: 当前经营店铺绑定及可选目录

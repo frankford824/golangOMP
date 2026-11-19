@@ -76,6 +76,7 @@
             </form>
             <p v-else class="detail-note">{{ [user.department, user.team].filter(Boolean).join(' / ') || '未分配' }}</p>
           </section>
+          <PersonnelProfile v-if="canViewTerms && activeTab === 'profile'" :key="user.id" :user-id="user.id" />
         </div>
 
         <div v-show="activeTab === 'roles'" id="user-detail-panel-roles" class="modal-body" role="tabpanel" aria-labelledby="user-detail-tab-roles">
@@ -211,6 +212,7 @@ import {
   type UserRow,
 } from './userManagementTypes'
 
+const PersonnelProfile = defineAsyncComponent(() => import('@/oa/components/PersonnelProfile.vue'))
 const PersonnelTerms = defineAsyncComponent(() => import('@/oa/components/PersonnelTerms.vue'))
 
 const props = defineProps<{

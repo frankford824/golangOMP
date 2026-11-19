@@ -16,24 +16,25 @@ import (
 )
 
 type rosterRow struct {
-	Row                int    `json:"row"`
-	Sheet              string `json:"sheet"`
-	Name               string `json:"name"`
-	Error              string `json:"error"`
-	PersonID           int64  `json:"id"`
-	Version            int    `json:"version"`
-	EmploymentType     string `json:"employment_type"`
-	EmployeeNo         *int   `json:"employee_no,omitempty"`
-	PreviousEmployeeNo *int   `json:"previous_employee_no,omitempty"`
-	PreviousName       string `json:"previous_name,omitempty"`
-	NewName            string `json:"new_name,omitempty"`
-	Result             string `json:"result,omitempty"`
-	Failure            string `json:"failure,omitempty"`
-	ShopID             string `json:"shop_id"`
-	From               string `json:"from"`
+	Row                int            `json:"row"`
+	Sheet              string         `json:"sheet"`
+	Name               string         `json:"name"`
+	Error              string         `json:"error"`
+	Profile            *profileUpdate `json:"profile,omitempty"`
+	PersonID           int64          `json:"id"`
+	Version            int            `json:"version"`
+	EmploymentType     string         `json:"employment_type"`
+	EmployeeNo         *int           `json:"employee_no,omitempty"`
+	PreviousEmployeeNo *int           `json:"previous_employee_no,omitempty"`
+	PreviousName       string         `json:"previous_name,omitempty"`
+	NewName            string         `json:"new_name,omitempty"`
+	Result             string         `json:"result,omitempty"`
+	Failure            string         `json:"failure,omitempty"`
+	ShopID             string         `json:"shop_id"`
+	From               string         `json:"from"`
 }
 
-var peopleHeader = []any{"用户ID", "工号", "姓名", "用工类型"}
+var peopleHeader = []any{"用户ID", "工号", "姓名", "用工类型", "直属负责人用户ID", "直属负责人工号或姓名", "入职日期", "岗位", "职级", "成本中心", "生效直属负责人（只读）"}
 var termsHeader = []any{"用户ID", "店铺ID", "生效日期", "结束日期"}
 
 func (app office) exportPeople(w http.ResponseWriter, r *http.Request) {
@@ -62,12 +63,26 @@ func (app office) exportPeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	index := 2
+	peopleByID := make(map[int64]person, len(people))
+	for _, p := range people {
+		peopleByID[p.ID] = p
+	}
 	for row, p := range people {
 		no := ""
 		if p.EmployeeNo != nil {
 			no = strconv.Itoa(*p.EmployeeNo)
 		}
-		values := []any{decimal(p.ID), no, p.Name, p.EmploymentType}
+		var managerID, managerLabel string
+		if p.ManagerOverrideID > 0 {
+			managerID = decimal(p.ManagerOverrideID)
+			if manager, visible := peopleByID[p.ManagerOverrideID]; visible {
+				managerLabel = manager.Name
+				if manager.EmployeeNo != nil {
+					managerLabel = strconv.Itoa(*manager.EmployeeNo)
+				}
+			}
+		}
+		values := []any{decimal(p.ID), no, p.Name, p.EmploymentType, managerID, managerLabel, p.Joined, p.JobTitle, p.JobLevel, p.CostCenter, p.ManagerName}
 		if book.SetSheetRow("人员", "A"+strconv.Itoa(row+2), &values) != nil {
 			internal(w)
 			return
@@ -128,6 +143,10 @@ func (app office) previewPeople(w http.ResponseWriter, r *http.Request) {
 		if sheet == "店铺任职" {
 			header = termsHeader
 		}
+		extended := sheet == "人员" && len(rows[0]) != 4
+		if sheet == "人员" && !extended {
+			header = peopleHeader[:4]
+		}
 		if len(rows[0]) < len(header) {
 			bad(w, "花名册表头与导出模板不一致")
 			return
@@ -142,12 +161,12 @@ func (app office) previewPeople(w http.ResponseWriter, r *http.Request) {
 			if len(cells) == 0 {
 				continue
 			}
-			values := make([]string, 4)
+			values := make([]string, len(header))
 			copy(values, cells)
 			for cell := range values {
 				values[cell] = strings.TrimSpace(values[cell])
 			}
-			if values[0] == "" && values[1] == "" && values[2] == "" && values[3] == "" {
+			if strings.Join(values, "") == "" {
 				continue
 			}
 			row := rosterRow{Row: index + 2, Sheet: sheet, PersonID: number(values[0]), Name: values[2]}
@@ -162,6 +181,21 @@ func (app office) previewPeople(w http.ResponseWriter, r *http.Request) {
 			} else {
 				row.Version = p.Version
 				row.Name = p.Name
+			}
+			if row.Error == "" && extended {
+				if err := app.applyProfile(r.Context(), &p); err != nil {
+					internal(w)
+					return
+				}
+				input, err := app.rosterProfile(r, actor, p, values)
+				if errors.Is(err, errManagerInvalid) || errors.Is(err, errRosterProfile) || errors.Is(err, errManagerCycle) {
+					row.Error = err.Error()
+				} else if err != nil {
+					internal(w)
+					return
+				} else {
+					row.Profile = input
+				}
 			}
 			if row.Error == "" && sheet == "人员" {
 				row.EmploymentType = values[3]
@@ -284,6 +318,10 @@ func (app office) confirmPeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	if err := lockManagers(ctx, tx); err != nil {
+		internal(w)
+		return
+	}
 	err = tx.QueryRowContext(ctx, "SELECT payload,confirmed_count FROM oa_office_imports WHERE token=? AND actor=? AND expires_at>CURRENT_TIMESTAMP FOR UPDATE", input.Token, actor.ID).Scan(&raw, &count)
 	if err != nil {
 		conflict(w)
@@ -333,8 +371,53 @@ func (app office) confirmPeople(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		dirty := false
+		if row.Profile != nil {
+			if !validProfile(*row.Profile) || row.Profile.ManagerID == p.ID {
+				row.Failure = "人员档案参数无效"
+				failures++
+				continue
+			}
+			if row.Profile.ManagerID > 0 {
+				if _, err := app.allowedManager(r, actor, row.Profile.ManagerID); err != nil {
+					if !errors.Is(err, errManagerInvalid) {
+						internal(w)
+						return
+					}
+					row.Failure = err.Error()
+					failures++
+					continue
+				}
+			}
+			if _, err := tx.ExecContext(ctx, "SAVEPOINT oa_profile_row"); err != nil {
+				internal(w)
+				return
+			}
+			err := writeProfile(ctx, tx, p.ID, actor.ID, *row.Profile)
+			if err == nil {
+				err = checkManagerGraph(ctx, tx)
+			}
+			if err != nil {
+				if !errors.Is(err, errProfileVersion) && !errors.Is(err, errManagerCycle) {
+					internal(w)
+					return
+				}
+				if _, rollback := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT oa_profile_row"); rollback != nil {
+					internal(w)
+					return
+				}
+				row.Failure = err.Error()
+				failures++
+				continue
+			}
+		}
 		if row.EmployeeNo != nil || row.NewName != "" {
 			if problem := app.patchRosterIdentity(r, *row, p); problem != "" {
+				if row.Profile != nil {
+					if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT oa_profile_row"); err != nil {
+						internal(w)
+						return
+					}
+				}
 				row.Failure = problem
 				failures++
 				continue
@@ -356,6 +439,8 @@ func (app office) confirmPeople(w http.ResponseWriter, r *http.Request) {
 				internal(w)
 				return
 			}
+		}
+		if dirty || row.Profile != nil {
 			changed++
 			row.Result = "applied"
 		} else {
@@ -417,4 +502,82 @@ func (app office) patchRosterIdentity(r *http.Request, row rosterRow, current pe
 
 func sameEmployeeNo(left, right *int) bool {
 	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+var errRosterProfile = errors.New("请检查入职日期（YYYY-MM-DD，今日或过去）及岗位、职级、成本中心（各限 100 字）")
+
+func (app office) rosterProfile(r *http.Request, actor platform.Actor, p person, values []string) (*profileUpdate, error) {
+	input := profileUpdate{Version: p.ProfileVersion, Joined: values[6], JobTitle: values[7], JobLevel: values[8], CostCenter: values[9]}
+	switch {
+	case values[4] != "":
+		id, err := strconv.ParseInt(values[4], 10, 64)
+		if err != nil || id <= 0 {
+			return nil, errManagerInvalid
+		}
+		input.ManagerID = id
+	case values[5] != "":
+		id, err := app.rosterManagerReference(r, actor, values[5])
+		if err != nil {
+			return nil, err
+		}
+		input.ManagerID = id
+	}
+	if input.ManagerID == p.ManagerOverrideID && input.Joined == p.Joined && input.JobTitle == p.JobTitle &&
+		input.JobLevel == p.JobLevel && input.CostCenter == p.CostCenter {
+		return nil, nil
+	}
+	if !validProfile(input) {
+		return nil, errRosterProfile
+	}
+	if input.ManagerID == p.ID {
+		return nil, errManagerInvalid
+	}
+	if input.ManagerID > 0 {
+		if _, err := app.allowedManager(r, actor, input.ManagerID); err != nil {
+			return nil, err
+		}
+		seen := map[int64]bool{p.ID: true}
+		for current := input.ManagerID; current > 0; {
+			if seen[current] {
+				return nil, errManagerCycle
+			}
+			seen[current] = true
+			id, err := app.effectiveManager(r, current)
+			if err != nil {
+				return nil, err
+			}
+			current = id
+		}
+	}
+	return &input, nil
+}
+
+func (app office) rosterManagerReference(r *http.Request, actor platform.Actor, ref string) (int64, error) {
+	rows, err := app.source.QueryContext(r.Context(), `SELECT id FROM users WHERE status='active' AND
+		(display_name=? OR employee_no=?) LIMIT 3`, ref, employeeSearchNumber(ref))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+	if err = rows.Close(); err != nil {
+		return 0, err
+	}
+	if len(ids) != 1 {
+		return 0, errManagerInvalid
+	}
+	if _, err = app.allowedManager(r, actor, ids[0]); err != nil {
+		return 0, err
+	}
+	return ids[0], nil
 }
