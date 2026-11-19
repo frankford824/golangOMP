@@ -372,22 +372,29 @@ function resetDrawer() {
 }
 function searchFromDrawer() {
   filterDrawerOpen.value = false
-  navigateList({ ...filters }, 1, showLedger.value, true)
+  navigateList({ ...filters }, 1, showLedger.value, 'refresh')
 }
 function queryText(query: LocationQuery, key: string) {
   const value = query[key]
   return typeof value === 'string' ? value.trim() : ''
 }
-function navigateList(next: typeof applied, page: number, ledger = showLedger.value, refresh = false) {
+function navigateList(next: typeof applied, page: number, ledger = showLedger.value, navigation: 'push' | 'replace' | 'refresh' = 'replace') {
   const query = Object.fromEntries(Object.entries(next).filter(([,value]) => value !== ''))
   if (page > 1) query.page = String(page)
   if (ledger) query.view = 'ledger'
   const target = { name: 'AssetsIndex', query }
-  if (router.resolve(target).fullPath !== route.fullPath) void router.replace(target)
-  else if (refresh) void load()
+  if (router.resolve(target).fullPath === route.fullPath) {
+    if (navigation === 'refresh') void load()
+    return
+  }
+  if (oaEnabled && navigation === 'push') {
+    void router.push(target)
+  } else {
+    void router.replace(target)
+  }
 }
 function setLedger(ledger: boolean) {
-  navigateList({ ...applied }, requestedPage, ledger)
+  navigateList({ ...applied }, requestedPage, ledger, 'push')
 }
 watch(() => route.name === 'AssetsIndex' ? route.query : null, (query, previous) => {
   if (!query) {
@@ -478,10 +485,10 @@ async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number)
   }))
 }
 function goPage(page: number) {
-  navigateList({ ...applied }, Math.max(1, Math.min(totalPages.value, page)))
+  navigateList({ ...applied }, Math.max(1, Math.min(totalPages.value, page)), showLedger.value, 'push')
 }
 function search() {
-  navigateList({ ...applied, q: filters.q }, 1, showLedger.value, true)
+  navigateList({ ...applied, q: filters.q }, 1, showLedger.value, 'refresh')
 }
 </script>
 

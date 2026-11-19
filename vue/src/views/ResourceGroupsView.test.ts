@@ -28,7 +28,10 @@ vi.mock('vue-router', async () => {
       return route
     },
     useRouter: () => ({
-      push: mocks.push,
+      push: (to: Parameters<typeof resolve>[0]) => {
+        if (to.name === 'AssetsIndex') Object.assign(route, { ...resolve(to), query: to.query ?? {} })
+        else mocks.push(to)
+      },
       resolve,
       replace: (to: { name: string; query?: Record<string, string> }) => Object.assign(route, { ...resolve(to), query: to.query ?? {} }),
     }),
