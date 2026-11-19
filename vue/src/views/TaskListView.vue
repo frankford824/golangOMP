@@ -20,7 +20,7 @@
             {{ refreshingList ? '刷新中…' : '刷新列表' }}
           </BaseButton>
           <BaseButton
-            v-if="showAuditHandoverEntry"
+            v-if="showAuditHandoverEntry && !oaEnabled"
             size="sm"
             variant="secondary"
             class="task-list-action-button"
@@ -46,6 +46,8 @@
       </DesktopSlot>
       <template v-if="!draftsSelected">
       <div class="toolbar">
+        <BaseButton v-if="oaEnabled && showAuditHandoverEntry" size="sm" variant="secondary"
+          :disabled="batchAuditHandoverSubmitting" @click="openAuditHandoverCenter()">审核交班</BaseButton>
         <div v-if="oaEnabled" class="task-exception-filters" aria-label="任务异常筛选">
           <button type="button" :aria-pressed="filters.overdueOnly" @click="filterOverdue">已逾期</button>
         </div>

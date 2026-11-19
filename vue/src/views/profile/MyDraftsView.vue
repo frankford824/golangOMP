@@ -5,11 +5,12 @@
       <div class="flex items-center justify-between gap-2">
         <div>
           <component :is="taskCenterSource ? 'h2' : 'h1'" :class="{ 'oa-draft-title': oaEnabled }" class="text-base font-semibold text-[var(--v1-text-primary)]">{{ taskCenterSource ? '草稿箱' : '任务草稿' }}</component>
-          <p class="mt-1 text-xs text-[var(--v1-text-secondary)]">
+          <p v-if="canUseDrafts" class="mt-1 text-xs text-[var(--v1-text-secondary)]">
             管理当前账号的未提交草稿（最多 20 条，7 天过期）。
           </p>
         </div>
-        <div class="flex items-center gap-2">
+        <DesktopSlot v-if="canUseDrafts" target="actions">
+        <div class="oa-actions flex items-center gap-2">
           <button
             type="button"
             class="inline-flex min-h-9 items-center justify-center rounded border border-[var(--v1-border)] bg-[rgb(var(--yb-surface))] px-3 text-xs text-[var(--v1-text-secondary)]"
@@ -20,15 +21,18 @@
           </button>
           <router-link
             class="inline-flex min-h-9 items-center justify-center rounded bg-[var(--v1-bg-primary)] px-3 text-xs text-[rgb(var(--yb-text-inverse))]"
+            :class="{ 'oa-button-primary': oaEnabled }"
             :to="composeLocation()"
           >
             创建任务
           </router-link>
         </div>
+        </DesktopSlot>
       </div>
     </div>
 
-    <AsyncStateWrapper
+    <p v-if="!canUseDrafts" role="status">当前账号没有创建任务权限，无法使用任务草稿。</p>
+    <AsyncStateWrapper v-else
       :loading="loading"
       :error="errorMessage"
       :empty="!loading && !errorMessage && drafts.length === 0"
@@ -89,6 +93,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { oaEnabled } from '@/oa/access'
+import DesktopSlot from '@/oa/components/DesktopSlot.vue'
+import { usePermissionsStore } from '@/stores/permissions'
 import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import { COMPOSE_INTENT_META, type ComposeIntent } from '@/domain/unified-task-compose'
@@ -106,6 +112,8 @@ interface DraftLike {
 }
 
 const props = defineProps<{ taskCenterSource?: string }>()
+const permissions = usePermissionsStore()
+const canUseDrafts = computed(() => !oaEnabled || permissions.hasAction('task.create'))
 
 function composeLocation(draftId?: string) {
   return {
@@ -166,6 +174,7 @@ function pickFormValue(draft: DraftLike, key: string): string {
 }
 
 async function loadDrafts(): Promise<void> {
+  if (!canUseDrafts.value) return
   loading.value = true
   errorMessage.value = ''
   try {
