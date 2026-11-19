@@ -76,7 +76,6 @@ function buildUser() {
     display_name: mockDisplayName,
     name: mockDisplayName,
     department: '演示部门',
-    department_id: 14,
     team: '演示团队',
     roles: ['super_admin'],
     mobile: mockMobile,
