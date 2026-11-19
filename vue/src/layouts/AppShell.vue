@@ -397,7 +397,11 @@ const menuSections = computed(() =>
   ].filter((section) => section.menus.length > 0),
 )
 
+const lastTaskQuery = ref<Record<string, string>>({})
+watch(() => permissionsStore.currentUser?.id, () => { lastTaskQuery.value = {} }, { flush: 'sync' })
 function resolveMenuTo(menu: MenuConfig) {
+  if (oaEnabled && menu.key === 'task_list') return { path: '/tasks', query: lastTaskQuery.value }
+
   if (menu.key === 'dashboard' && can('orders.view')) return { path: '/', query: { workspace: 'tasks' } }
   return menu.to
 }
@@ -449,6 +453,14 @@ onMounted(() => {
   wideSidebar?.addEventListener('change', syncDesktop)
   window.addEventListener('keydown', onGlobalKeydown)
   removeRouteBeforeGuard = router.beforeEach((_to, from, next) => {
+    if (oaEnabled && from.name === 'TaskList' && _to.name !== 'TaskList') {
+      const filters: Record<string, string> = {}
+      for (const key of ['q', 'tab', 'operational_bucket', 'status', 'owner_department', 'owner_org_team', 'task_category', 'task_type', 'creator_id', 'designer_id', 'priority', 'date_from', 'date_to', 'overdue', 'sort']) {
+        const value = from.query[key]
+        if (typeof value === 'string') filters[key] = value
+      }
+      lastTaskQuery.value = filters
+    }
     if (contentScroller.value) routeScrollPositions.set(from.fullPath, contentScroller.value.scrollTop)
     startRouteLoading()
     next()
@@ -1127,5 +1139,17 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
 @media (min-width:1920px) {
   .oa-client-shell .app-topbar .topbar-search:has(.oa-search-key) { width:184px; justify-content:flex-start; padding-inline:8px; }
   .oa-client-shell .app-topbar .topbar-search__label,.oa-client-shell .app-topbar .oa-search-key { display:inline; }
+}
+
+/* Give compact menu names and their queue shortcuts separate pointer targets. */
+@media (min-width:1280px) {
+  .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-entry:has(.oa-nav-signal) {
+    display:grid; justify-items:stretch; gap:2px;
+  }
+  .oa-sidebar.sidebar:not(.oa-sidebar-open) .nav-entry .oa-nav-signal {
+    position:static; transform:none; justify-self:center; min-width:28px; line-height:16px;
+  }
+  .oa-sidebar.sidebar.oa-sidebar-open .nav-entry:has(.oa-nav-signal) { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+  .oa-sidebar.sidebar.oa-sidebar-open .nav-entry .oa-nav-signal { position:static; transform:none; }
 }
 </style>

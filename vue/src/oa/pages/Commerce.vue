@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { orderFilters, rememberOrderFilters } from '../orderFilterMemory'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Copy, FileText, Search } from 'lucide-vue-next'
@@ -32,6 +33,7 @@ type TaskLink = { id: number; task_no: string; status: string }
 type Feedback = { id: number; shop_id: string; note: string; adjusted_on: string; task_id?: number }
 type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; scope_state?: 'unassigned'; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
 
+const restored = orderFilters(props.mode, route.query)
 const today = dateInChina()
 const earliest = '2026-06-01'
 const periods = computed(() => [
@@ -47,7 +49,7 @@ function rangeStart(daysBack: number) {
   return [date.toISOString().slice(0, 10), earliest].sort()[1]
 }
 function routeDate(key: 'from' | 'to') {
-  const value = route.query[key]
+  const value = restored[key]
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value < earliest || value > today) return ''
   const date = new Date(value + 'T12:00:00Z')
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : ''
@@ -57,7 +59,7 @@ const incomingTo = routeDate('to')
 const useIncomingPeriod = Boolean(incomingFrom && incomingTo && incomingFrom <= incomingTo)
 const from = ref(useIncomingPeriod ? incomingFrom : today)
 const to = ref(useIncomingPeriod ? incomingTo : today)
-const shop = ref(props.mode !== 'personal' && typeof route.query.shop_id === 'string' ? route.query.shop_id : '')
+const shop = ref(props.mode !== 'personal' && typeof restored.shop_id === 'string' ? restored.shop_id : '')
 const navigationQuery = ref<Record<string, string>>({})
 function recordScope(query: URLSearchParams) {
   const start = query.get('from') || today
@@ -70,6 +72,14 @@ function recordScope(query: URLSearchParams) {
     ...(shopID ? { shop_id: shopID } : {}),
     include_brush: query.get('include_brush') === '1' ? '1' : '0',
   }
+  const specific: Record<string, string> = {}
+  if (props.mode === 'products') {
+    specific.scope = query.get('mine') === '1' ? 'mine' : 'overview'
+    specific.exception = lowCoverageOnly.value ? 'coverage' : ''
+  }
+  if (props.mode === 'ranking') specific.group = query.get('group') || 'shop'
+  rememberOrderFilters(props.mode, navigationQuery.value, specific)
+
 }
 const costAction = ref<InstanceType<typeof ProductCostAction>>()
 const selectedProduct = ref<DataRow>()
@@ -106,11 +116,11 @@ function productLink(sku: string, shopId?: string) {
   }
 }
 const selectedSku = ref(props.productId ?? '')
-const group = ref('shop')
+const group = ref(typeof restored.group === 'string' && ['shop', 'platform', 'product', 'growth', ...(currentProfile.value?.super_admin ? ['person'] : [])].includes(restored.group) ? restored.group : 'shop')
 const appliedGroup = ref('shop')
 let appliedQuery = ''
-const productScope = ref(route.query.scope === 'overview' ? 'overview' : 'mine')
-const includeBrush = ref(route.query.include_brush === '1')
+const productScope = ref(restored.scope === 'overview' ? 'overview' : 'mine')
+const includeBrush = ref(restored.include_brush === '1')
 const loadedDetail = ref<{ shop: string; sku: string; from: string; to: string; includeBrush: boolean }>()
 const shopOptions = ref<DataRow[]>([])
 const shopError = ref('')
@@ -331,7 +341,10 @@ function sum(rows: DataRow[], key: MoneyKey): string | null {
 
 const summaryRows = computed(() => summary.value?.rows?.filter(Boolean) ?? [])
 const rows = computed(() => data.value?.rows?.filter(Boolean) ?? [])
-const lowCoverageOnly = ref(route.query.exception === 'coverage')
+const lowCoverageOnly = ref(restored.exception === 'coverage')
+watch(lowCoverageOnly, () => {
+  if (props.mode === 'products' && appliedQuery) recordScope(new URLSearchParams(appliedQuery))
+})
 const lowCoverage = (row: DataRow) => row.verified_coverage == null || Number(row.verified_coverage) < .9
 const displayRows = computed(() => props.mode === 'overview'
   ? rows.value.slice(0, 10)

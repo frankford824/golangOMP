@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { orderFilters, rememberOrderFilters } from '../orderFilterMemory'
 import { computed, nextTick, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight, Copy, Search, X } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
@@ -106,16 +107,17 @@ function resetFilters() {
 }
 
 function restoreRouteFilters() {
-  const { from: start, to: end, shop_id: shopId, platform: platformCode } = route.query
+  const saved = orderFilters('orders-' + props.mode, route.query)
+  const { from: start, to: end, shop_id: shopId, platform: platformCode } = saved
   const validDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && value >= firstDay && value <= today && new Date(value).toJSON()?.slice(0, 10) === value
   if (validDate(start) && validDate(end) && start <= end) {
     from.value = start
     to.value = end
   }
   shop.value = typeof shopId === 'string' ? shopId : ''
-  orderNo.value = props.mode === 'detail' && typeof route.query.online_order_no === 'string' ? route.query.online_order_no : ''
+  orderNo.value = props.mode === 'detail' && typeof saved.online_order_no === 'string' ? saved.online_order_no : ''
   platform.value = typeof platformCode === 'string' ? platformCode : ''
-  includeBrush.value = route.query.include_brush !== '0'
+  includeBrush.value = saved.include_brush !== '0'
 }
 
 const navigationQuery = computed(() => {
@@ -149,6 +151,11 @@ async function load(next = 0, filters = filterQuery()) {
     data.value = result
     offset.value = next
     applied.value = filters
+    const active = Object.fromEntries(new URLSearchParams(filters))
+    const specific: Record<string, string> = {}
+    if (active.platform) specific.platform = active.platform
+    if (active.online_order_no) specific.online_order_no = active.online_order_no
+    rememberOrderFilters('orders-' + props.mode, active, specific)
   } catch (cause) {
     if (requestId !== currentRequest) return
     const failure = cause as HttpAppError

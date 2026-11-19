@@ -2175,6 +2175,7 @@ watch(activeTab, () => {
 watch(
   () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value, operationalBucket.value] as const,
   () => {
+    if (oaEnabled && route.name !== 'TaskList') return
     const q = { ...route.query } as Record<string, string | string[] | undefined>
     const kw = searchKeyword.value.trim()
     if (kw) q.q = kw
@@ -2220,6 +2221,7 @@ watch(
 watch(
   () => route.query,
   (query) => {
+    if (oaEnabled && route.name !== 'TaskList') return
     const nextTab = parseTaskTab(query.tab)
     const nextOperationalBucket = parseOperationalBucket(query.operational_bucket)
     const nextFilters = {
