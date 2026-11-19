@@ -1218,3 +1218,8 @@ html.oa-live-ui #app .content :is(.commerce-comparison strong,.hero-facts dt,.oa
 html.oa-live-ui #app .content :is(.cost-row-link strong,.detail-sku-costs strong,.sku-code,.sku-facts b,.hero-facts time) {
   font-family:var(--yb-font-mono),var(--yb-font-sans); font-variant-numeric:tabular-nums;
 }
+
+@media (min-width:1280px) {
+  html.oa-live-ui #app .commerce-filter .workspace-filters > :is(label,.commerce-period) { box-sizing:border-box; height:32px; min-height:32px; padding-block:0; align-items:center; }
+  html.oa-live-ui #app .commerce-filter .workspace-filters > label:not(.oa-check-inline) { border-block-width:0; box-shadow:inset 0 1px var(--yb-line-control),inset 0 -1px var(--yb-line-control); }
+}
