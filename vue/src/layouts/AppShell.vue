@@ -109,8 +109,7 @@
             <Menu :size="18" aria-hidden="true" />
           </button>
           <div v-if="oaEnabled" ref="desktopBack" class="oa-bar-return" />
-          <div v-if="oaEnabled" ref="desktopTitle" class="oa-context-title" />
-          <h1 v-if="oaEnabled && desktop" class="oa-bar-title">{{ $route.name === 'TaskDetail' ? '任务中心 / 任务详情' : moduleName || pageTitle }}</h1>
+          <h1 v-if="oaEnabled && desktop" class="oa-bar-title">{{ moduleName || pageTitle }}</h1>
           <span v-else-if="oaEnabled" class="oa-breadcrumb"><span v-if="moduleName && moduleName !== pageTitle">{{ moduleName }} / </span>{{ pageTitle }}</span>
           <span v-else class="app-topbar__title" title="永箔运营管理系统">
             <span class="app-topbar__full-name">永箔运营管理系统</span>
@@ -273,11 +272,10 @@ const large = ref(!!wideSidebar?.matches)
 const desktopBack = ref<HTMLElement | null>(null)
 const compactBack = ref<HTMLElement | null>(null)
 const backHost = computed(() => desktop.value ? desktopBack.value : compactBack.value)
-const desktopTitle = ref<HTMLElement | null>(null)
 const desktopTabs = ref<HTMLElement | null>(null)
 const desktopStatus = ref<HTMLElement | null>(null)
 const desktopActions = ref<HTMLElement | null>(null)
-if (oaEnabled) provide(desktopChromeKey, { desktop, back: backHost, title: desktopTitle, tabs: desktopTabs, status: desktopStatus, actions: desktopActions })
+if (oaEnabled) provide(desktopChromeKey, { desktop, back: backHost, tabs: desktopTabs, status: desktopStatus, actions: desktopActions })
 function syncDesktop() {
   desktop.value = oaEnabled && !!deskQuery?.matches
   large.value = !!wideSidebar?.matches
@@ -360,6 +358,7 @@ const moduleName = computed(() => {
   if (path === '/me/task-drafts') return '任务中心'
   if (path === '/me/notifications') return '通知中心'
   if (path.startsWith('/me')) return '个人中心'
+  if (path.startsWith('/asset-center/')) return '资产管理'
   if (path.startsWith('/tasks/')) return '任务中心'
   return ''
 })
@@ -1330,8 +1329,6 @@ function onSidebarTransitionEnd(e: TransitionEvent) {
   flex: none; padding: 4px 12px; background: var(--oa-surface); border-bottom: 1px solid var(--oa-chrome-divider);
 }
 .oa-bar-return:empty { display: none; }
-.oa-context-title:empty,.oa-context-title:has(+ .oa-breadcrumb),.oa-context-title:not(:empty) + .oa-bar-title { display:none; }
-.oa-context-title { white-space:nowrap; }
 
 @media (min-width:1440px) {
   #app .oa-client-shell .app-topbar button.topbar-search { width:232px; min-width:232px; justify-content:flex-start; gap:0; }

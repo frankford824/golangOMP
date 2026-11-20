@@ -43,7 +43,7 @@ export function rememberOrderFilters(mode: string, query: Record<string, string>
 }
 
 
-export function orderVisit<T>(name: string) {
+export function orderVisit<T>(name: string, persist?: { owner: string | number; select: (value: T) => T }) {
   const state = typeof window === 'undefined' ? undefined : window.history.state
   let historyEntry: string | undefined = state?.oaOrderVisit
   if (typeof state?.position === 'number' && !historyEntry) {
@@ -53,10 +53,24 @@ export function orderVisit<T>(name: string) {
   const identityAtEntry = getToken()
   const key = historyEntry ? historyEntry + ':' + name : ''
   return {
-    read: () => currentSession() && key ? visits.get(key) as T | undefined : undefined,
-    save(snapshot: T) {
+    read(): T | undefined {
+      if (!currentSession() || !key) return
+      if (visits.has(key)) return visits.get(key) as T
+      const saved = state?.oaOrderListPage
+      if (persist && saved?.key === key && saved.owner === persist.owner && saved.day === day) return saved.value as T
+    },
+    save(snapshot: T, persistControls = true) {
       if (!currentSession() || !key || identity !== identityAtEntry) return
       visits.set(key, snapshot)
+      // Keep only applied list controls on their own browser entry after a reload.
+      const entry = window.history.state
+      if (persist && persistControls && entry?.oaOrderVisit === historyEntry) {
+        const value = persist.select(snapshot)
+        const saved = entry.oaOrderListPage
+        if (saved?.key !== key || saved.owner !== persist.owner || saved.day !== day || JSON.stringify(value) !== JSON.stringify(saved.value)) {
+          window.history.replaceState({ ...entry, oaOrderListPage: { key, owner: persist.owner, day, value } }, '')
+        }
+      }
       if (visits.size > 80) visits.delete(visits.keys().next().value!)
     },
   }

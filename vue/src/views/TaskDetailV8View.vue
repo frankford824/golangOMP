@@ -1,12 +1,13 @@
 <template>
   <main class="task-page task-detail-view" :class="{ 'oa-task-detail': oaEnabled }">
-    <OAPageReturn v-if="oaEnabled" :to="returnTarget">{{ backButtonLabel }}</OAPageReturn>
+    <DetailBreadcrumb v-if="oaEnabled" module="任务中心" :identifier="task?.task_no">
+      <OAPageReturn inline :to="returnTarget">{{ backButtonLabel }}</OAPageReturn>
+    </DetailBreadcrumb>
     <div v-if="loading && !task" class="state">正在打开任务…</div>
     <div v-else-if="error && !task" class="state error" role="alert">
       {{ error }}
     </div>
     <template v-else-if="task">
-      <DetailBreadcrumb v-if="oaEnabled" module="任务中心" :identifier="task.task_no" />
       <section class="task-hero" :class="{ 'is-terminal': isTerminal }">
         <TaskDetailAtmosphere v-if="!oaEnabled" />
         <div class="hero-content">
@@ -395,7 +396,7 @@
 
 <script setup lang="ts">
 import DetailBreadcrumb from '@/oa/components/DetailBreadcrumb.vue'
-import { detailReturnTarget } from '@/oa/returnNavigation'
+import { detailReturnTarget, workspaceOrigin } from '@/oa/returnNavigation'
 import { oaReturnLabel } from '@/oa/pageTitle'
 import OAPageReturn from '@/oa/components/OAPageReturn.vue'
 import { goBackTo } from '@/oa/returnNavigation'
@@ -474,7 +475,12 @@ type WorkspaceMode = 'workflow' | 'defaultStyle' | 'resources' | 'attachments' |
 const route = useRoute()
 const router = useRouter()
 const returnTarget = computed(() => {
-  if (oaEnabled) return detailReturnTarget(router, route.fullPath, '/tasks')
+  if (oaEnabled) {
+    const fallback = workspaceOrigin(router, route.query?.globalFrom)
+      || assetTaskReturnSource(route.query?.assetDetailFrom) || taskReturnSource(route.query?.taskFrom)
+      || (route.query?.from === 'design-dashboard' ? '/design-dashboard' : '/tasks')
+    return detailReturnTarget(router, route.fullPath, fallback)
+  }
   return assetTaskReturnSource(route.query?.assetDetailFrom)
     || taskReturnSource(route.query?.taskFrom)
     || assetTaskReturnSource(window.history.state?.back)

@@ -299,7 +299,7 @@ watch([() => props.mode, () => route.query, scope, allowed], async () => {
 
 <template>
   <div class="oa-page order-data">
-    <OAPageReturn v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
+    <OAPageReturn inline v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
     <PageHead :title="title" :subtitle="subtitle" />
     <OperationNav :query="navigationQuery" />
 

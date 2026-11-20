@@ -41,12 +41,20 @@ type Feedback = { id: number; shop_id: string; note: string; adjusted_on: string
 type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; total_rows?: number; scope_state?: 'unassigned'; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
 
 type Visit = { filters: Record<string, string>; offset: number; scroll: number; row?: string; closed: boolean }
-let visit = orderVisit<Visit>(props.mode)
+function listVisit() {
+  const owner = permissions.currentUser?.id
+  const list = owner && (props.mode === 'products' || props.mode === 'ranking')
+  return orderVisit<Visit>(props.mode, list ? {
+    owner,
+    select: ({ filters, offset }) => ({ filters, offset, scroll: 0, closed: false }),
+  } : undefined)
+}
+let visit = listVisit()
 const previousVisit = visit.read()
 const restored = previousVisit?.filters ?? orderFilters(props.mode, route.query)
 const resultRegion = ref<HTMLElement>()
 const returnTarget = computed(() => props.mode === 'detail'
-  ? detailReturnTarget(router, route.fullPath, '/operations/products')
+  ? detailReturnTarget(router, route.fullPath, orderReturnTarget(route) || '/operations/products')
   : orderReturnTarget(route))
 const returnSource = computed(() => orderReturnSource(route))
 const today = dateInChina()
@@ -411,7 +419,7 @@ const defaultInspector = ref(false)
 let inspectorPreferenceSet = previousVisit?.closed ?? false
 let restoringVisit = Boolean(previousVisit)
 const rowKey = (row: DataRow) => JSON.stringify([row.shop_id, row.shop_item_id, row.sku])
-function saveVisit() {
+function saveVisit(persistControls = true) {
   if (restoringVisit || !data.value || !appliedPeriod.value) return
   visit.save({
     filters: {
@@ -425,9 +433,9 @@ function saveVisit() {
     scroll: resultRegion.value?.scrollTop ?? 0,
     row: selectedProduct.value && rowKey(selectedProduct.value),
     closed: inspectorPreferenceSet,
-  })
+  }, persistControls)
 }
-watch([data, offset, selectedProduct, lowCoverageOnly], saveVisit, { flush: 'post' })
+watch([data, offset, selectedProduct, lowCoverageOnly], () => saveVisit(), { flush: 'post' })
 function openDefaultInspector() {
   if (!restoringVisit && props.mode === 'products' && defaultInspector.value && !inspectorPreferenceSet && !selectedProduct.value && selectableProducts.value[0]) {
     openCost(selectableProducts.value[0], false)
@@ -847,7 +855,7 @@ function onSessionStorage(event: StorageEvent) {
 const visitPath = route.path
 watch(() => route.fullPath, async () => {
   if (route.path !== visitPath) return
-  visit = orderVisit<Visit>(props.mode)
+  visit = listVisit()
   const saved = visit.read()
   const filters = saved?.filters ?? orderFilters(props.mode, route.query)
   const start = routeDate('from', filters)
@@ -922,13 +930,15 @@ onUnmounted(() => {
 
 <template>
 <div :class="['oa-page commerce-workspace', { 'commerce-overview': mode === 'overview', 'commerce-list': mode === 'products' || mode === 'ranking', 'commerce-products': mode === 'products' }]">
-  <OAPageReturn v-if="returnTarget" :source="mode === 'detail' ? undefined : returnSource" :to="returnTarget">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
-  <DetailBreadcrumb v-if="mode === 'detail'" module="经营中心" :identifier="productId" />
+  <DetailBreadcrumb v-if="mode === 'detail'" module="经营中心" :identifier="productId">
+    <OAPageReturn v-if="returnTarget" inline :to="returnTarget">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
+  </DetailBreadcrumb>
+  <OAPageReturn v-else-if="returnTarget" inline :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
-  <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" />
+  <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" :origin="mode === 'detail' ? returnTarget : undefined" />
   <div class="commerce-body" role="region" aria-label="经营数据" @keydown="productKeys">
   <p v-if="!mayView" class="oa-error" role="alert">当前账号没有经营查询权限。</p>
   <template v-else>
@@ -1092,7 +1102,7 @@ onUnmounted(() => {
       <OAEmpty v-if="!displayRows.length" :title="rows.length && lowCoverageOnly ? '本页暂无待补成本或低覆盖商品' : '所选范围暂无数据'" kind="search">
         <button v-if="mode === 'products' && !rows.length && appliedMine && !data.has_more" type="button" :disabled="busy" @click="showAllProducts">切换为全部可见范围</button>
       </OAEmpty>
-      <div v-else ref="resultRegion" class="oa-table-wrap" tabindex="0" @scroll="saveVisit" role="region" :aria-label="title + '数据表'">
+      <div v-else ref="resultRegion" class="oa-table-wrap" tabindex="0" @scroll="saveVisit(false)" role="region" :aria-label="title + '数据表'">
         <table v-if="mode === 'ranking'" class="oa-table commerce-ranking-table" :class="{ 'commerce-ranking-sku': appliedGroup === 'sku' }">
           <thead><tr>
             <th class="oa-number">名次</th><th>{{ rankingGroups[appliedGroup] }}</th>

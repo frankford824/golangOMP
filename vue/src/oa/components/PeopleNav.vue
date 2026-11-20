@@ -2,12 +2,15 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useOAAccess } from '../access'
-import { directoryQuery, peopleReturnSource, shopBindingReturnSource } from '../peopleNavigation'
+import { directoryQuery, peopleReturnSource, rosterReturnSource, shopBindingReturnSource } from '../peopleNavigation'
 
 const route = useRoute()
 const router = useRouter()
 const { can, currentProfile } = useOAAccess()
+const profileRoster = computed(() => route.path === '/users' && route.query.user_id ? rosterReturnSource(route.query.rosterFrom) : undefined)
+const selectedPath = computed(() => profileRoster.value ? '/users/roster' : route.path)
 const rosterSource = computed(() => {
+  if (profileRoster.value) return profileRoster.value
   const source = shopBindingReturnSource(route.query.peopleFrom)
   return source && router.resolve(source).path === '/users/roster' ? source : undefined
 })
@@ -32,9 +35,9 @@ const bindings = computed(() => route.path === '/users/shop-bindings' ? route.fu
 
 <template>
   <nav class="people-nav" aria-label="人员管理">
-    <RouterLink :to="directory" active-class="selected" exact-active-class="">成员与组织</RouterLink>
-    <RouterLink v-if="can('people.manage')" :to="roster" active-class="selected" exact-active-class="">人员花名册</RouterLink>
-    <RouterLink v-if="can('people.manage') && currentProfile?.super_admin" :to="bindings" active-class="selected" exact-active-class="">店铺人员绑定</RouterLink>
+    <RouterLink :to="directory" active-class="" exact-active-class="" :class="{ selected: selectedPath === '/users' }" :aria-current="selectedPath === '/users' ? 'page' : 'false'">成员与组织</RouterLink>
+    <RouterLink v-if="can('people.manage')" :to="roster" active-class="" exact-active-class="" :class="{ selected: selectedPath === '/users/roster' }" :aria-current="selectedPath === '/users/roster' ? 'page' : 'false'">人员花名册</RouterLink>
+    <RouterLink v-if="can('people.manage') && currentProfile?.super_admin" :to="bindings" active-class="" exact-active-class="" :class="{ selected: selectedPath === '/users/shop-bindings' }" :aria-current="selectedPath === '/users/shop-bindings' ? 'page' : 'false'">店铺人员绑定</RouterLink>
   </nav>
 </template>
 

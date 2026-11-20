@@ -1,8 +1,8 @@
 <template>
   <section class="maintenance" aria-label="编码成本维护" @keydown="navigateRows">
-    <OAPageReturn v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
     <div class="maintenance-list">
     <div class="maintenance-tools">
+      <OAPageReturn inline v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
       <form @submit.prevent="search">
         <button v-if="oaEnabled" class="conflict-filter" type="button" :aria-pressed="status === 'conflict'" @click="toggleConflicts">冲突待确认</button>
         <label class="sr-only" for="cost-keyword">搜索编码、名称或款式</label

@@ -1,6 +1,6 @@
 <template>
   <main class="task-resources-page">
-    <OAPageReturn v-if="oaEnabled" :to="returnTarget">返回任务</OAPageReturn>
+    <OAPageReturn inline v-if="oaEnabled" :to="returnTarget">返回任务</OAPageReturn>
     <header class="page-head">
       <div>
         <p class="eyebrow">任务 {{ taskId }}</p>

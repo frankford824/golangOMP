@@ -1,6 +1,6 @@
 <template>
   <main class="compose-page" :class="{ 'oa-task-create': oaEnabled }" :data-row-count="rows.length" :data-compose-intent="intent">
-    <OAPageReturn v-if="oaEnabled" :to="composeReturnTarget">{{ composeReturnLabel }}</OAPageReturn>
+    <OAPageReturn inline v-if="oaEnabled" :to="composeReturnTarget">{{ composeReturnLabel }}</OAPageReturn>
     <header class="compose-hero">
       <div class="hero-copy">
         <h1>创建任务</h1>

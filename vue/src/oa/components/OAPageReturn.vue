@@ -4,12 +4,12 @@ import type { RouteLocationRaw } from 'vue-router'
 import DesktopSlot from './DesktopSlot.vue'
 import OAReturnLink from './OAReturnLink.vue'
 
-defineProps<{ to?: RouteLocationRaw; source?: string; disabled?: boolean }>()
+defineProps<{ to?: RouteLocationRaw; source?: string; disabled?: boolean; inline?: boolean }>()
 defineEmits<{ activate: [] }>()
 </script>
 
 <template>
-  <DesktopSlot target="back">
+  <DesktopSlot target="back" :inline="inline">
     <OAReturnLink v-if="to" class="oa-page-return" data-oa-page-return :to="to" :source="source">
       <ArrowLeft :size="16" aria-hidden="true" />
       <slot />

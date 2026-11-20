@@ -5,16 +5,13 @@
         <h1 class="yb-page-title">SKU 资产中心</h1>
       </div>
       <DesktopSlot target="actions"><div class="page-actions">
-        <div v-if="oaEnabled && !isFlatMode" class="asset-view-modes" role="group" aria-label="结果视图">
-          <button type="button" class="quiet-button" :aria-pressed="!showLedger" @click="setLedger(false)">图库网格</button>
-          <button type="button" class="quiet-button" :aria-pressed="showLedger" @click="setLedger(true)">规格台账</button>
-        </div>
         <button class="quiet-button asset-refresh" :disabled="loading" @click="load()">
           {{ loading ? '刷新中…' : '刷新' }}
         </button>
       </div></DesktopSlot>
     </header>
 
+    <AssetViewTabs v-if="oaEnabled && !isFlatMode" :ledger="showLedger" @select="setLedger" />
     <section class="search-workbench" aria-label="资产检索">
       <form class="search-row" @submit.prevent="search">
         <label class="search-field">
@@ -242,6 +239,7 @@
 </template>
 
 <script setup lang="ts">
+import AssetViewTabs from '@/oa/components/AssetViewTabs.vue'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
 import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue'
@@ -830,13 +828,11 @@ function search() {
     width: 100%;
   }
 }
-html.oa-live-ui .asset-view-modes { display: flex; gap: 4px; }
-html.oa-live-ui #app .page-actions :is(.asset-view-modes button,.asset-refresh) { border-radius: 6px; }
+html.oa-live-ui #app .page-actions .asset-refresh { border-radius: 6px; }
 html.oa-live-ui #app .page-actions .asset-refresh { border: 1px solid rgb(var(--yb-border-strong)); }
 html.oa-live-ui .sku-facts > span { padding-inline: clamp(4px, .35vw, 9px); }
 html.oa-live-ui .sku-facts small { white-space: nowrap; }
 html.oa-live-ui .sku-facts b { font-weight: 600; }
-html.oa-live-ui .asset-view-modes [aria-pressed="true"] { background: rgb(var(--yb-brand-soft)); color: rgb(var(--yb-brand)); border-color: currentColor; }
 html.oa-live-ui .search-field input,
 html.oa-live-ui .search-row > button { min-height: 36px; height: 36px; border-radius: 6px; }
 html.oa-live-ui .search-icon { font-size: 18px; top: 9px; }

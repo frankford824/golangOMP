@@ -38,10 +38,12 @@ const tabOptions: ReadonlyArray<{ label: string; value: TaskCenterTab }> = [
   { label: '已终止', value: 'terminated' },
 ]
 const tabs = computed(() => tabOptions.filter(tab => tab.value === 'drafts' ? canOpenDrafts.value : canOpenList.value))
-const activeTab = computed(() => props.active ?? (route.name === 'MeTaskDrafts' ? 'drafts' : undefined))
+const listOrigin = computed(() => taskListReturnSource(route.query?.taskFrom)
+  || taskListReturnSource(router.options.history.state?.back) || '/tasks')
+const activeTab = computed(() => props.active ?? (route.name === 'MeTaskDrafts' ? 'drafts' : listTabFromQuery(router.resolve(listOrigin.value).query)))
 
 function select(tab: TaskCenterTab) {
-  if (tab === activeTab.value) return
+  if (props.active && tab === activeTab.value) return
   if (props.active) {
     emit('select', tab)
     return
@@ -50,10 +52,7 @@ function select(tab: TaskCenterTab) {
     void router.push('/me/task-drafts')
     return
   }
-  const source = taskListReturnSource(route.query.taskFrom)
-    || taskListReturnSource(router.options.history.state?.back)
-    || '/tasks'
-  const resolved = router.resolve(source)
+  const resolved = router.resolve(listOrigin.value)
   void router.push(taskCenterTabLocation(tab, resolved.query, listTabFromQuery(resolved.query), resolved.hash))
 }
 </script>

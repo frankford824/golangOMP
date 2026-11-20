@@ -34,13 +34,14 @@
 
 .filter-prefix { flex: none; padding-inline: 8px 4px; }
 .order-data-filters label:focus-within {
-  border-color: var(--oa-accent); box-shadow: 0 0 0 2px rgb(var(--yb-brand) / .2);
+  border-color: var(--oa-accent); box-shadow: var(--yb-focus-ring);
 }
 #app .order-data .order-data-filters label :is(input:not([type=checkbox]), select),
 #app .order-data .order-data-filters label :deep(.order-date-field input) {
   border: 0;
   border-radius: 0;
   outline: 0;
+  box-shadow: none;
   min-block-size: 30px;
   block-size: 30px;
   padding-block: 0;

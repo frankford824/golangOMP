@@ -49,7 +49,7 @@
 .commerce-workspace .workspace-filters .oa-check-inline { padding-inline: 8px; gap: 6px; }
 .filter-prefix { flex: none; padding-inline: 8px 4px; }
 .commerce-workspace .workspace-filters > label:focus-within {
-  border-color: var(--oa-accent); box-shadow: 0 0 0 2px rgb(var(--yb-brand) / .2);
+  border-color: var(--oa-accent); box-shadow: var(--yb-focus-ring);
 }
 #app .commerce-workspace .workspace-filters :is(input:not([type=checkbox]), select),
 #app .commerce-workspace .workspace-filters :deep(.order-date-field input) {
@@ -59,6 +59,7 @@
   border: 0;
   border-radius: 0;
   outline: 0;
+  box-shadow: none;
   min-width: 0;
 }
 .commerce-workspace .workspace-filters input[type=checkbox] { accent-color: var(--oa-accent); }

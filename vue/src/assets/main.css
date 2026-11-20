@@ -1161,7 +1161,6 @@ html.oa-live-ui #app .content :is(button,select,input,textarea):not(.material-sy
  html.oa-live-ui #app .org-hero h1,
  html.oa-live-ui #app .org-hero p:first-child { display:none; }
  html.oa-live-ui .oa-bar-tabs :is(nav,.workspace-tabs) svg { flex:none; }
- html.oa-live-ui .oa-bar-page-actions .asset-view-modes { display:inline-flex;align-items:center;gap:4px; }
 }
 
 html.oa-live-ui #app .oa-bar-page-actions button.oa-new-user > span {line-height:normal;}

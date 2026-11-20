@@ -5,7 +5,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { useOAAccess } from '../access'
 
 defineOptions({ inheritAttrs: false })
-const props = defineProps<{ query?: Record<string, string> }>()
+const props = defineProps<{ query?: Record<string, string>; origin?: string }>()
 const route = useRoute()
 const { currentProfile, can } = useOAAccess()
 const nav = ref<HTMLElement>()
@@ -20,9 +20,12 @@ const links = computed(() => [
   { path: '/me/performance', title: '我的业绩' },
 ])
 function active(path: string) {
+  const originPath = props.origin?.split(/[?#]/, 1)[0]
+  if (links.value.some(item => item.path === originPath)) return path === originPath
   return route.path === path || (path === '/operations/products' && route.path.startsWith(path + '/'))
 }
 function tabTarget(path: string) {
+  if (props.origin && props.origin.split(/[?#]/, 1)[0] === path) return props.origin
   return route.path === path ? route.fullPath : { path, query: props.query }
 }
 watch(() => route.path, async () => {
