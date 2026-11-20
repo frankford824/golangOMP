@@ -1,5 +1,6 @@
 <template>
-  <section class="notif-page">
+  <section class="notif-page" :class="{ 'notif-activity-page': oaEnabled && section !== 'system' }"
+    :data-oa-return-scroll="oaEnabled && section !== 'system' ? 'notice-activity' : undefined">
     <header v-if="!oaEnabled || section === 'system'" class="notif-hero" :class="{ 'notif-toolbar': oaEnabled }">
       <div>
         <h1 v-if="!oaEnabled">通知中心</h1>
@@ -57,7 +58,7 @@
           <button type="button" class="notif-btn notif-btn--ghost" @click="reloadPage">重试</button>
         </div>
         <p v-else-if="oaEnabled && pageLoading" class="notif-empty" role="status">正在加载通知…</p>
-        <div v-else-if="visibleItems.length" class="notif-list desktop-region-scroll" role="region" aria-label="通知记录" tabindex="0">
+        <div v-else-if="visibleItems.length" class="notif-list desktop-region-scroll" data-oa-return-scroll="system-notices" role="region" aria-label="通知记录" tabindex="0">
           <article
             v-for="item in visibleItems"
             :key="item.id"
@@ -109,7 +110,7 @@
         </nav>
       </section>
 
-      <aside class="notification-tools desktop-region-scroll" aria-label="通知设置与广播" tabindex="0">
+      <aside class="notification-tools desktop-region-scroll" data-oa-return-scroll="notification-tools" aria-label="通知设置与广播" tabindex="0">
         <nav v-if="canBroadcast" class="notification-tool-nav" aria-label="通知工具">
           <button type="button" :aria-pressed="toolPane==='settings'" @click="toolPane='settings'">通知设置</button>
           <button type="button" :aria-pressed="toolPane==='broadcast'" @click="toolPane='broadcast'">发广播</button>
@@ -1569,6 +1570,7 @@ onMounted(() => {
     block-size: calc(100dvh - 6rem);
     min-block-size: 23rem;
   }
+  .notif-page.notif-activity-page { overflow-y: auto; }
   .notif-hero { flex: 0 0 auto; padding: 0.85rem 1rem; }
   .notif-layout {
     flex: 1 1 auto;

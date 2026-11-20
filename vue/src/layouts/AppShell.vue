@@ -229,6 +229,7 @@ import PersonalNav from '@/oa/components/PersonalNav.vue'
 import PeopleNav from '@/oa/components/PeopleNav.vue'
 import TaskCenterTabs from '@/oa/components/TaskCenterTabs.vue'
 import CachedWorkspace from '@/oa/components/CachedWorkspace.vue'
+import { createReturnScroll } from '@/oa/returnScroll'
 import { desktopChromeKey } from '@/oa/desktopChrome'
 import { useExpenseActivity } from '@/oa/expenseActivity'
 import { useSidebarCounts } from '@/oa/sidebarCounts'
@@ -373,6 +374,7 @@ const mobileSidebarOpen = ref(false)
 const routeLoading = ref(false)
 const contentScroller = ref<HTMLElement | null>(null)
 const routeScrollPositions = new Map<string, number>()
+const oaScroll = oaEnabled ? createReturnScroll() : undefined
 let routeLoadingTimer: ReturnType<typeof setTimeout> | null = null
 let removeRouteBeforeGuard: (() => void) | null = null
 let removeRouteAfterHook: (() => void) | null = null
@@ -531,6 +533,7 @@ onMounted(() => {
       if (feeRoute.value) refreshVisibleOAAccess()
     }, 60_000)
   }
+  if (oaScroll && contentScroller.value) oaScroll.restore(contentScroller.value, router.currentRoute.value.fullPath, String(permissionsStore.currentUser?.id ?? ''))
   removeRouteBeforeGuard = router.beforeEach((_to, from, next) => {
     if (oaEnabled && from.name === 'TaskList' && _to.name !== 'TaskList') {
       const filters: Record<string, string> = {}
@@ -540,14 +543,19 @@ onMounted(() => {
       }
       lastTaskQuery.value = filters
     }
-    if (contentScroller.value) routeScrollPositions.set(from.fullPath, contentScroller.value.scrollTop)
+    if (contentScroller.value) {
+      if (oaScroll) oaScroll.capture(contentScroller.value, from.fullPath, String(permissionsStore.currentUser?.id ?? ''))
+      else routeScrollPositions.set(from.fullPath, contentScroller.value.scrollTop)
+    }
     startRouteLoading()
     next()
   })
-  removeRouteAfterHook = router.afterEach((to) => {
+  removeRouteAfterHook = router.afterEach((to, _from, failure) => {
     stopRouteLoading()
     void nextTick(() => {
-      if (contentScroller.value) contentScroller.value.scrollTop = routeScrollPositions.get(to.fullPath) ?? 0
+      if (failure || !contentScroller.value || router.currentRoute.value.fullPath !== to.fullPath) return
+      if (oaScroll) oaScroll.restore(contentScroller.value, to.fullPath, String(permissionsStore.currentUser?.id ?? ''))
+      else contentScroller.value.scrollTop = routeScrollPositions.get(to.fullPath) ?? 0
     })
   })
   removeRouteErrorHook = router.onError(() => {
@@ -565,6 +573,7 @@ onUnmounted(() => {
     clearInterval(feeAccessRefresh)
   }
   stopRouteLoading()
+  oaScroll?.dispose()
   removeRouteBeforeGuard?.()
   removeRouteAfterHook?.()
   removeRouteErrorHook?.()

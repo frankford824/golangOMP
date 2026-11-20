@@ -130,12 +130,13 @@ function returnQuery() {
     ...(props.mode === 'products' ? { scope: appliedMine.value ? 'mine' : 'overview', exception: lowCoverageOnly.value ? 'coverage' : '' } : {}),
     ...(props.mode === 'ranking' ? { group: appliedGroup.value, sort: rankingMetric.value, order: rankingDirection.value } : {}),
     ...(offset.value ? { offset: String(offset.value) } : {}),
+    ...(props.mode === 'detail' && loadedDetail.value ? { sku: loadedDetail.value.sku } : {}),
     ...(props.mode === 'detail' ? Object.fromEntries(Object.entries(route.query).filter(([key, value]) =>
       ['scope', 'returnTo', 'returnFallback'].includes(key) && typeof value === 'string')) as Record<string, string> : {}),
   }, route.fullPath)
 }
 function externalCostLink(path: string, sku: string) {
-  return { path, query: { sku, ...returnQuery() } }
+  return { path, query: { sku, ...(path === '/cost-rules' ? { focus: 'cost-detail' } : {}), ...returnQuery() } }
 }
 function productLink(sku: string, shopId?: string) {
   return {
@@ -148,7 +149,7 @@ function productLink(sku: string, shopId?: string) {
     },
   }
 }
-const selectedSku = ref(props.productId ?? '')
+const selectedSku = ref(props.mode === 'detail' && typeof restored.sku === 'string' ? restored.sku : props.productId ?? '')
 function readRankingGroup(value: unknown) {
   return typeof value === 'string' && ['shop', 'platform', 'product', 'sku', 'growth', ...(currentProfile.value?.super_admin ? ['person'] : [])].includes(value) ? value : 'shop'
 }
@@ -425,6 +426,7 @@ function saveVisit(persistControls = true) {
     filters: {
       ...navigationQuery.value,
       group: appliedGroup.value,
+      ...(props.mode === 'detail' && loadedDetail.value ? { sku: loadedDetail.value.sku } : {}),
       ...(props.mode === 'ranking' ? { sort: rankingMetric.value, order: rankingDirection.value } : {}),
       scope: appliedMine.value ? 'mine' : 'overview',
       exception: lowCoverageOnly.value ? 'coverage' : '',
@@ -936,10 +938,11 @@ onUnmounted(() => {
   <OAPageReturn v-else-if="returnTarget" inline :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
+    <RouterLink v-if="mode === 'detail' && loadedDetail?.sku && permissions.hasMenu('cost_rules')" class="oa-button" :to="externalCostLink('/cost-rules', loadedDetail.sku)">查看编码成本</RouterLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
   <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" :origin="mode === 'detail' ? returnTarget : undefined" />
-  <div class="commerce-body" role="region" aria-label="经营数据" @keydown="productKeys">
+  <div class="commerce-body" :data-oa-return-scroll="mode === 'detail' ? 'product-detail' : undefined" role="region" aria-label="经营数据" @keydown="productKeys">
   <p v-if="!mayView" class="oa-error" role="alert">当前账号没有经营查询权限。</p>
   <template v-else>
     <form class="oa-panel commerce-filter" aria-label="经营筛选" @submit.prevent="load()">

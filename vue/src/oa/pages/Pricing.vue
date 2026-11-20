@@ -167,7 +167,7 @@ async function preview() {
   <main class="oa-page oa-pricing">
     <OAPageReturn inline v-if="returnTarget" :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
     <PageHead title="SKU 核价" subtitle="按编码查看成本中心的当前成本、计价依据和规则试算结果。">
-      <RouterLink v-if="canOpenMaintenance" class="oa-button" :to="costLink()">编码成本维护</RouterLink>
+      <RouterLink v-if="canOpenMaintenance" class="oa-button" :to="costLink(parsed.length === 1 ? parsed[0] : undefined)">编码成本维护</RouterLink>
     </PageHead>
     <OperationNav v-if="can('orders.view')" />
     <div class="pricing-body" @keydown="rowKey" role="region" aria-label="SKU 核价工作区">
@@ -225,7 +225,7 @@ async function preview() {
       <p>{{ labels[selected.state] }}</p>
       <p v-if="selected.reason">{{ selected.reason }}</p>
       <RouterLink v-if="canOpenMaintenance && selected.sku_item_id" class="oa-button"
-        :to="costLink(selected.sku_code)" target="_blank" rel="noopener">打开完整成本记录 ↗</RouterLink>
+        :to="costLink(selected.sku_code)">打开完整成本记录</RouterLink>
       <dl class="pricing-inspector-totals">
         <div><dt>当前成本</dt><dd>{{ selected.sku_item_id && selected.current_cost == null ? '未记录' : price(selected.current_cost) }}</dd></div>
         <div><dt>试算建议</dt><dd>{{ price(selected.suggested_cost) }}</dd></div>

@@ -62,7 +62,7 @@
     <template v-else>
       <OAEmpty v-if="oaEnabled && !result.items.length && !externalItems.length && !error" kind="files" title="没有找到符合条件的 SKU 资源" description="可调整搜索词或筛选条件，再查看结果。" />
       <div v-else-if="!result.items.length && !externalItems.length && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
-      <div v-else-if="oaEnabled && showLedger && result.items.length" class="asset-ledger-scroll" role="region" aria-label="SKU 规格台账" tabindex="0">
+      <div v-else-if="oaEnabled && showLedger && result.items.length" class="asset-ledger-scroll" data-oa-return-scroll="asset-ledger" role="region" aria-label="SKU 规格台账" tabindex="0">
         <table class="asset-ledger">
           <thead>
             <tr><th scope="col">SKU / 产品</th><th scope="col">规格 / 尺寸</th><th scope="col">计价面积</th><th scope="col" class="ledger-amount">系统计算成本</th><th scope="col" class="ledger-amount">ERP 实际成本</th><th scope="col">同步状态</th><th scope="col">操作</th></tr>
