@@ -8,7 +8,7 @@
       <!-- 外层容器参与定位宽度；避免 button 嵌套 -->
       <div
         ref="triggerEl"
-        class="flex h-11 w-full items-center gap-1 rounded-xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft)_/_0.8)] px-2 text-sm text-[rgb(var(--yb-text))] transition focus-within:border-[rgb(var(--yb-brand-border-strong))] focus-within:ring-1 focus-within:ring-[rgb(var(--yb-brand-accent)_/_0.35)] hover:bg-[rgb(var(--yb-surface))]"
+        class="base-select-control flex h-11 w-full items-center gap-1 rounded-xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface-soft)_/_0.8)] px-2 text-sm text-[rgb(var(--yb-text))] transition focus-within:border-[rgb(var(--yb-brand-border-strong))] focus-within:ring-1 focus-within:ring-[rgb(var(--yb-brand-accent)_/_0.35)] hover:bg-[rgb(var(--yb-surface))]"
         :class="{ 'cursor-not-allowed bg-[rgb(var(--yb-surface-muted))] text-[rgb(var(--yb-text-faint))]': disabled }"
       >
         <button

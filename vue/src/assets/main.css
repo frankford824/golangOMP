@@ -1181,11 +1181,22 @@ html.oa-live-ui #app :where(.oa-button,.oa-pill,kbd,[role=tab],button:not(.hidde
 html.oa-live-ui #app :is(button,.oa-button,.oa-pill,[role=tab]) > :is(svg,.material-symbols-outlined) { display:block; flex-shrink:0; line-height:1; }
 html.oa-live-ui #app :is(input:not([type=checkbox],[type=radio]),select,textarea) { border-color:var(--yb-line-control); }
 html.oa-live-ui #app :is(input:not([type=checkbox],[type=radio]),select,textarea):hover:not(:disabled) { border-color:var(--yb-line-control-hover); }
-html.oa-live-ui #app :is(input,select,textarea):focus,
-html.oa-live-ui #app :is(button,.oa-button,a):focus-visible,
-html.oa-live-ui dialog :is(input,select,textarea,button):focus-visible {
+html.oa-live-ui #app :is(input,select,textarea):not(:where(.n-input *, .n-base-selection *, .n-input-number *)):focus,
+html.oa-live-ui #app :is(button,.oa-button,a):not(:where(.base-select-control *, .n-input *, .n-base-selection *)):focus-visible,
+html.oa-live-ui dialog :is(input,select,textarea,button):not(:where(.base-select-control *, .n-input *, .n-base-selection *)):focus-visible {
   outline:none; border-color:var(--oa-accent); box-shadow:var(--yb-focus-ring);
 }
+/* BaseSelect owns one frame; the trigger and optional clear action share it. */
+html.oa-live-ui :is(#app, body) .base-select-control {
+  height: 32px; min-height: 32px; border: 1px solid var(--yb-line-control); border-radius: 6px;
+  background: var(--oa-surface); padding-inline: 8px;
+}
+html.oa-live-ui :is(#app, body) .base-select-control > button {
+  min-height: 0; height: auto; align-self: stretch; border: 0; border-radius: 0; background: transparent; box-shadow: none;
+}
+html.oa-live-ui :is(#app, body) .base-select-control:focus-within { border-color: var(--oa-accent); box-shadow: var(--yb-focus-ring); }
+html.oa-live-ui :is(#app, body) .base-select-control > button:focus-visible { outline: none; box-shadow: none; }
+html.oa-live-ui :is(#app, body) .base-select-control > button[aria-label]:focus-visible { background: var(--oa-active); color: var(--oa-accent); }
 html.oa-live-ui #app :is(.oa-button-primary,.auth-submit,.oa-new-user) { -webkit-font-smoothing:antialiased; }
 html.oa-live-ui #app :is(.oa-panel,.content-card,.commerce-metrics,.order-data-results) { border-color:var(--yb-line-structure); }
 html.oa-live-ui #app :is(.oa-table,.oa-task-table,.asset-ledger,.maintenance table) :is(td,th) { border-bottom-color:var(--yb-line-hairline); }

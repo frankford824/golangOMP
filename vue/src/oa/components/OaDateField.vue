@@ -24,6 +24,8 @@ function afterLimit(timestamp: number) {
   <label class="oa-date-field">
     <span>{{ label }}<i v-if="required" aria-hidden="true">*</i></span>
     <NDatePicker
+      size="small"
+      :theme-overrides="{ peers: { Input: { heightSmall: '32px', borderRadius: '6px' } } }"
       type="date"
       :formatted-value="value || null"
       value-format="yyyy-MM-dd"

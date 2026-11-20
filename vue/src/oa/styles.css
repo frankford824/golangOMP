@@ -16,18 +16,20 @@
 .oa-page h3, .oa-page h4 { font: 600 14px/1.4 var(--oa-font); }
 .oa-page strong, .oa-page b { font-weight: 600; }
 .oa-page small, #app .oa-page .yb-page-subtitle, .oa-page .oa-muted { font: 400 12px/1.6 var(--oa-font); color: var(--oa-muted); }
-.oa-page button, .oa-page input, .oa-page select, .oa-page textarea { font: inherit; }
-html.oa-live-ui #app .oa-page :where(button, .oa-button, input:not([type=checkbox],[type=radio]), select, textarea),
-.oa-page :where(button, .oa-button, input:not([type=checkbox],[type=radio]), select, textarea) {
-  min-height: 32px; border-radius: 6px;
+/* Compound controls provide their own frame, padding and focus indication. */
+@scope (.oa-page) to (.base-select-control, .n-input, .n-base-selection, .n-input-number) {
+  :scope button, :scope input, :scope select, :scope textarea { font: inherit; }
+  :scope :where(button, .oa-button, input:not([type=checkbox],[type=radio]), select, textarea) {
+    min-height: 32px; border-radius: 6px;
+  }
+  :scope button, :scope .oa-button, :scope input:not([type=checkbox],[type=radio]), :scope select, :scope textarea {
+    padding: 4px 12px; border: 1px solid var(--oa-line); background: var(--oa-surface); color: var(--oa-ink);
+  }
+  :scope button, :scope .oa-button { min-width: 32px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: fit-content; }
+  :scope button:hover, :scope .oa-button:hover { border-color: rgb(var(--yb-brand-border-strong)); }
+  :scope button:disabled, :scope button.oa-button-primary:disabled { cursor: not-allowed; color: var(--oa-disabled); background: rgb(var(--yb-surface-muted)); border-color: var(--oa-line); opacity: 1; }
+  :scope :focus-visible { outline: 2px solid var(--oa-accent); outline-offset: 3px; }
 }
-.oa-page button, .oa-page .oa-button, .oa-page input:not([type=checkbox],[type=radio]), .oa-page select, .oa-page textarea {
-  padding: 4px 12px; border: 1px solid var(--oa-line); background: var(--oa-surface); color: var(--oa-ink);
-}
-.oa-page button, .oa-page .oa-button { min-width: 32px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: fit-content; }
-.oa-page button:hover, .oa-page .oa-button:hover { border-color: rgb(var(--yb-brand-border-strong)); }
-.oa-page button:disabled, .oa-page button.oa-button-primary:disabled { cursor: not-allowed; color: var(--oa-disabled); background: rgb(var(--yb-surface-muted)); border-color: var(--oa-line); opacity: 1; }
-.oa-page :focus-visible { outline: 2px solid var(--oa-accent); outline-offset: 3px; }
 .oa-page button.oa-button-primary, .oa-page .oa-button.oa-button-primary { background: var(--oa-accent); color: rgb(var(--yb-text-inverse)); border-color: var(--oa-accent); }
 .oa-page .oa-button-primary:hover { background: rgb(var(--yb-brand-strong)); }
 #app .oa-page-head.yb-page-surface { flex-wrap: wrap; align-items: center; min-height: 0; border-radius: 8px; padding: 16px; margin-bottom: 12px; gap: 8px 16px; }

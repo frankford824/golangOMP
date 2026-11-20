@@ -9,6 +9,7 @@ import { searchFeePeople, approverLabel, type FeePerson as Approver } from '../f
 import { feeTabs } from '../routes'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import PageHead from '../components/PageHead.vue'
+import OAReturnLink from '../components/OAReturnLink.vue'
 import { api, dateInChina, errorText, money, send } from '../api'
 import { useOAAccess } from '../access'
 import { expenseActivityActions, useExpenseActivity } from '../expenseActivity'
@@ -64,6 +65,11 @@ const isApplicationOrigin = (path: string) => [
 ].includes(path)
 const applicationReturn = computed(() => safeReturnPath(route.query.applyFrom, isApplicationOrigin)
   || safeReturnPath(router.options.history.state?.back, isApplicationOrigin) || '/fees/mine')
+const selectedFeeTab = computed(() => {
+  if (props.mode !== 'apply') return props.mode
+  const origin = applicationReturn.value.split(/[?#]/, 1)[0]
+  return feeTabs.find(tab => origin === '/fees/' + tab.mode)?.mode ?? 'mine'
+})
 const applicationReturnLabel = computed(() => oaReturnLabel(applicationReturn.value))
 const applicationLink = computed(() => ({ path: '/fees/apply', query: { applyFrom: route.fullPath } }))
 const activeTab = computed(() => feeTabs.find(tab => tab.mode === props.mode))
@@ -1189,19 +1195,21 @@ watch(() => route.fullPath, syncLocation)
 <div class="oa-page" :class="{ 'fee-approval-page': desktopApproval }" @keydown="navigateApproval">
   <OAPageReturn v-if="allowed && returned" @activate="closeReturned">返回单据</OAPageReturn>
   <OAPageReturn v-else-if="allowed && mode === 'document'" :to="documentReturn">{{ documentReturnLabel }}</OAPageReturn>
-  <OAPageReturn v-else-if="allowed && mode === 'apply'" :to="applicationReturn">{{ applicationReturnLabel }}</OAPageReturn>
   <OAPageReturn v-else-if="allowed && !desktopApproval && (mode === 'mine' || mode === 'approval') && typeof route.query.id === 'string'" :disabled="busy" @activate="run(returnToQueue)">返回{{ returnLabel }}</OAPageReturn>
-  <PageHead :title="title" :subtitle="({ mine: '跟踪费用申请的审批进度与付款记录', approval: '处理轮到自己的审批和已获授权的付款登记', templates: '维护费用类型、审批节点与经办权限', report: '按实付日期查询费用支出' } as Record<string, string>)[mode]">
+  <PageHead v-if="mode !== 'apply'" :title="title" :subtitle="({ mine: '跟踪费用申请的审批进度与付款记录', approval: '处理轮到自己的审批和已获授权的付款登记', templates: '维护费用类型、审批节点与经办权限', report: '按实付日期查询费用支出' } as Record<string, string>)[mode]">
     <RouterLink v-if="mode === 'mine'" class="oa-button" to="/fees/accounts">常用收款账户</RouterLink>
-    <RouterLink v-if="mode !== 'apply' && can('finance.apply')" class="oa-button oa-button-primary" :to="applicationLink">＋ 发起费用申请</RouterLink>
+    <RouterLink v-if="can('finance.apply')" class="oa-button oa-button-primary" :to="applicationLink">＋ 发起费用申请</RouterLink>
   </PageHead>
   <DesktopSlot target="tabs">
   <nav class="fee-tabs" aria-label="费用中心">
-    <RouterLink v-if="mode === 'apply'" :to="route.fullPath || '/fees/apply'" aria-current="page">发起报销 / 付款</RouterLink>
     <RouterLink v-for="tab in feeTabs.filter(item => item.actions.some(can))" :key="tab.mode" :to="'/fees/' + tab.mode"
-      :aria-current="mode === tab.mode ? 'page' : undefined">{{ tab.mode === 'approval' && !can('finance.approve') ? '待付款' : tab.label }}</RouterLink>
+      :aria-current="selectedFeeTab === tab.mode ? 'page' : undefined">{{ tab.mode === 'approval' && !can('finance.approve') ? '待付款' : tab.label }}</RouterLink>
   </nav>
   </DesktopSlot>
+  <header v-if="allowed && mode === 'apply'" class="fee-apply-heading">
+    <h2>发起费用申请</h2>
+    <OAReturnLink class="oa-button" :to="applicationReturn"><ArrowLeft :size="16" aria-hidden="true" />{{ applicationReturnLabel }}</OAReturnLink>
+  </header>
   <section v-if="!allowed" class="oa-panel">
     <OAEmpty kind="inbox" title="当前页面不可用" :description="accessMessage" />
   </section>
@@ -1299,7 +1307,7 @@ watch(() => route.fullPath, syncLocation)
     </div>
     <div class="fee-queue-layout" :class="{ 'has-fee-detail': detail }">
     <section v-if="!detail || desktopApproval" class="oa-panel fee-queue">
-      <form class="oa-actions oa-filter fee-queue-filter" @submit.prevent="searchQueue">
+      <form class="oa-actions oa-filter fee-queue-filter" :class="{ 'fee-queue-mine': queue === 'mine' }" @submit.prevent="searchQueue">
         <label>搜索单据<input v-model="queueFilters.q" maxlength="240" placeholder="单号、姓名或模板" /></label>
         <BaseSelect v-if="queue === 'mine'" class="fee-filter-select" label="状态" :model-value="queueFilters.state" :options="queryStates" @update:model-value="queueFilters.state = String($event)" />
         <BaseSelect class="fee-filter-select" label="费用类型" :model-value="queueFilters.expense_type" :options="queryExpenseTypes" @update:model-value="queueFilters.expense_type = String($event)" />
@@ -1639,7 +1647,21 @@ watch(() => route.fullPath, syncLocation)
 .fee-amount-trigger { display: inline-block; margin-inline: 4px; padding: 1px 6px; border: 1px dashed var(--oa-warning); border-radius: 4px; font-size: 12px; background: color-mix(in srgb, var(--oa-surface) 92%, var(--oa-warning)); }
 .fee-setup-notice svg { vertical-align: text-bottom; margin-inline-end: 4px; }
 .fee-setup-notice { background: color-mix(in srgb, var(--oa-surface) 93%, var(--oa-warning)); }
-.fee-filter-select { min-width: 8rem; }
+.fee-apply-heading { width: 100%; max-width: 1200px; margin: 0 auto 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fee-apply-heading h2 { margin: 0; }
+.fee-queue { container-type: inline-size; }
+.fee-queue-filter { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 8px 12px; }
+.fee-queue-filter > *, .fee-grant-filter > * { min-width: 0; }
+.fee-queue-filter > label > input { width: 100%; max-width: none; height: 32px; }
+.fee-queue-filter > button { justify-self: start; height: 32px; }
+.fee-queue-filter > [role=alert] { grid-column: 1 / -1; }
+@container (min-width: 640px) { .fee-queue-filter { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@container (min-width: 940px) { .fee-queue-filter { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@container (min-width: 1440px) {
+  .fee-queue-filter { grid-template-columns: minmax(150px, 1.5fr) repeat(2, minmax(90px, 1fr)) minmax(138px, 1.4fr) repeat(2, minmax(132px, 1.2fr)) repeat(4, minmax(92px, .9fr)) auto; }
+  .fee-queue-filter:not(.fee-queue-mine) { grid-template-columns: minmax(150px, 1.5fr) minmax(90px, 1fr) minmax(138px, 1.4fr) repeat(2, minmax(132px, 1.2fr)) repeat(4, minmax(92px, .9fr)) auto; }
+}
+.fee-grant-filter .fee-filter-select { min-width: 8rem; }
 .fee-document-number code { overflow-wrap: anywhere; }
 .fee-grant-dialog { width: min(480px, calc(100% - 24px)); max-height: calc(100dvh - 24px); overflow: auto; }
 .fee-grant-dialog::backdrop { background: rgb(var(--yb-overlay-night) / 40%); }
