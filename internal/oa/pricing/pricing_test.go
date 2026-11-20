@@ -72,7 +72,7 @@ func TestResolveRejectsUnsafeInputs(t *testing.T) {
 			})
 			req := httptest.NewRequest(http.MethodPost, basePath+"preview", nil)
 			req.Header.Set("Authorization", "Bearer fixture")
-			result := (app{native: native}).resolveSKU(req, "成本 QA 1")
+			result := (app{native: native}).resolveSKU(req, "成本 QA 1", false)
 			if result.State != tc.state {
 				t.Fatalf("expected %s, got %+v", tc.state, result)
 			}
@@ -104,5 +104,16 @@ func TestPreviewPermissionAndOnlyMountedOperation(t *testing.T) {
 		if res.Code != tc.status {
 			t.Fatalf("%s: expected %d, got %d", tc.path, tc.status, res.Code)
 		}
+	}
+}
+
+func TestOrderCodesKeepTheirOriginalSpelling(t *testing.T) {
+	codes, ok := normalize([]string{"款/a,03", "款/A,03", "款/a,03"}, true)
+	if !ok || len(codes) != 2 || codes[0] != "款/a,03" || codes[1] != "款/A,03" || sameSKU(codes[0], codes[1], true) {
+		t.Fatalf("order codes changed: %v", codes)
+	}
+	old, ok := normalize(codes, false)
+	if !ok || len(old) != 1 || old[0] != "款/A,03" || !sameSKU(codes[0], old[0], false) {
+		t.Fatal("legacy batch changed")
 	}
 }

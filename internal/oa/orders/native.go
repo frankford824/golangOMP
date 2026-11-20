@@ -29,24 +29,22 @@ func (s *server) nativeRead(r *http.Request, target string, out any) bool {
 }
 
 type nativeTaskData struct {
-	Task struct {
-		ID         int64  `json:"id"`
-		Number     string `json:"task_no"`
-		Status     string `json:"task_status"`
-		SKU        string `json:"sku_code"`
-		PrimarySKU string `json:"primary_sku_code"`
-	} `json:"task"`
-	SKUItems []struct {
+	ID         int64  `json:"id"`
+	Number     string `json:"task_no"`
+	Status     string `json:"task_status"`
+	SKU        string `json:"sku_code"`
+	PrimarySKU string `json:"primary_sku_code"`
+	SKUItems   []struct {
 		SKU string `json:"sku_code"`
 	} `json:"sku_items"`
 }
 
 func (d nativeTaskData) link() taskLink {
-	return taskLink{ID: d.Task.ID, Number: d.Task.Number, Status: d.Task.Status}
+	return taskLink{ID: d.ID, Number: d.Number, Status: d.Status}
 }
 
 func (d nativeTaskData) hasSKU(sku string) bool {
-	if sku == d.Task.SKU || sku == d.Task.PrimarySKU {
+	if sku == d.SKU || sku == d.PrimarySKU {
 		return true
 	}
 	for _, item := range d.SKUItems {
@@ -62,7 +60,7 @@ func (s *server) nativeTaskDetails(r *http.Request, id int64) (nativeTaskData, b
 		Data nativeTaskData `json:"data"`
 	}
 	ok := id > 0 && s.nativeRead(r, fmt.Sprintf("/v1/tasks/%d", id), &payload)
-	return payload.Data, ok && payload.Data.Task.ID == id
+	return payload.Data, ok && payload.Data.ID == id
 }
 
 func (s *server) nativeTask(r *http.Request, id int64) (taskLink, bool) {
@@ -96,15 +94,18 @@ func (s *server) historicalTasks(r *http.Request, sku string, seen map[int64]boo
 }
 func (s *server) currentCost(r *http.Request, sku string) (*string, taskLink, bool) {
 	query := url.Values{"keyword": {sku}, "review_state": {"all"}, "page_size": {"100"}}
+	type maintenanceRecord struct {
+		ID     int64       `json:"id"`
+		TaskID int64       `json:"task_id"`
+		SKU    string      `json:"sku_code"`
+		Cost   json.Number `json:"cost_price"`
+	}
+	var match *maintenanceRecord
 	var cursor int64
 	for range 20 {
 		var response struct {
-			Data []struct {
-				TaskID int64       `json:"task_id"`
-				SKU    string      `json:"sku_code"`
-				Cost   json.Number `json:"cost_price"`
-			} `json:"data"`
-			Next int64 `json:"next_before_id"`
+			Data []maintenanceRecord `json:"data"`
+			Next int64               `json:"next_before_id"`
 		}
 		if !s.nativeRead(r, "/v1/cost-management/sku-costs?"+query.Encode(), &response) {
 			return nil, taskLink{}, false
@@ -113,18 +114,24 @@ func (s *server) currentCost(r *http.Request, sku string) (*string, taskLink, bo
 			if record.SKU != sku {
 				continue
 			}
-			task, ok := s.nativeTask(r, record.TaskID)
+			if match != nil && (record.ID == 0 || record.ID != match.ID || record.TaskID != match.TaskID || record.Cost != match.Cost) {
+				return nil, taskLink{}, false
+			}
+			match = &record
+		}
+		if response.Next == 0 {
+			if match == nil {
+				return nil, taskLink{}, true
+			}
+			task, ok := s.nativeTask(r, match.TaskID)
 			if !ok {
 				return nil, taskLink{}, false
 			}
-			if record.Cost == "" {
-				return nil, taskLink{}, true
+			if match.Cost == "" {
+				return nil, task, true
 			}
-			value := record.Cost.String()
+			value := match.Cost.String()
 			return &value, task, true
-		}
-		if response.Next == 0 {
-			return nil, taskLink{}, true
 		}
 		if response.Next < 0 || cursor != 0 && response.Next >= cursor {
 			return nil, taskLink{}, false

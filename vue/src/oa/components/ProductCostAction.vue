@@ -10,7 +10,7 @@ import { errorText, money, send } from '../api'
 import { invalidateCostActivity } from '../costActivity'
 export type CostTarget = {
   sku: string; shop: string; shopName: string; from: string; to: string; includeBrush: boolean
-  productName: string; quantity?: string; sales?: string; coverage?: string; today: boolean
+  productName: string; quantity?: string; sales?: string; coverage?: string; missingCostLines?: string; today: boolean
 }
 const { can, currentProfile } = useOAAccess()
 const { can: hasNativePermission } = usePermission()
@@ -81,15 +81,23 @@ async function loadCurrentCost() {
   readController = controller
   try {
     let cursor = 0
+    let match: MaintenanceRow | undefined
     // Keyword search also matches names. Only use the exact canonical SKU.
     for (let page = 0; page < 20; page++) {
       const result = await costMaintenanceApi.list({
         keyword: sku, review_state: 'all', page_size: 100, ...(cursor ? { before_id: cursor } : {}),
       }, controller.signal)
       if (controller.signal.aborted || token !== getToken()) return
-      const row = result.data.find(item => item.sku_code === sku)
-      if (row || result.next_before_id === 0) {
-        currentCost.value = row
+      for (const row of result.data) {
+        if (row.sku_code !== sku) continue
+        if (match && match.id !== row.id) {
+          costReadError.value = '成本中心有多条同码维护记录，请发起核价复核。'
+          return
+        }
+        match = row
+      }
+      if (result.next_before_id === 0) {
+        currentCost.value = match
         return
       }
       if (result.next_before_id < 0 || (cursor && result.next_before_id >= cursor)) break
@@ -146,7 +154,7 @@ async function maintain(action: 'confirm' | 'modify') {
 function open(target: CostTarget, focus = true) {
   if (busy.value) return
   subject.value = target
-  reason.value = ''
+  reason.value = Number(target.missingCostLines) > 0 ? `本组有 ${target.missingCostLines} 条订单行缺少成本，请核对该 SKU。` : ''
   message.value = ''
   error.value = ''
   maintenanceMessage.value = ''
@@ -218,13 +226,14 @@ defineExpose({ open, close, dismiss, pending: busy })
           <div><dt>ERP 最近观测单位成本</dt><dd>{{ costAmount(currentCost?.erp_cost) }}</dd></div>
         </dl>
         <p v-if="currentCost">{{ maintenanceStatuses[currentCost.status] ?? currentCost.status }}</p>
-        <p v-else>暂无系统成本维护记录，可发起核价复核。</p>
+        <p v-else>成本中心没有与此订单 SKU 完全一致的维护记录。</p>
       </template>
     </section>
+    <p v-if="subject.missingCostLines != null" class="sku-hint">{{ Number(subject.missingCostLines) > 0 ? '本组有 ' + subject.missingCostLines + ' 条订单行缺少成本。' : '本组订单行均有成本金额。' }}</p>
     <p class="sku-hint">{{ costCoverageDefinition }} 当前编码成本用于日常维护。</p>
     <div class="sku-actions">
       <RouterLink v-if="detailLink" class="oa-button" :to="detailLink">查看商品详情</RouterLink>
-      <RouterLink v-if="can('pricing.view')" class="oa-button" :to="pricingLink || { path: '/operations/pricing', query: { sku: subject.sku } }">查看试算依据</RouterLink>
+      <RouterLink v-if="can('pricing.view')" class="oa-button" :to="pricingLink || { path: '/operations/pricing', query: { sku: subject.sku, exact_sku: '1' } }">查看试算依据</RouterLink>
     </div>
     <template v-if="canMaintainRow">
       <p v-if="maintenanceMessage" role="status">{{ maintenanceMessage }}</p>
@@ -248,7 +257,7 @@ defineExpose({ open, close, dismiss, pending: busy })
           type="button" class="oa-button-primary" :disabled="busy" @click="maintain('confirm')">确认当前系统成本</button>
       </div>
     </template>
-    <form v-else-if="!loadingCost && !message" @submit.prevent="submit">
+    <form v-if="!loadingCost && !message && !editingPrice && (!canMaintainRow || Number(subject.missingCostLines) > 0 || currentCost?.cost_price == null)" @submit.prevent="submit">
       <label>核价原因
         <textarea v-model.trim="reason" maxlength="300" required
           placeholder="例如：已更换材质，请核对这个编码的维护成本" @keydown.enter.exact.prevent="submit" />

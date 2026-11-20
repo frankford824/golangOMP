@@ -467,6 +467,10 @@ paths:
               additionalProperties: false
               required: [sku_codes]
               properties:
+                exact_codes:
+                  type: boolean
+                  default: false
+                  description: 从订单或核价消息带入编码时为 true，保留大小写并逐字匹配；原手工批量调用继续兼容。
                 sku_codes:
                   type: array
                   minItems: 1
@@ -806,6 +810,10 @@ paths:
                               shop_item_id:
                                 type: string
                                 nullable: true
+                              missing_cost_lines:
+                                type: string
+                                pattern: '^[0-9]+$'
+                                description: 当前店铺、宝贝和聚水潭商品编码分组中 cost_amount 为 NULL 的订单行数。
                               quantity:
                                 type: string
                               item_pay_total:
@@ -1187,6 +1195,10 @@ paths:
                               shop_item_id:
                                 type: string
                                 nullable: true
+                              missing_cost_lines:
+                                type: string
+                                pattern: '^[0-9]+$'
+                                description: 当前店铺、宝贝和聚水潭商品编码分组中 cost_amount 为 NULL 的订单行数。
                               quantity:
                                 type: string
                               item_pay_total:
@@ -1215,6 +1227,9 @@ paths:
                           pattern: ^-?[0-9]+(\.[0-9]+)?$
                           description: 精确十进制金额字符串
                           nullable: true
+                        maintenance_record_found:
+                          type: boolean
+                          description: 成功核对时返回。true 表示成本中心有同码且已验证访问权限的维护记录，单价仍可能为空；false 表示已查完且无同码记录。权限或服务不可用时省略。
                         cost_context_available:
                           type: boolean
                         tasks:

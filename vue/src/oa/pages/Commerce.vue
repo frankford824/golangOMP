@@ -30,7 +30,7 @@ const props = defineProps<{ mode: Mode; productId?: string }>()
 type DataRow = {
   day?: string; hour?: number | string; shop_id?: string; platform?: string; shop_item_id?: string; sku?: string; product_name?: string
   quantity?: string; order_count?: number | string; payable_amount?: string; item_pay_total?: string
-  cost_verified_total?: string | null; item_pay_verified_total?: string | null; verified_gross?: string | null; verified_coverage?: number | string | null; verified_gross_rate?: number | null
+  missing_cost_lines?: string; cost_verified_total?: string | null; item_pay_verified_total?: string | null; verified_gross?: string | null; verified_coverage?: number | string | null; verified_gross_rate?: number | null
   key?: string; title?: string; person_id?: string; name?: string; archived?: 0 | 1 | null
   tasks?: { id?: number; task_id?: number; task_no?: string; title?: string }[]
   feedback?: { id: number; note?: string; live_date?: string; task_id?: number }[]
@@ -38,7 +38,7 @@ type DataRow = {
 }
 type TaskLink = { id: number; task_no: string; status: string }
 type Feedback = { id: number; shop_id: string; note: string; adjusted_on: string; task_id?: number }
-type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; total_rows?: number; scope_state?: 'unassigned'; current_cost?: string | null; cost_context_available?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
+type OrderResult = { rows: DataRow[]; freshness?: { source_committed_at?: string; lag_seconds?: number } | null; stale?: boolean; has_more?: boolean; total_rows?: number; scope_state?: 'unassigned'; current_cost?: string | null; cost_context_available?: boolean; maintenance_record_found?: boolean; tasks?: TaskLink[]; feedback?: Feedback[]; forecast?: string | null; month_actual?: string | null }
 
 type Visit = { filters: Record<string, string>; offset: number; scroll: number; row?: string; closed: boolean }
 function listVisit() {
@@ -119,7 +119,7 @@ function openCost(row: DataRow, focus = true) {
     sku: row.sku, shop: row.shop_id, shopName: shopName(row.shop_id),
     from: query.from, to: query.to, includeBrush: query.include_brush === '1',
     productName: row.product_name || row.shop_item_id || row.sku,
-    quantity: row.quantity, sales: row.item_pay_total,
+    quantity: row.quantity, sales: row.item_pay_total, missingCostLines: stale.value ? undefined : row.missing_cost_lines,
     coverage: lineCoverage(row.verified_coverage).value,
     today: query.from === today && query.to === today,
   }, focus)
@@ -136,7 +136,7 @@ function returnQuery() {
   }, route.fullPath)
 }
 function externalCostLink(path: string, sku: string) {
-  return { path, query: { sku, ...(path === '/cost-rules' ? { focus: 'cost-detail' } : {}), ...returnQuery() } }
+  return { path, query: { sku, ...(path === '/cost-rules' ? { focus: 'cost-detail' } : { exact_sku: '1' }), ...returnQuery() } }
 }
 function productLink(sku: string, shopId?: string) {
   return {
@@ -406,6 +406,13 @@ function sum(rows: DataRow[], key: MoneyKey): string | null {
 }
 
 const summaryRows = computed(() => summary.value?.rows?.filter(Boolean) ?? [])
+const currentUnitCostLabel = computed(() => {
+  const result = data.value
+  if (result?.cost_context_available !== true) return '暂无法核对'
+  if (result.maintenance_record_found === false) return '无同码维护记录'
+  if (result.current_cost == null) return result.maintenance_record_found ? '未填维护价' : '—'
+  return '¥' + result.current_cost
+})
 const rows = computed(() => data.value?.rows?.filter(Boolean) ?? [])
 const lowCoverageOnly = ref(restored.exception === 'coverage')
 watch(lowCoverageOnly, () => {
@@ -938,7 +945,7 @@ onUnmounted(() => {
   <OAPageReturn v-else-if="returnTarget" inline :to="returnTarget" :source="returnSource">{{ oaReturnLabel(returnTarget) }}</OAPageReturn>
   <PageHead :title="title" subtitle="按北京时间下单日">
     <FreshnessStatus v-if="mayView" :freshness="freshness" :stale="cached" />
-    <RouterLink v-if="mode === 'detail' && loadedDetail?.sku && permissions.hasMenu('cost_rules')" class="oa-button" :to="externalCostLink('/cost-rules', loadedDetail.sku)">查看编码成本</RouterLink>
+    <RouterLink v-if="mode === 'detail' && loadedDetail?.sku && data?.maintenance_record_found === true && permissions.hasMenu('cost_rules')" class="oa-button" :to="externalCostLink('/cost-rules', loadedDetail.sku)">查看编码成本</RouterLink>
     <RouterLink v-if="mode === 'detail' && linkedTask && permissions.hasAction('task.create')" class="oa-button oa-button-primary" :to="linkedTask">发起优化任务 <ArrowUpRight :size="14" /></RouterLink>
   </PageHead>
   <OperationNav v-if="mayView" class="commerce-nav" :query="navigationQuery" :origin="mode === 'detail' ? returnTarget : undefined" />
@@ -1192,10 +1199,10 @@ onUnmounted(() => {
             <td :title="shopName(row.shop_id)">{{ shopName(row.shop_id) }}</td><td class="oa-number">{{ row.quantity ?? '—' }}</td><td class="oa-number">{{ money(row.item_pay_total) }}</td>
             <td class="oa-number">{{ money(row.cost_verified_total) }}</td><td class="oa-number">{{ money(row.verified_gross) }}</td>
             <td class="oa-number" :class="{ 'coverage-low': lineCoverage(row.verified_coverage).low }" :title="costCoverageDefinition">{{ lineCoverage(row.verified_coverage).low ? lineCoverage(row.verified_coverage).note : lineCoverage(row.verified_coverage).value }}</td>
-            <td v-if="mode === 'detail'" class="oa-number">{{ data.cost_context_available === false ? '成本上下文不可用' : money(data.current_cost) }}</td>
+            <td v-if="mode === 'detail'" class="oa-number">{{ currentUnitCostLabel }}</td>
             <td class="sku-action-column">
               <button v-if="row.sku && row.shop_id" class="sku-check-action" :ref="(element) => bindProductButton(row, element)"
-                type="button" :aria-label="'核对 ' + row.sku + ' 的成本'" @click="openCost(row)">核价</button>
+                type="button" :aria-label="'核对 ' + row.sku + ' 的成本'" @click="openCost(row)">{{ !stale && Number(row.missing_cost_lines) > 0 ? '申请核价' : '核价' }}</button>
               <span v-else>—</span>
             </td>
           </tr></tbody>

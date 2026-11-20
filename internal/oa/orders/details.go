@@ -72,6 +72,7 @@ func (s *server) skuDetails(w http.ResponseWriter, r *http.Request, actor platfo
 	cost, costTask, costOK := s.currentCost(r, sku)
 	if costOK {
 		output["cost_context_available"] = true
+		output["maintenance_record_found"] = costTask.ID > 0
 		output["current_cost"] = cost
 	}
 	tasks := []taskLink{}

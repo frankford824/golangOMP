@@ -62,15 +62,18 @@ func decode(w http.ResponseWriter, r *http.Request, input any) bool {
 	return true
 }
 
-func normalize(values []string) ([]string, bool) {
+func normalize(values []string, exact bool) ([]string, bool) {
 	if len(values) < 1 || len(values) > batchLimit {
 		return nil, false
 	}
 	out := make([]string, 0, len(values))
 	seen := map[string]bool{}
 	for _, value := range values {
-		sku := strings.ToUpper(strings.TrimSpace(value))
-		if sku == "" || utf8.RuneCountInString(sku) > 128 || strings.ContainsFunc(sku, unicode.IsControl) {
+		sku := value
+		if !exact {
+			sku = strings.ToUpper(strings.TrimSpace(sku))
+		}
+		if strings.TrimSpace(sku) == "" || utf8.RuneCountInString(sku) > 128 || strings.ContainsFunc(sku, unicode.IsControl) {
 			return nil, false
 		}
 		if !seen[sku] {
@@ -88,20 +91,21 @@ func (a app) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		SKUs []string `json:"sku_codes"`
+		SKUs  []string `json:"sku_codes"`
+		Exact bool     `json:"exact_codes"`
 	}
 	if !decode(w, r, &request) {
 		return
 	}
-	skus, ok := normalize(request.SKUs)
+	skus, ok := normalize(request.SKUs, request.Exact)
 	if !ok {
 		platform.Error(w, 400, "请输入 1 到 30 个有效的商品编码")
 		return
 	}
-	platform.JSON(w, 200, map[string]any{"rows": a.resolve(r, skus)})
+	platform.JSON(w, 200, map[string]any{"rows": a.resolve(r, skus, request.Exact)})
 }
 
-func (a app) resolve(r *http.Request, skus []string) []row {
+func (a app) resolve(r *http.Request, skus []string, exact bool) []row {
 	ctx, cancel := context.WithTimeout(r.Context(), 48*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
@@ -117,7 +121,7 @@ func (a app) resolve(r *http.Request, skus []string) []row {
 		go func() {
 			defer workers.Done()
 			for i := range jobs {
-				rows[i] = a.resolveSKU(r, skus[i])
+				rows[i] = a.resolveSKU(r, skus[i], exact)
 			}
 		}()
 	}
@@ -125,10 +129,10 @@ func (a app) resolve(r *http.Request, skus []string) []row {
 	return rows
 }
 
-func (a app) resolveSKU(r *http.Request, sku string) row {
+func (a app) resolveSKU(r *http.Request, sku string, exact bool) row {
 	result := row{SKU: sku, State: "unavailable"}
 	finish := func(state, reason string) row { result.State, result.Reason = state, reason; return result }
-	canonical, state := a.loadCanonical(r, sku)
+	canonical, state := a.loadCanonical(r, sku, exact)
 	switch state {
 	case "not_found":
 		return finish(state, "主站没有找到这个编码的已完成商品成本记录")
@@ -154,7 +158,7 @@ func (a app) resolveSKU(r *http.Request, sku string) row {
 	var item *domain.TaskSKUItem
 	for i := range task.SKUItems {
 		candidate := &task.SKUItems[i]
-		if candidate.ID == canonical.ID && strings.EqualFold(candidate.SKUCode, sku) {
+		if candidate.ID == canonical.ID && sameSKU(candidate.SKUCode, sku, exact) {
 			item = candidate
 			break
 		}
@@ -248,7 +252,14 @@ func prepareInput(r domain.CostMaintenanceRow, item *domain.TaskSKUItem, detail 
 	}, true
 }
 
-func (a app) loadCanonical(r *http.Request, sku string) (result domain.CostMaintenanceRow, state string) {
+func sameSKU(code, input string, exact bool) bool {
+	if exact {
+		return code == input
+	}
+	return strings.EqualFold(strings.TrimSpace(code), input)
+}
+
+func (a app) loadCanonical(r *http.Request, sku string, exact bool) (result domain.CostMaintenanceRow, state string) {
 	var before int64
 	for range 5 {
 		path := "/v1/cost-management/sku-costs"
@@ -264,7 +275,7 @@ func (a app) loadCanonical(r *http.Request, sku string) (result domain.CostMaint
 			return result, "unavailable"
 		}
 		for _, entry := range page.Data {
-			if strings.EqualFold(strings.TrimSpace(entry.SKUCode), sku) {
+			if sameSKU(entry.SKUCode, sku, exact) {
 				if result.ID > 0 && result.ID != entry.ID {
 					return result, "ambiguous"
 				}

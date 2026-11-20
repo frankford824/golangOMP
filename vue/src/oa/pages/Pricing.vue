@@ -36,15 +36,18 @@ function saveVisit() {
 }
 function costLink(sku?: string) {
   const query = Object.fromEntries(Object.entries(route.query).filter(([key, value]) =>
-    ['returnTo', 'returnFallback', 'sku'].includes(key) && typeof value === 'string')) as Record<string, string>
+    ['returnTo', 'returnFallback', 'sku', 'exact_sku'].includes(key) && typeof value === 'string')) as Record<string, string>
   if (codes.value && codes.value.length <= 500) query.sku = codes.value
+  if (!sourceSKU.value) delete query.exact_sku
   return { name: 'CostRules', query: { ...(sku ? { sku, focus: 'cost-detail' } : {}),
     ...orderReturnQuery(router, route.path, query, route.fullPath) } }
 }
 const { can } = useOAAccess()
 const { canAccessMenu } = usePermission()
 const codes = ref(previous?.codes ?? (typeof route.query.sku === 'string' ? route.query.sku : ''))
-const parsed = computed(() => [...new Set(codes.value.split(/[\r\n,，、;；]+/).map(code => code.trim().toUpperCase()).filter(Boolean))])
+// A link carries one source SKU verbatim, even when it contains a comma.
+const sourceSKU = computed(() => route.query.exact_sku === '1' && typeof route.query.sku === 'string' && codes.value === route.query.sku && !/[\r\n]/.test(codes.value))
+const parsed = computed(() => sourceSKU.value ? [codes.value] : [...new Set(codes.value.split(/[\r\n,，、;；]+/).map(code => code.trim().toUpperCase()).filter(Boolean))])
 const rows = ref<Row[]>([])
 const selected = ref<Row>()
 const inspectorHeading = ref<HTMLElement>()
@@ -147,7 +150,7 @@ async function preview() {
   busy.value = true
   rows.value = []
   try {
-    const response = await http.post<{ data: { rows: Row[] } }>('/oa-api/pricing/preview', { sku_codes: parsed.value }, { timeout: 60_000 })
+    const response = await http.post<{ data: { rows: Row[] } }>('/oa-api/pricing/preview', { sku_codes: parsed.value, ...(sourceSKU.value ? { exact_codes: true } : {}) }, { timeout: 60_000 })
     if (version === requestVersion) {
       rows.value = response.data.data.rows
       queried.value = true

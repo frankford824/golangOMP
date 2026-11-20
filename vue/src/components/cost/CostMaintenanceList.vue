@@ -535,7 +535,7 @@ function pricingLink(sku?: string) {
   const query = Object.fromEntries(Object.entries(route.query).filter(([key, value]) =>
     ['tab','sku','focus','returnTo','returnFallback'].includes(key) && typeof value === 'string')) as Record<string, string>;
   if (appliedVisit?.keyword) query.sku = appliedVisit.keyword;
-  return { name: 'OperationsPricing', query: { ...(sku ? { sku } : {}),
+  return { name: 'OperationsPricing', query: { ...(sku ? { sku, exact_sku: '1' } : {}),
     ...orderReturnQuery(router, route.path, query, route.fullPath) } };
 }
 const rows = ref<MaintenanceRow[]>([]),

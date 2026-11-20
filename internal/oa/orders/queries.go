@@ -42,7 +42,7 @@ const summarySQL = `SELECT toString(day) AS day,sales.shop_id AS shop_id,sales.p
  toFloat64(sales.item_pay_verified_total)/nullIf(toFloat64(sales.item_pay_total),0) AS verified_coverage
  FROM (SELECT day,shop_id,platform,order_count,payable_amount,item_pay_total,cost_verified_total,item_pay_verified_total` + shopDays + `) AS sales ORDER BY day,shop_id`
 const verifiedZeroSQL = `SELECT toString(toDate(order_time,'Asia/Shanghai')) AS day,shop_id FROM jst.v_orders WHERE ` + period + shopFilter + ` AND is_valid=1 AND is_brush=0 AND isNotNull(cost_verified_total) AND (shop_id,toString(toDate(order_time,'Asia/Shanghai'))) IN {zero_pairs:Array(Tuple(String,String))} GROUP BY day,shop_id`
-const productSelect = `SELECT shop_id,shop_item_id,sku_id AS sku,argMax(product_name,order_time) AS product_name,` + lineMetrics + realLines + ` AND ({sku:String}='' OR sku_id={sku:String}) AND ({product:String}='' OR shop_item_id={product:String})`
+const productSelect = `SELECT shop_id,shop_item_id,sku_id AS sku,argMax(product_name,order_time) AS product_name,toString(countIf(isNull(cost_amount))) AS missing_cost_lines,` + lineMetrics + realLines + ` AND ({sku:String}='' OR sku_id={sku:String}) AND ({product:String}='' OR shop_item_id={product:String})`
 const productGroup = ` GROUP BY shop_id,shop_item_id,sku_id ORDER BY sum(item_pay_amount) DESC,shop_id,shop_item_id,sku_id LIMIT 101 OFFSET {offset:UInt32}`
 const rankedOrderIDs = ` AND order_id IN (SELECT order_id FROM jst.v_orders WHERE ` + period + shopFilter + ` AND is_valid=1 AND ({brush:UInt8}=1 OR is_brush=0)) `
 const productsSQL = productSelect + rankedOrderIDs + ` AND is_placeholder_price=0 ` + productGroup

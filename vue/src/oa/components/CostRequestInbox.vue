@@ -46,7 +46,7 @@ function notificationLocation(target: Queue, cursors: number[]) {
 }
 function sourceLink(path:string, sku:string) {
   const fallback=router.resolve(notificationLocation(queue.value,history.value)).fullPath
-  return {path, query:{sku, returnFallback:fallback, returnTo:fullPage.value ? route.fullPath : fallback}}
+  return {path, query:{sku, ...(path === '/operations/pricing' ? {exact_sku:'1'} : {}), returnFallback:fallback, returnTo:fullPage.value ? route.fullPath : fallback}}
 }
 function changePage(next:boolean) {
   const cursors=next?[...history.value,rows.value.at(-1)!.id]:history.value.slice(0,-1)

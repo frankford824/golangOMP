@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import ProductCostAction from './ProductCostAction.vue'
+import ProductCostAction, { type CostTarget } from './ProductCostAction.vue'
 
 const mocks = vi.hoisted(() => ({
   canView: true, canMaintain: true,
@@ -38,9 +38,9 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-const open = async () => {
+const open = async (subject: CostTarget = target) => {
   const wrapper = mount(ProductCostAction, { props: { split: true }, global: { stubs: ['RouterLink'] } })
-  wrapper.vm.open(target)
+  wrapper.vm.open(subject)
   await flushPromises()
   return wrapper
 }
@@ -113,4 +113,18 @@ it('keeps both costs unknown and offers review when the SKU has no maintenance r
   } finally {
     wrapper.unmount()
   }
+})
+
+it('routes missing order costs to review even with a maintainable row, without writing a price', async () => {
+  const sku = '原编码/规格03'
+  mocks.list.mockResolvedValue({ data: [{ ...row, sku_code: sku, cost_price: null }], next_before_id: 0 })
+  mocks.send.mockResolvedValue({ existing: false })
+  const wrapper = await open({ ...target, sku, missingCostLines: '2' })
+  try {
+    expect(wrapper.get('textarea').element.value).toContain('2 条订单行缺少成本')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.send).toHaveBeenCalledWith('/oa-api/orders/cost-requests', expect.objectContaining({ sku, shop_id: target.shop, from: target.from, to: target.to }))
+    expect(mocks.maintain).not.toHaveBeenCalled()
+  } finally { wrapper.unmount() }
 })
