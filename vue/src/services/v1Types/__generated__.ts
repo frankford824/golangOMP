@@ -24274,6 +24274,11 @@ export interface components {
             material: string;
             /** @enum {string} */
             basis: "area" | "piece" | "set" | "manual";
+            /**
+             * @description For area pricing, use one rate regardless of shape and selected processes. Requires empty thickness_prices, variant_prices and processes. Structured area is still required.
+             * @default false
+             */
+            area_only: boolean;
             unit_price: number;
             multiplier: number;
             minimum?: number;

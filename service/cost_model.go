@@ -38,6 +38,9 @@ func parseCostModel(raw string) (*domain.CostModel, error) {
 	if m.Multiplier <= 0 {
 		return nil, fmt.Errorf("基础价格系数必须大于0")
 	}
+	if m.AreaOnly && (m.Basis != "area" || len(m.ThicknessPrices) != 0 || len(m.VariantPrices) != 0 || len(m.Processes) != 0) {
+		return nil, fmt.Errorf("只按面积计价必须使用面积单价，不能同时设置形状、厚度或工艺价格")
+	}
 	if len(m.ThicknessPrices) > 32 || len(m.Processes) > 8 {
 		return nil, fmt.Errorf("厚度档位最多32项，工艺最多8项")
 	}
@@ -251,7 +254,7 @@ func calculateCostModel(m *domain.CostModel, in domain.CostInput) (*domain.CostC
 		add(costProcessName(p.Code), pq, p.Unit, p.UnitPrice, p.Multiplier)
 	}
 	for code, on := range in.Processes {
-		if on && !configured[code] {
+		if on && !m.AreaOnly && !configured[code] {
 			missing("已选择工艺但未配置价格：" + costProcessName(code))
 		}
 	}
@@ -326,7 +329,7 @@ func costModelPreview(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			in.Pieces = 0
 		}
 	}
-	if in.Shape == "irregular" && len(m.VariantPrices) == 0 {
+	if !m.AreaOnly && in.Shape == "irregular" && len(m.VariantPrices) == 0 {
 		resp.Explanation = "此方案未配置异形单价，请先核价"
 		resp.Calculation = &domain.CostCalculation{Status: "missing_input", Input: in, Lines: []domain.CostLine{}, Missing: []string{resp.Explanation}}
 		return out, true

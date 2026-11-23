@@ -2,7 +2,11 @@
   <section class="model-editor" aria-label="统一计价方案">
     <div class="fields">
       <label v-if="!hideMaterial">材质<input v-model.trim="draft.material" @input="update" placeholder="例如：覆膜KT板" /></label>
-      <label>计费方式<select v-model="draft.basis" @change="update"><option value="area">按面积</option><option value="piece">按件</option><option value="set">按套</option><option value="manual">人工报价</option></select></label>
+      <label>计费方式<select v-model="draft.basis" @change="changeBasis"><option value="area">按面积</option><option value="piece">按件</option><option value="set">按套</option><option value="manual">人工报价</option></select></label>
+      <label v-if="draft.basis === 'area'" class="area-only-toggle">
+        <input type="checkbox" :checked="draft.area_only === true" @change="changeAreaOnly" />
+        只按面积计价
+      </label>
       <template v-if="draft.basis !== 'manual'">
         <label v-if="!draft.variant_prices?.length">每{{draft.basis==='area'?'平方米':draft.basis==='piece'?'件':'套'}}价格（元）<input v-model.number="draft.unit_price" required type="number" min="0" step="any" @input="update" /></label>
         <details class="extras" :open="draft.multiplier!==1 || draft.minimum>0 || draft.small_area_threshold>0"><summary><ChevronDown :size="16" :stroke-width="1.75" aria-hidden="true" />起步价与价格调整（选填）</summary><div class="fields">
@@ -12,8 +16,8 @@
         </div></details>
       </template>
     </div>
-    <p class="formula">{{draft.basis==='manual'?'每个产品由工作人员确认价格。':draft.variant_prices?.length?'按厚度和形状取单价，再乘计费量与倍率。留空表示未核价，0 表示免费。':'按实际用料收费，选中的加工项目另计费用。'}}</p>
-    <template v-if="draft.basis !== 'manual'">
+    <p class="formula">{{draft.basis==='manual'?'每个产品由工作人员确认价格。':draft.area_only?'普通、异形统一按面积单价计费，工艺不另计。':draft.variant_prices?.length?'按厚度和形状取单价，再乘计费量与倍率。留空表示未核价，0 表示免费。':'按实际用料收费，选中的加工项目另计费用。'}}</p>
+    <template v-if="draft.basis !== 'manual' && !draft.area_only">
       <section v-if="draft.variant_prices?.length" class="variant-prices" aria-label="厚度与形状价格表">
         <div class="price-table-scroll"><table><thead><tr><th>厚度（mm）</th><th>普通（元/{{unitLabel}}）</th><th>异形（元/{{unitLabel}}）</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>
           <tr v-for="(row,i) in draft.variant_prices" :key="i">
@@ -52,11 +56,40 @@ const draft=ref<CostModel>(emptyCostModel())
 const unitLabel=computed(()=>({area:'㎡',piece:'件',set:'套',manual:'次'})[draft.value.basis])
 watch(()=>props.modelValue,v=>{try {draft.value={...emptyCostModel(),...JSON.parse(v)}}catch{draft.value=emptyCostModel()}},{immediate:true})
 function update(){emit('update:modelValue',JSON.stringify(draft.value))}
+function changeBasis() {
+  if (draft.value.basis !== 'area') delete draft.value.area_only
+  update()
+}
+
+function changeAreaOnly(event: Event) {
+  const enabled = (event.target as HTMLInputElement).checked
+  if (enabled) {
+    draft.value.area_only = true
+    delete draft.value.variant_prices
+    draft.value.thickness_prices = []
+    draft.value.processes = []
+  } else {
+    delete draft.value.area_only
+  }
+  update()
+}
+
 function enableVariants(){draft.value.variant_prices=draft.value.thickness_prices.length?draft.value.thickness_prices.map(p=>({thickness_mm:p.thickness_mm,normal_price:p.unit_price,irregular_price:null})):[{thickness_mm:0,normal_price:draft.value.unit_price,irregular_price:null}];draft.value.thickness_prices=[];update()}
 function setPrice(index:number,key:'normal_price'|'irregular_price',event:Event){const input=event.target as HTMLInputElement;draft.value.variant_prices![index]![key]=input.value===''?null:input.valueAsNumber;update()}
 function addProcess(){const code=Object.keys(processNames).find(code=>!draft.value.processes.some(p=>p.code===code));if(!code)return;draft.value.processes.push({code,unit:'sku',unit_price:0,multiplier:1});update()}
 </script>
 <style scoped>
+.model-editor .area-only-toggle {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 8px;
+  min-height: 38px;
+}
+.model-editor .area-only-toggle input {
+  width: 16px;
+  min-height: 16px;
+}
 .extras{grid-column:1/-1}.model-editor details{padding:10px 0;border-top:1px solid rgb(var(--yb-border))}.model-editor summary{font-size:13px;cursor:pointer;padding:4px 0 8px}
 .model-editor{min-width:0}.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin:8px 0}.model-editor label{display:grid;gap:4px;font-size:12px;color:rgb(var(--yb-text-secondary))}.model-editor input,.model-editor select{box-sizing:border-box;width:100%;min-width:0;padding:8px;border:1px solid rgb(var(--yb-border));border-radius:7px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.model-editor h3{font-size:13px;margin:16px 0 8px}.model-editor small{font-size:11px;font-weight:400;color:rgb(var(--yb-text-muted))}.model-editor button{padding:7px;border:1px solid rgb(var(--yb-border));border-radius:7px;background:rgb(var(--yb-surface));color:rgb(var(--yb-brand));cursor:pointer}.formula{padding:12px;background:rgb(var(--yb-brand-soft));border-radius:8px;font-size:13px}.process{border-bottom:1px solid rgb(var(--yb-border));padding:10px 0;margin-bottom:8px}
 </style>

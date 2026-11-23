@@ -49,6 +49,64 @@ func TestCostModelShapeAndThicknessPrices(t *testing.T) {
 	}
 }
 
+func TestAreaOnlyPriceKeepsStructuredAreaWithoutShapeOrProcessPricing(t *testing.T) {
+	const formula = `{"version":1,"material":"超透PVC","basis":"area","area_only":true,"unit_price":12,"multiplier":1}`
+	model, err := parseCostModel(formula)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := &domain.CostRule{RuleID: 70, RuleType: domain.CostRuleTypeModel, FormulaExpression: formula}
+	input := domain.CostInput{AreaMode: "total", AreaM2: 0.35, Pieces: 4}
+	quantity := int64(20)
+	for _, shape := range []string{"", "normal", "irregular"} {
+		input.Shape = shape
+		input.Processes = nil
+		if shape == "irregular" {
+			input.ThicknessMM = 5
+			input.Processes = map[string]bool{"slot": true, "double_sided": true}
+		}
+		resp := previewCostRules(domain.CostRulePreviewRequest{
+			Input: &input, Quantity: &quantity,
+		}, []*domain.CostRule{rule}).Response
+		if resp.RequiresManualReview || resp.EstimatedCost == nil || *resp.EstimatedCost != 4.2 || len(resp.Calculation.Lines) != 1 {
+			t.Fatalf("shape %q should use the same area rate: %+v", shape, resp)
+		}
+		if resp.Calculation.Input.Shape != shape {
+			t.Fatal("original input not preserved in the calculation")
+		}
+	}
+
+	input.AreaM2 = 0
+	if calc, price := calculateCostModel(model, input); price != nil || calc.Status != "missing_input" {
+		t.Fatalf("missing area must still require confirmation: %+v", calc)
+	}
+
+	model.AreaOnly = false
+	input.AreaM2 = 0.35
+	raw, err := json.Marshal(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule.FormulaExpression = string(raw)
+	resp := previewCostRules(domain.CostRulePreviewRequest{Input: &input}, []*domain.CostRule{rule}).Response
+	if !resp.RequiresManualReview || resp.EstimatedCost != nil {
+		t.Fatalf("legacy scheme must keep unquoted shape behavior: %+v", resp)
+	}
+}
+
+func TestAreaOnlyRejectsConflictingRateTables(t *testing.T) {
+	for _, extra := range []string{
+		`"thickness_prices":[{"thickness_mm":2,"unit_price":12}]`,
+		`"variant_prices":[{"thickness_mm":0,"normal_price":12,"irregular_price":12}]`,
+		`"processes":[{"code":"slot","unit":"sku","unit_price":2,"multiplier":1}]`,
+	} {
+		raw := `{"version":1,"material":"PVC","basis":"area","area_only":true,"unit_price":12,"multiplier":1,` + extra + "}"
+		if _, err := parseCostModel(raw); err == nil {
+			t.Fatalf("accepted incompatible configuration: %s", extra)
+		}
+	}
+}
+
 func TestCostModelVariantTableValidation(t *testing.T) {
 	for _, rows := range []string{
 		`[{"thickness_mm":-1,"normal_price":10}]`,
