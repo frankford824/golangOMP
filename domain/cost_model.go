@@ -5,7 +5,8 @@ package domain
 type CostModel struct {
 	Version            int                  `json:"version"`
 	Material           string               `json:"material"`
-	Basis              string               `json:"basis"` // area, piece, set, manual
+	Basis              string               `json:"basis"`               // area, piece, set, manual
+	AreaOnly           bool                 `json:"area_only,omitempty"` // The rate applies regardless of shape and selected processes.
 	UnitPrice          float64              `json:"unit_price"`
 	Multiplier         float64              `json:"multiplier"`
 	Minimum            float64              `json:"minimum"`

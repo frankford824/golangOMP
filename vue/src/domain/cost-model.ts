@@ -8,6 +8,7 @@ export interface CostInput {
 }
 export interface CostModel {
   version: number; material: string; basis: 'area' | 'piece' | 'set' | 'manual'
+  area_only?: boolean
   unit_price: number; multiplier: number; minimum: number
   small_area_threshold: number; small_area_surcharge: number
   thickness_prices: Array<{ thickness_mm: number; unit_price: number }>

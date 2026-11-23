@@ -27,6 +27,27 @@ describe('material price table',()=>{
     expect(model.variant_prices).toEqual([{thickness_mm:3,normal_price:20,irregular_price:null}])
     w.unmount()
   })
+  it('switches to one area price and clears conflicting pricing choices', async () => {
+    const wrapper = mount(CostModelEditor, {
+      props: {
+        modelValue: JSON.stringify({
+          ...emptyCostModel(),
+          material: '超透PVC',
+          unit_price: 12,
+          variant_prices: [{ thickness_mm: 0, normal_price: 10, irregular_price: 14 }],
+          processes: [{ code: 'slot', unit: 'sku', unit_price: 1, multiplier: 1 }],
+        }),
+      },
+    })
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    const model = JSON.parse(wrapper.emitted('update:modelValue')!.at(-1)![0] as string)
+    expect(model).toMatchObject({ area_only: true, unit_price: 12, thickness_prices: [], processes: [] })
+    expect(model).not.toHaveProperty('variant_prices')
+    expect(wrapper.find('.variant-prices').exists()).toBe(false)
+    expect(wrapper.text()).toContain('普通、异形统一按面积单价计费')
+    wrapper.unmount()
+  })
+
   it('preserves explicit shape through specification edits and allows clearing it',async()=>{
     const w=mount(CostInputFields,{props:{modelValue:{...emptyCostInput(),shape:'irregular',area_m2:.5}}})
     const shape=w.findAll('select').find(s=>s.find('option[value="irregular"]').exists())!

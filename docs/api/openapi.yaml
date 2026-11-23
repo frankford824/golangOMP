@@ -3804,6 +3804,10 @@ components:
         version: { type: integer, enum: [1] }
         material: { type: string, minLength: 1 }
         basis: { type: string, enum: [area, piece, set, manual] }
+        area_only:
+          type: boolean
+          default: false
+          description: For area pricing, use one rate regardless of shape and selected processes. Requires empty thickness_prices, variant_prices and processes. Structured area is still required.
         unit_price: { type: number, minimum: 0 }
         multiplier: { type: number, minimum: 0, exclusiveMinimum: true }
         minimum: { type: number, minimum: 0 }
