@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import {
@@ -48,7 +48,9 @@ watch(() => route?.query?.section, (section) => {
   activePricingSection.value = section === 'deduction' ? section : 'guide'
 }, { immediate: true })
 const priceSupersedeId = ref(0)
-const confirmingPriceSupersede = ref(false)
+const priceCopySource = ref<PriceGridRow | null>(null)
+const confirmingPriceRule = ref(false)
+const priceSaving = ref(false)
 const pendingPriceToggle = ref<PriceGridRow | null>(null)
 const deductionSupersedeId = ref(0)
 const welfareSupersedeId = ref(0)
@@ -80,15 +82,8 @@ const difficultyForm = ref({
   difficulty_coefficient: '' as number | string,
   sort_order: 50,
 })
-const priceForm = ref({
-  worker_type: 'fulltime',
-  job_grade: 'P1',
-  difficulty_class: '',
-  unit_price: 0,
-  effective_from: today,
-  effective_to: '',
-  remark: '',
-})
+const priceForm = ref(defaultPriceForm())
+const priceWorkerSelect = ref<HTMLSelectElement | null>(null)
 const deductionForm = ref({
   worker_type: 'all',
   job_grade: 'all',
@@ -187,6 +182,12 @@ const welfareRowsWithLabels = computed<WelfareGridRow[]>(() =>
 )
 const priceGridRows = computed(() => priceRowsWithLabels.value as unknown as Record<string, unknown>[])
 const priceSupersedeSource = computed(() => priceRowsWithLabels.value.find((row) => row.id === priceSupersedeId.value) ?? null)
+const priceCopyHasSameTarget = computed(() => {
+  const source = priceCopySource.value
+  const target = priceForm.value
+  return source != null && source.worker_type === target.worker_type &&
+    source.job_grade === target.job_grade && source.difficulty_class === target.difficulty_class
+})
 const priceSupersedeCutoff = computed(() => {
   if (!priceForm.value.effective_from) return ''
   return addDaysToDateInput(priceForm.value.effective_from, -1)
@@ -477,61 +478,92 @@ function costCenterError(err: unknown, fallback: string) {
   return resolveApiUserMessage(err, { fallback })
 }
 
+function defaultPriceForm() {
+  return {
+    worker_type: 'fulltime',
+    job_grade: 'P1',
+    difficulty_class: firstDifficultyCode(difficultyRows.value),
+    unit_price: 0,
+    effective_from: today,
+    effective_to: '',
+    remark: '',
+  }
+}
+
+function validatePriceForm() {
+  const form = priceForm.value
+  if (!form.worker_type || !form.job_grade || !form.difficulty_class) return '请选择人员类型、岗级和难度'
+  if (!form.effective_from) return '请先填写生效日'
+  if (form.effective_to && form.effective_to < form.effective_from) return '失效日不能早于生效日'
+  if (!Number.isFinite(form.unit_price) || form.unit_price < 0) return '请填写有效的单价'
+  if (priceCopyHasSameTarget.value) return '请更改人员类型、岗级或难度，再新增规则。'
+  if (priceSupersedeId.value && !priceSupersedeSource.value) return '请重新选择要修改的单价规则'
+  return ''
+}
+
 function submitPriceRuleAction() {
-  if (priceSupersedeId.value) {
-    openPriceSupersedeConfirm()
+  if (priceSaving.value) return
+  error.value = validatePriceForm()
+  if (error.value) return
+  if (priceSupersedeId.value || priceCopySource.value) {
+    confirmingPriceRule.value = true
     return
   }
   void createPriceRule()
 }
 
-function openPriceSupersedeConfirm() {
+async function startPriceCopy() {
+  if (!priceSupersedeSource.value || priceSaving.value) return
+  priceCopySource.value = priceSupersedeSource.value
+  priceSupersedeId.value = 0
+  confirmingPriceRule.value = false
   error.value = ''
-  if (!priceSupersedeSource.value) {
-    error.value = '请先选择要修改的单价规则'
-    return
-  }
-  if (!priceForm.value.effective_from) {
-    error.value = '请先填写新版生效日'
-    return
-  }
-  if (!Number.isFinite(priceForm.value.unit_price) || priceForm.value.unit_price < 0) {
-    error.value = '请填写有效的新单价'
-    return
-  }
-  confirmingPriceSupersede.value = true
+  notice.value = ''
+  await nextTick()
+  priceWorkerSelect.value?.focus()
 }
 
-function cancelPriceSupersede() {
+function cancelPriceDraft() {
+  if (priceSaving.value) return
   priceSupersedeId.value = 0
-  confirmingPriceSupersede.value = false
+  confirmingPriceRule.value = false
+  if (priceCopySource.value) {
+    priceCopySource.value = null
+    priceForm.value = defaultPriceForm()
+    error.value = ''
+  }
 }
 
 async function createPriceRule() {
-  error.value = ''
+  if (priceSaving.value) return
+  error.value = validatePriceForm()
+  if (error.value) return
   notice.value = ''
   const supersedeSource = priceSupersedeSource.value
+  const copySource = priceCopySource.value
   const payload = {
     ...priceForm.value,
     remark: priceForm.value.remark.trim() || undefined,
     effective_from: startOfShanghaiDay(priceForm.value.effective_from),
     effective_to: endOfShanghaiDay(priceForm.value.effective_to),
   }
+  priceSaving.value = true
   try {
-    if (priceSupersedeId.value) {
-      await assetWorkbenchApi.supersedePriceMatrix(priceSupersedeId.value, payload)
+    if (supersedeSource) {
+      await assetWorkbenchApi.supersedePriceMatrix(supersedeSource.id, payload)
       priceSupersedeId.value = 0
-      confirmingPriceSupersede.value = false
-      notice.value = supersedeSource
-        ? `${priceRuleIdentity(supersedeSource)} 已完成改价，旧规则自动截止到 ${priceSupersedeCutoff.value}`
-        : '价格修改已发布，旧规则会自动截止到新版生效日前一天'
+      notice.value = `${priceRuleIdentity(supersedeSource)} 已完成改价，旧规则自动截止到 ${priceSupersedeCutoff.value}`
     } else {
       await assetWorkbenchApi.createPriceMatrix(payload)
-      notice.value = '单价规则已创建'
+      priceCopySource.value = null
+      notice.value = copySource ? `已新增 ${priceRuleIdentity(payload)} 的单价规则` : '单价规则已创建'
     }
+    confirmingPriceRule.value = false
     await loadCostCenter()
   } catch (err) {
-    error.value = costCenterError(err, '单价规则创建失败')
+    error.value = costCenterError(err, '单价规则保存失败')
+  } finally {
+    priceSaving.value = false
   }
 }
 
@@ -655,8 +687,11 @@ async function toggleRule(action: () => Promise<unknown>) {
 }
 
 function startPriceSupersede(row: PriceGridRow) {
+  if (priceSaving.value) return
+  priceCopySource.value = null
   priceSupersedeId.value = row.id
-  confirmingPriceSupersede.value = false
+  confirmingPriceRule.value = false
+  error.value = ''
   priceForm.value = {
     worker_type: row.worker_type,
     job_grade: row.job_grade,
@@ -734,7 +769,7 @@ onMounted(async () => {
       </div>
     </div>
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
-    <p v-if="error" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
+    <p v-if="error && !confirmingPriceRule" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
 
     <div class="aw-pricing-settings">
       <aside class="aw-pricing-nav" aria-label="计价设置导航">
@@ -888,13 +923,16 @@ onMounted(async () => {
           <p class="aw-copy">设置「谁、做哪类作品、从哪天开始、每件多少钱」。日常改价只需要维护这里。</p>
         </div>
         <div class="aw-inline-actions">
-          <span v-if="priceSupersedeId" class="aw-chip aw-chip--info">改价草稿 #{{ priceSupersedeId }}</span>
-          <button v-if="priceSupersedeId" class="aw-secondary-button" type="button" @click="cancelPriceSupersede">取消改价</button>
-          <button class="aw-secondary-button" type="button" @click="submitPriceRuleAction">{{ priceSupersedeId ? '预览并发布' : '新增' }}</button>
+          <button v-if="priceSupersedeId || priceCopySource" class="aw-secondary-button" type="button" :disabled="priceSaving" @click="cancelPriceDraft">{{ priceCopySource ? '取消新建' : '取消改价' }}</button>
+          <button class="aw-secondary-button" type="button" :disabled="priceLoading || priceSaving" @click="submitPriceRuleAction">{{ priceSupersedeId ? '预览并发布' : priceCopySource ? '预览新规则' : '新增' }}</button>
         </div>
       </div>
-      <p v-if="priceSupersedeId" class="aw-inline-alert">
-        正在修改价格：人员类型、岗级、难度已锁定，只调整新单价和生效日。旧规则会自动截止到新版生效日前一天，历史提交和已结算记录不会重算。
+      <div v-if="priceSupersedeSource" class="aw-inline-alert aw-inline-actions">
+        <span>改价保留当前适用对象。要调整人员类型、岗级或难度，可以复制后新建。</span>
+        <button class="aw-secondary-button" type="button" :disabled="priceSaving" @click="startPriceCopy">复制为新规则</button>
+      </div>
+      <p v-else-if="priceCopySource" class="aw-inline-alert">
+        复制自 #{{ priceCopySource.id }}（{{ priceRuleIdentity(priceCopySource) }}）。请选择新的适用对象，来源规则保留原状态和日期。
       </p>
       <div v-if="priceSupersedeSource" class="aw-price-change-card" aria-live="polite">
         <div class="aw-price-change-card__item">
@@ -915,7 +953,7 @@ onMounted(async () => {
         </div>
         <div class="aw-price-change-card__item aw-price-change-card__item--impact">
           <span>影响范围</span>
-          <strong>从新版生效日之后的新提交开始使用；过往月度、历史提交、已结算记录保持原单价快照。</strong>
+          <strong>新版单价从生效日当天起用于新提交。历史提交和已结算记录保留原单价快照。</strong>
       </div>
       </div>
       <WorkbenchDataGrid
@@ -930,12 +968,12 @@ onMounted(async () => {
       >
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'action'" class="aw-grid-actions">
-            <button class="aw-secondary-button" type="button" :disabled="priceLoading" @click="startPriceSupersede(gridRowAsPrice(row))">修改价格</button>
+            <button class="aw-secondary-button" type="button" :disabled="priceLoading || priceSaving" @click="startPriceSupersede(gridRowAsPrice(row))">修改价格</button>
             <button
               class="aw-secondary-button"
               :class="{ 'aw-secondary-button--danger': gridRowAsPrice(row).enabled }"
               type="button"
-              :disabled="priceLoading"
+              :disabled="priceLoading || priceSaving"
               :aria-label="`${gridRowAsPrice(row).enabled ? '停用' : '启用'}单价规则：${priceRuleIdentity(gridRowAsPrice(row))}`"
               @click="requestTogglePriceRule(gridRowAsPrice(row))"
             >
@@ -952,13 +990,13 @@ onMounted(async () => {
         <span><b>人员类型</b>：全职或兼职</span>
         <span><b>岗级</b>：人员档案里的等级</span>
         <span><b>难度</b>：上传目录绑定的难度分类</span>
-        <span><b>生效日</b>：从这一天之后的新提交开始使用新单价</span>
+        <span><b>生效日</b>：从这一天起，新提交使用新单价</span>
       </div>
       <div class="aw-form-grid">
         <label>
           类型
           <input v-if="priceSupersedeId" :value="workerTypeMeta(priceForm.worker_type).label" disabled />
-          <select v-else v-model="priceForm.worker_type" @change="normalizeGradeForWorker(priceForm, false)">
+          <select v-else ref="priceWorkerSelect" v-model="priceForm.worker_type" @change="normalizeGradeForWorker(priceForm, false)">
             <option value="fulltime">全职</option>
             <option value="parttime">兼职</option>
           </select>
@@ -1008,31 +1046,41 @@ onMounted(async () => {
         <span class="aw-timeline-band__future">未来</span>
       </div>
 
-      <div v-if="confirmingPriceSupersede && priceSupersedeSource" class="aw-dialog-backdrop" role="presentation" @click.self="confirmingPriceSupersede = false">
-        <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="price-supersede-confirm-title">
+      <div v-if="confirmingPriceRule && (priceSupersedeSource || priceCopySource)" class="aw-dialog-backdrop" role="presentation" @click.self="!priceSaving && (confirmingPriceRule = false)">
+        <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="price-confirm-title">
           <div>
-            <p class="aw-eyebrow">改价确认</p>
-            <h3 id="price-supersede-confirm-title">确认发布这次价格修改</h3>
-            <p class="aw-copy">{{ priceSupersedeConfirmText }}</p>
+            <h3 id="price-confirm-title">{{ priceCopySource ? '确认新增单价规则' : '确认发布这次价格修改' }}</h3>
+            <p v-if="priceSupersedeSource" class="aw-copy">{{ priceSupersedeConfirmText }}</p>
+            <p v-else class="aw-copy">来源规则保留原状态和日期。</p>
           </div>
           <div class="aw-confirm-dialog__summary">
-            <div>
+            <div v-if="priceSupersedeSource">
               <span>当前单价</span>
               <strong>{{ formatMoney(priceSupersedeSource.unit_price) }}</strong>
+            </div>
+            <div v-else>
+              <span>新规则适用对象</span>
+              <strong>{{ priceRuleIdentity(priceForm) }}</strong>
             </div>
             <div>
               <span>新单价</span>
               <strong>{{ formatMoney(priceForm.unit_price) }}</strong>
             </div>
-            <div>
+            <div v-if="priceSupersedeSource">
               <span>旧规则自动截止</span>
               <strong>{{ priceSupersedeCutoff }}</strong>
             </div>
-            <p>旧规则不需要手动停用；历史提交和已结算记录不会重算。</p>
+            <div v-else>
+              <span>生效日期</span>
+              <strong>{{ priceForm.effective_from }}{{ priceForm.effective_to ? ' 至 ' + priceForm.effective_to : ' 起' }}</strong>
+            </div>
           </div>
+          <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
           <div class="aw-inline-actions">
-            <button class="aw-secondary-button" type="button" @click="confirmingPriceSupersede = false">返回修改</button>
-            <button class="aw-primary-button" type="button" @click="createPriceRule">确认发布</button>
+            <button class="aw-secondary-button" type="button" :disabled="priceSaving" @click="confirmingPriceRule = false">返回修改</button>
+            <button class="aw-primary-button" type="button" :disabled="priceSaving" @click="createPriceRule">
+              {{ priceSaving ? '保存中…' : priceCopySource ? '确认新增' : '确认发布' }}
+            </button>
           </div>
         </section>
       </div>
