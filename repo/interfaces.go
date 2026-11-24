@@ -612,6 +612,7 @@ type AssetWorkbenchRepo interface {
 	VoidSubmission(ctx context.Context, tx Tx, submissionID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmission, error)
 	CreateSubmissionItem(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error)
 	GetSubmissionItem(ctx context.Context, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error)
+	GetSubmissionItemForUpdate(ctx context.Context, tx Tx, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error)
 	UpdateSubmissionItemEditableFields(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error)
 	UpdateSubmissionItemQCStatus(ctx context.Context, tx Tx, itemID int64, qcStatus string) (*domain.AssetWorkbenchSubmissionItem, error)
 	VoidSubmissionItem(ctx context.Context, tx Tx, itemID int64, actorID int64, reason string, at time.Time) (*domain.AssetWorkbenchSubmissionItem, error)

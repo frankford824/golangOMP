@@ -2239,6 +2239,11 @@ func (r *assetWorkbenchRepo) GetSubmissionItem(ctx context.Context, itemID int64
 	return scanAssetWorkbenchSubmissionItem(row)
 }
 
+func (r *assetWorkbenchRepo) GetSubmissionItemForUpdate(ctx context.Context, tx repo.Tx, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSubmissionItemSelect()+` WHERE id = ? FOR UPDATE`, itemID)
+	return scanAssetWorkbenchSubmissionItem(row)
+}
+
 func (r *assetWorkbenchRepo) UpdateSubmissionItemEditableFields(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
 	if item == nil {
 		return nil, sql.ErrNoRows
@@ -2909,8 +2914,7 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 		  AND i.current_settlement_batch_id IS NULL
 		  AND i.qc_status <> ?
 		  AND (? = 0 OR (f.owner_user_id = ? AND i.payee_user_id = ?
-		    AND i.entry_kind <> ? AND i.qc_status = ?
-		    AND i.pricing_status IN (?, ?) AND i.gross_amount = 0))`,
+		    AND i.entry_kind <> ? AND i.qc_status = ?))`,
 		toNullInt64(file.UploadDirectoryID),
 		file.UploadDirectoryName,
 		file.UploadDirectoryPrefix,
@@ -2926,8 +2930,6 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 		selfMoveUserID,
 		domain.AssetWorkbenchSubmissionEntryKindSupplement,
 		domain.AssetWorkbenchSubmissionStatusSubmitted,
-		domain.AssetWorkbenchPricingStatusPendingGrade,
-		domain.AssetWorkbenchPricingStatusUnpriced,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update asset workbench submission file location: %w", err)

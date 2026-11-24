@@ -346,7 +346,7 @@ describe('UploadOverviewPage self-service date scope', () => {
     mocks.driveFiles.mockResolvedValue({ items: files.slice(0, 1), total: 1 })
     mocks.batchMoveFiles.mockResolvedValue({ files: [], failures: [{
       file_id: 1,
-      reason: 'The target category would price this work. Ask an asset manager to move it.',
+      reason: 'Only works awaiting quality review can be moved by their submitter.',
     }] })
     const wrapper = mountSelfLedger()
     await flushPromises()
@@ -357,7 +357,7 @@ describe('UploadOverviewPage self-service date scope', () => {
     await flushPromises()
 
     expect(mocks.batchMoveFiles).toHaveBeenCalledWith([1], 8, '上传总览移动文件')
-    expect(wrapper.text()).toContain('移动到该分类会产生计件金额，请联系素材管理员处理。')
+    expect(wrapper.text()).toContain('普通员工只能移动尚未质检的作品。需要调整时，请联系素材管理员。')
     wrapper.unmount()
   })
 

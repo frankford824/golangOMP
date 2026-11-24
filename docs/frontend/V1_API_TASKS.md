@@ -12816,7 +12816,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/files/<file_id>/archive/e
 ### 简介
 支持方法: POST。
 
-- `POST`: Moves all active files of each selected submission item together. Submitters can move their own normal uploads before pricing and quality review, provided the target does not price the work. Asset managers can also move eligible priced works. Supplement and settlement-locked items are rejected. The operation updates directory and pricing snapshots, preserves item and page counts, refreshes submission totals, and records audit events.
+- `POST`: Moves all active files of each selected submission item together. Submitters can move their own normal uploads awaiting quality review, including priced works. Supplement and settlement-locked items are rejected. The operation replaces the original difficulty and pricing with the target directory's difficulty and recalculated amount on the same item, preserves item and page counts, refreshes submission totals, and records audit events.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
