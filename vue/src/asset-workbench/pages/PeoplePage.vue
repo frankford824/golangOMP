@@ -2,9 +2,10 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { assetWorkbenchApi, type AssetWorkbenchProfile } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type AssetWorkbenchProfile, type PersonnelSuggestion } from '@aw/shared/api/assetWorkbenchApi'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { usePersonnelSuggestions } from '@aw/shared/composables/usePersonnelSuggestions'
 import { maskPhone } from '@aw/shared/format/pii'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
 import { cityOptions, provinceOptions } from '@aw/shared/profile/chinaRegions'
@@ -84,27 +85,37 @@ const availableHRCities = computed(() => cityOptions(hrForm.province, hrForm.cit
 const focusedUserID = computed(() => Number(route.query.user_id || 0))
 const personnelQuery = ref('')
 const personnelFilter = ref('all')
+const searchingPersonnel = computed(() => canManageProfiles.value && Boolean(personnelQuery.value.trim()))
+const personnelSuggestions = usePersonnelSuggestions('payee', personnelQuery, searchingPersonnel)
 const matchingProfiles = computed(() => {
-  const query = personnelQuery.value.trim().toLowerCase()
-  return profiles.value.filter((profile) => {
-    const matchesStatus = personnelFilter.value === 'all' || profileNeedsGrade(profile) === (personnelFilter.value === 'pending')
-    return matchesStatus && (!query || [profile.real_name, profile.personnel_no, String(profile.user_id)].some((value) => value?.toLowerCase().includes(query)))
-  })
+  const rows: (PersonnelSuggestion & { phone?: string })[] = searchingPersonnel.value ? personnelSuggestions.items.value : profiles.value.map(profile => ({
+    user_id: profile.user_id,
+    name: profile.real_name || `用户 ${profile.user_id}`,
+    username: '',
+    personnel_no: profile.personnel_no,
+    phone: profile.phone,
+    worker_type: profile.worker_type,
+    job_grade: profile.job_grade,
+    status: profile.status,
+  }))
+  return rows.filter(person => personnelFilter.value === 'all' || profileNeedsGrade(person) === (personnelFilter.value === 'pending'))
 })
 const pendingProfiles = computed(() => profiles.value.filter((profile) => profileNeedsGrade(profile)))
 const readyProfiles = computed(() => profiles.value.filter((profile) => !profileNeedsGrade(profile)))
 const selectedProfileNeedsGrade = computed(() => selectedProfile.value ? profileNeedsGrade(selectedProfile.value) : false)
 const cannotSaveHRProfile = computed(() => !selectedProfile.value || hrSaving.value || profileDetailLoading.value || !!profileDetailError.value || (hrForm.status === 'active' && !hrForm.job_grade))
 let profileDetailRequestID = 0
-function profileNeedsGrade(profile: AssetWorkbenchProfile) {
+type GradeState = Pick<PersonnelSuggestion, 'status' | 'worker_type' | 'job_grade'>
+
+function profileNeedsGrade(profile: GradeState) {
   return profile.status !== 'active' || !profile.worker_type || !profile.job_grade
 }
 
-function profilePricingLabel(profile: AssetWorkbenchProfile) {
+function profilePricingLabel(profile: GradeState) {
   return profileNeedsGrade(profile) ? '待定级' : '可计价'
 }
 
-function profilePricingTone(profile: AssetWorkbenchProfile) {
+function profilePricingTone(profile: GradeState) {
   return profileNeedsGrade(profile) ? 'warn' : 'success'
 }
 
@@ -127,10 +138,12 @@ async function loadPeople() {
   }
   profiles.value = data.profiles
   const selectedUserID = selectedProfile.value?.user_id
-  const target = focusedUserID.value > 0
-    ? profiles.value.find((profile) => profile.user_id === focusedUserID.value)
-    : profiles.value.find((profile) => profile.user_id === selectedUserID) ?? pendingProfiles.value[0] ?? profiles.value[0]
-  if (target) await selectProfileRecord(target)
+  const target = profiles.value.find(profile => profile.user_id === selectedUserID) ?? selectedProfile.value ??
+    (focusedUserID.value > 0
+      ? profiles.value.find(profile => profile.user_id === focusedUserID.value)
+      : pendingProfiles.value[0] ?? profiles.value[0])
+  if (target) await selectProfileRecord(target.user_id)
+  if (searchingPersonnel.value) void personnelSuggestions.search()
 }
 
 async function saveProfile() {
@@ -194,14 +207,15 @@ function fillHRForm(profile: AssetWorkbenchProfile, includePII: boolean) {
   })
 }
 
-async function selectProfileRecord(profile: AssetWorkbenchProfile) {
+async function selectProfileRecord(userID: number) {
   const requestID = ++profileDetailRequestID
-  selectedProfile.value = profile
-  fillHRForm(profile, false)
+  const profile = profiles.value.find(row => row.user_id === userID)
+  selectedProfile.value = profile ?? null
+  if (profile) fillHRForm(profile, false)
   profileDetailLoading.value = true
   profileDetailError.value = ''
   try {
-    const detail = await assetWorkbenchApi.getProfile(profile.user_id)
+    const detail = await assetWorkbenchApi.getProfile(userID)
     if (requestID !== profileDetailRequestID) return
     selectedProfile.value = detail
     fillHRForm(detail, true)
@@ -340,31 +354,34 @@ onMounted(() => {
             <span class="aw-chip aw-chip--warn">待定级 {{ pendingProfiles.length }}</span>
             <span class="aw-chip aw-chip--success">可计价 {{ readyProfiles.length }}</span>
           </div>
-          <div v-if="profiles.length" class="aw-grade-queue__list aw-grade-queue__list--scroll">
-            <div class="aw-personnel-filters">
-              <input v-model="personnelQuery" type="search" aria-label="搜索人员名单" placeholder="姓名或人员编号" />
-              <select v-model="personnelFilter" aria-label="定级状态">
-                <option value="all">全部状态</option>
-                <option value="pending">待定级</option>
-                <option value="ready">可计价</option>
-              </select>
-              <p v-if="!matchingProfiles.length" class="aw-copy">没有匹配的人员</p>
-            </div>
+          <div class="aw-personnel-filters">
+            <input v-model="personnelQuery" type="search" maxlength="80" aria-label="搜索人员名单" placeholder="姓名、拼音或人员编号" />
+            <select v-model="personnelFilter" aria-label="定级状态">
+              <option value="all">全部状态</option>
+              <option value="pending">待定级</option>
+              <option value="ready">可计价</option>
+            </select>
+          </div>
+          <p v-if="personnelSuggestions.loading.value" class="aw-copy" role="status">正在查找人员…</p>
+          <p v-else-if="personnelSuggestions.error.value" class="aw-inline-alert aw-inline-alert--warning" role="status">{{ personnelSuggestions.error.value }}</p>
+          <div v-else-if="matchingProfiles.length" class="aw-grade-queue__list aw-grade-queue__list--scroll">
             <button
-              v-for="profile in matchingProfiles"
-              :key="profile.id"
+              v-for="person in matchingProfiles"
+              :key="person.user_id"
               type="button"
               class="aw-grade-queue__item"
-              :class="{ 'aw-grade-queue__item--active': selectedProfile?.id === profile.id }"
-              @click="selectProfileRecord(profile)"
+              :class="{ 'aw-grade-queue__item--active': selectedProfile?.user_id === person.user_id }"
+              @click="selectProfileRecord(person.user_id)"
             >
               <span class="aw-grade-queue__item-head">
-                <strong>{{ profile.real_name || `用户 ${profile.user_id}` }}</strong>
-                <span :class="chipClass(profilePricingTone(profile))">{{ profilePricingLabel(profile) }}</span>
+                <strong>{{ person.name }}</strong>
+                <span :class="chipClass(profilePricingTone(person))">{{ profilePricingLabel(person) }}</span>
               </span>
-              <span>{{ workerTypeMeta(profile.worker_type).label }} · {{ profile.job_grade || '未定级' }} · {{ maskPhone(profile.phone) }}</span>
+              <span>{{ workerTypeMeta(person.worker_type).label }} · {{ person.job_grade || '未定级' }} · 编号 {{ person.personnel_no || person.user_id }}</span>
+              <span v-if="person.username || person.phone">{{ person.username || maskPhone(person.phone) }}</span>
             </button>
           </div>
+          <p v-else-if="searchingPersonnel || profiles.length" class="aw-copy" role="status">没有匹配的人员</p>
           <div v-else class="aw-grade-queue__empty">
             <strong>当前没有可维护人员</strong>
             <span>刷新后仍为空时，请先在成员管理中开通资产工作台账号。</span>
@@ -491,8 +508,12 @@ onMounted(() => {
           </div>
         </div>
         <div v-else class="aw-grade-editor aw-grade-editor--empty">
-          <strong>请选择人员</strong>
-          <span>从左侧人员名单选择姓名后，再维护人员类型、岗级、证件和支付资料。</span>
+          <p v-if="profileDetailLoading" role="status">正在读取人员资料…</p>
+          <p v-else-if="profileDetailError" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ profileDetailError }}</p>
+          <template v-else>
+            <strong>请选择人员</strong>
+            <span>从左侧人员名单选择姓名后，再维护人员类型、岗级、证件和支付资料。</span>
+          </template>
         </div>
       </div>
     </div>

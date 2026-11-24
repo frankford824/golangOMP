@@ -1,35 +1,39 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
-import { RefreshCw, ShieldCheck, UserRound } from 'lucide-vue-next'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { RefreshCw, ShieldCheck } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import MemberDisableDialog from '@aw/features/members/MemberDisableDialog.vue'
-import { assetWorkbenchApi, type AccountMergePreview, type WorkbenchMemberRow } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type AccountMergePreview, type PersonnelSuggestion, type WorkbenchMemberRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { chipClass, workerTypeMeta } from '@aw/shared/format/status'
 import { managedAssetRoles, roleDisplayList, roleDisplayName } from '@aw/shared/format/roleDisplay'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
+import PersonnelAutocomplete from '@aw/shared/ui/PersonnelAutocomplete.vue'
 
 const savingUserId = ref<number | null>(null)
 const notice = ref('')
 const query = ref('')
+const selectedMember = ref<PersonnelSuggestion | null>(null)
 const statusFilter = ref('active')
 const page = ref(1)
 const pageSize = 50
 const members = ref<WorkbenchMemberRow[]>([])
 const lookupQuery = ref('')
-const lookupResults = ref<WorkbenchMemberRow[]>([])
-const selectedLookupUser = ref<WorkbenchMemberRow | null>(null)
+const selectedLookupUser = ref<PersonnelSuggestion | null>(null)
 const openRoles = ref<string[]>(['AssetSubmitter'])
 const openReason = ref('开通资产工作台')
 const disableTarget = ref<WorkbenchMemberRow | null>(null)
 const disableError = ref('')
-const memberSearch = ref<HTMLInputElement | null>(null)
+const memberSearch = ref<InstanceType<typeof PersonnelAutocomplete> | null>(null)
 let disableTrigger: HTMLElement | null = null
 const mergeSourceId = ref('')
 const mergeCanonicalId = ref('')
+const mergeSource = ref<PersonnelSuggestion | null>(null)
+const mergeCanonical = ref<PersonnelSuggestion | null>(null)
+let mergePreviewRequest = 0
 const mergeReason = ref('合并资产工作台账号')
 const mergePreview = ref<AccountMergePreview | null>(null)
 const mergeChoices = ref<Record<string, string>>({})
@@ -38,7 +42,8 @@ const { bootstrap, refresh: refreshBootstrap } = useAssetWorkbenchBootstrap()
 const membersRequest = usePageRequest<{ items: WorkbenchMemberRow[]; total: number }>(
   async (signal) => {
     const params: Record<string, unknown> = {
-      q: query.value,
+      q: selectedMember.value ? undefined : query.value,
+      user_id: selectedMember.value?.user_id,
       page: page.value,
       page_size: pageSize,
     }
@@ -90,6 +95,17 @@ async function loadMembers() {
   members.value = result?.items ?? []
 }
 
+function updateMemberSearch(value: string) {
+  query.value = value
+  selectedMember.value = null
+}
+
+function selectMember(person: PersonnelSuggestion) {
+  query.value = person.name
+  selectedMember.value = person
+  void applyFilters()
+}
+
 async function applyFilters() {
   page.value = 1
   await loadMembers()
@@ -137,22 +153,13 @@ async function toggleRole(member: WorkbenchMemberRow, role: string, checked: boo
   }
 }
 
-async function searchAllUsers() {
-  if (!canChangeRoles.value) return
-  error.value = ''
-  try {
-    const result = await assetWorkbenchApi.searchPeople({
-      q: lookupQuery.value,
-      scope: 'all_users',
-      page_size: 20,
-    })
-    lookupResults.value = result.items
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '账号搜索失败'
-  }
+function updateLookupQuery(value: string) {
+  lookupQuery.value = value
+  selectedLookupUser.value = null
 }
 
-function selectLookupUser(user: WorkbenchMemberRow) {
+function selectLookupUser(user: PersonnelSuggestion) {
+  lookupQuery.value = user.name
   selectedLookupUser.value = user
 }
 
@@ -177,9 +184,8 @@ async function openSelectedAccess() {
       identity_type: 'staff',
       reason: openReason.value,
     })
-    notice.value = `已为 ${memberName(user)} 开通资产工作台`
-    lookupResults.value = []
-    selectedLookupUser.value = null
+    notice.value = `已为 ${user.name} 开通资产工作台`
+    updateLookupQuery('')
     await loadMembers()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '开通失败'
@@ -250,23 +256,51 @@ async function restoreMember(member: WorkbenchMemberRow) {
   }
 }
 
+function updateMergeSource(value: string) {
+  mergeSourceId.value = value
+  mergeSource.value = null
+}
+
+function selectMergeSource(person: PersonnelSuggestion) {
+  mergeSourceId.value = person.name
+  mergeSource.value = person
+}
+
+function updateMergeCanonical(value: string) {
+  mergeCanonicalId.value = value
+  mergeCanonical.value = null
+}
+
+function selectMergeCanonical(person: PersonnelSuggestion) {
+  mergeCanonicalId.value = person.name
+  mergeCanonical.value = person
+}
+
+watch([mergeSourceId, mergeCanonicalId, mergeSource, mergeCanonical], () => {
+  mergePreviewRequest += 1
+  mergePreview.value = null
+  mergeChoices.value = {}
+}, { flush: 'sync' })
+
 async function previewMerge() {
-  const source = Number(mergeSourceId.value)
-  const canonical = Number(mergeCanonicalId.value)
-  if (!source || !canonical) {
-    error.value = '请输入来源账号编号和主账号编号'
+  const source = mergeSource.value?.user_id ?? Number(mergeSourceId.value)
+  const canonical = mergeCanonical.value?.user_id ?? Number(mergeCanonicalId.value)
+  if (!Number.isSafeInteger(source) || source <= 0 || !Number.isSafeInteger(canonical) || canonical <= 0) {
+    error.value = '请从候选中选择来源和主账号，或输入账号编号。'
     return
   }
   error.value = ''
   notice.value = ''
+  const request = ++mergePreviewRequest
   try {
     const result = await assetWorkbenchApi.previewAccountMerge({ source_user_id: source, canonical_user_id: canonical })
+    if (request !== mergePreviewRequest) return
     mergePreview.value = result
     const choices: Record<string, string> = {}
     for (const key of Object.keys(result.conflicts ?? {})) choices[key] = 'canonical'
     mergeChoices.value = choices
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '合并预览失败'
+    if (request === mergePreviewRequest) error.value = err instanceof Error ? err.message : '合并预览失败'
   }
 }
 
@@ -283,8 +317,8 @@ async function confirmMerge() {
     })
     notice.value = '账号已合并，历史真实收款人保持不变，工作台归属已迁移到主账号'
     mergePreview.value = null
-    mergeSourceId.value = ''
-    mergeCanonicalId.value = ''
+    updateMergeSource('')
+    updateMergeCanonical('')
     await loadMembers()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '账号合并失败'
@@ -338,10 +372,11 @@ function refreshFromOtherApp() {
               <option v-for="option in statusOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
-          <label>
-            搜索成员
-            <input ref="memberSearch" v-model="query" placeholder="输入姓名、账号或手机号" @keydown.enter="applyFilters" />
-          </label>
+          <PersonnelAutocomplete ref="memberSearch" scope="member" label="搜索成员"
+            placeholder="输入姓名、账号或手机号"
+            :status="statusFilter === 'all' ? undefined : statusFilter"
+            :model-value="query" :selected="selectedMember !== null"
+            @update:model-value="updateMemberSearch" @selected="selectMember" @submit="applyFilters" />
           <button class="aw-primary-button aw-form-grid__full" type="button" :disabled="loading" @click="applyFilters">
             <IconfontActionIcon name="search" :size="16" />
             搜索
@@ -440,32 +475,16 @@ function refreshFromOtherApp() {
           <ShieldCheck :size="18" aria-hidden="true" />
         </div>
         <div class="aw-form-grid">
-          <label class="aw-form-grid__full">
-            按姓名或账号搜索
-            <input v-model="lookupQuery" placeholder="搜索主站账号" @keydown.enter="searchAllUsers" />
-          </label>
-          <button class="aw-secondary-button" type="button" @click="searchAllUsers">查找账号</button>
+          <PersonnelAutocomplete class="aw-form-grid__full" scope="main_account" label="查找主站账号"
+            placeholder="搜索主站账号" :model-value="lookupQuery" :selected="selectedLookupUser !== null"
+            @update:model-value="updateLookupQuery" @selected="selectLookupUser" />
           <label class="aw-form-grid__full">
             开通原因
             <input v-model="openReason" />
           </label>
         </div>
-        <div v-if="lookupResults.length" class="aw-compact-list">
-          <button
-            v-for="user in lookupResults"
-            :key="user.user_id"
-            class="aw-compact-list__item"
-            type="button"
-            @click="selectLookupUser(user)"
-          >
-            <span class="aw-template-option__icon">
-              <UserRound :size="16" aria-hidden="true" />
-            </span>
-            <span>{{ memberName(user) }} · {{ user.username || user.user_id }}</span>
-          </button>
-        </div>
         <div v-if="selectedLookupUser" class="aw-panel">
-          <p class="aw-copy">将为 {{ memberName(selectedLookupUser) }} 开通：</p>
+          <p class="aw-copy">将为 {{ selectedLookupUser.name }}（{{ selectedLookupUser.username }}）开通工作台。</p>
           <label v-for="role in openableRoles" :key="role" class="aw-inline-check">
             <input
               type="checkbox"
@@ -492,14 +511,12 @@ function refreshFromOtherApp() {
       </div>
       <p class="aw-copy">合并后工作台归属迁到主账号；历史已发放记录的真实收款人不会被改写。</p>
       <div class="aw-form-grid">
-        <label>
-          来源账号编号
-          <input v-model="mergeSourceId" inputmode="numeric" placeholder="外部资产账号" />
-        </label>
-        <label>
-          主账号编号
-          <input v-model="mergeCanonicalId" inputmode="numeric" placeholder="运营主账号" />
-        </label>
+        <PersonnelAutocomplete scope="main_account" label="来源账号" placeholder="姓名或外部资产账号编号"
+          :model-value="mergeSourceId" :selected="mergeSource !== null"
+          @update:model-value="updateMergeSource" @selected="selectMergeSource" />
+        <PersonnelAutocomplete scope="main_account" label="主账号" placeholder="姓名或运营主账号编号"
+          :model-value="mergeCanonicalId" :selected="mergeCanonical !== null"
+          @update:model-value="updateMergeCanonical" @selected="selectMergeCanonical" />
         <label class="aw-form-grid__full">
           合并原因
           <input v-model="mergeReason" />

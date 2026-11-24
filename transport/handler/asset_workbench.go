@@ -294,9 +294,17 @@ func (h *AssetWorkbenchHandler) ListMembers(c *gin.Context) {
 	}
 	page, _ := strconv.Atoi(c.Query("page"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	rawUserID := strings.TrimSpace(c.Query("user_id"))
+	userID, parseErr := strconv.ParseInt(rawUserID, 10, 64)
+	if rawUserID != "" && (parseErr != nil || userID <= 0) {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id must be a positive ID.", nil))
+		return
+	}
 	items, total, appErr := h.svc.ListMembers(c.Request.Context(), actor, repo.AssetWorkbenchMemberFilter{
 		Keyword:  c.Query("q"),
 		Identity: c.Query("identity"),
+		Status:   c.Query("status"),
+		UserID:   userID,
 		Page:     page,
 		PageSize: pageSize,
 	})
@@ -305,6 +313,19 @@ func (h *AssetWorkbenchHandler) ListMembers(c *gin.Context) {
 		return
 	}
 	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
+}
+
+func (h *AssetWorkbenchHandler) SuggestPersonnel(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.SuggestPersonnel(c.Request.Context(), actor, strings.TrimSpace(c.Query("scope")), c.Query("q"), strings.TrimSpace(c.Query("status")))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, assetworkbench.PersonnelSuggestionsResult{Items: result.Items, Total: result.Total})
 }
 
 func (h *AssetWorkbenchHandler) SearchPeople(c *gin.Context) {

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
-import { assetWorkbenchApi, type AssetWorkbenchEventRow } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type AssetWorkbenchEventRow, type PersonnelSuggestion } from '@aw/shared/api/assetWorkbenchApi'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { formatInt } from '@aw/shared/format/number'
 import { chipClass, entityTypeMeta, eventReasonText, eventTypeMeta } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
+import PersonnelAutocomplete from '@aw/shared/ui/PersonnelAutocomplete.vue'
 
 const filters = ref({
   event_type: 'all',
@@ -15,6 +16,7 @@ const filters = ref({
   entity_id: '',
   actor_user_id: '',
 })
+const selectedActor = ref<PersonnelSuggestion | null>(null)
 const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/events')
 type EventGridRow = AssetWorkbenchEventRow & { event_label: string; entity_label: string; actor_label: string; reason_label: string; created_at_label: string }
 
@@ -114,8 +116,24 @@ async function loadEvents() {
   await eventsRequest.run()
 }
 
+function updateActor(value: string) {
+  filters.value.actor_user_id = value
+  selectedActor.value = null
+}
+
+function selectActor(person: PersonnelSuggestion) {
+  filters.value.actor_user_id = person.name
+  selectedActor.value = person
+}
+
 function applyFilters() {
-  appliedFilters.value = { ...filters.value }
+  const text = filters.value.actor_user_id.trim()
+  const id = selectedActor.value ? String(selectedActor.value.user_id) : text
+  if (id && !/^[1-9]\d*$/.test(id)) {
+    error.value = '请从候选中选择操作者，或输入账号编号。'
+    return
+  }
+  appliedFilters.value = { ...filters.value, actor_user_id: id }
   page.value = 1
   void loadEvents()
 }
@@ -151,7 +169,9 @@ onMounted(() => {
         <select v-model="filters.entity_type" aria-label="对象类型">
           <option v-for="option in entityFilterOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
         </select>
-        <input v-model.trim="filters.actor_user_id" aria-label="操作者账号编号" placeholder="操作者账号编号" inputmode="numeric" pattern="[1-9][0-9]*" />
+        <PersonnelAutocomplete scope="audit_actor" label="操作者" placeholder="操作者姓名或编号"
+          hide-label :model-value="filters.actor_user_id" :selected="selectedActor !== null"
+          @update:model-value="updateActor" @selected="selectActor" />
         <input v-model.trim="filters.entity_id" aria-label="对象记录编号" placeholder="对象记录编号" inputmode="numeric" pattern="[1-9][0-9]*" />
         <button type="submit" :disabled="loading">筛选</button>
         <span>{{ formatInt(total) }} 条匹配日志</span>

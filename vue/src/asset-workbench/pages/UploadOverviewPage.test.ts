@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   driveDirectories: vi.fn(),
   listUploadDirectories: vi.fn().mockResolvedValue([]),
   driveFiles: vi.fn(),
+  suggestPersonnel: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   batchMoveFiles: vi.fn(),
   listSettlementSupplements: vi.fn(),
   getSubmissionDetail: vi.fn(),
@@ -126,6 +127,48 @@ describe('UploadOverviewPage operation source', () => {
       wrapper.unmount()
     },
   )
+
+  it('queries by the selected uploader ID and clears it when the creator text is edited', async () => {
+    vi.useFakeTimers()
+    mocks.suggestPersonnel.mockResolvedValueOnce({
+      items: [
+        { user_id: 41, name: '李明', username: 'qa-one', personnel_no: 'Q-41' },
+        { user_id: 42, name: '李明', username: 'qa-two', personnel_no: 'Q-42' },
+      ],
+      total: 2,
+    })
+    mocks.driveFiles.mockResolvedValue({ items: [], total: 0 })
+    const wrapper = mount(UploadOverviewPage, { global: { stubs: { RouterLink: true } } })
+    try {
+      await flushPromises()
+      const input = wrapper.get('input[placeholder="姓名或账号"]')
+      await input.setValue('liming')
+      await vi.advanceTimersByTimeAsync(220)
+      await flushPromises()
+      expect(mocks.suggestPersonnel).toHaveBeenLastCalledWith('upload_owner', 'liming', expect.any(AbortSignal))
+      const options = wrapper.get('[aria-label="创建人候选"]').findAll('[role="option"]')
+      expect(options).toHaveLength(2)
+      expect(options[1]!.text()).toContain('qa-two · 人员编号 Q-42')
+      await options[1]!.trigger('click')
+      const filters = wrapper.get('form.aw-upload-ledger__filters')
+      await filters.trigger('submit')
+      await flushPromises()
+      expect(mocks.driveFiles).toHaveBeenLastCalledWith(expect.objectContaining({
+        owner_user_id: 42, owner: undefined,
+      }), expect.any(AbortSignal))
+      expect(wrapper.get('[aria-label="已应用筛选"]').text()).toContain('创建人：李明（qa-two）')
+
+      await input.setValue('李')
+      await filters.trigger('submit')
+      await flushPromises()
+      expect(mocks.driveFiles).toHaveBeenLastCalledWith(expect.objectContaining({
+        owner_user_id: undefined, owner: '李',
+      }), expect.any(AbortSignal))
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
 
   it('marks client supplement files in the admin upload ledger and detail panel', async () => {
     mocks.driveFiles.mockResolvedValue({

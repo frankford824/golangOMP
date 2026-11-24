@@ -1,10 +1,10 @@
-# V1 API 速查表(294 path · 一行一条)
+# V1 API 速查表(295 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 294 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 295 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -170,6 +170,7 @@
 | PATCH | `/v1/asset-workbench/members/{user_id}/roles` | Update asset workbench member roles | PATCH:SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/accounts/merge/preview` | Preview asset workbench account merge | POST:SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/accounts/merge` | Confirm asset workbench account merge | POST:SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/personnel-suggestions` | Suggest personnel for upload filters or payee selection | GET:HRAdmin, AssetManager, AssetSettlement, AssetTemplateAdmin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/people-lookup` | Search people for workbench access | GET:AssetManager, AssetTemplateAdmin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/groups/{group_id}/members` | List asset workbench group members | GET:AssetManager, AssetTemplateAdmin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/difficulty-classes` | List enabled asset workbench difficulty classes；Create asset workbench difficulty class | GET:AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, HRAdmin, SuperAdmin; POST:AssetTemplateAdmin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |

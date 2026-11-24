@@ -12,6 +12,7 @@ func TestParseUploadLedgerDirectoryFilters(t *testing.T) {
 	tests := []struct {
 		query      string
 		legacyID   int64
+		ownerID    int64
 		ids        []int64
 		unassigned bool
 		invalid    bool
@@ -23,6 +24,9 @@ func TestParseUploadLedgerDirectoryFilters(t *testing.T) {
 		{query: "dir_ids=2,0", invalid: true},
 		{query: "dir_ids=2,bad", invalid: true},
 		{query: "dir_ids=2&dir_id=1", invalid: true},
+		{query: "dir_ids=3&owner_user_id=42", ids: []int64{3}, ownerID: 42},
+		{query: "owner_user_id=0", invalid: true},
+		{query: "owner_user_id=bad", invalid: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.query, func(t *testing.T) {
@@ -31,7 +35,7 @@ func TestParseUploadLedgerDirectoryFilters(t *testing.T) {
 			filter, err := parseUploadLedgerFilters(c)
 			if tt.invalid {
 				if err == nil {
-					t.Fatal("invalid category filter must be rejected")
+					t.Fatal("invalid ledger filter must be rejected")
 				}
 				return
 			}
@@ -39,7 +43,11 @@ func TestParseUploadLedgerDirectoryFilters(t *testing.T) {
 			if filter.UploadDirectoryID != nil {
 				legacyID = *filter.UploadDirectoryID
 			}
-			if err != nil || legacyID != tt.legacyID || !reflect.DeepEqual(filter.UploadDirectoryIDs, tt.ids) || filter.Unassigned != tt.unassigned {
+			var ownerID int64
+			if filter.OwnerUserID != nil {
+				ownerID = *filter.OwnerUserID
+			}
+			if err != nil || legacyID != tt.legacyID || ownerID != tt.ownerID || !reflect.DeepEqual(filter.UploadDirectoryIDs, tt.ids) || filter.Unassigned != tt.unassigned {
 				t.Fatalf("unexpected filter: %+v, error: %v", filter, err)
 			}
 		})

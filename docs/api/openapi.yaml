@@ -15624,6 +15624,10 @@ paths:
           name: status
           schema: { type: string, enum: [pending, active, disabled, merged] }
         - in: query
+          name: user_id
+          description: Exact workbench member ID.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - in: query
           name: page
           schema: { type: integer, minimum: 1 }
         - in: query
@@ -15853,6 +15857,56 @@ paths:
         '400': { description: Missing conflict choices }
         '403': { description: Forbidden }
         '409': { description: Merge conflict }
+  /v1/asset-workbench/personnel-suggestions:
+    get:
+      summary: Suggest personnel for upload filters or payee selection
+      description: Matches names, accounts, personnel numbers, user IDs, pinyin, and initials. Each scope uses the permissions and records of its own workflow. Upload owners require site-wide ledger access, payees require HR or settlement access, members require member-management access, main accounts require SuperAdmin, and audit actors require site-wide workbench audit access. Results contain only selection and display fields.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [HRAdmin, AssetManager, AssetSettlement, AssetTemplateAdmin, SuperAdmin]
+      parameters:
+        - in: query
+          name: scope
+          required: true
+          schema: { type: string, enum: [upload_owner, payee, member, main_account, audit_actor] }
+        - in: query
+          name: q
+          schema: { type: string, maxLength: 80 }
+        - in: query
+          name: status
+          description: Optional membership status filter for the member scope.
+          schema: { type: string, enum: [pending, active, disabled, merged] }
+      responses:
+        '200':
+          description: Matching personnel in match order with a total count. An empty payee query shows up to fifty recent profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [items, total]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [user_id, name, username]
+                          properties:
+                            user_id: { type: integer, format: int64 }
+                            name: { type: string }
+                            username: { type: string }
+                            personnel_no: { type: string }
+                            worker_type: { type: string }
+                            job_grade: { type: string }
+                            status: { type: string }
+                      total: { type: integer, minimum: 0 }
+        '400': { description: Invalid scope or query }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden for the requested scope }
   /v1/asset-workbench/people-lookup:
     get:
       summary: Search people for workbench access
@@ -16815,6 +16869,10 @@ paths:
           description: Uploader name/account filter.
           schema: { type: string }
         - in: query
+          name: owner_user_id
+          description: Exact uploader user ID. Non-manager users may only query their own ID.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - in: query
           name: operation_source
           description: Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements.
           schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }
@@ -16936,6 +16994,10 @@ paths:
         - in: query
           name: owner
           schema: { type: string }
+        - in: query
+          name: owner_user_id
+          description: Exact uploader user ID. Non-manager users may only query their own ID.
+          schema: { type: integer, format: int64, minimum: 1 }
         - in: query
           name: operation_source
           schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }

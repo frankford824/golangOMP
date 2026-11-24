@@ -3526,7 +3526,7 @@ body.aw-submission-dialog-locked {
 .aw-grade-queue__list--scroll {
   max-height: min(520px, 58vh);
   overflow: auto;
-  padding-right: 2px;
+  padding: var(--aw-space-1);
 }
 
 .aw-grade-queue__item {
@@ -5525,7 +5525,8 @@ body.aw-submission-dialog-locked {
 
 .aw-personnel-picker__result:hover,
 .aw-personnel-picker__result:focus-visible,
-.aw-personnel-picker__result[aria-selected='true'] {
+.aw-personnel-picker__result[aria-selected='true'],
+.aw-personnel-picker__result[data-highlighted='true'] {
   border-color: var(--aw-accent);
   background: color-mix(in srgb, var(--aw-accent) 6%, var(--aw-surface-raised));
   outline: none;
@@ -6792,6 +6793,23 @@ a.aw-submission-tasks__row:hover {
   border-top: 1px solid var(--aw-hairline);
   color: var(--aw-ink-muted);
   font-size: var(--aw-font-size-sm);
+}
+
+.aw-personnel-autocomplete {
+  position: relative;
+  min-width: 0;
+}
+
+.aw-personnel-autocomplete__menu {
+  position: absolute;
+  inset: calc(100% + var(--aw-space-1)) auto auto 0;
+  width: min(21rem, calc(100vw - 2rem));
+  max-width: none;
+  z-index: 30;
+}
+
+.aw-personnel-autocomplete__menu .aw-personnel-picker__results {
+  max-height: 18rem;
 }
 
 .aw-upload-ledger__filters label {
@@ -11252,8 +11270,8 @@ a.aw-submission-tasks__row:hover {
 
 .aw-personnel-filters {
   display: grid;
+  min-width: 0;
   gap: var(--aw-space-2);
-  margin-bottom: var(--aw-space-2);
 }
 
 .aw-settings-disclosure > summary {

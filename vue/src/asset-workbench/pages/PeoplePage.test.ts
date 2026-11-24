@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   bootstrap: vi.fn(),
   listProfiles: vi.fn(),
+  suggestPersonnel: vi.fn(),
   getProfile: vi.fn(),
   upsertProfile: vi.fn(),
   upsertMyProfile: vi.fn(),
@@ -76,8 +77,39 @@ describe('PeoplePage', () => {
     mocks.bootstrap.mockResolvedValue({ capabilities: ['asset.workbench.profile.manage'] })
     mocks.listProfiles.mockResolvedValue({ items: [maskedProfile], total: 1 })
     mocks.getProfile.mockResolvedValue(completeProfile)
+    mocks.suggestPersonnel.mockResolvedValue({ items: [], total: 0 })
     mocks.upsertProfile.mockResolvedValue(completeProfile)
     mocks.upsertMyProfile.mockResolvedValue(completeProfile)
+  })
+
+  it('searches beyond the loaded roster and fetches full details only after a result is chosen', async () => {
+    vi.useFakeTimers()
+    const suggested = { user_id: 331, name: '测试张明', username: 'qa-331', personnel_no: 'Q-331', worker_type: 'fulltime', job_grade: 'P1', status: 'active' }
+    mocks.suggestPersonnel.mockResolvedValue({ items: [suggested], total: 1 })
+    mocks.getProfile.mockImplementation(async (userId) => userId === 331
+      ? { ...completeProfile, user_id: 331, real_name: suggested.name }
+      : completeProfile)
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings/people', component: PeoplePage }] })
+    await router.push('/settings/people')
+    const wrapper = mount(PeoplePage, { global: { plugins: [router] } })
+    try {
+      await flushPromises()
+      const input = wrapper.get('input[aria-label="搜索人员名单"]')
+      expect(wrapper.get('.aw-grade-queue__list--scroll').find('input').exists()).toBe(false)
+      await input.setValue('zhang')
+      await vi.advanceTimersByTimeAsync(220)
+      await flushPromises()
+      expect(mocks.suggestPersonnel).toHaveBeenLastCalledWith('payee', 'zhang', expect.any(AbortSignal))
+      expect(mocks.getProfile).toHaveBeenCalledTimes(1)
+      expect(wrapper.get('.aw-grade-queue__item').text()).toContain('编号 Q-331')
+      await wrapper.get('.aw-grade-queue__item').trigger('click')
+      await flushPromises()
+      expect(mocks.getProfile).toHaveBeenLastCalledWith(331)
+      expect(wrapper.get('.aw-grade-editor h3').text()).toBe('测试张明')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
   })
 
   it('saves the selected pending person without assigning a grade or editing the admin profile', async () => {

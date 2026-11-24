@@ -65,6 +65,16 @@ func (s *Service) driveOwnerFilter(actor domain.RequestActor) *int64 {
 	return &id
 }
 
+func (s *Service) applyDriveOwnerScope(actor domain.RequestActor, filter *repo.AssetWorkbenchDriveFilter) *domain.AppError {
+	if own := s.driveOwnerFilter(actor); own != nil {
+		if filter.OwnerUserID != nil && *filter.OwnerUserID != *own {
+			return domain.NewAppError(domain.ErrCodePermissionDenied, "You can only view your own uploads.", nil)
+		}
+		filter.OwnerUserID = own
+	}
+	return nil
+}
+
 func normalizeDrivePage(page, pageSize int) (int, int) {
 	if page <= 0 {
 		page = 1
@@ -128,7 +138,9 @@ func (s *Service) ListDriveUploadDays(ctx context.Context, actor domain.RequestA
 	if err != nil || start.Year() < 1000 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "month must be a valid YYYY-MM.", nil)
 	}
-	filter.OwnerUserID = s.driveOwnerFilter(actor)
+	if appErr := s.applyDriveOwnerScope(actor, &filter); appErr != nil {
+		return nil, appErr
+	}
 	days, err := s.repo.DriveUploadDays(ctx, filter, start)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load upload calendar.", nil)
@@ -144,7 +156,9 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 	if appErr := validateDriveOperationSource(filter.OperationSource); appErr != nil {
 		return nil, appErr
 	}
-	filter.OwnerUserID = s.driveOwnerFilter(actor)
+	if appErr := s.applyDriveOwnerScope(actor, &filter); appErr != nil {
+		return nil, appErr
+	}
 	filter.Keyword = strings.TrimSpace(filter.Keyword)
 	filter.OwnerKeyword = strings.TrimSpace(filter.OwnerKeyword)
 	filter.OperationSource = strings.TrimSpace(filter.OperationSource)

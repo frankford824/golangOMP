@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, useId, watch } from 'vue'
 
-import { assetWorkbenchApi, type AssetWorkbenchProfile } from '@aw/shared/api/assetWorkbenchApi'
+import type { PersonnelSuggestion } from '@aw/shared/api/assetWorkbenchApi'
+import { usePersonnelSuggestions } from '@aw/shared/composables/usePersonnelSuggestions'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
 
 const props = withDefaults(defineProps<{
@@ -11,78 +12,70 @@ const props = withDefaults(defineProps<{
   clearable?: boolean
   compact?: boolean
 }>(), {
-  hint: '按姓名或人员编号查找',
+  hint: '按姓名、拼音或人员编号查找',
   clearable: false,
   compact: false,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: number]
-  selected: [profile: AssetWorkbenchProfile]
+  selected: [person: PersonnelSuggestion]
   cleared: []
 }>()
 
 const dialogOpen = ref(false)
 const query = ref('')
-const loading = ref(false)
-const error = ref('')
-const profiles = ref<AssetWorkbenchProfile[]>([])
-const selectedProfile = ref<AssetWorkbenchProfile | null>(null)
+const { items, total, error, loading, active, activeIndex, search, step } = usePersonnelSuggestions('payee', query, dialogOpen)
+const selectedPerson = ref<PersonnelSuggestion | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
+const results = ref<HTMLElement | null>(null)
+const listId = useId()
 
 const selectedLabel = computed(() => {
-  if (selectedProfile.value?.user_id === props.modelValue) {
-    return `${selectedProfile.value.real_name || '未填写姓名'} · 编号 ${selectedProfile.value.user_id}`
+  if (selectedPerson.value?.user_id === props.modelValue) {
+    return `${selectedPerson.value.name} · 编号 ${selectedPerson.value.personnel_no || selectedPerson.value.user_id}`
   }
   return props.modelValue > 0 ? `人员编号 ${props.modelValue}` : '尚未选择人员'
 })
 
 watch(() => props.modelValue, (value) => {
-  if (selectedProfile.value && selectedProfile.value.user_id !== value) selectedProfile.value = null
+  if (selectedPerson.value && selectedPerson.value.user_id !== value) selectedPerson.value = null
 })
 
 async function openPicker() {
-  dialogOpen.value = true
   query.value = ''
-  await loadProfiles()
+  dialogOpen.value = true
   await nextTick()
   searchInput.value?.focus()
 }
 
 function closePicker() {
   dialogOpen.value = false
-  error.value = ''
 }
 
-async function loadProfiles() {
-  loading.value = true
-  error.value = ''
-  try {
-    const value = query.value.trim()
-    const isPersonnelCode = /^\d+$/.test(value)
-    const result = await assetWorkbenchApi.listProfiles({
-      page: 1,
-      page_size: 50,
-      ...(value ? (isPersonnelCode ? { user_id: Number(value) } : { q: value }) : {}),
-    })
-    profiles.value = result.items
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '人员列表加载失败'
-    profiles.value = []
-  } finally {
-    loading.value = false
+async function handleSearchKey(event: KeyboardEvent) {
+  if (event.isComposing) return
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && items.value.length) {
+    event.preventDefault()
+    step(event.key === 'ArrowDown' ? 1 : -1)
+    await nextTick()
+    results.value?.querySelector('[data-highlighted="true"]')?.scrollIntoView({ block: 'nearest' })
+  } else if (event.key === 'Enter') {
+    event.preventDefault()
+    if (active.value) selectPerson(active.value)
+    else void search()
   }
 }
 
-function selectProfile(profile: AssetWorkbenchProfile) {
-  selectedProfile.value = profile
-  emit('update:modelValue', profile.user_id)
-  emit('selected', profile)
+function selectPerson(person: PersonnelSuggestion) {
+  selectedPerson.value = person
+  emit('update:modelValue', person.user_id)
+  emit('selected', person)
   closePicker()
 }
 
 function clearSelection() {
-  selectedProfile.value = null
+  selectedPerson.value = null
   emit('update:modelValue', 0)
   emit('cleared')
 }
@@ -103,37 +96,45 @@ function clearSelection() {
     </div>
 
     <div v-if="dialogOpen" class="aw-dialog-backdrop" role="presentation" @click.self="closePicker">
-      <section class="aw-confirm-dialog aw-personnel-picker__dialog" role="dialog" aria-modal="true" :aria-labelledby="`personnel-picker-${label}`" @keydown.esc.prevent="closePicker">
+      <section class="aw-confirm-dialog aw-personnel-picker__dialog" role="dialog" aria-modal="true" :aria-labelledby="`personnel-picker-${label}`" @keydown.esc="!$event.isComposing && closePicker()">
         <div>
           <p class="aw-eyebrow">人员查找</p>
           <h3 :id="`personnel-picker-${label}`">{{ label }}</h3>
-          <p class="aw-copy">选择姓名后，系统会自动使用对应人员编码，不需要手工记忆编号。</p>
+          <p class="aw-copy">输入姓名片段、拼音或编号查找。请核对姓名和人员编号后选择。</p>
         </div>
 
-        <form class="aw-personnel-picker__search" @submit.prevent="loadProfiles">
-          <input ref="searchInput" v-model="query" type="search" placeholder="输入姓名或人员编号" aria-label="搜索人员" />
-          <button class="aw-secondary-button" type="submit" :disabled="loading">{{ loading ? '查找中…' : '查找' }}</button>
-        </form>
+        <div class="aw-personnel-picker__search">
+          <input ref="searchInput" v-model="query" type="search" maxlength="80" placeholder="输入姓名、拼音或人员编号"
+            aria-label="搜索人员" role="combobox" aria-autocomplete="list" :aria-expanded="items.length > 0"
+            :aria-controls="items.length ? listId : undefined"
+            :aria-activedescendant="active ? listId + '-' + active.user_id : undefined" @keydown="handleSearchKey" />
+          <button class="aw-secondary-button" type="button" @click="search">查找</button>
+        </div>
 
-        <p v-if="error" class="aw-inline-alert aw-inline-alert--warning">{{ error }}</p>
-        <div v-else-if="profiles.length" class="aw-personnel-picker__results" role="listbox" aria-label="人员搜索结果">
+        <p v-if="loading" class="aw-copy" role="status">正在查找人员…</p>
+        <p v-else-if="error" class="aw-inline-alert aw-inline-alert--warning" role="status">{{ error }}</p>
+        <div v-if="items.length" :id="listId" ref="results" class="aw-personnel-picker__results" role="listbox" aria-label="人员搜索结果">
           <button
-            v-for="profile in profiles"
-            :key="profile.user_id"
+            v-for="(person, index) in items"
+            :id="listId + '-' + person.user_id"
+            :key="person.user_id"
             class="aw-personnel-picker__result"
             type="button"
             role="option"
-            :aria-selected="profile.user_id === modelValue"
-            @click="selectProfile(profile)"
+            :aria-selected="person.user_id === modelValue"
+            :data-highlighted="index === activeIndex || undefined"
+            @click="selectPerson(person)"
           >
             <span>
-              <strong>{{ profile.real_name || '未填写姓名' }}</strong>
-              <small>人员编号 {{ profile.user_id }} · {{ workerTypeMeta(profile.worker_type).label }} · {{ profile.job_grade || '未定级' }}</small>
+              <strong>{{ person.name }}</strong>
+              <small>人员编号 {{ person.personnel_no || person.user_id }} · {{ workerTypeMeta(person.worker_type).label }} · {{ person.job_grade || '未定级' }}</small>
+              <small v-if="person.username && person.username !== person.name">{{ person.username }}</small>
             </span>
-            <span :class="chipClass(profileStatusMeta(profile.status).tone)">{{ profileStatusMeta(profile.status).label }}</span>
+            <span :class="chipClass(profileStatusMeta(person.status).tone)">{{ profileStatusMeta(person.status).label }}</span>
           </button>
         </div>
-        <p v-else-if="!loading" class="aw-copy">没有找到匹配人员，请检查姓名或编号。</p>
+        <p v-if="!loading && !error && !items.length" class="aw-copy" role="status">没有找到匹配人员，请检查姓名或编号。</p>
+        <p v-if="total > items.length" class="aw-copy">共 {{ total }} 人，继续输入可缩小范围。</p>
 
         <div class="aw-inline-actions">
           <button class="aw-secondary-button" type="button" @click="closePicker">取消</button>
