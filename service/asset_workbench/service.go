@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -4191,11 +4192,13 @@ func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.Requ
 	if appErr != nil {
 		return nil, appErr
 	}
-	if selfMoveUserID != 0 && (item.PayeeUserID != selfMoveUserID ||
-		item.QCStatus != domain.AssetWorkbenchSubmissionStatusSubmitted ||
-		(item.PricingStatus != domain.AssetWorkbenchPricingStatusPendingGrade && item.PricingStatus != domain.AssetWorkbenchPricingStatusUnpriced) ||
-		item.GrossAmount != 0) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "You can only move your own works before pricing and quality review.", nil)
+	if selfMoveUserID != 0 {
+		if item.PayeeUserID != selfMoveUserID {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "You can only move your own uploaded works.", nil)
+		}
+		if item.QCStatus != domain.AssetWorkbenchSubmissionStatusSubmitted {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only works awaiting quality review can be moved by their submitter.", nil)
+		}
 	}
 	if s.oss == nil || !s.oss.Enabled() {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "OSS direct move is not enabled.", nil)
@@ -4203,10 +4206,6 @@ func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.Requ
 	repriced, appErr := s.buildSubmissionItemForDifficulty(ctx, item, directory.DifficultyClass)
 	if appErr != nil {
 		return nil, appErr
-	}
-
-	if selfMoveUserID != 0 && (repriced.PricingStatus == domain.AssetWorkbenchPricingStatusPriced || repriced.GrossAmount != 0) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "The target category would price this work. Ask an asset manager to move it.", nil)
 	}
 
 	now := s.nowFn().UTC()
@@ -4259,6 +4258,17 @@ func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.Requ
 			updatedFiles = append(updatedFiles, updated)
 			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileMoved, domain.AssetWorkbenchEntitySubmissionFile, &next.ID, files[index], updated, reason); err != nil {
 				return err
+			}
+		}
+		if selfMoveUserID != 0 {
+			current, err := s.repo.GetSubmissionItemForUpdate(ctx, tx, item.ID)
+			if err != nil {
+				return err
+			}
+			// OSS copying runs outside the transaction. Discard the move if the
+			// original pricing or work details changed before the write.
+			if !reflect.DeepEqual(current, item) {
+				return domain.NewAppError(domain.ErrCodeConflict, "Submission file or work changed during the move. Refresh and try again.", nil)
 			}
 		}
 		updatedItem, err := s.repo.UpdateSubmissionItemEditableFields(ctx, tx, repriced)

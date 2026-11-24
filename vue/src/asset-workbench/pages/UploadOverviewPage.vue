@@ -1097,7 +1097,7 @@ onBeforeUnmount(() => {
             </select>
             <button class="aw-secondary-button" type="button" :disabled="actionLoading || selectionLoading || filterChangesPending || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
           </template>
-          <span v-if="!canManageDrive" class="aw-copy">仅可移动本人未计价、未质检的日常作品。文件夹作品请勾选全部文件。</span>
+          <span v-if="!canManageDrive" class="aw-copy">仅可移动本人未质检、未进入结算批次的日常作品，移动后按目标分类重新计件。文件夹作品请勾选全部文件。</span>
           <input v-model.trim="actionReason" placeholder="删除原因或移动备注" aria-label="操作原因" />
           <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || selectionLoading || !actionReason.trim() || filterChangesPending || deletionDateRangeMissing" :title="filterChangesPending ? '筛选条件已改变，请先查询再选择' : deletionDateRangeMissing ? '请先查询明确的开始、结束日期范围' : '核对整件作品后再确认删除'" @click="deleteSelectedFiles">
             <Trash2 :size="15" aria-hidden="true" />

@@ -3759,7 +3759,7 @@ onBeforeUnmount(() => {
               <option :value="0">移动到…</option>
               <option v-for="dir in directoryOptions" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
             </select>
-            <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || selectionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles()">
+            <button class="aw-secondary-button" type="button" title="移动后按目标目录重新计件" :disabled="fileMutationLoading || selectionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles()">
               {{ fileMutationLoading ? '处理中…' : '移动' }}
             </button>
           </template>
@@ -4252,7 +4252,7 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <div class="aw-inline-actions">
-                <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || selectionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles(selectedFile.id)">
+                <button class="aw-secondary-button" type="button" title="移动后按目标目录重新计件" :disabled="fileMutationLoading || selectionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles(selectedFile.id)">
                   {{ fileMutationLoading ? '处理中…' : '移动文件' }}
                 </button>
               </div>

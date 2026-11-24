@@ -17462,7 +17462,7 @@ export interface paths {
         put?: never;
         /**
          * Batch move submission files to an upload directory
-         * @description Moves all active files of each selected submission item together. Submitters can move their own normal uploads before pricing and quality review, provided the target does not price the work. Asset managers can also move eligible priced works. Supplement and settlement-locked items are rejected. The operation updates directory and pricing snapshots, preserves item and page counts, refreshes submission totals, and records audit events.
+         * @description Moves all active files of each selected submission item together. Submitters can move their own normal uploads awaiting quality review, including priced works. Supplement and settlement-locked items are rejected. The operation replaces the original difficulty and pricing with the target directory's difficulty and recalculated amount on the same item, preserves item and page counts, refreshes submission totals, and records audit events.
          */
         post: {
             parameters: {

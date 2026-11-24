@@ -2179,7 +2179,7 @@ func (r *batchFileMutationRepo) UpdateSubmissionFileLocation(_ context.Context, 
 	if current.ObjectKey != previousObjectKey || (selfMoveUserID != 0 &&
 		(current.OwnerUserID != selfMoveUserID || item.PayeeUserID != selfMoveUserID ||
 			item.QCStatus != domain.AssetWorkbenchSubmissionStatusSubmitted ||
-			item.PricingStatus == domain.AssetWorkbenchPricingStatusPriced || item.GrossAmount != 0)) {
+			item.EntryKind == domain.AssetWorkbenchSubmissionEntryKindSupplement)) {
 		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission file or work changed during the move. Refresh and try again.", nil)
 	}
 	copyFile := *file
@@ -2258,6 +2258,10 @@ func (r *batchFileMutationRepo) GetSubmissionItem(_ context.Context, itemID int6
 	}, nil
 }
 
+func (r *batchFileMutationRepo) GetSubmissionItemForUpdate(ctx context.Context, _ repo.Tx, itemID int64) (*domain.AssetWorkbenchSubmissionItem, error) {
+	return r.GetSubmissionItem(ctx, itemID)
+}
+
 func (r *batchFileMutationRepo) ListSubmissionFiles(_ context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
 	items := []*domain.AssetWorkbenchSubmissionFile{}
 	for _, file := range r.files {
@@ -2327,10 +2331,14 @@ func (r *batchFileMutationRepo) AppendEvent(_ context.Context, _ repo.Tx, event 
 }
 
 type rollbackBatchFileTxRunner struct {
-	repo *batchFileMutationRepo
+	repo   *batchFileMutationRepo
+	before func(*batchFileMutationRepo)
 }
 
 func (r rollbackBatchFileTxRunner) RunInTx(_ context.Context, fn func(tx repo.Tx) error) error {
+	if r.before != nil {
+		r.before(r.repo)
+	}
 	files := map[int64]*domain.AssetWorkbenchSubmissionFile{}
 	for id, file := range r.repo.files {
 		if file == nil {
@@ -4680,38 +4688,51 @@ func TestBatchMoveFilesRejectsSettlementLockedPricedWork(t *testing.T) {
 	}
 }
 
-func TestBatchMoveFilesSubmitterCannotChangePieceworkPay(t *testing.T) {
+func TestBatchMoveFilesSubmitterScopeAndPricing(t *testing.T) {
+	cPrice := &domain.AssetWorkbenchPriceMatrix{
+		ID: 88, WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "P1", DifficultyClass: "C", UnitPrice: 0.5,
+	}
 	for _, tc := range []struct {
-		name    string
-		alter   func(*batchFileMutationRepo, *domain.RequestActor)
-		failure string
+		name         string
+		alter        func(*batchFileMutationRepo, *domain.RequestActor)
+		beforeCommit func(*batchFileMutationRepo)
+		wantStatus   string
+		wantGross    float64
+		failure      string
 	}{
 		{name: "complete pending-grade work", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
 			r.items[8001].JobGradeSnapshot = ""
 			r.items[8001].PricingStatus = domain.AssetWorkbenchPricingStatusPendingGrade
-		}},
+		}, wantStatus: domain.AssetWorkbenchPricingStatusPendingGrade},
+		{name: "priced work recalculated from A to C", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
+			r.items[8001].PricingStatus = domain.AssetWorkbenchPricingStatusPriced
+			r.items[8001].GrossAmount = 1.5
+			r.price = cPrice
+		}, wantStatus: domain.AssetWorkbenchPricingStatusPriced, wantGross: 0.5},
+		{name: "unpriced work becomes priced", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
+			r.price = cPrice
+		}, wantStatus: domain.AssetWorkbenchPricingStatusPriced, wantGross: 0.5},
+		{name: "concurrent pricing change during copy", beforeCommit: func(r *batchFileMutationRepo) {
+			r.items[8001].GrossAmount = 1.75
+			r.items[8001].PricingStatus = domain.AssetWorkbenchPricingStatusPriced
+		}, failure: "file or work changed during the move"},
 		{name: "another owner in the same work", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
 			r.files[502].OwnerUserID = 98
 		}, failure: "only move your own uploaded works"},
 		{name: "different payee", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
 			r.items[8001].PayeeUserID = 98
-		}, failure: "before pricing and quality review"},
-		{name: "priced work", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
-			r.items[8001].PricingStatus = domain.AssetWorkbenchPricingStatusPriced
-		}, failure: "before pricing and quality review"},
+		}, failure: "only move your own uploaded works"},
 		{name: "reviewed work", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
 			r.items[8001].QCStatus = domain.AssetWorkbenchSubmissionStatusChecked
-		}, failure: "before pricing and quality review"},
-		{name: "priced destination", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
-			r.price = &domain.AssetWorkbenchPriceMatrix{
-				ID: 88, WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "P1", DifficultyClass: "B", UnitPrice: 0.63,
-			}
-		}, failure: "target category would price"},
+		}, failure: "awaiting quality review"},
 		{name: "supplement", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
 			r.items[8001].EntryKind = domain.AssetWorkbenchSubmissionEntryKindSupplement
 		}, failure: "managed through their supplement record"},
 		{name: "settlement batch", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
 			r.items[8001].SettlementStatus = domain.AssetWorkbenchSettlementStatusInBatch
+		}, failure: "settlement batch attachment"},
+		{name: "settled work", alter: func(r *batchFileMutationRepo, _ *domain.RequestActor) {
+			r.items[8001].SettlementStatus = domain.AssetWorkbenchSettlementStatusSettled
 		}, failure: "settlement batch attachment"},
 		{name: "stale legacy submitter role", alter: func(_ *batchFileMutationRepo, actor *domain.RequestActor) {
 			actor.EffectiveAccess.Permissions = []domain.PermissionCode{domain.PermissionAssetWorkbenchUse}
@@ -4721,7 +4742,7 @@ func TestBatchMoveFilesSubmitterCannotChangePieceworkPay(t *testing.T) {
 			ossTransport := useRecordingOSSTransport(t)
 			workbenchRepo := &batchFileMutationRepo{
 				directories: map[int64]*domain.AssetWorkbenchUploadDirectory{
-					11: {ID: 11, Name: "B类", OSSPrefix: "class-b", DifficultyClass: "B", Enabled: true},
+					11: {ID: 11, Name: "C类", OSSPrefix: "class-c", DifficultyClass: "C", Enabled: true},
 				},
 				files: map[int64]*domain.AssetWorkbenchSubmissionFile{
 					501: {ID: 501, OwnerUserID: 99, SubmissionID: 9001, SubmissionItemID: 8001, ObjectKey: "uploads/a.jpg"},
@@ -4729,7 +4750,7 @@ func TestBatchMoveFilesSubmitterCannotChangePieceworkPay(t *testing.T) {
 				},
 				items: map[int64]*domain.AssetWorkbenchSubmissionItem{
 					8001: {
-						ID: 8001, SubmissionID: 9001, PayeeUserID: 99, OrderNo: "AWF", DifficultyClass: "C",
+						ID: 8001, SubmissionID: 9001, PayeeUserID: 99, OrderNo: "AWF", DifficultyClass: "A",
 						PageCount: 1, ItemCount: 1, EntryKind: domain.AssetWorkbenchSubmissionEntryKindNormal,
 						WorkerTypeSnapshot: domain.AssetWorkbenchWorkerTypeParttime, JobGradeSnapshot: "P1",
 						BusinessMonth: "2026-07", SubmittedAt: time.Date(2026, 7, 3, 8, 0, 0, 0, time.UTC),
@@ -4743,16 +4764,27 @@ func TestBatchMoveFilesSubmitterCannotChangePieceworkPay(t *testing.T) {
 				ID: 99, Roles: []domain.Role{domain.RoleAssetSubmitter},
 				EffectiveAccess: &domain.EffectiveAccess{Permissions: []domain.PermissionCode{domain.PermissionAssetWorkbenchSubmit}},
 			}
-			tc.alter(workbenchRepo, &actor)
-			svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}), WithOSSDirect(testWorkbenchOSSDirect()))
+			if tc.alter != nil {
+				tc.alter(workbenchRepo, &actor)
+			}
+			before := *workbenchRepo.items[8001]
+			txRunner := rollbackBatchFileTxRunner{repo: workbenchRepo, before: tc.beforeCommit}
+			svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, txRunner), WithOSSDirect(testWorkbenchOSSDirect()))
 			result, appErr := svc.BatchMoveFiles(context.Background(), actor, BatchMoveFilesParams{FileIDs: []int64{501, 502}, UploadDirectoryID: 11})
 			if tc.failure == "" {
 				if appErr != nil || len(result.Failures) != 0 || len(result.Files) != 2 {
 					t.Fatalf("BatchMoveFiles() result=%+v error=%+v", result, appErr)
 				}
 				item := workbenchRepo.items[8001]
-				if item.DifficultyClass != "B" || item.PageCount != 1 || item.ItemCount != 1 || item.GrossAmount != 0 || item.PricingStatus != domain.AssetWorkbenchPricingStatusPendingGrade {
+				if item.ID != before.ID || item.DifficultyClass != "C" || item.PageCount != before.PageCount ||
+					item.ItemCount != before.ItemCount || item.GrossAmount != tc.wantGross || item.PricingStatus != tc.wantStatus {
 					t.Fatalf("unexpected move result: %+v", item)
+				}
+				if len(workbenchRepo.refreshed) != 1 || workbenchRepo.refreshed[0] != item.SubmissionID {
+					t.Fatalf("submission totals not refreshed: %v", workbenchRepo.refreshed)
+				}
+				if before.PricingStatus == domain.AssetWorkbenchPricingStatusPriced {
+					assertBatchMoveMigratesDifficultyTotals(t, &before, item)
 				}
 				if len(ossTransport.snapshot()) != 4 || len(workbenchRepo.events) != 3 {
 					t.Fatalf("expected two copies, two deletions and three audit events: %+v %+v", ossTransport.snapshot(), workbenchRepo.events)
@@ -4767,11 +4799,50 @@ func TestBatchMoveFilesSubmitterCannotChangePieceworkPay(t *testing.T) {
 				!strings.Contains(result.Failures[0].Reason, tc.failure) || !strings.Contains(result.Failures[1].Reason, tc.failure) {
 				t.Fatalf("BatchMoveFiles() result=%+v, want failure %q for both files", result, tc.failure)
 			}
-			if len(ossTransport.snapshot()) != 0 || len(workbenchRepo.updatedFiles) != 0 || len(workbenchRepo.events) != 0 {
-				t.Fatal("rejected work reached object storage or wrote file or audit data")
+			requests := ossTransport.snapshot()
+			if tc.beforeCommit == nil {
+				if len(requests) != 0 {
+					t.Fatal("rejected work reached object storage")
+				}
+			} else {
+				if len(requests) != 4 || requests[2].Method != http.MethodDelete || requests[3].Method != http.MethodDelete ||
+					requests[2].Path != requests[0].Path || requests[3].Path != requests[1].Path {
+					t.Fatalf("stale move should clean up only the copied objects: %+v", requests)
+				}
+				if workbenchRepo.items[8001].GrossAmount != 1.75 {
+					t.Fatal("concurrent pricing change was overwritten")
+				}
+			}
+			if len(workbenchRepo.updatedFiles) != 0 || len(workbenchRepo.events) != 0 || len(workbenchRepo.refreshed) != 0 {
+				t.Fatal("rejected work wrote file, audit or totals data")
 			}
 		})
 	}
+}
+
+func assertBatchMoveMigratesDifficultyTotals(t *testing.T, before, after *domain.AssetWorkbenchSubmissionItem) {
+	t.Helper()
+	svc := NewService(Config{Timezone: "Asia/Shanghai"})
+	svc.repo = &settlementReportRepo{}
+	otherA := &domain.AssetWorkbenchSubmissionItem{ID: 8101, PayeeUserID: before.PayeeUserID, DifficultyClass: "A", PageCount: 1, GrossAmount: 2}
+	otherC := &domain.AssetWorkbenchSubmissionItem{ID: 8102, PayeeUserID: before.PayeeUserID, DifficultyClass: "C", PageCount: 1, GrossAmount: 0.25}
+	check := func(item *domain.AssetWorkbenchSubmissionItem, countA int, grossA float64, countC int, grossC float64) {
+		t.Helper()
+		report, appErr := svc.buildSettlementReport(context.Background(), item.BusinessMonth,
+			[]*domain.AssetWorkbenchSubmissionItem{item, otherA, otherC}, nil, nil)
+		if appErr != nil {
+			t.Fatalf("build settlement report: %+v", appErr)
+		}
+		metrics := report.Totals.DifficultyMetrics
+		if len(metrics) != 2 ||
+			metrics[0].DifficultyClass != "A" || metrics[0].ItemCount != countA || metrics[0].GrossAmount != grossA ||
+			metrics[1].DifficultyClass != "C" || metrics[1].ItemCount != countC || metrics[1].GrossAmount != grossC ||
+			report.Totals.ItemCount != 3 || report.Totals.GrossAmount != grossA+grossC {
+			t.Fatalf("unexpected totals for %s: %+v", item.DifficultyClass, report.Totals)
+		}
+	}
+	check(before, 2, 3.5, 1, 0.25)
+	check(after, 1, 2, 2, 0.75)
 }
 
 func (r *batchFileMutationRepo) GetProfileByUserID(context.Context, int64) (*domain.AssetWorkbenchProfile, error) {
