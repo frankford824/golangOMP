@@ -9,6 +9,8 @@ const listDeductionRules = vi.hoisted(() => vi.fn())
 const listWelfareRules = vi.hoisted(() => vi.fn())
 const listPromoCoupons = vi.hoisted(() => vi.fn())
 const updatePriceMatrix = vi.hoisted(() => vi.fn())
+const createPriceMatrix = vi.hoisted(() => vi.fn())
+const supersedePriceMatrix = vi.hoisted(() => vi.fn())
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@aw/shared/api/assetWorkbenchApi')>()
@@ -22,6 +24,8 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
       listWelfareRules,
       listPromoCoupons,
       updatePriceMatrix,
+      createPriceMatrix,
+      supersedePriceMatrix,
     },
   }
 })
@@ -67,12 +71,15 @@ describe('CostCenterPage price rule actions', () => {
     vi.clearAllMocks()
     listDifficultyClassesAdmin.mockResolvedValue([
       { id: 1, code: 'C', name: 'C', description: '', enabled: true, sort_order: 1 },
+      { id: 2, code: 'D', name: 'A+视频', description: '', enabled: true, sort_order: 2 },
     ])
     listPriceMatrix.mockResolvedValue({ items: [enabledRule, disabledRule], total: 2, page: 1, page_size: 20 })
     listDeductionRules.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     listWelfareRules.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     listPromoCoupons.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     updatePriceMatrix.mockResolvedValue({ ...enabledRule, enabled: false })
+    createPriceMatrix.mockResolvedValue({ ...enabledRule, id: 43 })
+    supersedePriceMatrix.mockResolvedValue({ ...enabledRule, id: 44 })
   })
 
   it('shows price rules from separate API pages in one grid', async () => {
@@ -92,6 +99,75 @@ describe('CostCenterPage price rule actions', () => {
     expect(wrapper.find('button[aria-label="停用单价规则：全职 / P1 / C"]').exists()).toBe(true)
     expect(wrapper.find('button[aria-label="停用单价规则：兼职 / J1 / D"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="单价规则分页"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('copies a price draft to an editable target and confirms creation without updating the source', async () => {
+    const wrapper = shallowMount(CostCenterPage, { global: { stubs: { WorkbenchDataGrid: WorkbenchDataGridStub, AsyncBoundary: true } } })
+    await flushPromises()
+    await textButton(wrapper, '进入单价设置').trigger('click')
+    await textButton(wrapper, '修改价格').trigger('click')
+
+    const form = wrapper.get('.aw-pricing-section .aw-form-grid')
+    const from = form.findAll('input[type="date"]')[0]!
+    await from.setValue('2026-11-01')
+    expect(form.findAll('input[disabled]')).toHaveLength(3)
+
+    await textButton(wrapper, '复制为新规则').trigger('click')
+    expect(wrapper.text()).toContain('复制自 #41')
+    expect((form.get('input[type="number"]').element as HTMLInputElement).value).toBe('0.17')
+    expect((from.element as HTMLInputElement).value).toBe('2026-11-01')
+    await textButton(wrapper, '预览新规则').trigger('click')
+    expect(wrapper.text()).toContain('请更改人员类型、岗级或难度')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+
+    const [worker, grade, difficulty] = form.findAll('select')
+    await worker!.setValue('parttime')
+    await grade!.setValue('J2')
+    await difficulty!.setValue('D')
+    await form.get('input[type="number"]').setValue('2')
+    await form.findAll('input[type="date"]')[1]!.setValue('2026-11-23')
+    await textButton(wrapper, '预览新规则').trigger('click')
+
+    const dialog = wrapper.get('[role="dialog"][aria-labelledby="price-confirm-title"]')
+    expect(dialog.text()).toContain('确认新增单价规则')
+    expect(dialog.text()).toContain('兼职 / J2 / D')
+    expect(dialog.text()).toContain('2026-11-01 至 2026-11-23')
+    expect(createPriceMatrix).not.toHaveBeenCalled()
+    await textButton(wrapper, '返回修改').trigger('click')
+    expect((grade!.element as HTMLSelectElement).value).toBe('J2')
+    await textButton(wrapper, '预览新规则').trigger('click')
+    await textButton(wrapper, '确认新增').trigger('click')
+    await flushPromises()
+
+    expect(createPriceMatrix).toHaveBeenCalledExactlyOnceWith({
+      worker_type: 'parttime', job_grade: 'J2', difficulty_class: 'D', unit_price: 2,
+      effective_from: '2026-11-01T00:00:00+08:00', effective_to: '2026-11-23T23:59:59+08:00', remark: undefined,
+    })
+    expect(supersedePriceMatrix).not.toHaveBeenCalled()
+    expect(updatePriceMatrix).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('publishes a same-target price change as a new version of the selected rule', async () => {
+    const wrapper = shallowMount(CostCenterPage, { global: { stubs: { WorkbenchDataGrid: WorkbenchDataGridStub, AsyncBoundary: true } } })
+    await flushPromises()
+    await textButton(wrapper, '进入单价设置').trigger('click')
+    await textButton(wrapper, '修改价格').trigger('click')
+
+    const form = wrapper.get('.aw-pricing-section .aw-form-grid')
+    await form.get('input[type="number"]').setValue('0.5')
+    await form.findAll('input[type="date"]')[0]!.setValue('2026-11-25')
+    await textButton(wrapper, '预览并发布').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('2026-11-24')
+    await textButton(wrapper, '确认发布').trigger('click')
+    await flushPromises()
+
+    expect(supersedePriceMatrix).toHaveBeenCalledExactlyOnceWith(41, {
+      worker_type: 'fulltime', job_grade: 'P1', difficulty_class: 'C', unit_price: 0.5,
+      effective_from: '2026-11-25T00:00:00+08:00', effective_to: undefined, remark: undefined,
+    })
+    expect(createPriceMatrix).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
