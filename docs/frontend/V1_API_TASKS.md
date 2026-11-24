@@ -12816,11 +12816,11 @@ curl -X GET https://api.example.com/v1/asset-workbench/files/<file_id>/archive/e
 ### 简介
 支持方法: POST。
 
-- `POST`: Manager-only priced-work maintenance operation. All active files belonging to the same submission item must be selected together. The backend rejects settlement-locked items, copies the complete work into the target directory, updates directory snapshots, reprices the item using the target directory difficulty while preserving its item/page count, refreshes submission totals, records events, and best-effort removes old objects.
+- `POST`: Moves all active files of each selected submission item together. Submitters can move their own normal uploads before pricing and quality review, provided the target does not price the work. Asset managers can also move eligible priced works. Supplement and settlement-locked items are rejected. The operation updates directory and pricing snapshots, preserves item and page counts, refreshes submission totals, and records audit events.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: AssetManager, SuperAdmin。
+- `POST` 允许角色: AssetSubmitter, AssetManager, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema

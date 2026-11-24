@@ -181,6 +181,7 @@ func TestV8AssetWorkbenchUsesNarrowCapabilitiesForHighRiskSurfaces(t *testing.T)
 		{http.MethodPost, "/v1/asset-workbench/price-matrix", domain.PermissionAssetWorkbenchTemplates},
 		{http.MethodPatch, "/v1/asset-workbench/items/9/qc", domain.PermissionAssetWorkbenchQC},
 		{http.MethodPost, "/v1/asset-workbench/files/batch-move", domain.PermissionAssetWorkbenchQC},
+		{http.MethodPost, "/v1/asset-workbench/files/batch-move", domain.PermissionAssetWorkbenchSubmit},
 		{http.MethodPost, "/v1/asset-workbench/settlement/batches/4/confirm", domain.PermissionAssetWorkbenchSettlement},
 	}
 	for _, tt := range tests {

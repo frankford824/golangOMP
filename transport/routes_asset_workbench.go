@@ -103,7 +103,7 @@ func registerAssetWorkbenchRoutes(
 		group.GET("/files/:file_id/preview", access(group, http.MethodGet, "/files/:file_id/preview", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.GetFilePreview)
 		group.GET("/files/:file_id/download", access(group, http.MethodGet, "/files/:file_id/download", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.GetFileDownload)
 		group.POST("/files/batch-download", access(group, http.MethodPost, "/files/batch-download", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.BatchDownloadFiles)
-		group.POST("/files/batch-move", access(group, http.MethodPost, "/files/batch-move", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BatchMoveFiles)
+		group.POST("/files/batch-move", access(group, http.MethodPost, "/files/batch-move", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BatchMoveFiles)
 		group.POST("/files/batch-delete", access(group, http.MethodPost, "/files/batch-delete", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BatchDeleteFiles)
 		group.PATCH("/items/:item_id", access(group, http.MethodPatch, "/items/:item_id", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.UpdateSubmissionItem)
 		group.POST("/items/qc/excel", access(group, http.MethodPost, "/items/qc/excel", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.ImportSubmissionItemQCExcel)

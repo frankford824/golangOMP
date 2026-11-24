@@ -4026,8 +4026,12 @@ func (s *Service) BatchMoveFiles(ctx context.Context, actor domain.RequestActor,
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
+	var selfMoveUserID int64
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only managers can move submission files.", nil)
+		if actor.ID <= 0 || !actorHasAny(actor, domain.RoleAssetSubmitter) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench members can move submission files.", nil)
+		}
+		selfMoveUserID = actor.ID
 	}
 	fileIDs := positiveUniqueInt64s(params.FileIDs)
 	if len(fileIDs) == 0 {
@@ -4054,7 +4058,7 @@ func (s *Service) BatchMoveFiles(ctx context.Context, actor domain.RequestActor,
 	result := &BatchFileMutationResult{}
 	groups := s.completeSubmissionFileMutationGroups(ctx, fileIDs, byID, result)
 	for _, group := range groups {
-		moved, appErr := s.moveSubmissionFileGroup(ctx, actor, group, directory, strings.TrimSpace(params.Reason))
+		moved, appErr := s.moveSubmissionFileGroup(ctx, actor, selfMoveUserID, group, directory, strings.TrimSpace(params.Reason))
 		if appErr != nil {
 			appendBatchFileMutationFailures(result, group, appErr.Message)
 			continue
@@ -4172,13 +4176,26 @@ func orderBatchFileMutationFailures(result *BatchFileMutationResult, fileIDs []i
 	})
 }
 
-func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.RequestActor, files []*domain.AssetWorkbenchSubmissionFile, directory *domain.AssetWorkbenchUploadDirectory, reason string) ([]*domain.AssetWorkbenchSubmissionFile, *domain.AppError) {
+func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.RequestActor, selfMoveUserID int64, files []*domain.AssetWorkbenchSubmissionFile, directory *domain.AssetWorkbenchUploadDirectory, reason string) ([]*domain.AssetWorkbenchSubmissionFile, *domain.AppError) {
 	if len(files) == 0 || directory == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "files and upload directory are required.", nil)
+	}
+	if selfMoveUserID != 0 {
+		for _, file := range files {
+			if file == nil || file.OwnerUserID != selfMoveUserID {
+				return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "You can only move your own uploaded works.", nil)
+			}
+		}
 	}
 	item, appErr := s.loadMutableSubmissionItem(ctx, files[0].SubmissionItemID)
 	if appErr != nil {
 		return nil, appErr
+	}
+	if selfMoveUserID != 0 && (item.PayeeUserID != selfMoveUserID ||
+		item.QCStatus != domain.AssetWorkbenchSubmissionStatusSubmitted ||
+		(item.PricingStatus != domain.AssetWorkbenchPricingStatusPendingGrade && item.PricingStatus != domain.AssetWorkbenchPricingStatusUnpriced) ||
+		item.GrossAmount != 0) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "You can only move your own works before pricing and quality review.", nil)
 	}
 	if s.oss == nil || !s.oss.Enabled() {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "OSS direct move is not enabled.", nil)
@@ -4186,6 +4203,10 @@ func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.Requ
 	repriced, appErr := s.buildSubmissionItemForDifficulty(ctx, item, directory.DifficultyClass)
 	if appErr != nil {
 		return nil, appErr
+	}
+
+	if selfMoveUserID != 0 && (repriced.PricingStatus == domain.AssetWorkbenchPricingStatusPriced || repriced.GrossAmount != 0) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "The target category would price this work. Ask an asset manager to move it.", nil)
 	}
 
 	now := s.nowFn().UTC()
@@ -4231,7 +4252,7 @@ func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.Requ
 	updatedFiles := make([]*domain.AssetWorkbenchSubmissionFile, 0, len(nextFiles))
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		for index, next := range nextFiles {
-			updated, err := s.repo.UpdateSubmissionFileLocation(ctx, tx, next)
+			updated, err := s.repo.UpdateSubmissionFileLocation(ctx, tx, next, files[index].ObjectKey, selfMoveUserID)
 			if err != nil {
 				return err
 			}

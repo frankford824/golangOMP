@@ -17926,12 +17926,12 @@ paths:
   /v1/asset-workbench/files/batch-move:
     post:
       summary: Batch move submission files to an upload directory
-      description: Manager-only priced-work maintenance operation. All active files belonging to the same submission item must be selected together. The backend rejects settlement-locked items, copies the complete work into the target directory, updates directory snapshots, reprices the item using the target directory difficulty while preserving its item/page count, refreshes submission totals, records events, and best-effort removes old objects.
+      description: Moves all active files of each selected submission item together. Submitters can move their own normal uploads before pricing and quality review, provided the target does not price the work. Asset managers can also move eligible priced works. Supplement and settlement-locked items are rejected. The operation updates directory and pricing snapshots, preserves item and page counts, refreshes submission totals, and records audit events.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetManager, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
       requestBody:
         required: true
         content:

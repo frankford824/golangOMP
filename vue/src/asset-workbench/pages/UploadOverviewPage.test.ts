@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => ({
   settlementVisible: true,
   capabilities: ['asset.workbench.manage', 'asset.workbench.settlement'],
   driveDirectories: vi.fn(),
+  listUploadDirectories: vi.fn().mockResolvedValue([]),
   driveFiles: vi.fn(),
+  batchMoveFiles: vi.fn(),
   listSettlementSupplements: vi.fn(),
   getSubmissionDetail: vi.fn(),
   batchDeleteFiles: vi.fn(),
@@ -309,12 +311,16 @@ describe('UploadOverviewPage self-service date scope', () => {
     vi.clearAllMocks()
     mocks.capabilities = ['asset.workbench.submit']
     mocks.driveDirectories.mockResolvedValue([])
+    mocks.listUploadDirectories.mockResolvedValue([
+      { id: 8, name: 'A类', enabled: true },
+      { id: 9, name: '已停用', enabled: false },
+    ])
     mocks.driveFiles.mockImplementation(async (params) => ({ items: params.page_size === 100 ? files : files.slice(0, 50), total: 53 }))
     mocks.getSubmissionDetail.mockResolvedValue({ submission: { id: 20 }, items: [{ item: { id: 30 }, files }] })
     mocks.batchDeleteFiles.mockResolvedValue({ deleted: files.map((file) => file.id), failures: [] })
   })
 
-  it('opens an own-uploads ledger with default dates but without creator, rename or move controls', async () => {
+  it('opens an own-uploads ledger with default dates and move controls without exposing creator or rename controls', async () => {
     const wrapper = mountSelfLedger()
     await flushPromises()
     const dateInputs = wrapper.findAllComponents(UploadLedgerDateField)
@@ -328,8 +334,30 @@ describe('UploadOverviewPage self-service date scope', () => {
     await wrapper.get('.aw-upload-ledger__name button').trigger('click')
     expect(wrapper.find('input[aria-label="作品名称"]').exists()).toBe(false)
     await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
-    expect(wrapper.find('select[aria-label="移动目标分类"]').exists()).toBe(false)
+    const target = wrapper.get('select[aria-label="移动目标分类"]')
+    expect(target.text()).toContain('A类')
+    expect(target.text()).not.toContain('已停用')
+    expect(button(wrapper, '移动').attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('button').some((item) => item.text().trim() === '删除')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('submits a move for a client and shows the returned restriction in Chinese', async () => {
+    mocks.driveFiles.mockResolvedValue({ items: files.slice(0, 1), total: 1 })
+    mocks.batchMoveFiles.mockResolvedValue({ files: [], failures: [{
+      file_id: 1,
+      reason: 'The target category would price this work. Ask an asset manager to move it.',
+    }] })
+    const wrapper = mountSelfLedger()
+    await flushPromises()
+
+    await wrapper.get('input[aria-label="选择当前页"]').setValue(true)
+    await wrapper.get('select[aria-label="移动目标分类"]').setValue('8')
+    await button(wrapper, '移动').trigger('click')
+    await flushPromises()
+
+    expect(mocks.batchMoveFiles).toHaveBeenCalledWith([1], 8, '上传总览移动文件')
+    expect(wrapper.text()).toContain('移动到该分类会产生计件金额，请联系素材管理员处理。')
     wrapper.unmount()
   })
 
