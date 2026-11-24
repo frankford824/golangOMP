@@ -39,7 +39,6 @@ const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
 const allGradeOptions = ['all']
 
 const difficultyRows = ref<DifficultyClassRow[]>([])
-const priceRows = ref<PriceMatrixRow[]>([])
 const deductionRows = ref<DeductionRuleRow[]>([])
 const welfareRows = ref<WelfareRuleRow[]>([])
 const promoRows = ref<PromoCouponRow[]>([])
@@ -56,7 +55,6 @@ const welfareSupersedeId = ref(0)
 const promoSupersedeId = ref(0)
 const difficultyEditingCode = ref('')
 const totals = ref({
-  price: 0,
   deduction: 0,
   welfare: 0,
   promo: 0,
@@ -64,8 +62,22 @@ const totals = ref({
 const notice = ref('')
 const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/pricing')
 const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, '计价设置加载失败')
-const loading = costCenterRequest.loading
 const error = costCenterRequest.error
+const pricePageSize = 20
+const priceRequestPage = ref(1)
+const { data: priceData, loading: priceLoading, error: priceError, run: loadPricePage } = usePageRequest(
+  async (signal) => {
+    const page = priceRequestPage.value
+    const result = await assetWorkbenchApi.listPriceMatrix({ page, page_size: pricePageSize }, signal)
+    return { ...result, page }
+  },
+  null,
+  '单价设置加载失败',
+)
+const priceRows = computed(() => priceData.value?.items ?? [])
+const pricePage = computed(() => priceData.value?.page ?? 1)
+const priceTotal = computed(() => priceData.value?.total ?? 0)
+const pricePageCount = computed(() => Math.max(1, Math.ceil(priceTotal.value / pricePageSize)))
 const today = shanghaiDateInput()
 const difficultyForm = ref({
   code: '',
@@ -133,7 +145,7 @@ const pricingNavGroups = computed(() => [
   {
     label: '一级菜单：日常计价',
     items: [
-      { key: 'price' as const, title: '单价设置', meta: '三级字段：人员类型 / 岗级 / 难度 / 单价 / 生效日', count: `${totals.value.price} 条` },
+      { key: 'price' as const, title: '单价设置', meta: '三级字段：人员类型 / 岗级 / 难度 / 单价 / 生效日', count: `${priceTotal.value} 条` },
     ],
   },
   {
@@ -271,31 +283,33 @@ function gridRowAsDifficulty(row: Record<string, unknown>): DifficultyGridRow {
   return row as unknown as DifficultyGridRow
 }
 
-async function fetchCostCenter() {
-  const [difficulties, prices, deductions, welfare, promos] = await Promise.all([
-    assetWorkbenchApi.listDifficultyClassesAdmin(),
-    assetWorkbenchApi.listPriceMatrix({ page: 1, page_size: 20 }),
-    assetWorkbenchApi.listDeductionRules({ page: 1, page_size: 20 }),
-    assetWorkbenchApi.listWelfareRules({ page: 1, page_size: 20 }),
-    assetWorkbenchApi.listPromoCoupons({ page: 1, page_size: 20 }),
+async function fetchCostCenter(signal: AbortSignal) {
+  const [difficulties, deductions, welfare, promos] = await Promise.all([
+    assetWorkbenchApi.listDifficultyClassesAdmin(signal),
+    assetWorkbenchApi.listDeductionRules({ page: 1, page_size: 20 }, signal),
+    assetWorkbenchApi.listWelfareRules({ page: 1, page_size: 20 }, signal),
+    assetWorkbenchApi.listPromoCoupons({ page: 1, page_size: 20 }, signal),
   ])
-  return { difficulties, prices, deductions, welfare, promos }
+  return { difficulties, deductions, welfare, promos }
+}
+
+async function changePricePage(nextPage: number) {
+  if (priceLoading.value || priceSupersedeId.value || nextPage < 1 || nextPage > pricePageCount.value) return
+  priceRequestPage.value = nextPage
+  await loadPricePage()
 }
 
 async function loadCostCenter() {
-  const data = await costCenterRequest.run()
+  const [data] = await Promise.all([costCenterRequest.run(), loadPricePage()])
   if (!data) return
-  const prices = Array.isArray(data.prices.items) ? data.prices.items : []
   const deductions = Array.isArray(data.deductions.items) ? data.deductions.items : []
   const welfare = Array.isArray(data.welfare.items) ? data.welfare.items : []
   const promos = Array.isArray(data.promos.items) ? data.promos.items : []
   difficultyRows.value = data.difficulties
-  priceRows.value = prices
   deductionRows.value = deductions
   welfareRows.value = welfare
   promoRows.value = promos
   totals.value = {
-    price: data.prices.total || prices.length,
     deduction: data.deductions.total || deductions.length,
     welfare: data.welfare.total || welfare.length,
     promo: data.promos.total || promos.length,
@@ -913,11 +927,12 @@ onMounted(async () => {
       >
         <template #cell="{ row, column, value }">
           <div v-if="column.key === 'action'" class="aw-grid-actions">
-            <button class="aw-secondary-button" type="button" @click="startPriceSupersede(gridRowAsPrice(row))">修改价格</button>
+            <button class="aw-secondary-button" type="button" :disabled="priceLoading" @click="startPriceSupersede(gridRowAsPrice(row))">修改价格</button>
             <button
               class="aw-secondary-button"
               :class="{ 'aw-secondary-button--danger': gridRowAsPrice(row).enabled }"
               type="button"
+              :disabled="priceLoading"
               :aria-label="`${gridRowAsPrice(row).enabled ? '停用' : '启用'}单价规则：${priceRuleIdentity(gridRowAsPrice(row))}`"
               @click="requestTogglePriceRule(gridRowAsPrice(row))"
             >
@@ -930,6 +945,11 @@ onMounted(async () => {
           <span v-else>{{ value === 'all' ? '全部' : value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
+      <nav v-if="pricePageCount > 1" class="aw-inline-actions" aria-label="单价规则分页">
+        <button class="aw-secondary-button" type="button" :disabled="priceLoading || !!priceSupersedeId || pricePage <= 1" @click="changePricePage(pricePage - 1)">上一页</button>
+        <span class="aw-copy" aria-live="polite">第 {{ pricePage }} / {{ pricePageCount }} 页</span>
+        <button class="aw-secondary-button" type="button" :disabled="priceLoading || !!priceSupersedeId || pricePage >= pricePageCount" @click="changePricePage(pricePage + 1)">下一页</button>
+      </nav>
       <div class="aw-pricing-field-help">
         <span><b>人员类型</b>：全职或兼职</span>
         <span><b>岗级</b>：人员档案里的等级</span>
@@ -977,12 +997,12 @@ onMounted(async () => {
         </label>
       </div>
       <AsyncBoundary
-        :loading="loading"
-        :error="error"
+        :loading="priceLoading"
+        :error="priceError"
         loading-label="正在加载单价设置"
-        @retry="loadCostCenter"
+        @retry="loadPricePage"
       >
-        <p class="aw-copy">已配置 {{ totals.price }} 条单价规则</p>
+        <p class="aw-copy">已配置 {{ priceTotal }} 条单价规则</p>
       </AsyncBoundary>
       <div class="aw-timeline-band">
         <span class="aw-timeline-band__past">过期</span>

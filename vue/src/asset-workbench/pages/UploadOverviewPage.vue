@@ -56,8 +56,11 @@ const exportLimit = 5000
 const skeletonRowCount = 8
 
 const directories = ref<DriveDirectoryRow[]>([])
-const moveDirectories = ref<UploadDirectoryRow[]>([])
-const moveDirectoriesError = ref('')
+const uploadDirectories = ref<UploadDirectoryRow[]>([])
+const directoryOptionsLoading = ref(false)
+const recordedDirectoriesError = ref(false)
+const uploadDirectoriesError = ref(false)
+const directoryOptionsIncomplete = computed(() => recordedDirectoriesError.value || uploadDirectoriesError.value)
 const files = ref<DriveFileRow[]>([])
 const supplementItemIds = ref<Set<number>>(new Set())
 const selectedFile = ref<DriveFileRow | null>(null)
@@ -138,7 +141,7 @@ const appliedFilterLabels = computed(() => {
   if (filters.q) labels.push({ key: 'q', label: `关键词：${filters.q}` })
   if (filters.owner && canViewAllUploads.value) labels.push({ key: 'owner', label: `创建人：${filters.owner}` })
   const directoryLabels = (filters.dir_ids ?? []).map(id =>
-    directoryOptions.value.find(dir => dir.directory_id === id)?.name || '分类 ' + id,
+    directoryNames.value.get(id) || '分类 ' + id,
   )
   if (filters.unassigned) directoryLabels.unshift('未分类')
   if (directoryLabels.length) labels.push({ key: 'directory', label: `分类：${directoryLabels.join('、')}` })
@@ -184,10 +187,17 @@ const activeFilterCount = computed(() =>
     operationSource.value !== 'all' ? operationSource.value : '',
   ].filter(Boolean).length,
 )
-const directoryOptions = computed(() => directories.value.filter((dir) => Number(dir.directory_id || 0) > 0))
+const directoryNames = computed(() => {
+  const names = new Map<number, string>()
+  for (const directory of directories.value) {
+    if (directory.directory_id != null && directory.directory_id > 0) names.set(directory.directory_id, directory.name)
+  }
+  for (const directory of uploadDirectories.value) names.set(directory.id, directory.name)
+  return names
+})
 const categoryOptions = computed(() => [
   { value: 'unassigned' as const, label: '未分类' },
-  ...directoryOptions.value.map(dir => ({ value: Number(dir.directory_id), label: dir.name })),
+  ...Array.from(directoryNames.value, ([value, label]) => ({ value, label })),
 ])
 
 const archiveBreadcrumbs = computed(() => {
@@ -428,18 +438,22 @@ function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDispla
   return row
 }
 
-async function loadDirectories() {
-  directories.value = await assetWorkbenchApi.driveDirectories()
+async function loadDirectoryOptions() {
+  if (directoryOptionsLoading.value) return
+  directoryOptionsLoading.value = true
+  const [recorded, enabled] = await Promise.allSettled([
+    assetWorkbenchApi.driveDirectories(),
+    assetWorkbenchApi.listUploadDirectories(),
+  ])
+  recordedDirectoriesError.value = recorded.status === 'rejected'
+  uploadDirectoriesError.value = enabled.status === 'rejected'
+  if (recorded.status === 'fulfilled') directories.value = recorded.value
+  if (enabled.status === 'fulfilled') uploadDirectories.value = enabled.value.filter(directory => directory.enabled)
+  directoryOptionsLoading.value = false
 }
 
-async function loadMoveDirectories() {
-  if (!canChangeUploadFiles.value) return
-  moveDirectoriesError.value = ''
-  try {
-    moveDirectories.value = (await assetWorkbenchApi.listUploadDirectories()).filter((directory) => directory.enabled)
-  } catch {
-    moveDirectoriesError.value = '暂时无法加载移动目标分类。'
-  }
+async function refreshLedger() {
+  await Promise.all([loadDirectoryOptions(), refreshResults()])
 }
 
 async function hydrateSupplementSources(rows: DriveFileRow[], signal?: AbortSignal) {
@@ -982,7 +996,7 @@ onMounted(async () => {
     createdFrom.value = ''
     createdTo.value = ''
   }
-  await Promise.all([loadDirectories(), loadMoveDirectories(), loadFiles(1)])
+  await Promise.all([loadDirectoryOptions(), loadFiles(1)])
 })
 
 onBeforeUnmount(() => {
@@ -1030,7 +1044,7 @@ onBeforeUnmount(() => {
             <button v-if="personalLedger || activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">{{ personalLedger ? '恢复今天' : '重置筛选' }}</button>
           </div>
           <div class="aw-upload-ledger__tools">
-            <button class="aw-secondary-button" type="button" :disabled="loading" @click="refreshResults">
+            <button class="aw-secondary-button" type="button" :disabled="loading || directoryOptionsLoading" @click="refreshLedger">
               <RefreshCw :size="15" aria-hidden="true" />
               刷新
             </button>
@@ -1041,6 +1055,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </form>
+      <div v-if="directoryOptionsIncomplete" class="aw-inline-alert aw-inline-actions" role="status">
+        <span>分类选项加载不完整。</span>
+        <button class="aw-grid-button" type="button" :disabled="directoryOptionsLoading" @click="loadDirectoryOptions">重试加载分类</button>
+      </div>
     </section>
 
     <section class="aw-upload-ledger__results" aria-label="上传查询结果">
@@ -1086,14 +1104,11 @@ onBeforeUnmount(() => {
           下载
         </button>
         <template v-if="canChangeUploadFiles">
-          <template v-if="moveDirectoriesError">
-            <span role="status">{{ moveDirectoriesError }}</span>
-            <button class="aw-grid-button" type="button" @click="loadMoveDirectories">重试加载分类</button>
-          </template>
+          <span v-if="uploadDirectoriesError" class="aw-copy">暂时无法加载移动目标分类。</span>
           <template v-else>
             <select v-model.number="moveTargetDirectoryId" aria-label="移动目标分类">
               <option :value="0">移动到分类…</option>
-              <option v-for="dir in moveDirectories" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
+              <option v-for="dir in uploadDirectories" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
             </select>
             <button class="aw-secondary-button" type="button" :disabled="actionLoading || selectionLoading || filterChangesPending || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
           </template>

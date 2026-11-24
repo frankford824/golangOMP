@@ -1297,6 +1297,26 @@ func (r *uploadDirectorySessionRepo) ListUploadDirectories(_ context.Context, fi
 	return items, nil
 }
 
+func TestSettlementReaderCanListEnabledUploadDirectories(t *testing.T) {
+	ctx := context.Background()
+	workbenchRepo := &uploadDirectorySessionRepo{directories: []*domain.AssetWorkbenchUploadDirectory{
+		{ID: 10, Name: "A类+小夜灯", Enabled: true},
+		{ID: 9, Name: "已停用"},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 7, EffectiveAccess: &domain.EffectiveAccess{
+		Permissions: []domain.PermissionCode{domain.PermissionAssetWorkbenchUse, domain.PermissionAssetWorkbenchSettlement},
+	}}
+
+	directories, appErr := svc.ListUploadDirectories(ctx, actor, false)
+	if appErr != nil || len(directories) != 1 || directories[0].ID != 10 {
+		t.Fatalf("ListUploadDirectories: got %+v, err=%v, want enabled directory 10", directories, appErr)
+	}
+	if _, appErr := svc.ListUploadDirectories(ctx, actor, true); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("admin ListUploadDirectories: got %v, want permission denied", appErr)
+	}
+}
+
 func (r *uploadDirectorySessionRepo) GetUploadDirectory(_ context.Context, directoryID int64) (*domain.AssetWorkbenchUploadDirectory, error) {
 	for _, item := range r.directories {
 		if item != nil && item.ID == directoryID {

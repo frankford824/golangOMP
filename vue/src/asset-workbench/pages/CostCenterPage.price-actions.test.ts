@@ -75,6 +75,34 @@ describe('CostCenterPage price rule actions', () => {
     updatePriceMatrix.mockResolvedValue({ ...enabledRule, enabled: false })
   })
 
+  it('loads the J1 video rule from the second price page without reloading other settings', async () => {
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({ ...enabledRule, id: index + 1 }))
+    const videoRule = { ...enabledRule, id: 21, worker_type: 'parttime', job_grade: 'J1', difficulty_class: 'D', unit_price: 2 }
+    listPriceMatrix.mockImplementation(async ({ page }) => ({
+      items: page === 1 ? firstPage : [videoRule], total: 21, page, page_size: 20,
+    }))
+    const wrapper = shallowMount(CostCenterPage, { global: { stubs: { WorkbenchDataGrid: WorkbenchDataGridStub, AsyncBoundary: true } } })
+    await flushPromises()
+    await textButton(wrapper, '进入单价设置').trigger('click')
+
+    const pager = wrapper.get('[aria-label="单价规则分页"]')
+    expect(pager.text()).toContain('第 1 / 2 页')
+    expect(wrapper.find('button[aria-label="停用单价规则：兼职 / J1 / D"]').exists()).toBe(false)
+
+    await textButton(wrapper, '下一页').trigger('click')
+    await flushPromises()
+    expect(listPriceMatrix).toHaveBeenLastCalledWith({ page: 2, page_size: 20 }, expect.any(AbortSignal))
+    expect(listDeductionRules).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('button[aria-label="停用单价规则：兼职 / J1 / D"]').exists()).toBe(true)
+    expect(pager.text()).toContain('第 2 / 2 页')
+    expect(textButton(wrapper, '下一页').attributes('disabled')).toBeDefined()
+
+    await textButton(wrapper, '上一页').trigger('click')
+    await flushPromises()
+    expect(pager.text()).toContain('第 1 / 2 页')
+    wrapper.unmount()
+  })
+
   it('shows direct stop and enable actions and keeps confirmation for stopping an active rule', async () => {
     const wrapper = shallowMount(CostCenterPage, {
       global: {

@@ -2875,7 +2875,7 @@ func (s *Service) ListUploadDirectories(ctx context.Context, actor domain.Reques
 		}
 		return items, nil
 	}
-	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can list upload directories.", nil)
 	}
 	enabled := true
