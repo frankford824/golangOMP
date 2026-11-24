@@ -2,6 +2,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import DriveDeleteConfirmDialog from '@aw/shared/drive/DriveDeleteConfirmDialog.vue'
 import UploadLedgerDateField from '@aw/features/upload/UploadLedgerDateField.vue'
+import UploadLedgerCategoryFilter from '@aw/features/upload/UploadLedgerCategoryFilter.vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -53,6 +54,7 @@ describe('UploadOverviewPage operation source', () => {
     mocks.settlementVisible = true
     mocks.capabilities = ['asset.workbench.manage', 'asset.workbench.settlement']
     mocks.driveDirectories.mockResolvedValue([])
+    mocks.listUploadDirectories.mockResolvedValue([])
     mocks.listSettlementSupplements.mockResolvedValue({ items: [], total: 0, page: 1, size: 100 })
   })
 
@@ -88,6 +90,42 @@ describe('UploadOverviewPage operation source', () => {
     vi.unstubAllGlobals()
     wrapper.unmount()
   })
+
+  it.each(['asset.workbench.manage', 'asset.workbench.submit', 'asset.workbench.settlement'])(
+    'includes enabled empty directories and retired directories with valid records for %s',
+    async (capability) => {
+      mocks.capabilities = [capability]
+      mocks.driveDirectories.mockResolvedValue([
+        { directory_id: 8, name: 'C类旧名' },
+        { directory_id: 9, name: '停用目录的历史记录' },
+      ])
+      mocks.listUploadDirectories.mockResolvedValue([
+        { id: 8, name: 'C类', enabled: true },
+        { id: 10, name: 'A类+小夜灯', enabled: true },
+        { id: 11, name: 'A类+小夜灯未定稿', enabled: true },
+        { id: 12, name: '停用且无记录的目录', enabled: false },
+      ])
+      mocks.driveFiles.mockResolvedValue({ items: [], total: 0 })
+      const wrapper = mount(UploadOverviewPage, { global: { stubs: { RouterLink: true } } })
+      await flushPromises()
+
+      const category = wrapper.getComponent(UploadLedgerCategoryFilter)
+      expect(category.props('options')).toEqual([
+        { value: 'unassigned', label: '未分类' },
+        { value: 8, label: 'C类' },
+        { value: 9, label: '停用目录的历史记录' },
+        { value: 10, label: 'A类+小夜灯' },
+        { value: 11, label: 'A类+小夜灯未定稿' },
+      ])
+      category.vm.$emit('update:modelValue', [10, 11])
+      await wrapper.get('form.aw-upload-ledger__filters').trigger('submit')
+      await flushPromises()
+      expect(mocks.driveFiles).toHaveBeenLastCalledWith(expect.objectContaining({ dir_ids: [10, 11] }), expect.any(AbortSignal))
+      expect(wrapper.get('[aria-label="已应用筛选"]').text()).toContain('分类：A类+小夜灯、A类+小夜灯未定稿')
+      expect(wrapper.get('tbody').text()).toContain('没有匹配的上传记录')
+      wrapper.unmount()
+    },
+  )
 
   it('marks client supplement files in the admin upload ledger and detail panel', async () => {
     mocks.driveFiles.mockResolvedValue({
