@@ -3,7 +3,7 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ driveFolder: vi.fn(), getSubmissionDetail: vi.fn(), batchDeleteFiles: vi.fn() }))
+const mocks = vi.hoisted(() => ({ driveFolder: vi.fn(), getSubmissionDetail: vi.fn(), batchDeleteFiles: vi.fn(), batchMoveFiles: vi.fn() }))
 vi.mock('vue-router', async (loadOriginal) => ({ ...await loadOriginal<typeof import('vue-router')>(), useRoute: () => ({ query: {} }) }))
 vi.mock('@aw/shared/download/useGlobalDownload', () => ({ useGlobalDownload: () => ({ queueDriveFile: vi.fn(), queueMaterial: vi.fn() }) }))
 vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
@@ -11,7 +11,10 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
   return { ...original, assetWorkbenchApi: { ...original.assetWorkbenchApi, ...mocks,
     listDifficultyClasses: vi.fn().mockResolvedValue([]),
     driveDirectories: vi.fn().mockResolvedValue([{ directory_id: 8, name: 'A类', prefix: 'a', difficulty_class: 'A', file_count: 53, order_count: 1 }]),
-    listUploadDirectories: vi.fn().mockResolvedValue([{ id: 8, name: 'A类', enabled: true, oss_prefix: 'a', difficulty_class: 'A' }]),
+    listUploadDirectories: vi.fn().mockResolvedValue([
+      { id: 8, name: 'A类', enabled: true, oss_prefix: 'a', difficulty_class: 'A' },
+      { id: 9, name: 'B类', enabled: true, oss_prefix: 'b', difficulty_class: 'B' },
+    ]),
   } }
 })
 
@@ -92,6 +95,21 @@ describe('DrivePage client folder deletion', () => {
     dialog.vm.$emit('confirm')
     await flushPromises()
     expect(mocks.batchDeleteFiles).toHaveBeenCalledWith(files.map((file) => file.id), '重复交稿')
+    wrapper.unmount()
+  })
+
+  it('moves all selected nested files as a submitter', async () => {
+    const wrapper = await mountFolder()
+    mocks.batchMoveFiles.mockResolvedValue({ files, failures: [] })
+    await wrapper.get('button[aria-label="选择整个文件夹 image"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('select[aria-label="移动目标目录"]').setValue('9')
+    await button(wrapper, '移动').trigger('click')
+    await flushPromises()
+
+    expect(mocks.batchMoveFiles).toHaveBeenCalledWith(files.map((file) => file.id), 9, '素材网盘移动文件')
+    expect(wrapper.text()).toContain('已移动 53 个文件')
+    expect(wrapper.find('.aw-drive-batch-bar').exists()).toBe(false)
     wrapper.unmount()
   })
 

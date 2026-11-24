@@ -2893,7 +2893,7 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileDisplayName(ctx context.Context
 	return scanAssetWorkbenchSubmissionFile(row)
 }
 
-func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, tx repo.Tx, file *domain.AssetWorkbenchSubmissionFile) (*domain.AssetWorkbenchSubmissionFile, error) {
+func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, tx repo.Tx, file *domain.AssetWorkbenchSubmissionFile, previousObjectKey string, selfMoveUserID int64) (*domain.AssetWorkbenchSubmissionFile, error) {
 	if file == nil {
 		return nil, sql.ErrNoRows
 	}
@@ -2903,9 +2903,14 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 		SET f.upload_directory_id = ?, f.upload_directory_name = ?, f.upload_directory_prefix = ?, f.upload_directory_difficulty_class = ?,
 		    f.object_key = ?, f.preview_key = ?, f.updated_at = CURRENT_TIMESTAMP
 		WHERE f.id = ?
+		  AND f.object_key = ?
+		  AND f.deleted_at IS NULL
 		  AND i.settlement_status = ?
 		  AND i.current_settlement_batch_id IS NULL
-		  AND i.qc_status <> ?`,
+		  AND i.qc_status <> ?
+		  AND (? = 0 OR (f.owner_user_id = ? AND i.payee_user_id = ?
+		    AND i.entry_kind <> ? AND i.qc_status = ?
+		    AND i.pricing_status IN (?, ?) AND i.gross_amount = 0))`,
 		toNullInt64(file.UploadDirectoryID),
 		file.UploadDirectoryName,
 		file.UploadDirectoryPrefix,
@@ -2913,8 +2918,16 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 		file.ObjectKey,
 		file.PreviewKey,
 		file.ID,
+		previousObjectKey,
 		domain.AssetWorkbenchSettlementStatusUnsettled,
 		domain.AssetWorkbenchSubmissionStatusVoided,
+		selfMoveUserID,
+		selfMoveUserID,
+		selfMoveUserID,
+		domain.AssetWorkbenchSubmissionEntryKindSupplement,
+		domain.AssetWorkbenchSubmissionStatusSubmitted,
+		domain.AssetWorkbenchPricingStatusPendingGrade,
+		domain.AssetWorkbenchPricingStatusUnpriced,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update asset workbench submission file location: %w", err)
@@ -2924,7 +2937,7 @@ func (r *assetWorkbenchRepo) UpdateSubmissionFileLocation(ctx context.Context, t
 		return nil, fmt.Errorf("asset workbench file location rows affected: %w", err)
 	}
 	if affected != 1 {
-		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission file cannot be moved after settlement or void.", map[string]interface{}{"file_id": file.ID})
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission file or work changed during the move. Refresh and try again.", map[string]interface{}{"file_id": file.ID})
 	}
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE id = ?`, file.ID)
 	return scanAssetWorkbenchSubmissionFile(row)

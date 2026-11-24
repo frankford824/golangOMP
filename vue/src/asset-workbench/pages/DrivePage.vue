@@ -153,9 +153,8 @@ const canPublishClientMaterials = computed(() => canManageDrive.value || capabil
 const clientPublishedView = computed(() => !canPublishClientMaterials.value)
 const canMaintainItems = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const canViewAmounts = computed(() => canMaintainItems.value || session.bootstrap?.profile?.settlement_visible !== false)
-const canListUploadDirectories = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
+const canChangeUploadFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canUseOperational = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.material.download'))
-const canDeleteDriveFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const supplementRecordPath = computed(() => capabilities.value.has('asset.workbench.settlement') ? '/supplements' : '/my-settlement')
 
 interface SelectedDir {
@@ -1477,7 +1476,7 @@ async function loadDirectories() {
       assetWorkbenchApi.driveDirectories(),
       canManageDrive.value
         ? assetWorkbenchApi.listUploadDirectoriesAdmin()
-        : canListUploadDirectories.value
+        : canChangeUploadFiles.value
           ? assetWorkbenchApi.listUploadDirectories()
           : Promise.resolve([] as UploadDirectoryRow[]),
     ])
@@ -2277,19 +2276,27 @@ async function repriceSelectedItem() {
   }
 }
 
-async function moveSelectedFiles() {
-  if (!canManageDrive.value || fileMutationLoading.value) return
-  const ids = selectedFileActionIds.value
+async function moveSelectedFiles(fileId?: number) {
+  if (!canChangeUploadFiles.value || fileMutationLoading.value || selectionLoading.value) return
+  const previousSelection = selectedFileActionIds.value
+  const ids = fileId === undefined ? previousSelection : [fileId]
   if (!ids.length || !moveTargetDirectoryId.value) return
   fileMutationLoading.value = true
   actionError.value = ''
+  notice.value = ''
   try {
     const result = await assetWorkbenchApi.batchMoveFiles(ids, moveTargetDirectoryId.value, maintenanceReason.value || '素材网盘移动文件')
-    const movedCount = result.files?.length ?? 0
-    notice.value = movedCount ? `已移动 ${movedCount} 个文件` : ''
+    const movedIds = new Set(result.files?.map((file) => file.id))
+    if (movedIds.has(selectedFile.value?.id ?? 0)) selectedFile.value = null
+    if (movedIds.size) {
+      notice.value = `已移动 ${movedIds.size} 个文件`
+      await refreshCurrentDrive()
+    }
+    const nextSelection = fileId === undefined
+      ? (result.failures ?? []).map((failure) => failure.file_id)
+      : previousSelection.filter((id) => !movedIds.has(id))
+    selectedFileIds.value = new Set(nextSelection)
     actionError.value = batchMutationFailureMessage('移动', result.failures)
-    selectedFileIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
-    await refreshCurrentDrive()
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '移动文件失败'
   } finally {
@@ -2298,7 +2305,7 @@ async function moveSelectedFiles() {
 }
 
 async function deleteSelectedFiles() {
-  if (!canDeleteDriveFiles.value || fileMutationLoading.value || selectionLoading.value) return
+  if (!canChangeUploadFiles.value || fileMutationLoading.value || selectionLoading.value) return
   const ids = selectedFileActionIds.value
   if (!ids.length || !deleteReason.value.trim()) return
   const requestID = ++selectionRequestSeq
@@ -3662,7 +3669,7 @@ onBeforeUnmount(() => {
             </template>
             <template v-else-if="activeMode === 'directories'">
               <button v-if="selectedDir && files.length" class="aw-secondary-button" type="button" :disabled="selectionLoading || fileMutationLoading" @click="selectAllFilesInDirectory">全选本页</button>
-              <button v-if="selectedDir && !archiveView && canDeleteDriveFiles" class="aw-secondary-button" type="button" :disabled="filesLoading || selectionLoading || fileMutationLoading" @click="selectWholeFolder(driveFolderPath)">{{ selectionLoading ? '正在读取文件夹…' : '选择当前文件夹（含子文件夹）' }}</button>
+              <button v-if="selectedDir && !archiveView && canChangeUploadFiles" class="aw-secondary-button" type="button" :disabled="filesLoading || selectionLoading || fileMutationLoading" @click="selectWholeFolder(driveFolderPath)">{{ selectionLoading ? '正在读取文件夹…' : '选择当前文件夹（含子文件夹）' }}</button>
               <button v-if="selectedDir" class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
                 <Table2 :size="16" aria-hidden="true" />
                 {{ driveSpreadsheetOpen ? '收起清单模式' : '清单模式' }}
@@ -3747,16 +3754,16 @@ onBeforeUnmount(() => {
             <Download :size="15" aria-hidden="true" />
             下载所选
           </button>
-          <template v-if="canManageDrive">
+          <template v-if="canChangeUploadFiles">
             <select v-model.number="moveTargetDirectoryId" aria-label="移动目标目录">
               <option :value="0">移动到…</option>
               <option v-for="dir in directoryOptions" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
             </select>
-            <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">
+            <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || selectionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles()">
               {{ fileMutationLoading ? '处理中…' : '移动' }}
             </button>
           </template>
-          <template v-if="canDeleteDriveFiles">
+          <template v-if="canChangeUploadFiles">
             <input v-model.trim="deleteReason" placeholder="删除原因" aria-label="删除原因" />
             <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="selectionLoading || fileMutationLoading || !deleteReason.trim()" @click="deleteSelectedFiles">
               <IconfontActionIcon name="delete" :size="15" />
@@ -3916,7 +3923,7 @@ onBeforeUnmount(() => {
                       <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
                       <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
                     </button>
-                    <button v-if="canDeleteDriveFiles" class="aw-grid-button" type="button" :disabled="selectionLoading || fileMutationLoading" :aria-label="`选择整个文件夹 ${folder.name}`" @click="selectWholeFolder(folder.path, folder.file_count)">选择整个文件夹</button>
+                    <button v-if="canChangeUploadFiles" class="aw-grid-button" type="button" :disabled="selectionLoading || fileMutationLoading" :aria-label="`选择整个文件夹 ${folder.name}`" @click="selectWholeFolder(folder.path, folder.file_count)">选择整个文件夹</button>
                   </article>
                 </div>
                 <div v-if="files.length" class="aw-drive-files aw-drive-files--roomy" @dragover.prevent @drop.prevent="dropOnCurrentDirectory">
@@ -4209,7 +4216,7 @@ onBeforeUnmount(() => {
               查看压缩包内容
             </button>
           </div>
-          <div v-if="canMaintainItems || canDeleteDriveFiles" class="aw-drive-maintenance">
+          <div v-if="canMaintainItems || canChangeUploadFiles" class="aw-drive-maintenance">
             <template v-if="canMaintainItems">
               <p class="aw-eyebrow">文件维护</p>
               <label class="aw-field">
@@ -4236,7 +4243,7 @@ onBeforeUnmount(() => {
                 <button class="aw-secondary-button" type="button" @click="repriceSelectedItem">重新计件</button>
               </div>
             </template>
-            <template v-if="canManageDrive">
+            <template v-if="canChangeUploadFiles">
               <label class="aw-field">
                 <span>移动到目录</span>
                 <select v-model.number="moveTargetDirectoryId">
@@ -4245,12 +4252,12 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <div class="aw-inline-actions">
-                <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">
+                <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || selectionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles(selectedFile.id)">
                   {{ fileMutationLoading ? '处理中…' : '移动文件' }}
                 </button>
               </div>
             </template>
-            <template v-if="canDeleteDriveFiles">
+            <template v-if="canChangeUploadFiles">
               <label class="aw-field">
                 <span>删除原因</span>
                 <input v-model.trim="deleteReason" placeholder="删除必须填写原因" />
@@ -4392,7 +4399,7 @@ onBeforeUnmount(() => {
         <button v-if="canOpenArchive(fileFromContext())" type="button" @click="openContextArchiveFile">
           查看压缩包内容
         </button>
-        <button v-if="canDeleteDriveFiles" type="button" @click="selectContextFileForDelete">
+        <button v-if="canChangeUploadFiles" type="button" @click="selectContextFileForDelete">
           删除…
         </button>
       </template>

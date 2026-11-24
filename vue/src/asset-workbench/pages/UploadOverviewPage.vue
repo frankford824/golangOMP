@@ -11,6 +11,7 @@ import {
   type ArchiveVirtualFolder,
   type DriveDirectoryRow,
   type DriveFileRow,
+  type UploadDirectoryRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import UploadLedgerCategoryFilter from '@aw/features/upload/UploadLedgerCategoryFilter.vue'
@@ -45,7 +46,7 @@ const canManageDrive = computed(() => capabilities.value.has('asset.workbench.ma
 const canViewAllUploads = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.settlement'))
 const personalLedger = computed(() => !canViewAllUploads.value)
 const canViewAmounts = computed(() => canViewAllUploads.value || session.bootstrap?.profile?.settlement_visible !== false)
-const canDeleteFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
+const canChangeUploadFiles = computed(() => canManageDrive.value || capabilities.value.has('asset.workbench.submit'))
 const canMaintainFiles = computed(() => canViewAllUploads.value)
 const canViewSupplementLedger = computed(() => capabilities.value.has('asset.workbench.settlement'))
 const supplementRecordPath = computed(() => capabilities.value.has('asset.workbench.settlement') ? '/supplements' : '/my-settlement')
@@ -55,6 +56,8 @@ const exportLimit = 5000
 const skeletonRowCount = 8
 
 const directories = ref<DriveDirectoryRow[]>([])
+const moveDirectories = ref<UploadDirectoryRow[]>([])
+const moveDirectoriesError = ref('')
 const files = ref<DriveFileRow[]>([])
 const supplementItemIds = ref<Set<number>>(new Set())
 const selectedFile = ref<DriveFileRow | null>(null)
@@ -427,6 +430,16 @@ function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDispla
 
 async function loadDirectories() {
   directories.value = await assetWorkbenchApi.driveDirectories()
+}
+
+async function loadMoveDirectories() {
+  if (!canChangeUploadFiles.value) return
+  moveDirectoriesError.value = ''
+  try {
+    moveDirectories.value = (await assetWorkbenchApi.listUploadDirectories()).filter((directory) => directory.enabled)
+  } catch {
+    moveDirectoriesError.value = '暂时无法加载移动目标分类。'
+  }
 }
 
 async function hydrateSupplementSources(rows: DriveFileRow[], signal?: AbortSignal) {
@@ -835,7 +848,7 @@ async function downloadSelectedFiles() {
 
 async function moveSelectedFiles() {
   const ids = [...selectedIds.value]
-  if (!ids.length || !moveTargetDirectoryId.value || !canManageDrive.value) return
+  if (!ids.length || !moveTargetDirectoryId.value || !canChangeUploadFiles.value || selectionLoading.value || actionLoading.value || filterChangesPending.value) return
   actionLoading.value = true
   error.value = ''
   notice.value = ''
@@ -857,7 +870,7 @@ async function moveSelectedFiles() {
 async function deleteSelectedFiles() {
   const ids = [...selectedIds.value]
   const reason = actionReason.value.trim()
-  if (!ids.length || !reason || !canDeleteFiles.value || selectionLoading.value || actionLoading.value || filterChangesPending.value) return
+  if (!ids.length || !reason || !canChangeUploadFiles.value || selectionLoading.value || actionLoading.value || filterChangesPending.value) return
   if (deletionDateRangeMissing.value) {
     error.value = '请先选择开始日期和结束日期并查询，再批量删除。'
     return
@@ -900,7 +913,7 @@ async function deleteSelectedFiles() {
 
 async function confirmDeleteSelectedFiles() {
   const selection = pendingDeletion.value
-  if (!selection || actionLoading.value || !canDeleteFiles.value || filterChangesPending.value) return
+  if (!selection || actionLoading.value || !canChangeUploadFiles.value || filterChangesPending.value) return
   actionLoading.value = true
   error.value = ''
   supplementDeleteGuidance.value = false
@@ -969,7 +982,7 @@ onMounted(async () => {
     createdFrom.value = ''
     createdTo.value = ''
   }
-  await Promise.all([loadDirectories(), loadFiles(1)])
+  await Promise.all([loadDirectories(), loadMoveDirectories(), loadFiles(1)])
 })
 
 onBeforeUnmount(() => {
@@ -1072,15 +1085,20 @@ onBeforeUnmount(() => {
           <Download :size="15" aria-hidden="true" />
           下载
         </button>
-        <template v-if="canManageDrive">
-          <select v-model.number="moveTargetDirectoryId" aria-label="移动目标分类">
-            <option :value="0">移动到分类…</option>
-            <option v-for="dir in directoryOptions" :key="dir.directory_id ?? dir.name" :value="Number(dir.directory_id)">{{ dir.name }}</option>
-          </select>
-          <button class="aw-secondary-button" type="button" :disabled="actionLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
-        </template>
-        <template v-if="canDeleteFiles">
-          <input v-model.trim="actionReason" :placeholder="canManageDrive ? '删除原因或移动备注' : '删除原因'" aria-label="操作原因" />
+        <template v-if="canChangeUploadFiles">
+          <template v-if="moveDirectoriesError">
+            <span role="status">{{ moveDirectoriesError }}</span>
+            <button class="aw-grid-button" type="button" @click="loadMoveDirectories">重试加载分类</button>
+          </template>
+          <template v-else>
+            <select v-model.number="moveTargetDirectoryId" aria-label="移动目标分类">
+              <option :value="0">移动到分类…</option>
+              <option v-for="dir in moveDirectories" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
+            </select>
+            <button class="aw-secondary-button" type="button" :disabled="actionLoading || selectionLoading || filterChangesPending || !moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
+          </template>
+          <span v-if="!canManageDrive" class="aw-copy">仅可移动本人未计价、未质检的日常作品。文件夹作品请勾选全部文件。</span>
+          <input v-model.trim="actionReason" placeholder="删除原因或移动备注" aria-label="操作原因" />
           <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="actionLoading || selectionLoading || !actionReason.trim() || filterChangesPending || deletionDateRangeMissing" :title="filterChangesPending ? '筛选条件已改变，请先查询再选择' : deletionDateRangeMissing ? '请先查询明确的开始、结束日期范围' : '核对整件作品后再确认删除'" @click="deleteSelectedFiles">
             <Trash2 :size="15" aria-hidden="true" />
             删除
