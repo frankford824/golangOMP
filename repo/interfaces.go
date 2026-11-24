@@ -514,6 +514,7 @@ type AssetWorkbenchRepo interface {
 	ReadSettlementReportSources(ctx context.Context, month string) (*AssetWorkbenchReportSources, error)
 	GetProfileByUserID(ctx context.Context, userID int64) (*domain.AssetWorkbenchProfile, error)
 	ListProfiles(ctx context.Context, filter AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error)
+	ListPersonnelSuggestionCandidates(ctx context.Context, scope, status string) ([]domain.AssetWorkbenchPersonnelSuggestion, error)
 	ListMembers(ctx context.Context, filter AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error)
 	SearchPeople(ctx context.Context, filter AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error)
 	UpsertProfile(ctx context.Context, tx Tx, profile *domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, error)

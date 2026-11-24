@@ -22,6 +22,18 @@ function mediaPreviewInfo(assetId: number, info: MediaDeliveryInfo): SystemAsset
   return { asset_id: assetId, status: ready ? 'ready' : preparing ? 'pending' : 'not_applicable', preparing, preview_available: ready, preview_url: ready ? info.download_url! : undefined, filename: info.filename, mime_type: info.mime_type, expires_at: info.expires_at }
 }
 
+export interface PersonnelSuggestion {
+  user_id: number
+  name: string
+  username: string
+  personnel_no?: string
+  worker_type?: string
+  job_grade?: string
+  status?: string
+}
+
+export type PersonnelSuggestionScope = 'upload_owner' | 'payee' | 'member' | 'main_account' | 'audit_actor'
+
 export interface AssetWorkbenchProfile {
   personnel_no?: string
   id: number
@@ -1465,6 +1477,13 @@ export const assetWorkbenchApi = {
     return unwrapPaginated(res.data)
   },
 
+  async suggestPersonnel(scope: PersonnelSuggestionScope, q: string, signal?: AbortSignal, status?: string): Promise<{ items: PersonnelSuggestion[]; total: number }> {
+    const res = await http.get<ApiEnvelope<{ items: PersonnelSuggestion[]; total: number }>>('/v1/asset-workbench/personnel-suggestions', {
+      params: { scope, q, status }, signal,
+    })
+    return unwrap(res.data)
+  },
+
   async searchPeople(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<PaginatedResult<WorkbenchMemberRow>> {
     const res = await http.get<ApiEnvelope<WorkbenchMemberRow[]>>('/v1/asset-workbench/people-lookup', { params, signal })
     return unwrapPaginated(res.data)
@@ -2045,7 +2064,7 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async driveUploadDays(params: { month: string; dir_id?: number; dir_ids?: number[]; unassigned?: boolean; q?: string; owner?: string; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
+  async driveUploadDays(params: { month: string; dir_id?: number; dir_ids?: number[]; unassigned?: boolean; q?: string; owner?: string; owner_user_id?: number; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
     const res = await http.get<ApiEnvelope<string[]>>('/v1/asset-workbench/drive/upload-days', {
       params: { ...params, dir_ids: params.dir_ids?.length ? params.dir_ids.join(',') : undefined },
       signal,
@@ -2061,6 +2080,7 @@ export const assetWorkbenchApi = {
       order_no?: string
       q?: string
       owner?: string
+      owner_user_id?: number
       operation_source?: 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
       created_from?: string
       created_to?: string
@@ -2075,6 +2095,7 @@ export const assetWorkbenchApi = {
     if (params.order_no) query.order_no = params.order_no
     if (params.q) query.q = params.q
     if (params.owner) query.owner = params.owner
+    if (params.owner_user_id) query.owner_user_id = params.owner_user_id
     if (params.operation_source) query.operation_source = params.operation_source
     if (params.created_from) query.created_from = params.created_from
     if (params.created_to) query.created_to = params.created_to

@@ -11,10 +11,12 @@ import {
   type ArchiveVirtualFolder,
   type DriveDirectoryRow,
   type DriveFileRow,
+  type PersonnelSuggestion,
   type UploadDirectoryRow,
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import UploadLedgerCategoryFilter from '@aw/features/upload/UploadLedgerCategoryFilter.vue'
+import PersonnelAutocomplete from '@aw/shared/ui/PersonnelAutocomplete.vue'
 import UploadLedgerDateField from '@aw/features/upload/UploadLedgerDateField.vue'
 import { chipClass, pricingStatusMeta, qcStatusMeta } from '@aw/shared/format/status'
 import { formatInt, formatMoney } from '@aw/shared/format/number'
@@ -32,7 +34,7 @@ import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vu
 type SortBy = 'created_at' | 'owner' | 'directory' | 'name' | 'format'
 type SortDir = 'asc' | 'desc'
 type OperationSourceFilter = 'all' | 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
-type LedgerFilters = Omit<Parameters<typeof assetWorkbenchApi.driveFiles>[0], 'page' | 'page_size'>
+type LedgerFilters = Omit<Parameters<typeof assetWorkbenchApi.driveFiles>[0], 'page' | 'page_size'> & { ownerLabel?: string }
 interface PieceworkDisplayState {
   isPrimary: boolean
   siblingCount: number
@@ -79,6 +81,17 @@ const page = ref(1)
 const total = ref(0)
 const query = ref('')
 const owner = ref('')
+const ownerSelection = ref<PersonnelSuggestion | null>(null)
+
+function updateOwner(value: string) {
+  owner.value = value
+  ownerSelection.value = null
+}
+
+function selectOwner(person: PersonnelSuggestion) {
+  owner.value = person.name
+  ownerSelection.value = person
+}
 const currentUploadDay = () => formatShanghaiDateTime(new Date()).slice(0, 10)
 const createdFrom = ref(personalLedger.value ? currentUploadDay() : '')
 const createdTo = ref(personalLedger.value ? currentUploadDay() : '')
@@ -139,7 +152,8 @@ const appliedFilterLabels = computed(() => {
   const filters = appliedFilters.value
   const labels: Array<{ key: string; label: string }> = []
   if (filters.q) labels.push({ key: 'q', label: `关键词：${filters.q}` })
-  if (filters.owner && canViewAllUploads.value) labels.push({ key: 'owner', label: `创建人：${filters.owner}` })
+  const ownerLabel = filters.ownerLabel || filters.owner
+  if (ownerLabel && canViewAllUploads.value) labels.push({ key: 'owner', label: `创建人：${ownerLabel}` })
   const directoryLabels = (filters.dir_ids ?? []).map(id =>
     directoryNames.value.get(id) || '分类 ' + id,
   )
@@ -485,7 +499,8 @@ async function hydrateSupplementSources(rows: DriveFileRow[], signal?: AbortSign
 const uploadDayFilters = computed(() => ({
   ...directoryParams(),
   q: query.value.trim() || undefined,
-  owner: canViewAllUploads.value ? owner.value.trim() || undefined : undefined,
+  owner: canViewAllUploads.value && !ownerSelection.value ? owner.value.trim() || undefined : undefined,
+  owner_user_id: canViewAllUploads.value ? ownerSelection.value?.user_id : undefined,
   operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
 }))
 const uploadDayFilterKey = computed(() => JSON.stringify(uploadDayFilters.value))
@@ -495,7 +510,9 @@ function loadUploadDays(month: string, signal: AbortSignal) {
 }
 
 function currentFileFilters(): LedgerFilters {
+  const selected = canViewAllUploads.value ? ownerSelection.value : null
   return { ...uploadDayFilters.value,
+    ownerLabel: selected ? `${selected.name}（${selected.username}）` : undefined,
     created_from: createdFrom.value || undefined, created_to: createdTo.value || undefined, sort_by: sortBy.value, sort_dir: sortDir.value }
 }
 
@@ -552,7 +569,7 @@ async function applyFilters() {
 
 async function resetFilters() {
   query.value = ''
-  owner.value = ''
+  updateOwner('')
   createdFrom.value = personalLedger.value ? currentUploadDay() : ''
   createdTo.value = personalLedger.value ? currentUploadDay() : ''
   selectedDirectories.value = []
@@ -1021,10 +1038,16 @@ onBeforeUnmount(() => {
           <span>关键词</span>
           <input v-model.trim="query" type="search" placeholder="作品名称 / 文件名 / 格式" />
         </label>
-        <label v-if="canViewAllUploads">
-          <span>创建人</span>
-          <input v-model.trim="owner" placeholder="姓名或账号" />
-        </label>
+        <PersonnelAutocomplete
+          v-if="canViewAllUploads"
+          scope="upload_owner"
+          label="创建人"
+          placeholder="姓名或账号"
+          :model-value="owner"
+          :selected="ownerSelection !== null"
+          @update:model-value="updateOwner"
+          @selected="selectOwner"
+        />
         <UploadLedgerCategoryFilter v-model="selectedDirectories" :options="categoryOptions" />
         <label>
           <span>操作来源</span>

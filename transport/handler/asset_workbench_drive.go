@@ -35,6 +35,13 @@ func parseUploadLedgerFilters(c *gin.Context) (repo.AssetWorkbenchDriveFilter, *
 		OwnerKeyword:      c.Query("owner"),
 		OperationSource:   strings.TrimSpace(c.Query("operation_source")),
 	}
+	if value := strings.TrimSpace(c.Query("owner_user_id")); value != "" {
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || id <= 0 {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "owner_user_id must be a positive user ID.", nil)
+		}
+		filter.OwnerUserID = &id
+	}
 	raw := c.Query("dir_ids")
 	if raw == "" {
 		return filter, nil

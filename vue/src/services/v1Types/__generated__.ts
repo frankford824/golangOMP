@@ -12929,6 +12929,8 @@ export interface paths {
                     q?: string;
                     identity?: "admin" | "normal";
                     status?: "pending" | "active" | "disabled" | "merged";
+                    /** @description Exact workbench member ID. */
+                    user_id?: number;
                     page?: number;
                     page_size?: number;
                 };
@@ -13306,6 +13308,85 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/personnel-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Suggest personnel for upload filters or payee selection
+         * @description Matches names, accounts, personnel numbers, user IDs, pinyin, and initials. Each scope uses the permissions and records of its own workflow. Upload owners require site-wide ledger access, payees require HR or settlement access, members require member-management access, main accounts require SuperAdmin, and audit actors require site-wide workbench audit access. Results contain only selection and display fields.
+         */
+        get: {
+            parameters: {
+                query: {
+                    scope: "upload_owner" | "payee" | "member" | "main_account" | "audit_actor";
+                    q?: string;
+                    /** @description Optional membership status filter for the member scope. */
+                    status?: "pending" | "active" | "disabled" | "merged";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Matching personnel in match order with a total count. An empty payee query shows up to fifty recent profiles. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                items: {
+                                    /** Format: int64 */
+                                    user_id: number;
+                                    name: string;
+                                    username: string;
+                                    personnel_no?: string;
+                                    worker_type?: string;
+                                    job_grade?: string;
+                                    status?: string;
+                                }[];
+                                total: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid scope or query */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden for the requested scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -15404,6 +15485,8 @@ export interface paths {
                     q?: string;
                     /** @description Uploader name/account filter. */
                     owner?: string;
+                    /** @description Exact uploader user ID. Non-manager users may only query their own ID. */
+                    owner_user_id?: number;
                     /** @description Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. */
                     operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                     /** @description Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. */
@@ -15524,6 +15607,8 @@ export interface paths {
                     unassigned?: boolean;
                     q?: string;
                     owner?: string;
+                    /** @description Exact uploader user ID. Non-manager users may only query their own ID. */
+                    owner_user_id?: number;
                     operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                 };
                 header?: never;

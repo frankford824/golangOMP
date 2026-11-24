@@ -73,6 +73,55 @@ func (r *assetWorkbenchRepo) ListProfiles(ctx context.Context, filter repo.Asset
 	return items, total, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) ListPersonnelSuggestionCandidates(ctx context.Context, scope, status string) ([]domain.AssetWorkbenchPersonnelSuggestion, error) {
+	where := "WHERE p.id IS NOT NULL"
+	from := "FROM users u LEFT JOIN asset_workbench_profiles p ON p.user_id = u.id"
+	statusSQL := "COALESCE(p.status,'')"
+	var args []interface{}
+	switch scope {
+	case "upload_owner":
+		where = `WHERE EXISTS (
+			SELECT 1 FROM asset_workbench_submission_files f
+			JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
+			WHERE f.owner_user_id = u.id AND f.deleted_at IS NULL
+		)`
+	case "member":
+		from += " LEFT JOIN app_memberships am ON am.user_id = u.id AND am.app_code = 'asset_workbench'"
+		statusSQL = workbenchMembershipStatusSQL()
+		where = "(am.app_code = 'asset_workbench' OR (u.status = 'active' AND " +
+			workbenchPermissionSQL("u", domain.PermissionAssetWorkbenchUse) + "))"
+		if status != "" {
+			where += " AND " + statusSQL + " = ?"
+			args = append(args, status)
+		}
+		where = "WHERE " + where
+	case "main_account":
+		where = ""
+		statusSQL = "u.status"
+	case "audit_actor":
+		where = "WHERE EXISTS (SELECT 1 FROM asset_workbench_events e WHERE e.actor_user_id = u.id)"
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT u.id, COALESCE(NULLIF(p.real_name,''), NULLIF(u.display_name,''), u.username),
+			u.username, COALESCE(p.personnel_no,''), COALESCE(p.worker_type,''),
+			COALESCE(p.job_grade,''), `+statusSQL+`, COALESCE(u.display_name,'')
+		`+from+" "+where+` ORDER BY p.updated_at DESC, u.id DESC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list asset workbench personnel suggestions: %w", err)
+	}
+	defer rows.Close()
+	var items []domain.AssetWorkbenchPersonnelSuggestion
+	for rows.Next() {
+		var item domain.AssetWorkbenchPersonnelSuggestion
+		if err := rows.Scan(&item.UserID, &item.Name, &item.Username, &item.PersonnelNo, &item.WorkerType,
+			&item.JobGrade, &item.Status, &item.AlternateName); err != nil {
+			return nil, fmt.Errorf("scan asset workbench personnel suggestion: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *assetWorkbenchRepo) ListDifficultyClasses(ctx context.Context, filter repo.AssetWorkbenchDifficultyClassFilter) ([]*domain.AssetWorkbenchDifficultyClass, error) {
 	where := []string{"1=1"}
 	args := []interface{}{}

@@ -5,7 +5,7 @@ import { Download, Table2 } from 'lucide-vue-next'
 
 import {
   assetWorkbenchApi,
-  type AssetWorkbenchProfile,
+  type PersonnelSuggestion,
   type DifficultyClassRow,
   type ErrorImportBatchRow,
   type ErrorImportRecordRow,
@@ -1087,8 +1087,8 @@ function requireEntrySupplementMonth() {
   return supplementMonth.value
 }
 
-async function selectPermissionPayee(profile: AssetWorkbenchProfile) {
-  permissionPayeeName.value = profile.real_name || ''
+async function selectPermissionPayee(person: PersonnelSuggestion) {
+  permissionPayeeName.value = person.name
   eligibleSupplementMonths.value = []
   await loadSupplementEligibleMonths()
 }

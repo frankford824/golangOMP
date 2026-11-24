@@ -66,6 +66,8 @@ func v8AssetWorkbenchRoutePermissions(method, path string) ([]domain.PermissionC
 		return []domain.PermissionCode{domain.PermissionAssetWorkbenchProfiles}, true
 	case relative == "/members":
 		return []domain.PermissionCode{domain.PermissionAssetWorkbenchMembers}, true
+	case relative == "/personnel-suggestions":
+		return []domain.PermissionCode{domain.PermissionAssetWorkbenchProfiles, domain.PermissionAssetManage, domain.PermissionAssetWorkbenchSettlement, domain.PermissionAssetWorkbenchAuditView}, true
 	case relative == "/people-lookup", relative == "/groups", strings.HasPrefix(relative, "/groups/"):
 		return []domain.PermissionCode{domain.PermissionAssetWorkbenchGroups}, true
 	case method == http.MethodGet && (strings.HasPrefix(relative, "/difficulty-classes/admin") || relative == "/price-matrix" || strings.HasPrefix(relative, "/price-matrix/") || relative == "/deduction-rules" || strings.HasPrefix(relative, "/deduction-rules/") || relative == "/welfare-rules" || strings.HasPrefix(relative, "/welfare-rules/") || relative == "/promo-coupons" || strings.HasPrefix(relative, "/promo-coupons/")):

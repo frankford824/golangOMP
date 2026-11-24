@@ -50,6 +50,7 @@ func registerAssetWorkbenchRoutes(
 		group.PATCH("/members/:user_id/roles", access(group, http.MethodPatch, "/members/:user_id/roles", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.UpdateMemberRoles)
 		group.POST("/accounts/merge/preview", access(group, http.MethodPost, "/accounts/merge/preview", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.PreviewAccountMerge)
 		group.POST("/accounts/merge", access(group, http.MethodPost, "/accounts/merge", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.MergeAccounts)
+		group.GET("/personnel-suggestions", access(group, http.MethodGet, "/personnel-suggestions", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin), assetWorkbenchH.SuggestPersonnel)
 		group.GET("/people-lookup", access(group, http.MethodGet, "/people-lookup", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin), assetWorkbenchH.SearchPeople)
 		group.GET("/groups", access(group, http.MethodGet, "/groups", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin), assetWorkbenchH.ListGroups)
 		group.POST("/groups", access(group, http.MethodPost, "/groups", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleSuperAdmin), assetWorkbenchH.CreateGroup)

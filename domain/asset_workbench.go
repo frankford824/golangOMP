@@ -216,6 +216,17 @@ const (
 
 const AssetWorkbenchEventSettlementConfirmationReversed = "settlement.confirmation_reversed"
 
+type AssetWorkbenchPersonnelSuggestion struct {
+	UserID        int64  `json:"user_id"`
+	Name          string `json:"name"`
+	Username      string `json:"username"`
+	PersonnelNo   string `json:"personnel_no,omitempty"`
+	WorkerType    string `json:"worker_type,omitempty"`
+	JobGrade      string `json:"job_grade,omitempty"`
+	Status        string `json:"status,omitempty"`
+	AlternateName string `json:"-"`
+}
+
 type AssetWorkbenchProfile struct {
 	PersonnelNo       *string    `json:"personnel_no,omitempty" db:"personnel_no"`
 	ID                int64      `json:"id" db:"id"`

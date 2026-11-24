@@ -26,7 +26,7 @@ describe('SettlementPage supplement months', () => {
     await wrapper.findAll('button').find((button) => button.text().includes('补录管理'))!.trigger('click')
     const picker = wrapper.findAllComponents({ name: 'PersonnelPicker' })[0]!
     picker.vm.$emit('update:modelValue', 366)
-    picker.vm.$emit('selected', { user_id: 366, real_name: '验收员工' })
+    picker.vm.$emit('selected', { user_id: 366, name: '验收员工', username: 'qa-employee' })
     await flushPromises()
     const select = wrapper.get('select[aria-label="开放补录结算月"]')
     expect(wrapper.text()).not.toContain('补录工资统一计入当前自然月')
