@@ -63,21 +63,14 @@ const notice = ref('')
 const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings/pricing')
 const costCenterRequest = usePageRequest<CostCenterData>(fetchCostCenter, null, '计价设置加载失败')
 const error = costCenterRequest.error
-const pricePageSize = 20
-const priceRequestPage = ref(1)
-const { data: priceData, loading: priceLoading, error: priceError, run: loadPricePage } = usePageRequest(
-  async (signal) => {
-    const page = priceRequestPage.value
-    const result = await assetWorkbenchApi.listPriceMatrix({ page, page_size: pricePageSize }, signal)
-    return { ...result, page }
-  },
+const pricePageSize = 100
+const { data: priceData, loading: priceLoading, error: priceError, run: loadPriceRules } = usePageRequest(
+  fetchPriceRules,
   null,
   '单价设置加载失败',
 )
-const priceRows = computed(() => priceData.value?.items ?? [])
-const pricePage = computed(() => priceData.value?.page ?? 1)
-const priceTotal = computed(() => priceData.value?.total ?? 0)
-const pricePageCount = computed(() => Math.max(1, Math.ceil(priceTotal.value / pricePageSize)))
+const priceRows = computed(() => priceData.value ?? [])
+const priceTotal = computed(() => priceRows.value.length)
 const today = shanghaiDateInput()
 const difficultyForm = ref({
   code: '',
@@ -293,14 +286,24 @@ async function fetchCostCenter(signal: AbortSignal) {
   return { difficulties, deductions, welfare, promos }
 }
 
-async function changePricePage(nextPage: number) {
-  if (priceLoading.value || priceSupersedeId.value || nextPage < 1 || nextPage > pricePageCount.value) return
-  priceRequestPage.value = nextPage
-  await loadPricePage()
+async function fetchPriceRules(signal: AbortSignal) {
+  const first = await assetWorkbenchApi.listPriceMatrix({ page: 1, page_size: pricePageSize }, signal)
+  const rows = [...first.items]
+  const pageCount = Math.ceil(first.total / pricePageSize)
+  const changed = '读取时单价规则列表发生变化，请重试。'
+  for (let page = 2; page <= pageCount; page += 1) {
+    const next = await assetWorkbenchApi.listPriceMatrix({ page, page_size: pricePageSize }, signal)
+    if (next.total !== first.total) throw new Error(changed)
+    rows.push(...next.items)
+  }
+  if (rows.length !== first.total || new Set(rows.map(row => row.id)).size !== first.total) {
+    throw new Error(changed)
+  }
+  return rows
 }
 
 async function loadCostCenter() {
-  const [data] = await Promise.all([costCenterRequest.run(), loadPricePage()])
+  const [data] = await Promise.all([costCenterRequest.run(), loadPriceRules()])
   if (!data) return
   const deductions = Array.isArray(data.deductions.items) ? data.deductions.items : []
   const welfare = Array.isArray(data.welfare.items) ? data.welfare.items : []
@@ -945,11 +948,6 @@ onMounted(async () => {
           <span v-else>{{ value === 'all' ? '全部' : value || '—' }}</span>
         </template>
       </WorkbenchDataGrid>
-      <nav v-if="pricePageCount > 1" class="aw-inline-actions" aria-label="单价规则分页">
-        <button class="aw-secondary-button" type="button" :disabled="priceLoading || !!priceSupersedeId || pricePage <= 1" @click="changePricePage(pricePage - 1)">上一页</button>
-        <span class="aw-copy" aria-live="polite">第 {{ pricePage }} / {{ pricePageCount }} 页</span>
-        <button class="aw-secondary-button" type="button" :disabled="priceLoading || !!priceSupersedeId || pricePage >= pricePageCount" @click="changePricePage(pricePage + 1)">下一页</button>
-      </nav>
       <div class="aw-pricing-field-help">
         <span><b>人员类型</b>：全职或兼职</span>
         <span><b>岗级</b>：人员档案里的等级</span>
@@ -1000,7 +998,7 @@ onMounted(async () => {
         :loading="priceLoading"
         :error="priceError"
         loading-label="正在加载单价设置"
-        @retry="loadPricePage"
+        @retry="loadPriceRules"
       >
         <p class="aw-copy">已配置 {{ priceTotal }} 条单价规则</p>
       </AsyncBoundary>
