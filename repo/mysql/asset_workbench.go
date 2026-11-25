@@ -632,6 +632,11 @@ func (r *assetWorkbenchRepo) LockPriceMatrixDimension(ctx context.Context, tx re
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) GetPriceMatrix(ctx context.Context, id int64) (*domain.AssetWorkbenchPriceMatrix, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchPriceMatrixSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchPriceMatrix(row)
+}
+
 func (r *assetWorkbenchRepo) GetPriceMatrixForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AssetWorkbenchPriceMatrix, error) {
 	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchPriceMatrixSelect()+` WHERE id = ? FOR UPDATE`, id)
 	return scanAssetWorkbenchPriceMatrix(row)

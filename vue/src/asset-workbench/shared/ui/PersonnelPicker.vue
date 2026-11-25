@@ -96,7 +96,7 @@ function clearSelection() {
     </div>
 
     <div v-if="dialogOpen" class="aw-dialog-backdrop" role="presentation" @click.self="closePicker">
-      <section class="aw-confirm-dialog aw-personnel-picker__dialog" role="dialog" aria-modal="true" :aria-labelledby="`personnel-picker-${label}`" @keydown.esc="!$event.isComposing && closePicker()">
+      <section class="aw-confirm-dialog aw-personnel-picker__dialog" role="dialog" aria-modal="true" :aria-labelledby="`personnel-picker-${label}`" @keydown.esc.stop="!$event.isComposing && closePicker()">
         <div>
           <p class="aw-eyebrow">人员查找</p>
           <h3 :id="`personnel-picker-${label}`">{{ label }}</h3>

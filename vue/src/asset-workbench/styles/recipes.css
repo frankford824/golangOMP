@@ -5291,6 +5291,12 @@ body.aw-submission-dialog-locked {
   padding: var(--aw-space-5);
 }
 
+.aw-batch-reprice-dialog {
+  width: min(860px, 100%);
+  max-height: calc(100dvh - var(--aw-space-5) * 2);
+  overflow: auto;
+}
+
 .aw-confirm-dialog h3 {
   margin: 0;
 }

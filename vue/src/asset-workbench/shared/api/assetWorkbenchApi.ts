@@ -142,6 +142,38 @@ export interface WorkbenchEntryResult {
   bootstrap?: AssetWorkbenchBootstrap
 }
 
+export interface BatchRepriceScope {
+  rule_id: number
+  business_month: string
+  payee_user_id?: number
+  submitted_from?: string
+  submitted_to?: string
+  include_priced?: boolean
+}
+
+export interface BatchRepricePreview {
+  rule_id: number
+  business_month: string
+  count: number
+  old_gross: number
+  new_gross: number
+  preview_token: string
+  items: {
+    item_id: number
+    payee_user_id: number
+    order_no: string
+    submitted_on: string
+    old_gross: number
+    new_gross: number
+  }[]
+}
+
+export interface BatchRepriceResult {
+  updated: number
+  old_gross: number
+  new_gross: number
+}
+
 export interface PriceMatrixRow {
   id: number
   worker_type: string
@@ -1429,6 +1461,18 @@ export const assetWorkbenchApi = {
 
   async updateDifficultyClass(code: string, payload: UpsertDifficultyClassPayload, signal?: AbortSignal): Promise<DifficultyClassRow> {
     const res = await http.patch<ApiEnvelope<DifficultyClassRow>>(`/v1/asset-workbench/difficulty-classes/${encodeURIComponent(code)}`, payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async previewBatchReprice(scope: BatchRepriceScope, signal?: AbortSignal): Promise<BatchRepricePreview> {
+    const res = await http.post<ApiEnvelope<BatchRepricePreview>>('/v1/asset-workbench/items/reprice-batch/preview', scope, { signal })
+    return unwrap(res.data)
+  },
+
+  async confirmBatchReprice(scope: BatchRepriceScope, previewToken: string): Promise<BatchRepriceResult> {
+    const res = await http.post<ApiEnvelope<BatchRepriceResult>>('/v1/asset-workbench/items/reprice-batch/confirm', {
+      ...scope, preview_token: previewToken,
+    })
     return unwrap(res.data)
   },
 
