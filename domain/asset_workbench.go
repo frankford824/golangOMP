@@ -705,6 +705,7 @@ type AssetWorkbenchDriveFile struct {
 	OwnerUserID         int64     `json:"owner_user_id" db:"owner_user_id"`
 	OwnerName           string    `json:"owner_name" db:"owner_name"`
 	OwnerUsername       string    `json:"owner_username" db:"owner_username"`
+	OwnerWorkerType     string    `json:"owner_worker_type,omitempty" db:"owner_worker_type"`
 	UploadDirectoryID   *int64    `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
 	UploadDirectoryName string    `json:"upload_directory_name" db:"upload_directory_name"`
 	DifficultyClass     string    `json:"difficulty_class,omitempty" db:"difficulty_class"`

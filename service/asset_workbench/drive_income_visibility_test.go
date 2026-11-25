@@ -11,9 +11,10 @@ import (
 
 type incomeDriveRepo struct {
 	repo.AssetWorkbenchRepo
-	file       *domain.AssetWorkbenchDriveFile
-	visible    *bool
-	profileErr error
+	file         *domain.AssetWorkbenchDriveFile
+	visible      *bool
+	profileErr   error
+	exportFilter *repo.AssetWorkbenchDriveFilter
 }
 
 func (r *incomeDriveRepo) GetProfileByUserID(context.Context, int64) (*domain.AssetWorkbenchProfile, error) {
@@ -25,6 +26,10 @@ func (r *incomeDriveRepo) DriveListFiles(context.Context, repo.AssetWorkbenchDri
 func (r *incomeDriveRepo) DriveSearchFiles(ctx context.Context, f repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error) {
 	return r.DriveListFiles(ctx, f)
 }
+func (r *incomeDriveRepo) DriveExportFiles(_ context.Context, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, error) {
+	r.exportFilter = &filter
+	return []*domain.AssetWorkbenchDriveFile{r.file}, nil
+}
 func (r *incomeDriveRepo) DriveLocateFile(context.Context, repo.AssetWorkbenchDriveFilter, int64) (*domain.AssetWorkbenchDriveFile, error) {
 	return r.file, nil
 }
@@ -32,7 +37,7 @@ func (r *incomeDriveRepo) DriveLocateFile(context.Context, repo.AssetWorkbenchDr
 func TestDriveIncomeVisibilityAcrossReadPaths(t *testing.T) {
 	for _, visible := range []bool{false, true} {
 		for _, admin := range []bool{false, true} {
-			for _, path := range []string{"list", "search", "folder", "locate"} {
+			for _, path := range []string{"list", "search", "folder", "locate", "export"} {
 				t.Run(path+"/"+map[bool]string{true: "visible", false: "hidden"}[visible]+"/"+map[bool]string{true: "admin", false: "client"}[admin], func(t *testing.T) {
 					r := &incomeDriveRepo{visible: &visible, file: &domain.AssetWorkbenchDriveFile{ID: 1, OriginalFilename: "file.png", GrossAmount: 123.45, PageCount: 1}}
 					s := NewService(Config{}, WithRepository(r, assetWorkbenchTestTxRunner{}))
@@ -60,6 +65,17 @@ func TestDriveIncomeVisibilityAcrossReadPaths(t *testing.T) {
 							t.Fatal(err)
 						}
 						file = result.Files[0]
+					case "export":
+						result, err := s.ExportDriveFiles(context.Background(), actor, repo.AssetWorkbenchDriveFilter{WorkerType: "parttime"})
+						if err != nil {
+							t.Fatal(err)
+						}
+						filter := r.exportFilter
+						if filter.WorkerType != "parttime" || (admin && filter.OwnerUserID != nil) ||
+							(!admin && (filter.OwnerUserID == nil || *filter.OwnerUserID != actor.ID)) {
+							t.Fatalf("unexpected export scope: %+v", filter)
+						}
+						file = result[0]
 					case "locate":
 						var err *domain.AppError
 						file, err = s.LocateDriveFile(context.Background(), actor, 1)

@@ -33,7 +33,13 @@ func parseUploadLedgerFilters(c *gin.Context) (repo.AssetWorkbenchDriveFilter, *
 		Unassigned:        unassigned,
 		Keyword:           c.Query("q"),
 		OwnerKeyword:      c.Query("owner"),
+		WorkerType:        strings.TrimSpace(c.Query("worker_type")),
 		OperationSource:   strings.TrimSpace(c.Query("operation_source")),
+	}
+	switch filter.WorkerType {
+	case "", domain.AssetWorkbenchWorkerTypeFulltime, domain.AssetWorkbenchWorkerTypeParttime:
+	default:
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "worker_type must be fulltime or parttime.", nil)
 	}
 	if value := strings.TrimSpace(c.Query("owner_user_id")); value != "" {
 		id, err := strconv.ParseInt(value, 10, 64)
@@ -112,37 +118,66 @@ func (h *AssetWorkbenchHandler) DriveListOrders(c *gin.Context) {
 	respondOK(c, items)
 }
 
+func parseDriveFileFilters(c *gin.Context) (repo.AssetWorkbenchDriveFilter, *domain.AppError) {
+	filter, appErr := parseUploadLedgerFilters(c)
+	if appErr != nil {
+		return filter, appErr
+	}
+	filter.OrderNo = c.Query("order_no")
+	filter.SortBy = c.Query("sort_by")
+	filter.SortDir = c.Query("sort_dir")
+	filter.CreatedFrom, appErr = parseDriveTimeQuery(c, "created_from", false)
+	if appErr != nil {
+		return filter, appErr
+	}
+	filter.CreatedTo, appErr = parseDriveTimeQuery(c, "created_to", true)
+	if appErr != nil {
+		return filter, appErr
+	}
+	if filter.CreatedFrom != nil && filter.CreatedTo != nil && filter.CreatedFrom.After(*filter.CreatedTo) {
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "created_from cannot be after created_to.", nil)
+	}
+	return filter, nil
+}
+
 func (h *AssetWorkbenchHandler) DriveListFiles(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
 		return
 	}
-	filter, appErr := parseUploadLedgerFilters(c)
+	filter, appErr := parseDriveFileFilters(c)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	filter.Page, _ = strconv.Atoi(c.Query("page"))
 	filter.PageSize, _ = strconv.Atoi(c.Query("page_size"))
-	filter.OrderNo = c.Query("order_no")
-	filter.SortBy = c.Query("sort_by")
-	filter.SortDir = c.Query("sort_dir")
-	filter.CreatedFrom, appErr = parseDriveTimeQuery(c, "created_from", false)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	filter.CreatedTo, appErr = parseDriveTimeQuery(c, "created_to", true)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
 	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, filter)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	respondOKWithPagination(c, result.Items, gin.H{"total": result.Total, "page": result.Page, "page_size": result.Size})
+}
+
+func (h *AssetWorkbenchHandler) DriveExportFiles(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	filter, appErr := parseDriveFileFilters(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	var items []*domain.AssetWorkbenchDriveFile
+	items, appErr = h.svc.ExportDriveFiles(c.Request.Context(), actor, filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	respondOK(c, items)
 }
 
 func (h *AssetWorkbenchHandler) DriveUploadDays(c *gin.Context) {

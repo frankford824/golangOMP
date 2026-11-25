@@ -1095,6 +1095,41 @@ export interface DriveOrderRow {
   latest_at: string
 }
 
+export type DriveWorkerType = 'fulltime' | 'parttime'
+
+export interface DriveFileFilters {
+  dir_id?: number
+  dir_ids?: number[]
+  unassigned?: boolean
+  order_no?: string
+  q?: string
+  owner?: string
+  owner_user_id?: number
+  worker_type?: DriveWorkerType
+  operation_source?: 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
+  created_from?: string
+  created_to?: string
+  sort_by?: string
+  sort_dir?: string
+}
+
+function driveFileQuery(params: DriveFileFilters) {
+  const {
+    dir_ids, dir_id, unassigned,
+    order_no, q, owner, owner_user_id, worker_type, operation_source,
+    created_from, created_to, sort_by, sort_dir,
+  } = params
+  return {
+    dir_ids: dir_ids?.length ? dir_ids.join(',') : undefined,
+    dir_id: !unassigned && !dir_ids?.length ? dir_id : undefined,
+    unassigned: unassigned ? 1 : undefined,
+    order_no: order_no || undefined, q: q || undefined, owner: owner || undefined,
+    owner_user_id: owner_user_id || undefined, worker_type, operation_source,
+    created_from: created_from || undefined, created_to: created_to || undefined,
+    sort_by: sort_by || undefined, sort_dir: sort_dir || undefined,
+  }
+}
+
 export interface DriveFileRow {
   id: number
   submission_id: number
@@ -1103,6 +1138,7 @@ export interface DriveFileRow {
   owner_user_id: number
   owner_name?: string
   owner_username?: string
+  owner_worker_type?: DriveWorkerType
   upload_directory_id?: number | null
   upload_directory_name: string
   difficulty_class?: string
@@ -2109,7 +2145,7 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async driveUploadDays(params: { month: string; dir_id?: number; dir_ids?: number[]; unassigned?: boolean; q?: string; owner?: string; owner_user_id?: number; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
+  async driveUploadDays(params: { month: string; dir_id?: number; dir_ids?: number[]; unassigned?: boolean; q?: string; owner?: string; owner_user_id?: number; worker_type?: DriveWorkerType; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
     const res = await http.get<ApiEnvelope<string[]>>('/v1/asset-workbench/drive/upload-days', {
       params: { ...params, dir_ids: params.dir_ids?.length ? params.dir_ids.join(',') : undefined },
       signal,
@@ -2118,41 +2154,23 @@ export const assetWorkbenchApi = {
   },
 
   async driveFiles(
-    params: {
-      dir_id?: number
-      dir_ids?: number[]
-      unassigned?: boolean
-      order_no?: string
-      q?: string
-      owner?: string
-      owner_user_id?: number
-      operation_source?: 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
-      created_from?: string
-      created_to?: string
-      sort_by?: string
-      sort_dir?: string
-      page?: number
-      page_size?: number
-    },
+    params: DriveFileFilters & { page?: number; page_size?: number },
     signal?: AbortSignal,
   ): Promise<PaginatedResult<DriveFileRow>> {
-    const query: Record<string, unknown> = {}
-    if (params.order_no) query.order_no = params.order_no
-    if (params.q) query.q = params.q
-    if (params.owner) query.owner = params.owner
-    if (params.owner_user_id) query.owner_user_id = params.owner_user_id
-    if (params.operation_source) query.operation_source = params.operation_source
-    if (params.created_from) query.created_from = params.created_from
-    if (params.created_to) query.created_to = params.created_to
-    if (params.sort_by) query.sort_by = params.sort_by
-    if (params.sort_dir) query.sort_dir = params.sort_dir
-    if (params.unassigned) query.unassigned = 1
-    if (params.dir_ids?.length) query.dir_ids = params.dir_ids.join(',')
-    else if (!params.unassigned && params.dir_id) query.dir_id = params.dir_id
-    if (params.page) query.page = params.page
-    if (params.page_size) query.page_size = params.page_size
-    const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/files', { params: query, signal })
+    const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/files', {
+      params: { ...driveFileQuery(params), page: params.page || undefined, page_size: params.page_size || undefined },
+      signal,
+    })
     return unwrapPaginated(res.data)
+  },
+
+  async exportDriveFiles(params: DriveFileFilters, signal?: AbortSignal): Promise<DriveFileRow[]> {
+    const res = await http.get<ApiEnvelope<DriveFileRow[]>>('/v1/asset-workbench/drive/files/export', {
+      params: driveFileQuery(params),
+      signal,
+      timeout: 120_000,
+    })
+    return unwrap(res.data)
   },
 
   async updateSubmissionFile(fileId: number, payload: { display_name: string }, signal?: AbortSignal): Promise<SubmissionFileRow> {

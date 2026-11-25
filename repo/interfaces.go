@@ -404,6 +404,7 @@ type AssetWorkbenchDriveFilter struct {
 	OrderNo            string
 	Keyword            string
 	OwnerKeyword       string
+	WorkerType         string
 	OperationSource    string
 	CreatedFrom        *time.Time
 	CreatedTo          *time.Time
@@ -625,6 +626,7 @@ type AssetWorkbenchRepo interface {
 	DriveListDirectories(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveDirectory, error)
 	DriveListOrders(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveOrder, error)
 	DriveListFiles(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error)
+	DriveExportFiles(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, error)
 	DriveUploadDays(ctx context.Context, filter AssetWorkbenchDriveFilter, monthStart time.Time) ([]string, error)
 	DriveSearchFiles(ctx context.Context, filter AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error)
 	DriveLocateFile(ctx context.Context, filter AssetWorkbenchDriveFilter, fileID int64) (*domain.AssetWorkbenchDriveFile, error)

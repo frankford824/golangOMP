@@ -181,6 +181,7 @@ func driveFileColumns() string {
 	return `f.id, f.submission_id, f.submission_item_id, s.submission_no, f.owner_user_id,
 		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', f.owner_user_id)) AS owner_name,
 		COALESCE(u.username, '') AS owner_username,
+		CASE WHEN p.worker_type IN ('fulltime', 'parttime') THEN p.worker_type ELSE '' END AS owner_worker_type,
 		f.upload_directory_id,
 		COALESCE(NULLIF(f.upload_directory_name, ''), '未分类') AS upload_directory_name,
 		i.difficulty_class, i.order_no,
@@ -201,7 +202,7 @@ func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.Ass
 	item := &domain.AssetWorkbenchDriveFile{}
 	if err := scanner.Scan(
 		&item.ID, &item.SubmissionID, &item.SubmissionItemID, &item.SubmissionNo, &item.OwnerUserID,
-		&item.OwnerName, &item.OwnerUsername,
+		&item.OwnerName, &item.OwnerUsername, &item.OwnerWorkerType,
 		&item.UploadDirectoryID, &item.UploadDirectoryName, &item.DifficultyClass, &item.OrderNo,
 		&item.OriginalFilename, &item.DisplayName, &item.RelativePath, &item.UploadBatchID, &item.IsFolderUpload,
 		&item.FileType, &item.MimeType, &item.FileSize, &item.PreviewStatus,
@@ -237,15 +238,16 @@ func driveListFileOrderBy(filter repo.AssetWorkbenchDriveFilter, orderNo string)
 	}
 }
 
-func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error) {
+func buildDriveListBase(filter repo.AssetWorkbenchDriveFilter) (string, []interface{}) {
 	ownerSQL, ownerArgs := driveOwnerClause(filter)
 	dirSQL, dirArgs := driveDirectoryClause(filter)
 	orderNo := strings.TrimSpace(filter.OrderNo)
-	where := driveOperationSourceClause(filter.OperationSource)
+	where, extraArgs := driveSearchExtraClauses(filter)
 	args := append([]interface{}{}, ownerArgs...)
 	args = append(args, dirArgs...)
+	args = append(args, extraArgs...)
 	if orderNo != "" {
-		where = ` AND i.order_no = ?`
+		where += ` AND i.order_no = ?`
 		args = append(args, orderNo)
 	}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
@@ -253,20 +255,6 @@ func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.Ass
 		where += ` AND (f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR f.file_type LIKE ? OR f.mime_type LIKE ? OR COALESCE(f.upload_directory_name, '') LIKE ? OR COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ?)`
 		args = append(args, like, like, like, like, like, like, like, like, like, like, like)
 	}
-	if owner := strings.TrimSpace(filter.OwnerKeyword); owner != "" {
-		like := "%" + owner + "%"
-		where += ` AND (COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ?)`
-		args = append(args, like, like, like)
-	}
-	if filter.CreatedFrom != nil {
-		where += ` AND f.created_at >= ?`
-		args = append(args, *filter.CreatedFrom)
-	}
-	if filter.CreatedTo != nil {
-		where += ` AND f.created_at <= ?`
-		args = append(args, *filter.CreatedTo)
-	}
-	orderBy := driveListFileOrderBy(filter, orderNo)
 
 	base := `FROM asset_workbench_submission_files f
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
@@ -274,6 +262,13 @@ func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.Ass
 	LEFT JOIN users u ON u.id = f.owner_user_id
 	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
 	WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + where
+
+	return base, args
+}
+
+func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, int64, error) {
+	base, args := buildDriveListBase(filter)
+	orderBy := driveListFileOrderBy(filter, strings.TrimSpace(filter.OrderNo))
 
 	var total int64
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) `+base, args...).Scan(&total); err != nil {
@@ -340,6 +335,41 @@ func (r *assetWorkbenchRepo) DriveSearchFiles(ctx context.Context, filter repo.A
 		items = append(items, item)
 	}
 	return items, total, rows.Err()
+}
+
+// DriveExportFiles uses the same filters and sort order as the ledger, without
+// COUNT/OFFSET requests that can mix different snapshots or truncate an export.
+func (r *assetWorkbenchRepo) DriveExportFiles(ctx context.Context, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, error) {
+	keyword := strings.TrimSpace(filter.Keyword)
+	if keyword == "" {
+		base, args := buildDriveListBase(filter)
+		return r.readDriveExportRows(ctx, base, args, driveListFileOrderBy(filter, strings.TrimSpace(filter.OrderNo)))
+	}
+	base, args := buildDriveSearchBase(filter, true)
+	orderBy := driveListFileOrderBy(filter, "")
+	items, err := r.readDriveExportRows(ctx, base, args, orderBy)
+	if isMySQLFullTextIndexMissing(err) || (err == nil && len(items) == 0 && externalAssetBooleanQuery(keyword) != "") {
+		base, args = buildDriveSearchBase(filter, false)
+		return r.readDriveExportRows(ctx, base, args, orderBy)
+	}
+	return items, err
+}
+
+func (r *assetWorkbenchRepo) readDriveExportRows(ctx context.Context, base string, args []interface{}, orderBy string) ([]*domain.AssetWorkbenchDriveFile, error) {
+	rows, err := r.db.db.QueryContext(ctx, `SELECT `+driveFileColumns()+` `+base+` ORDER BY `+orderBy, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchDriveFile{}
+	for rows.Next() {
+		item, err := scanDriveFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *assetWorkbenchRepo) DriveUploadDays(ctx context.Context, filter repo.AssetWorkbenchDriveFilter, monthStart time.Time) ([]string, error) {
@@ -460,6 +490,10 @@ func buildDriveSearchFullTextIDQuery(filter repo.AssetWorkbenchDriveFilter, full
 func driveSearchExtraClauses(filter repo.AssetWorkbenchDriveFilter) (string, []interface{}) {
 	args := []interface{}{}
 	clauses := []string{}
+	if filter.WorkerType != "" {
+		clauses = append(clauses, "p.worker_type = ?")
+		args = append(args, filter.WorkerType)
+	}
 	if operationClause := strings.TrimPrefix(driveOperationSourceClause(filter.OperationSource), " AND "); operationClause != "" {
 		clauses = append(clauses, operationClause)
 	}

@@ -16873,6 +16873,10 @@ paths:
           description: Exact uploader user ID. Non-manager users may only query their own ID.
           schema: { type: integer, format: int64, minimum: 1 }
         - in: query
+          name: worker_type
+          description: Filter by the uploader's current asset workbench personnel type. Omit for all types.
+          schema: { type: string, enum: [fulltime, parttime] }
+        - in: query
           name: operation_source
           description: Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements.
           schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }
@@ -16897,7 +16901,7 @@ paths:
           schema: { type: integer, minimum: 1 }
         - in: query
           name: page_size
-          schema: { type: integer, minimum: 1, maximum: 100 }
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':
           description: Drive file rows
@@ -16922,6 +16926,10 @@ paths:
                         owner_username:
                           type: string
                           description: Upload owner login username when available.
+                        owner_worker_type:
+                          type: string
+                          enum: [fulltime, parttime]
+                          description: Current personnel type of the upload owner, omitted when unset.
                         upload_directory_id: { type: integer, nullable: true }
                         upload_directory_name: { type: string }
                         difficulty_class: { type: string }
@@ -16958,12 +16966,90 @@ paths:
                       total: { type: integer }
                       page: { type: integer }
                       page_size: { type: integer }
+        '400': { description: Invalid filter }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/drive/files/export:
+    get:
+      summary: Export all matching upload ledger files
+      description: Returns all matching file rows in a single read snapshot for CSV generation, with the same visibility, filters, and sort order as drive files. Pagination parameters do not apply.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: dir_id
+          schema: { type: integer }
+        - in: query
+          name: dir_ids
+          description: Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { type: integer, format: int64, minimum: 1 }
+        - in: query
+          name: unassigned
+          schema: { type: boolean }
+        - in: query
+          name: order_no
+          schema: { type: string }
+        - in: query
+          name: q
+          description: Keyword filter across filename, relative path, format, upload directory, uploader, order number, and submission number.
+          schema: { type: string }
+        - in: query
+          name: owner
+          description: Uploader name/account filter.
+          schema: { type: string }
+        - in: query
+          name: owner_user_id
+          description: Exact uploader user ID. Non-manager users may only query their own ID.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - in: query
+          name: worker_type
+          description: Filter by the uploader's current asset workbench personnel type. Omit for all types.
+          schema: { type: string, enum: [fulltime, parttime] }
+        - in: query
+          name: operation_source
+          description: Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements.
+          schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }
+        - in: query
+          name: created_from
+          description: Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD.
+          schema: { type: string }
+        - in: query
+          name: created_to
+          description: Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD.
+          schema: { type: string }
+        - in: query
+          name: sort_by
+          description: Sort field for upload ledger views.
+          schema: { type: string, enum: [created_at, owner, creator, directory, category, name, display_name, format, file_type] }
+        - in: query
+          name: sort_dir
+          description: Sort direction.
+          schema: { type: string, enum: [asc, desc] }
+      responses:
+        '200':
+          description: All matching upload ledger rows, ordered as requested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: *AssetWorkbenchDriveFile
+        '400': { description: Invalid filter }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/drive/upload-days:
     get:
       summary: List calendar dates with matching uploads
-      description: Returns distinct Asia/Shanghai upload dates in one calendar month, across all ledger pages. Uses the same visibility and keyword, uploader, directory and operation source filters as the upload ledger. The date range selected in the ledger does not constrain this lookup.
+      description: Returns distinct Asia/Shanghai upload dates in one calendar month, across all ledger pages. Uses the same visibility and keyword, uploader, directory, personnel type and operation source filters as the upload ledger. The date range selected in the ledger does not constrain this lookup.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -16999,6 +17085,10 @@ paths:
           description: Exact uploader user ID. Non-manager users may only query their own ID.
           schema: { type: integer, format: int64, minimum: 1 }
         - in: query
+          name: worker_type
+          description: Filter by the uploader's current asset workbench personnel type. Omit for all types.
+          schema: { type: string, enum: [fulltime, parttime] }
+        - in: query
           name: operation_source
           schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }
       responses:
@@ -17013,7 +17103,7 @@ paths:
                     type: array
                     maxItems: 31
                     items: { type: string, format: date }
-        '400': { description: Invalid month or operation source }
+        '400': { description: Invalid month or filter }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
   /v1/asset-workbench/drive/folder:

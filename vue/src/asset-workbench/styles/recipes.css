@@ -6698,7 +6698,7 @@ a.aw-submission-tasks__row:hover {
 
 .aw-upload-ledger__filters {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.45fr) repeat(6, minmax(0, 1fr));
   align-items: end;
   gap: var(--aw-space-3);
   min-width: 0;
@@ -7317,16 +7317,17 @@ a.aw-submission-tasks__row:hover {
 
 .aw-upload-ledger__col-check { width: 38px; }
 .aw-upload-ledger__col-thumb { width: 52px; }
-.aw-upload-ledger__col-owner { width: 104px; }
-.aw-upload-ledger__col-source { width: 92px; }
+.aw-upload-ledger__col-owner { width: 100px; }
+.aw-upload-ledger__col-worker-type { width: 70px; }
+.aw-upload-ledger__col-source { width: 88px; }
 .aw-upload-ledger__col-date { width: 128px; }
-.aw-upload-ledger__col-dir { width: 88px; }
+.aw-upload-ledger__col-dir { width: 84px; }
 .aw-upload-ledger__col-name { width: auto; }
-.aw-upload-ledger__col-format { width: 72px; }
-.aw-upload-ledger__col-count { width: 52px; }
-.aw-upload-ledger__col-amount { width: 86px; }
-.aw-upload-ledger__col-status { width: 102px; }
-.aw-upload-ledger__col-size { width: 64px; }
+.aw-upload-ledger__col-format { width: 62px; }
+.aw-upload-ledger__col-count { width: 48px; }
+.aw-upload-ledger__col-amount { width: 76px; }
+.aw-upload-ledger__col-status { width: 88px; }
+.aw-upload-ledger__col-size { width: 60px; }
 .aw-upload-ledger__col-actions { width: 76px; }
 
 .aw-upload-ledger__table th,

@@ -182,6 +182,24 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 	return &DriveFilesResult{Items: items, Total: total, Page: filter.Page, Size: filter.PageSize}, nil
 }
 
+// ExportDriveFiles reads a complete ledger result in one query snapshot.
+func (s *Service) ExportDriveFiles(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchDriveFilter) ([]*domain.AssetWorkbenchDriveFile, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if appErr := validateDriveOperationSource(filter.OperationSource); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.applyDriveOwnerScope(actor, &filter); appErr != nil {
+		return nil, appErr
+	}
+	items, err := s.repo.DriveExportFiles(ctx, filter)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to export drive files.", nil)
+	}
+	return s.redactDriveIncome(ctx, actor, items)
+}
+
 func (s *Service) BrowseDriveFolder(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, folderPath string, page, pageSize int) (*DriveFolderBrowseResult, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err

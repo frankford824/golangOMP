@@ -15487,6 +15487,8 @@ export interface paths {
                     owner?: string;
                     /** @description Exact uploader user ID. Non-manager users may only query their own ID. */
                     owner_user_id?: number;
+                    /** @description Filter by the uploader's current asset workbench personnel type. Omit for all types. */
+                    worker_type?: "fulltime" | "parttime";
                     /** @description Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. */
                     operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                     /** @description Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. */
@@ -15523,6 +15525,11 @@ export interface paths {
                                 owner_name?: string;
                                 /** @description Upload owner login username when available. */
                                 owner_username?: string;
+                                /**
+                                 * @description Current personnel type of the upload owner, omitted when unset.
+                                 * @enum {string}
+                                 */
+                                owner_worker_type?: "fulltime" | "parttime";
                                 upload_directory_id?: number | null;
                                 upload_directory_name?: string;
                                 difficulty_class?: string;
@@ -15562,6 +15569,144 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Invalid filter */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/drive/files/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export all matching upload ledger files
+         * @description Returns all matching file rows in a single read snapshot for CSV generation, with the same visibility, filters, and sort order as drive files. Pagination parameters do not apply.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    dir_id?: number;
+                    /** @description Match any selected upload directory. Cannot be used with dir_id. With unassigned=true, also matches files without a directory. */
+                    dir_ids?: number[];
+                    unassigned?: boolean;
+                    order_no?: string;
+                    /** @description Keyword filter across filename, relative path, format, upload directory, uploader, order number, and submission number. */
+                    q?: string;
+                    /** @description Uploader name/account filter. */
+                    owner?: string;
+                    /** @description Exact uploader user ID. Non-manager users may only query their own ID. */
+                    owner_user_id?: number;
+                    /** @description Filter by the uploader's current asset workbench personnel type. Omit for all types. */
+                    worker_type?: "fulltime" | "parttime";
+                    /** @description Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. */
+                    operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
+                    /** @description Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. */
+                    created_from?: string;
+                    /** @description Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD. */
+                    created_to?: string;
+                    /** @description Sort field for upload ledger views. */
+                    sort_by?: "created_at" | "owner" | "creator" | "directory" | "category" | "name" | "display_name" | "format" | "file_type";
+                    /** @description Sort direction. */
+                    sort_dir?: "asc" | "desc";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All matching upload ledger rows, ordered as requested */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                id?: number;
+                                submission_id?: number;
+                                submission_item_id?: number;
+                                submission_no?: string;
+                                owner_user_id?: number;
+                                /** @description Upload owner display name resolved from workbench profile, user display name, or username. */
+                                owner_name?: string;
+                                /** @description Upload owner login username when available. */
+                                owner_username?: string;
+                                /**
+                                 * @description Current personnel type of the upload owner, omitted when unset.
+                                 * @enum {string}
+                                 */
+                                owner_worker_type?: "fulltime" | "parttime";
+                                upload_directory_id?: number | null;
+                                upload_directory_name?: string;
+                                difficulty_class?: string;
+                                order_no?: string;
+                                original_filename?: string;
+                                display_name?: string;
+                                relative_path?: string;
+                                upload_batch_id?: string;
+                                is_folder_upload?: boolean;
+                                file_type?: string;
+                                mime_type?: string;
+                                file_size?: number;
+                                preview_status?: string;
+                                qc_status?: string;
+                                pricing_status?: string;
+                                settlement_status?: string;
+                                page_count?: number;
+                                gross_amount?: number;
+                                business_month?: string;
+                                /**
+                                 * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
+                                 * @enum {string}
+                                 */
+                                operation_source?: "normal_upload" | "client_supplement" | "admin_supplement";
+                                /** Format: date-time */
+                                created_at?: string;
+                                /** @description Present on locate responses; page number under the current directory upload-time ordering. */
+                                locate_page?: number;
+                                /** @description Present on locate responses; page size used to calculate locate_page. */
+                                locate_page_size?: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid filter */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 /** @description Unauthenticated */
                 401: {
                     headers: {
@@ -15595,7 +15740,7 @@ export interface paths {
         };
         /**
          * List calendar dates with matching uploads
-         * @description Returns distinct Asia/Shanghai upload dates in one calendar month, across all ledger pages. Uses the same visibility and keyword, uploader, directory and operation source filters as the upload ledger. The date range selected in the ledger does not constrain this lookup.
+         * @description Returns distinct Asia/Shanghai upload dates in one calendar month, across all ledger pages. Uses the same visibility and keyword, uploader, directory, personnel type and operation source filters as the upload ledger. The date range selected in the ledger does not constrain this lookup.
          */
         get: {
             parameters: {
@@ -15609,6 +15754,8 @@ export interface paths {
                     owner?: string;
                     /** @description Exact uploader user ID. Non-manager users may only query their own ID. */
                     owner_user_id?: number;
+                    /** @description Filter by the uploader's current asset workbench personnel type. Omit for all types. */
+                    worker_type?: "fulltime" | "parttime";
                     operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                 };
                 header?: never;
@@ -15628,7 +15775,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid month or operation source */
+                /** @description Invalid month or filter */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -15713,6 +15860,11 @@ export interface paths {
                                     owner_name?: string;
                                     /** @description Upload owner login username when available. */
                                     owner_username?: string;
+                                    /**
+                                     * @description Current personnel type of the upload owner, omitted when unset.
+                                     * @enum {string}
+                                     */
+                                    owner_worker_type?: "fulltime" | "parttime";
                                     upload_directory_id?: number | null;
                                     upload_directory_name?: string;
                                     difficulty_class?: string;
@@ -15817,6 +15969,11 @@ export interface paths {
                                 owner_name?: string;
                                 /** @description Upload owner login username when available. */
                                 owner_username?: string;
+                                /**
+                                 * @description Current personnel type of the upload owner, omitted when unset.
+                                 * @enum {string}
+                                 */
+                                owner_worker_type?: "fulltime" | "parttime";
                                 upload_directory_id?: number | null;
                                 upload_directory_name?: string;
                                 difficulty_class?: string;
@@ -15919,6 +16076,11 @@ export interface paths {
                                 owner_name?: string;
                                 /** @description Upload owner login username when available. */
                                 owner_username?: string;
+                                /**
+                                 * @description Current personnel type of the upload owner, omitted when unset.
+                                 * @enum {string}
+                                 */
+                                owner_worker_type?: "fulltime" | "parttime";
                                 upload_directory_id?: number | null;
                                 upload_directory_name?: string;
                                 difficulty_class?: string;
