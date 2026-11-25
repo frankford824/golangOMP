@@ -2,6 +2,7 @@ import http from '@/services/http'
 import { lanMediaEnabled, resolveMediaAccess, resolveMediaPreview, type MediaDeliveryInfo } from '@/services/mediaDelivery'
 import type { WorkbenchResourceDownloadManifest, WorkbenchResourceGroup } from '@aw/shared/resource-groups/types'
 import type { BackendUser } from '@/services/apiTypes'
+import { withUploadRateLimit } from './uploadRateLimit'
 
 interface ApiEnvelope<T> {
   data?: T
@@ -1886,22 +1887,22 @@ export const assetWorkbenchApi = {
   },
 
   async createUploadSession(payload: CreateUploadSessionPayload, signal?: AbortSignal): Promise<CreateUploadSessionResult> {
-    const res = await http.post<ApiEnvelope<CreateUploadSessionResult>>('/v1/asset-workbench/upload-sessions', payload, { signal })
+    const res = await withUploadRateLimit(() => http.post<ApiEnvelope<CreateUploadSessionResult>>('/v1/asset-workbench/upload-sessions', payload, { signal }), signal)
     return unwrap(res.data)
   },
 
   async completeUploadSession(sessionId: string, payload: CompleteUploadSessionPayload, signal?: AbortSignal): Promise<unknown> {
-    const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/upload-sessions/${encodeURIComponent(sessionId)}/complete`, payload, { signal })
+    const res = await withUploadRateLimit(() => http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/upload-sessions/${encodeURIComponent(sessionId)}/complete`, payload, { signal }), signal)
     return unwrap(res.data)
   },
 
   async cancelUploadSession(sessionId: string, signal?: AbortSignal): Promise<unknown> {
-    const res = await http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/upload-sessions/${encodeURIComponent(sessionId)}/cancel`, undefined, { signal })
+    const res = await withUploadRateLimit(() => http.post<ApiEnvelope<unknown>>(`/v1/asset-workbench/upload-sessions/${encodeURIComponent(sessionId)}/cancel`, undefined, { signal }), signal)
     return unwrap(res.data)
   },
 
   async createSubmission(payload: CreateSubmissionPayload, signal?: AbortSignal): Promise<SubmissionDetail> {
-    const res = await http.post<ApiEnvelope<SubmissionDetail>>('/v1/asset-workbench/submissions', payload, { signal })
+    const res = await withUploadRateLimit(() => http.post<ApiEnvelope<SubmissionDetail>>('/v1/asset-workbench/submissions', payload, { signal }), signal)
     return unwrap(res.data)
   },
 

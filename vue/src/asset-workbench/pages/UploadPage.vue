@@ -64,6 +64,10 @@ const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
 const draggingFiles = ref(false)
 const uploadReviewRef = ref<HTMLElement | null>(null)
+const assignDirectoryOpen = ref(false)
+const selectedGroupKeys = ref(new Set<string>())
+const targetDirectoryId = ref(0)
+const directoryAssignmentError = ref('')
 
 async function toggleUploadReview() {
   uploadSpreadsheetOpen.value = !uploadSpreadsheetOpen.value
@@ -104,27 +108,42 @@ const contextRequest = usePageRequest<UploadContext>(
 const contextLoading = contextRequest.loading
 const contextError = contextRequest.error
 
-const uploadedItems = computed(() => queue.value.filter((item) => item.status === 'uploaded'))
 const queuedItems = computed(() => queue.value.filter((item) => item.status === 'queued'))
 const failedItems = computed(() => queue.value.filter((item) => item.status === 'failed'))
 const uploadPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(queue.value))
-const uploadedPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(uploadedItems.value))
+const uploadedPieceworkGroups = computed(() =>
+  uploadPieceworkGroups.value.filter((group) => group.items.every((item) => item.status === 'uploaded' && item.sessionId)),
+)
+const waitingForFolderFiles = computed(() => uploadPieceworkGroups.value.some((group) =>
+  group.isFolder && group.items.some((item) => item.status === 'uploaded') &&
+  group.items.some((item) => item.status === 'failed'),
+))
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
 const canManageUploadDirectories = computed(() => bootstrap.value?.capabilities?.includes('asset.workbench.manage') === true)
 const requiresUploadDirectory = computed(() => uploadDirectories.value.length > 0)
 const selectedUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === selectedUploadDirectoryId.value))
-const canUseUploadDirectory = computed(() => !requiresUploadDirectory.value || selectedUploadDirectoryId.value > 0)
+const canUseUploadDirectory = computed(() => !requiresUploadDirectory.value || !!selectedUploadDirectory.value)
+const assignableGroups = computed(() => uploadPieceworkGroups.value.filter((group) =>
+  group.items.every((item) => item.status === 'queued' || item.status === 'failed'),
+))
+const assignableGroupByFirstItem = computed(() => new Map(assignableGroups.value.map((group) => [group.items[0].id, group])))
+const selectedGroups = computed(() => assignableGroups.value.filter((group) => selectedGroupKeys.value.has(group.key)))
+const directorySummary = computed(() => {
+  const byDirectory = new Map<string, number>()
+  for (const group of uploadPieceworkGroups.value) {
+    const name = queueDirectoryName(group.items[0])
+    byDirectory.set(name, (byDirectory.get(name) || 0) + 1)
+  }
+  return Array.from(byDirectory, ([name, count]) => ({ name, count }))
+})
+const directoryContextReady = computed(() => !contextLoading.value && !contextError.value)
+const canAddFiles = computed(() => !uploading.value && !submitting.value && directoryContextReady.value && canUseUploadDirectory.value)
 const hasPendingUploads = computed(() => queuedItems.value.length > 0)
-const canSubmit = computed(() => {
-  if (uploadedItems.value.length === 0 || uploading.value || submitting.value) return false
-  return true
-})
-const canSimpleSubmit = computed(() => {
-  if (!isSimpleUser.value) return false
-  if (!queue.value.length || uploading.value || submitting.value) return false
-  return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading' && item.status !== 'submitting') && (queuedItems.value.length > 0 || uploadedItems.value.length > 0)
-})
-const canRetryFailedUploads = computed(() => !uploading.value && !submitting.value && canUseUploadDirectory.value && failedItems.value.length > 0)
+const canSubmit = computed(() => uploadedPieceworkGroups.value.length > 0 && !uploading.value && !submitting.value)
+const canUploadAndSubmit = computed(() => !uploading.value && !submitting.value && (
+  canSubmit.value || (hasPendingUploads.value && directoryContextReady.value)
+))
+const canRetryFailedUploads = computed(() => !uploading.value && !submitting.value && directoryContextReady.value && failedItems.value.length > 0)
 const clearableUploadItems = computed(() => queue.value.filter((item) => item.status === 'queued' || item.status === 'failed'))
 const canClearUploadQueue = computed(() => !uploading.value && !submitting.value && clearableUploadItems.value.length > 0)
 const totalPieceworkPages = computed(() =>
@@ -137,11 +156,7 @@ const pieceworkSubmitHint = computed(() => {
 })
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const selectedAllowedFileTypes = computed(() => normalizedAllowedFileTypes(selectedUploadDirectory.value?.allowed_file_types ?? []))
-const selectedAllowedLabel = computed(() => (selectedAllowedFileTypes.value.length ? selectedAllowedFileTypes.value.join('、') : '全部格式'))
-const selectedAcceptString = computed(() => {
-  if (!selectedAllowedFileTypes.value.length) return ''
-  return selectedAllowedFileTypes.value.map((value) => (value.includes('/') ? value : `.${value}`)).join(',')
-})
+const selectedAllowedLabel = computed(() => selectedAllowedFileTypes.value.join('、') || '全部格式')
 const uploadStats = computed(() => {
   const total = queue.value.length
   const uploaded = queue.value.filter((item) => item.status === 'uploaded' || item.status === 'submitted').length
@@ -162,32 +177,21 @@ const uploadStats = computed(() => {
     percent: total > 0 ? Math.round(progressTotal / total) : 0,
   }
 })
-const simpleSubmitLabel = computed(() => {
+const primaryUploadLabel = computed(() => {
   if (uploading.value) return '正在上传'
   if (submitting.value) return '正在提交'
-  return '提交上传'
-})
-const adminUploadLabel = computed(() => {
-  if (uploading.value) return '正在上传'
-  if (submitting.value) return '正在提交'
+  if (canSubmit.value && !hasPendingUploads.value) return '继续提交'
   return '提交上传'
 })
 const uploadContinuityHint = computed(() => {
   if (uploading.value) return '正在上传。你可以切到看收入或网盘，回到本页仍能看到进度。请不要关闭浏览器窗口。'
   if (submitting.value) return '正在生成上传记录。你可以先切到其他页面，回到本页仍能看到结果。'
-  if (failedItems.value.length) return '有文件上传失败，失败项已保留，但不会自动重复上传。需要重传时请点击“重试失败文件”。'
-  if (queue.value.some((item) => item.status === 'uploaded')) return '文件已上传，回到本页可以继续生成上传记录。'
+  if (canSubmit.value && !hasPendingUploads.value) return '已上传的文件可以继续提交，无需重新选择。'
   return ''
 })
 const submitButtonLabel = computed(() => {
   if (submitting.value) return isSimpleUser.value ? '正在交作品' : '正在创建提交'
-  if (uploadedItems.value.length === 0) return '先上传文件'
   return isSimpleUser.value ? `交作品 ${uploadedPieceworkGroups.value.length} 个` : `生成提交记录 ${uploadedPieceworkGroups.value.length} 个`
-})
-const canUseAdminPrimaryAction = computed(() => {
-  if (uploading.value || submitting.value || queue.value.length === 0) return false
-  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return canSubmit.value
-  return canUseUploadDirectory.value && queuedItems.value.length > 0
 })
 const uploadSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]>(() =>
   queue.value.flatMap((item) => {
@@ -211,16 +215,16 @@ const uploadSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
     .join('|'),
   mode: 'import-review',
   title: '上传队列表格校对',
-  description: '用于批量校正难度、页数和定稿状态。文件名、目录、状态和大小只读，提交仍走原上传流程。',
+  description: '用于批量校正页数和定稿状态。上传目录决定计价分类，改目录请回到上传队列。',
   readonly: false,
   actions: [
     { key: 'apply_upload_queue', label: '应用到队列', tone: 'success', disabled: queue.value.length === 0 },
     { key: 'open_file_picker', label: '继续选文件', tone: 'neutral' },
     {
       key: 'submit_upload_queue',
-      label: isSimpleUser.value ? simpleSubmitLabel.value : adminUploadLabel.value,
+      label: primaryUploadLabel.value,
       tone: 'success',
-      disabled: isSimpleUser.value ? !canSimpleSubmit.value : !canUseAdminPrimaryAction.value,
+      disabled: !canUploadAndSubmit.value,
     },
   ],
   sheets: [
@@ -234,7 +238,7 @@ const uploadSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
         { key: 'id', label: 'ID', width: 140, readonly: true },
         { key: 'file_name', label: '文件名', width: 260, readonly: true },
         { key: 'directory', label: '目录', width: 180, readonly: true },
-        { key: 'difficultyClass', label: '难度', width: 120 },
+        { key: 'difficultyClass', label: '难度', width: 120, readonly: requiresUploadDirectory.value },
         { key: 'pageCount', label: '页数', width: 88, kind: 'number', align: 'right' },
         { key: 'finalized', label: '定稿', width: 88, kind: 'boolean', align: 'center' },
         { key: 'size', label: '大小', width: 110, readonly: true },
@@ -244,7 +248,7 @@ const uploadSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
       rows: queue.value.map((item) => ({
         id: item.id,
         file_name: queueItemDisplayName(item),
-        directory: item.uploadDirectoryName || selectedUploadDirectory.value?.name || '默认目录',
+        directory: queueDirectoryName(item),
         difficultyClass: item.difficultyClass || uploadDirectoryDifficulty(selectedUploadDirectory.value),
         pageCount: item.pageCount,
         finalized: item.finalized,
@@ -258,11 +262,11 @@ const uploadSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
 }))
 
 function openFilePicker() {
-  inputRef.value?.click()
+  if (canAddFiles.value) inputRef.value?.click()
 }
 
 function openFolderPicker() {
-  folderInputRef.value?.click()
+  if (canAddFiles.value) folderInputRef.value?.click()
 }
 
 function handleInput(event: Event) {
@@ -279,8 +283,10 @@ function handleFolderInput(event: Event) {
 
 async function handleDrop(event: DragEvent) {
   draggingFiles.value = false
+  if (!canAddFiles.value) return
+  const directory = selectedUploadDirectory.value
   try {
-    enqueueFiles(await filesFromDriveDrop(event.dataTransfer))
+    enqueueFiles(await filesFromDriveDrop(event.dataTransfer), directory)
   } catch {
     error.value = '文件夹读取失败，请改用“选择文件夹”'
   }
@@ -308,38 +314,36 @@ function isFileDrag(event: DragEvent) {
   return Array.from(event.dataTransfer?.types ?? []).includes('Files')
 }
 
-function enqueueFiles(files: FileList | File[] | null | undefined) {
+function enqueueFiles(files: FileList | File[] | null | undefined, directory = selectedUploadDirectory.value) {
+  if (!canAddFiles.value) return
   const values = Array.from(files ?? [])
   if (!values.length) {
     error.value = '没有读取到可上传文件'
     return
   }
-  const { accepted, rejected } = filterUploadFiles(values)
+  const accepted = values.filter((file) => file.size > 0 && uploadFilePathAllowed(file))
   if (!accepted.length) {
-    error.value = `没有读取到可上传文件。请确认文件夹内有文件，且格式符合当前目录要求（允许：${selectedAllowedLabel.value}）。`
+    error.value = '没有可加入队列的文件。请检查文件是否为空或位于系统隐藏目录。'
     return
   }
-  notice.value = rejected > 0
-    ? `已跳过 ${formatInt(rejected)} 个空文件、系统隐藏文件或不符合目录格式限制的文件（允许：${selectedAllowedLabel.value}）。`
-    : ''
+  const rejected = values.length - accepted.length
+  const unsupported = accepted.filter((file) => !uploadFileAllowed(file, normalizedAllowedFileTypes(directory?.allowed_file_types ?? []))).length
+  const messages = []
+  if (rejected) messages.push(`已跳过 ${formatInt(rejected)} 个空文件或系统隐藏文件。`)
+  if (unsupported) messages.push(`有 ${formatInt(unsupported)} 个文件的格式与当前目录不匹配，已保留在队列。请在提交前「批量改目录」。`)
+  notice.value = messages.join(' ')
   error.value = ''
   submittedFiles.value = []
   lastUploadResult.value = null
   lastSubmissionResult.value = null
   uploadCenter.addItems(accepted, {
     source: 'upload-page',
-    uploadDirectoryId: selectedUploadDirectoryId.value || undefined,
-    uploadDirectoryName: selectedUploadDirectory.value?.name ?? '',
-    difficultyClass: selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value),
+    uploadDirectoryId: directory?.id,
+    uploadDirectoryName: directory?.name ?? '',
+    difficultyClass: uploadDirectoryDifficulty(directory),
     finalized: true,
     pageCount: 1,
   })
-}
-
-function filterUploadFiles(files: File[]) {
-  const allowed = selectedAllowedFileTypes.value
-  const accepted = files.filter((file) => file.size > 0 && uploadFileAllowed(file, allowed) && uploadFilePathAllowed(file))
-  return { accepted, rejected: files.length - accepted.length }
 }
 
 function uploadFilePathAllowed(file: File) {
@@ -370,47 +374,49 @@ function pieceworkFileLabel(pieceworkCount: number, fileCount: number) {
   return `${formatInt(pieceworkCount)} 个作品 · ${formatInt(fileCount)} 个文件`
 }
 
-async function uploadQueuedItems(includeFailed = false) {
-  if (!canUseUploadDirectory.value) {
-    error.value = '先选择这次上传要进入的目录'
-    return false
-  }
-  const uploadTargets = queue.value.filter((item) => item.status === 'queued' || (includeFailed && item.status === 'failed'))
+async function uploadQueuedItems(target: 'queued' | 'failed' = 'queued') {
+  const uploadTargets = queue.value.filter((item) => item.status === target)
   if (!uploadTargets.length) {
-    error.value = includeFailed ? '没有需要重试的失败文件' : '没有新的待上传文件'
-    return false
+    error.value = target === 'failed' ? '没有需要重试的失败文件' : '没有新的待上传文件'
+    return
   }
   uploading.value = true
   error.value = ''
   notice.value = ''
   lastUploadResult.value = null
-  const uploadDirectoryId = selectedUploadDirectoryId.value || undefined
-  const uploadDirectoryName = selectedUploadDirectory.value?.name ?? ''
-  const uploadDirectoryDifficulty = selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value)
-  const uploadBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
-  const validTargets: QueueItem[] = []
-  for (const item of uploadTargets) {
-    const allowed = selectedAllowedFileTypes.value
-    if (!uploadFileAllowed(item.file, allowed) || !uploadFilePathAllowed(item.file)) {
-      item.status = 'failed'
-      item.error = `当前目录不允许上传这个文件。请确认格式或文件夹路径（允许：${selectedAllowedLabel.value}）。`
-      uploadCenter.updateItem(item.id, { status: item.status, error: item.error })
-      continue
+  const fallbackBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
+  const targets = new Set(uploadTargets.map((item) => item.id))
+  const transfers: { item: QueueItem; directory?: UploadDirectoryRow }[] = []
+  for (const group of uploadPieceworkGroups.value) {
+    if (!group.items.some((item) => targets.has(item.id))) continue
+    const reference = group.items.find((item) => item.status === 'uploaded') ?? group.items[0]
+    const directory = reference.uploadDirectoryId == null
+      ? selectedUploadDirectory.value
+      : uploadDirectories.value.find((row) => row.id === reference.uploadDirectoryId)
+    const problem = directoryProblem(group.items.filter((item) => item.status !== 'uploaded'), directory)
+    for (const item of group.items) {
+      if (!targets.has(item.id)) continue
+      if (problem) {
+        uploadCenter.updateItem(item.id, { status: 'failed', error: problem })
+        continue
+      }
+      transfers.push({ item, directory })
     }
-    validTargets.push(item)
   }
   try {
-    await runDriveUploadPool(validTargets, async (item) => {
-      item.status = 'uploading'
-      item.error = ''
-      item.progress = 0
-      item.uploadDirectoryId = uploadDirectoryId
-      item.uploadDirectoryName = uploadDirectoryName
-      item.difficultyClass = uploadDirectoryDifficulty
+    await runDriveUploadPool(transfers, async ({ item, directory }) => {
+      uploadCenter.updateItem(item.id, {
+        uploadDirectoryId: directory?.id,
+        uploadDirectoryName: directory?.name ?? '',
+        difficultyClass: directory ? uploadDirectoryDifficulty(directory) : item.difficultyClass || uploadDirectoryDifficulty(),
+        status: 'uploading',
+        error: '',
+        progress: 0,
+      })
       try {
         const uploaded = await uploadWorkbenchFile(item.file, {
-          uploadDirectoryId,
-          uploadBatchId,
+          uploadDirectoryId: item.uploadDirectoryId,
+          uploadBatchId: item.uploadBatchId || fallbackBatchId,
           relativePath: item.relativePath,
           isFolderUpload: item.relativePath.includes('/'),
           expectedBusinessMonth: pageBusinessMonth,
@@ -440,36 +446,15 @@ async function uploadQueuedItems(includeFailed = false) {
       ? `上传完成：成功 ${formatInt(success)} 个文件，失败 0 个`
       : `文件已上传：成功 ${formatInt(success)} 个文件。请继续生成提交记录，生成后才会进入上传记录。`
   }
-  return failed === 0
-}
-
-async function runAdminPrimaryAction() {
-  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) {
-    await createSubmission()
-    return
-  }
-  await uploadQueuedItems(false)
-  const successful = uploadedItems.value.length
-  const failed = failedItems.value.length
-  if (!successful) {
-    error.value = '没有文件上传成功，请重试'
-    return
-  }
-  const successfulPieces = uploadedPieceworkGroups.value.length
-  await createSubmission()
-  if (failed > 0 && !error.value) {
-    notice.value = `已为 ${formatInt(successfulPieces)} 个作品生成提交记录，包含 ${formatInt(successful)} 个文件；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
-  }
 }
 
 async function createSubmission() {
-  if (!uploadedItems.value.length) return
+  if (!canSubmit.value) return
+  const pieceworkGroups = uploadedPieceworkGroups.value
+  const submittingIds = pieceworkGroups.flatMap((group) => group.items.map((item) => item.id))
   submitting.value = true
   error.value = ''
   notice.value = ''
-  const submittingItems = [...uploadedItems.value]
-  const submittingIds = submittingItems.map((item) => item.id)
-  const pieceworkGroups = groupDriveUploadPieceworkItems(submittingItems)
   uploadCenter.updateItems(submittingIds, { status: 'submitting', error: '' })
   try {
     const detail = await assetWorkbenchApi.createSubmission({
@@ -479,7 +464,7 @@ async function createSubmission() {
       items: pieceworkGroups.map((group) => {
         const firstItem = group.items[0]
         return {
-          difficulty_class: firstItem?.difficultyClass || selectedUploadDirectory.value?.difficulty_class || undefined,
+          difficulty_class: firstItem?.uploadDirectoryId ? undefined : firstItem?.difficultyClass || undefined,
           finalized: group.items.every((item) => item.finalized),
           page_count: group.isFolder ? 1 : firstItem?.pageCount || 1,
           item_count: 1,
@@ -509,40 +494,29 @@ function submissionErrorMessage(err: unknown) {
   return `上传已完成，但提交失败：${resolveApiUserMessage(err, { fallback: '请稍后重试' })}`
 }
 
-async function submitSimple() {
-  if (!canSimpleSubmit.value) return
-  for (const item of queue.value) {
-    item.difficultyClass = selectedUploadDirectory.value?.difficulty_class ?? item.difficultyClass
-  }
-  if (hasPendingUploads.value) {
-    await uploadQueuedItems(false)
-    if (!uploadedItems.value.length) {
-      error.value = '没有文件上传成功，请重试。'
-      return
-    }
-  }
-  const successful = uploadedItems.value.length
-  const successfulPieces = uploadedPieceworkGroups.value.length
-  const failed = queue.value.filter((item) => item.status === 'failed').length
-  await createSubmission()
-  if (failed > 0 && !error.value) {
-    notice.value = `已提交成功 ${formatInt(successfulPieces)} 个作品，包含 ${formatInt(successful)} 个文件；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
-  }
+async function submitUploadQueue() {
+  if (!canUploadAndSubmit.value) return
+  if (hasPendingUploads.value && directoryContextReady.value) await uploadQueuedItems()
+  await submitReadyWorks()
 }
 
 async function retryAndSubmit() {
   if (!canRetryFailedUploads.value) return
-  for (const item of queue.value) {
-    if (item.status === 'failed') {
-      item.difficultyClass = selectedUploadDirectory.value?.difficulty_class ?? item.difficultyClass
-    }
-  }
-  await uploadQueuedItems(true)
-  if (!uploadedItems.value.length) {
-    error.value = '没有文件上传成功，请重试。'
+  await uploadQueuedItems('failed')
+  await submitReadyWorks()
+}
+
+async function submitReadyWorks() {
+  if (!canSubmit.value) {
+    error.value = waitingForFolderFiles.value
+      ? '文件夹内还有文件上传失败。请先重试失败文件，再整件提交。'
+      : '没有文件上传成功，请检查失败原因后重试。'
     return
   }
   await createSubmission()
+  if (!error.value && failedItems.value.length) {
+    notice.value += `还有 ${formatInt(failedItems.value.length)} 个文件上传失败，可继续重试。`
+  }
 }
 
 function selectUploadDirectoryById(id: number) {
@@ -551,16 +525,55 @@ function selectUploadDirectoryById(id: number) {
 }
 
 function selectUploadDirectory(directory: UploadDirectoryRow) {
-  selectedUploadDirectoryId.value = directory.id
-  for (const item of queue.value) {
-    if (item.status === 'queued' || item.status === 'failed') {
-      item.uploadDirectoryId = directory.id
-      item.uploadDirectoryName = directory.name
-      item.difficultyClass = directory.difficulty_class || firstDifficultyCode(difficultyRows.value)
-    }
-  }
+  if (!uploading.value && !submitting.value) selectedUploadDirectoryId.value = directory.id
 }
 
+function directoryProblem(items: QueueItem[], directory?: UploadDirectoryRow) {
+  if (!directory && (requiresUploadDirectory.value || items.some((item) => item.uploadDirectoryId != null))) {
+    return '上传目录已不可用，请为作品重新分配目录。'
+  }
+  const allowed = normalizedAllowedFileTypes(directory?.allowed_file_types ?? [])
+  const invalid = items.find((item) => !uploadFileAllowed(item.file, allowed) || !uploadFilePathAllowed(item.file))
+  return invalid ? `「${queueItemDisplayName(invalid)}」不符合「${directory?.name ?? '默认目录'}」的格式或路径要求。` : ''
+}
+
+function setGroupSelected(key: string, checked: boolean) {
+  if (checked) selectedGroupKeys.value.add(key)
+  else selectedGroupKeys.value.delete(key)
+  directoryAssignmentError.value = ''
+}
+
+function toggleAllAssignableGroups() {
+  selectedGroupKeys.value = selectedGroups.value.length === assignableGroups.value.length
+    ? new Set()
+    : new Set(assignableGroups.value.map((group) => group.key))
+  directoryAssignmentError.value = ''
+}
+
+function assignQueueDirectory() {
+  if (uploading.value || submitting.value || !selectedGroups.value.length) return
+  const directory = uploadDirectories.value.find((row) => row.id === targetDirectoryId.value)
+  if (!directory) return
+  const items = selectedGroups.value.flatMap((group) => group.items)
+  directoryAssignmentError.value = directoryProblem(items, directory)
+  if (directoryAssignmentError.value) return
+  const count = selectedGroups.value.length
+  uploadCenter.updateItems(items.map((item) => item.id), {
+    uploadDirectoryId: directory.id,
+    uploadDirectoryName: directory.name,
+    difficultyClass: uploadDirectoryDifficulty(directory),
+    status: 'queued',
+    error: '',
+    progress: 0,
+  })
+  selectedGroupKeys.value.clear()
+  error.value = ''
+  notice.value = `已将 ${formatInt(count)} 个作品分配到「${directory.name}」。`
+}
+
+function queueDirectoryName(item: QueueItem) {
+  return item.uploadDirectoryName || (item.status === 'queued' ? selectedUploadDirectory.value?.name : undefined) || '默认目录'
+}
 
 function uploadDirectoryDifficulty(directory?: UploadDirectoryRow) {
   return directory?.difficulty_class || firstDifficultyCode(difficultyRows.value)
@@ -595,11 +608,7 @@ async function handleUploadSpreadsheetAction(payload: WorkbenchSpreadsheetAction
     return
   }
   if (payload.action.key === 'submit_upload_queue') {
-    if (isSimpleUser.value) {
-      await submitSimple()
-    } else {
-      await runAdminPrimaryAction()
-    }
+    await submitUploadQueue()
     return
   }
   if (payload.action.key !== 'apply_upload_queue') return
@@ -609,7 +618,7 @@ async function handleUploadSpreadsheetAction(payload: WorkbenchSpreadsheetAction
     const row = rowByID.get(item.id)
     if (!row || item.status === 'uploading' || item.status === 'submitting') continue
     const pageCount = Number(row.pageCount)
-    item.difficultyClass = String(row.difficultyClass ?? item.difficultyClass).trim() || item.difficultyClass
+    if (!item.uploadDirectoryId) item.difficultyClass = String(row.difficultyClass ?? item.difficultyClass).trim() || item.difficultyClass
     item.pageCount = Number.isFinite(pageCount) && pageCount > 0 ? Math.floor(pageCount) : item.pageCount
     item.finalized =
       typeof row.finalized === 'boolean' ? row.finalized : ['true', '1', '是', '定稿', '已完成'].includes(String(row.finalized ?? '').trim())
@@ -676,9 +685,7 @@ async function loadContext() {
   const next = await contextRequest.run()
   uploadDirectories.value = next?.directories ?? []
   difficultyRows.value = next?.difficulties ?? []
-  if (!selectedUploadDirectoryId.value && uploadDirectories.value[0]) {
-    selectedUploadDirectoryId.value = uploadDirectories.value[0].id
-  }
+  if (!selectedUploadDirectory.value) selectedUploadDirectoryId.value = uploadDirectories.value[0]?.id ?? 0
 }
 
 onMounted(() => {
@@ -696,28 +703,17 @@ onActivated(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">{{ isSimpleUser ? '交作品' : '成品交付' }}</p>
         <h2>{{ isSimpleUser ? '上传成品' : '成品上传中心' }}</h2>
-        <p>{{ isSimpleUser ? '先选上传目录，再拖入文件。点一次提交，系统会自动处理。' : '批量拖拽文件，提交前校正难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
+        <p>{{ isSimpleUser ? '按目录加入文件，也可在队列批量改目录。准备好后一次提交。' : '批量拖拽文件，提交前校正难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
       </div>
-      <div class="aw-upload-header-actions">
-        <div class="aw-upload-header-actions__buttons">
-          <button class="aw-secondary-button" type="button" :aria-controls="uploadSpreadsheetOpen ? 'aw-upload-review' : undefined" :aria-expanded="uploadSpreadsheetOpen" @click="toggleUploadReview">
-            <Table2 :size="16" aria-hidden="true" />
-            {{ uploadSpreadsheetOpen ? '收起校对' : '表格校对' }}
-          </button>
-          <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
-            <FileUp :size="16" aria-hidden="true" />
-            {{ simpleSubmitLabel }}
-          </button>
-          <button v-else class="aw-primary-button" type="button" :disabled="!canUseAdminPrimaryAction" @click="runAdminPrimaryAction">
-            <FileUp :size="16" aria-hidden="true" />
-            {{ adminUploadLabel }}
-          </button>
-        </div>
-        <small>{{ selectedUploadDirectory?.name || '默认目录' }} · {{ uploadUnitLabel }}</small>
+      <div class="aw-page-bar__actions">
+        <button class="aw-secondary-button" type="button" :aria-controls="uploadSpreadsheetOpen ? 'aw-upload-review' : undefined" :aria-expanded="uploadSpreadsheetOpen" @click="toggleUploadReview">
+          <Table2 :size="16" aria-hidden="true" />
+          {{ uploadSpreadsheetOpen ? '收起校对' : '表格校对' }}
+        </button>
       </div>
     </div>
 
-    <input ref="inputRef" class="aw-visually-hidden" type="file" multiple :accept="selectedAcceptString" aria-label="选择作品文件" @change="handleInput" />
+    <input ref="inputRef" class="aw-visually-hidden" type="file" multiple aria-label="选择作品文件" @change="handleInput" />
     <input
       ref="folderInputRef"
       class="aw-visually-hidden"
@@ -725,7 +721,6 @@ onActivated(() => {
       multiple
       webkitdirectory
       directory
-      :accept="selectedAcceptString"
       aria-label="选择作品文件夹"
       @change="handleFolderInput"
     />
@@ -734,7 +729,7 @@ onActivated(() => {
       <div class="aw-panel__head">
         <div>
           <p class="aw-eyebrow">上传目录</p>
-          <h3>选择这次文件进入的位置</h3>
+          <h3>选择接下来添加文件的目录</h3>
         </div>
         <div class="aw-inline-actions">
           <span v-if="selectedUploadDirectory" class="aw-chip aw-chip--info">{{ selectedUploadDirectory.name }} · {{ uploadDirectoryDifficulty(selectedUploadDirectory) }}</span>
@@ -753,6 +748,7 @@ onActivated(() => {
             <span>上传目录</span>
             <select
               :value="selectedUploadDirectoryId"
+              :disabled="uploading || submitting"
               @change="selectUploadDirectoryById(Number(($event.target as HTMLSelectElement).value))"
             >
               <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
@@ -766,6 +762,8 @@ onActivated(() => {
               :key="directory.id"
               class="aw-template-option"
               :class="{ 'aw-template-option--active': selectedUploadDirectoryId === directory.id }"
+              :disabled="uploading || submitting"
+              :aria-pressed="selectedUploadDirectoryId === directory.id"
               type="button"
               @click="selectUploadDirectory(directory)"
             >
@@ -789,26 +787,40 @@ onActivated(() => {
       @dragover.prevent="handleDragEnter"
       @dragleave="handleDragLeave"
       @drop.prevent="handleDrop"
-      @keydown="handleDropzoneKeydown"
+      @keydown.self="handleDropzoneKeydown"
     >
       <FileUp :size="30" aria-hidden="true" />
       <strong>{{ queue.length ? '继续拖拽文件或文件夹到这里' : '拖拽文件或文件夹到这里' }}</strong>
-      <span>点击提交上传会自动完成上传和提交。允许：{{ selectedAllowedLabel }}</span>
+      <span>本次添加到「{{ selectedUploadDirectory?.name || '默认目录' }}」。目录允许：{{ selectedAllowedLabel }}</span>
       <div class="aw-dropzone__actions">
-        <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
-        <button class="aw-secondary-button" type="button" @click="openFolderPicker">选择文件夹</button>
+        <button class="aw-secondary-button" type="button" :disabled="!canAddFiles" @click="openFilePicker">选择文件</button>
+        <button class="aw-secondary-button" type="button" :disabled="!canAddFiles" @click="openFolderPicker">选择文件夹</button>
+        <button class="aw-primary-button" type="button" :disabled="!canUploadAndSubmit" @click="submitUploadQueue">
+          <FileUp :size="16" aria-hidden="true" />
+          {{ primaryUploadLabel }}
+        </button>
       </div>
       <small class="aw-dropzone__hint">{{ pieceworkSubmitHint }}</small>
+      <p v-if="uploading" class="aw-dropzone__hint" role="status">
+        已上传 {{ formatInt(uploadStats.uploaded) }} / {{ formatInt(uploadStats.total) }} 个文件。上传期间请保留原文件。
+      </p>
     </div>
 
-    <p v-if="error" class="aw-inline-alert">{{ error }}</p>
+    <ul v-if="directorySummary.length" class="aw-upload-directory-summary" aria-label="队列目录汇总">
+      <li v-for="directory in directorySummary" :key="directory.name" class="aw-chip aw-chip--neutral">
+        {{ directory.name }} · {{ formatInt(directory.count) }} 件
+      </li>
+    </ul>
+
+    <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="uploadContinuityHint" class="aw-inline-alert aw-inline-alert--info">{{ uploadContinuityHint }}</p>
 
     <section v-if="failedItems.length" class="aw-upload-failure-callout" aria-live="polite">
       <div>
         <strong>{{ formatInt(failedItems.length) }} 个文件上传失败</strong>
-        <p>继续选择新文件后，普通上传只会处理新文件；失败文件不会自动重复上传，需要你手动点击重试。</p>
+        <p v-if="waitingForFolderFiles">同一文件夹的作品要等文件传齐再提交。重试只上传失败文件，保留已上传的文件。</p>
+        <p v-else>重试只上传失败文件。若本地文件已移动或改名，请移除失败项后重新选择。</p>
       </div>
       <div class="aw-upload-failure-callout__actions">
         <button class="aw-primary-button" type="button" :disabled="!canRetryFailedUploads" @click="retryAndSubmit">重试失败文件</button>
@@ -833,7 +845,16 @@ onActivated(() => {
         <span v-if="queue.length">{{ formatInt(uploadStats.percent) }}%</span>
         <span v-if="queue.length">文件成功 {{ formatInt(uploadStats.uploaded) }} · 失败 {{ formatInt(uploadStats.failed) }}</span>
         <span v-if="!isSimpleUser">{{ formatInt(totalPieceworkPages) }} 页</span>
-        <button v-if="!isSimpleUser && uploadedItems.length && hasPendingUploads" type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
+        <button v-if="!isSimpleUser && uploadedPieceworkGroups.length && hasPendingUploads" type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
+        <button
+          v-if="uploadDirectories.length && assignableGroups.length"
+          class="aw-grid-button"
+          type="button"
+          :disabled="uploading || submitting"
+          :aria-expanded="assignDirectoryOpen"
+          aria-controls="aw-queue-assign-directory"
+          @click="assignDirectoryOpen = !assignDirectoryOpen"
+        >批量改目录</button>
         <button
           v-if="queue.length"
           class="aw-grid-button aw-upload-queue-clear"
@@ -846,13 +867,47 @@ onActivated(() => {
           清空队列
         </button>
       </div>
+      <div v-if="assignDirectoryOpen && assignableGroups.length" id="aw-queue-assign-directory" class="aw-queue-assign-directory">
+        <p class="aw-copy">勾选要改目录的作品。文件夹只需勾选一次。</p>
+        <div class="aw-inline-actions">
+          <button
+            class="aw-secondary-button"
+            type="button"
+            :disabled="uploading || submitting"
+            @click="toggleAllAssignableGroups"
+          >{{ selectedGroups.length === assignableGroups.length ? '取消全选' : '全选可分配作品' }}</button>
+          <label class="aw-inline-actions">
+            <span>目标目录</span>
+            <select v-model.number="targetDirectoryId" :disabled="uploading || submitting" @change="directoryAssignmentError = ''">
+              <option :value="0" disabled>选择目录</option>
+              <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">{{ directory.name }}</option>
+            </select>
+          </label>
+          <button
+            class="aw-primary-button"
+            type="button"
+            :disabled="uploading || submitting || !selectedGroups.length || !targetDirectoryId"
+            @click="assignQueueDirectory"
+          >分配 {{ formatInt(selectedGroups.length) }} 件</button>
+        </div>
+        <p v-if="directoryAssignmentError" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ directoryAssignmentError }}</p>
+      </div>
       <div v-if="queue.length && isSimpleUser" class="aw-simple-upload-list">
         <article v-for="item in queue" :key="item.id" class="aw-simple-upload-item">
           <div class="aw-simple-upload-item__main">
+            <template v-if="assignDirectoryOpen && assignableGroupByFirstItem.has(item.id)">
+              <input
+                type="checkbox"
+                :aria-label="`选择作品 ${queueItemDisplayName(item)}`"
+                :checked="selectedGroupKeys.has(assignableGroupByFirstItem.get(item.id)!.key)"
+                :disabled="uploading || submitting"
+                @change="setGroupSelected(assignableGroupByFirstItem.get(item.id)!.key, ($event.target as HTMLInputElement).checked)"
+              />
+            </template>
             <component :is="statusIcon(item.status)" :size="22" aria-hidden="true" />
             <div>
               <strong :title="queueItemDisplayName(item)">{{ queueItemDisplayName(item) }}</strong>
-              <span>{{ item.uploadDirectoryName || selectedUploadDirectory?.name || '默认目录' }} · 计价 {{ item.difficultyClass || uploadDirectoryDifficulty(selectedUploadDirectory) }} · {{ formatFileSize(item.file.size) }}</span>
+              <span>{{ queueDirectoryName(item) }} · 计价 {{ item.difficultyClass || uploadDirectoryDifficulty(selectedUploadDirectory) }} · {{ formatFileSize(item.file.size) }}</span>
             </div>
             <span class="aw-chip" :class="statusTone(item.status)">
               {{ item.status === 'uploading' ? `${item.progress}%` : statusLabel(item.status) }}
@@ -867,7 +922,7 @@ onActivated(() => {
               <ChevronUp v-if="expandedItemIds.has(item.id)" :size="16" aria-hidden="true" />
               <ChevronDown v-else :size="16" aria-hidden="true" />
             </button>
-            <button class="aw-secondary-button" type="button" :disabled="item.status === 'uploading' || item.status === 'submitting'" @click="removeItem(item.id)">移除</button>
+            <button class="aw-secondary-button" type="button" :disabled="uploading || submitting" @click="removeItem(item.id)">移除</button>
           </div>
           <div v-if="expandedItemIds.has(item.id)" class="aw-simple-upload-item__details">
             <label class="aw-field">
@@ -884,8 +939,19 @@ onActivated(() => {
       </div>
       <div v-else-if="queue.length" class="aw-upload-list">
         <div v-for="item in queue" :key="item.id" class="aw-upload-row">
-          <span class="aw-cell-text" :title="queueItemDisplayName(item)">{{ queueItemDisplayName(item) }}</span>
-          <select v-model="item.difficultyClass" aria-label="难度类">
+          <label class="aw-upload-row__file">
+            <template v-if="assignDirectoryOpen && assignableGroupByFirstItem.has(item.id)">
+              <input
+                type="checkbox"
+                :aria-label="`选择作品 ${queueItemDisplayName(item)}`"
+                :checked="selectedGroupKeys.has(assignableGroupByFirstItem.get(item.id)!.key)"
+                :disabled="uploading || submitting"
+                @change="setGroupSelected(assignableGroupByFirstItem.get(item.id)!.key, ($event.target as HTMLInputElement).checked)"
+              />
+            </template>
+            <span class="aw-cell-text" :title="queueItemDisplayName(item)">{{ queueItemDisplayName(item) }}</span>
+          </label>
+          <select v-model="item.difficultyClass" aria-label="难度类" :disabled="!!item.uploadDirectoryId || uploading || submitting">
             <option v-for="option in difficultyOptions" :key="option" :value="option">{{ option }}</option>
           </select>
           <input v-model.number="item.pageCount" aria-label="页数" min="1" type="number" />
@@ -894,8 +960,8 @@ onActivated(() => {
             定稿
           </label>
           <strong>{{ item.status === 'uploading' ? `${item.progress}%` : statusLabel(item.status) }}</strong>
-          <span class="aw-cell-text">{{ item.uploadDirectoryName || selectedUploadDirectory?.name || '默认目录' }}</span>
-          <button type="button" :disabled="item.status === 'uploading' || item.status === 'submitting'" @click="removeItem(item.id)">移除</button>
+          <span class="aw-cell-text">{{ queueDirectoryName(item) }}</span>
+          <button type="button" :disabled="uploading || submitting" @click="removeItem(item.id)">移除</button>
           <span v-if="item.error" class="aw-upload-row__error">{{ item.error }}</span>
         </div>
       </div>
@@ -913,9 +979,6 @@ onActivated(() => {
       <p v-if="lastSubmissionResult" class="aw-copy">
         提交：已生成 {{ formatInt(lastSubmissionResult.total) }} 个作品，包含 {{ formatInt(lastSubmissionResult.success) }} 个文件记录。
       </p>
-      <div v-if="failedItems.length" class="aw-inline-actions">
-        <button class="aw-primary-button" type="button" :disabled="!canRetryFailedUploads" @click="retryAndSubmit">重试失败文件</button>
-      </div>
       <ul v-if="failedItems.length" class="aw-upload-result-list">
         <li v-for="item in failedItems" :key="item.id">
           <strong>{{ queueItemDisplayName(item) }}</strong>

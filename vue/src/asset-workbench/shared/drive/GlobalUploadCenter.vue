@@ -27,12 +27,13 @@ watch(onIncomePage, (income) => {
 }, { immediate: true })
 const shellVisible = computed(() => uploadCenter.hasItems)
 const ringStyle = computed(() => ({
-  '--aw-upload-center-progress': `${Math.max(uploadCenter.overallProgress, uploadCenter.hasActive ? 8 : 100)}%`,
+  '--aw-upload-center-progress': `${Math.max(uploadCenter.overallProgress, uploadCenter.hasActive ? 8 : 0)}%`,
 }))
 const panelTitle = computed(() => {
   if (uploadCenter.hasActive) return '上传正在进行'
   if (uploadCenter.failedItems.length) return '上传需要处理'
   if (uploadCenter.pendingRecordItems.length) return '等待生成记录'
+  if (uploadCenter.queuedItems.length) return '等待上传'
   return '上传已完成'
 })
 
