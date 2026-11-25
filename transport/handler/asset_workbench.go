@@ -1509,6 +1509,45 @@ func (h *AssetWorkbenchHandler) RepriceSubmissionItem(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) PreviewBatchReprice(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.BatchRepriceParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择单价规则和结算月。", nil))
+		return
+	}
+	result, appErr := h.svc.PreviewBatchReprice(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, assetworkbench.BatchRepricePreview{
+		RuleID: result.RuleID, BusinessMonth: result.BusinessMonth, Count: result.Count,
+		OldGross: result.OldGross, NewGross: result.NewGross, Items: result.Items, PreviewToken: result.PreviewToken,
+	})
+}
+
+func (h *AssetWorkbenchHandler) ConfirmBatchReprice(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.ConfirmBatchRepriceParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "请先预览要重算的作品。", nil))
+		return
+	}
+	result, appErr := h.svc.ConfirmBatchReprice(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, assetworkbench.BatchRepriceResult{Updated: result.Updated, OldGross: result.OldGross, NewGross: result.NewGross})
+}
+
 func (h *AssetWorkbenchHandler) ImportErrorRecords(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

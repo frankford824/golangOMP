@@ -16525,6 +16525,194 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/asset-workbench/items/reprice-batch/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview batch repricing for one asset workbench price rule
+         * @description Read-only preview for one settlement month and enabled price rule. Uses original submission dates in Asia/Shanghai. Includes only mutable normal works whose ordinary pricing resolver selects the rule. Defaults to unpriced works and supports up to 1000 changes per batch.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        rule_id: number;
+                        business_month: string;
+                        /** Format: int64 */
+                        payee_user_id?: number;
+                        /** Format: date */
+                        submitted_from?: string;
+                        /** Format: date */
+                        submitted_to?: string;
+                        /** @default false */
+                        include_priced?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description A read-only preview and the token required to confirm it. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                /** Format: int64 */
+                                rule_id: number;
+                                business_month: string;
+                                count: number;
+                                old_gross: number;
+                                new_gross: number;
+                                preview_token: string;
+                                items: {
+                                    /** Format: int64 */
+                                    item_id?: number;
+                                    /** Format: int64 */
+                                    payee_user_id?: number;
+                                    order_no?: string;
+                                    /** Format: date */
+                                    submitted_on?: string;
+                                    old_gross?: number;
+                                    new_gross?: number;
+                                }[];
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid or too broad scope */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/asset-workbench/items/reprice-batch/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the previewed asset workbench batch repricing
+         * @description Recalculates the preview, locks the settlement month and compares the rule and works before updating their pricing. Applies the batch atomically and records audited before/after amounts. Locked settlement items are excluded.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        rule_id: number;
+                        business_month: string;
+                        /** Format: int64 */
+                        payee_user_id?: number;
+                        /** Format: date */
+                        submitted_from?: string;
+                        /** Format: date */
+                        submitted_to?: string;
+                        /** @default false */
+                        include_priced?: boolean;
+                    } & {
+                        preview_token: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Committed repricing counts and gross amounts. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                updated: number;
+                                old_gross: number;
+                                new_gross: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid or too broad scope */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Stale preview or a concurrent settlement or rule change */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/asset-workbench/error-imports": {
         parameters: {
             query?: never;

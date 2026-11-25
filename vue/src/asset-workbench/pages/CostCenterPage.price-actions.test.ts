@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { defineComponent, h } from 'vue'
-import { flushPromises, shallowMount } from '@vue/test-utils'
+import { flushPromises, mount, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const listDifficultyClassesAdmin = vi.hoisted(() => vi.fn())
@@ -11,6 +11,12 @@ const listPromoCoupons = vi.hoisted(() => vi.fn())
 const updatePriceMatrix = vi.hoisted(() => vi.fn())
 const createPriceMatrix = vi.hoisted(() => vi.fn())
 const supersedePriceMatrix = vi.hoisted(() => vi.fn())
+const previewBatchReprice = vi.hoisted(() => vi.fn())
+const confirmBatchReprice = vi.hoisted(() => vi.fn())
+
+vi.mock('@aw/app/session.store', () => ({
+  useAssetWorkbenchSessionStore: () => ({ bootstrap: { capabilities: ['asset.workbench.settlement'] } }),
+}))
 
 vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@aw/shared/api/assetWorkbenchApi')>()
@@ -26,6 +32,8 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', async (loadOriginal) => {
       updatePriceMatrix,
       createPriceMatrix,
       supersedePriceMatrix,
+      previewBatchReprice,
+      confirmBatchReprice,
     },
   }
 })
@@ -168,6 +176,44 @@ describe('CostCenterPage price rule actions', () => {
       effective_from: '2026-11-25T00:00:00+08:00', effective_to: undefined, remark: undefined,
     })
     expect(createPriceMatrix).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('requires a fresh preview after changing the batch repricing scope', async () => {
+    const preview = {
+      rule_id: 41, business_month: '2026-11', count: 1, old_gross: 0, new_gross: 0.17, preview_token: 'first',
+      items: [{ item_id: 50, payee_user_id: 42, submitted_on: '2026-11-18', order_no: 'QA-50', old_gross: 0, new_gross: 0.17 }],
+    }
+    previewBatchReprice.mockResolvedValueOnce(preview).mockResolvedValueOnce({ ...preview, preview_token: 'second' })
+    confirmBatchReprice.mockResolvedValue({ updated: 1, old_gross: 0, new_gross: 0.17 })
+    const wrapper = mount(CostCenterPage, { global: { stubs: { WorkbenchDataGrid: WorkbenchDataGridStub, AsyncBoundary: true, PersonnelPicker: true } } })
+    await flushPromises()
+    await textButton(wrapper, '进入单价设置').trigger('click')
+    await textButton(wrapper, '批量重算').trigger('click')
+    const dialog = wrapper.get('[role="dialog"][aria-labelledby="batch-reprice-title"]')
+    await dialog.get('input[type="month"]').setValue('2026-11')
+    await dialog.findAll('input[type="date"]')[0]!.setValue('2026-11-01')
+    await textButton(wrapper, '预览重算').trigger('click')
+    await flushPromises()
+
+    expect(previewBatchReprice).toHaveBeenLastCalledWith(expect.objectContaining({
+      rule_id: 41, business_month: '2026-11', submitted_from: '2026-11-01', include_priced: false,
+    }), expect.any(AbortSignal))
+    expect(dialog.text()).toContain('重算毛额')
+    expect(dialog.text()).toContain('¥0.17')
+    expect(confirmBatchReprice).not.toHaveBeenCalled()
+
+    await dialog.findAll('input[type="date"]')[1]!.setValue('2026-11-23')
+    expect(dialog.text()).not.toContain('确认重算 1 件')
+    await textButton(wrapper, '预览重算').trigger('click')
+    await flushPromises()
+    await textButton(wrapper, '确认重算 1 件').trigger('click')
+    await flushPromises()
+
+    expect(confirmBatchReprice).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      rule_id: 41, submitted_from: '2026-11-01', submitted_to: '2026-11-23',
+    }), 'second')
+    expect(wrapper.text()).toContain('已重算 1 件作品')
     wrapper.unmount()
   })
 

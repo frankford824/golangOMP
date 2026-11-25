@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 
 import {
   assetWorkbenchApi,
+  type BatchRepriceResult,
   type DeductionRuleRow,
   type DifficultyClassRow,
   type PriceMatrixRow,
@@ -12,6 +13,8 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
+import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
+import BatchRepriceDialog from '@aw/features/settlement/BatchRepriceDialog.vue'
 import { difficultyCodes, difficultyOptionsWithAll, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatMoney, formatPercent } from '@aw/shared/format/number'
 import { chipClass, enabledMeta, promoModeMeta, workerTypeMeta } from '@aw/shared/format/status'
@@ -47,6 +50,9 @@ const activePricingSection = ref<PricingSectionKey>('guide')
 watch(() => route?.query?.section, (section) => {
   activePricingSection.value = section === 'deduction' ? section : 'guide'
 }, { immediate: true })
+const session = useAssetWorkbenchSessionStore()
+const canBatchReprice = computed(() => session.bootstrap?.capabilities?.includes('asset.workbench.settlement') === true)
+const batchRepriceRule = ref<PriceMatrixRow | null>(null)
 const priceSupersedeId = ref(0)
 const priceCopySource = ref<PriceGridRow | null>(null)
 const confirmingPriceRule = ref(false)
@@ -225,7 +231,7 @@ const priceGridColumns = computed<GridColumn[]>(() => [
   { key: 'difficulty_class', label: '难度', width: 132 },
   { key: 'unit_price_label', label: '单价', width: 104, align: 'right' },
   { key: 'enabled_label', label: '状态', width: 88 },
-  { key: 'action', label: '动作', width: 196, align: 'center' },
+  { key: 'action', label: '动作', width: canBatchReprice.value ? 270 : 196, align: 'center' },
 ])
 const deductionGridColumns = computed<GridColumn[]>(() => [
   { key: 'worker_type_label', label: '类型', width: 96 },
@@ -686,6 +692,12 @@ async function toggleRule(action: () => Promise<unknown>) {
   }
 }
 
+function finishBatchReprice(result: BatchRepriceResult) {
+  batchRepriceRule.value = null
+  error.value = ''
+  notice.value = `已重算 ${result.updated} 件作品，毛额 ${formatMoney(result.old_gross)} → ${formatMoney(result.new_gross)}。`
+}
+
 function startPriceSupersede(row: PriceGridRow) {
   if (priceSaving.value) return
   priceCopySource.value = null
@@ -979,6 +991,12 @@ onMounted(async () => {
             >
               {{ gridRowAsPrice(row).enabled ? '停用' : '启用' }}
             </button>
+            <button
+              v-if="canBatchReprice && gridRowAsPrice(row).enabled && gridRowAsPrice(row).difficulty_class !== '0'"
+              class="aw-secondary-button" type="button"
+              :disabled="priceLoading || priceSaving || !!priceSupersedeId || !!priceCopySource"
+              @click="batchRepriceRule = gridRowAsPrice(row)"
+            >批量重算</button>
           </div>
           <span v-else-if="column.key === 'worker_type_label'" :class="chipClass(workerTypeMeta(gridRowAsPrice(row).worker_type).tone)">{{ value }}</span>
           <span v-else-if="column.key === 'enabled_label'" :class="chipClass(enabledMeta(gridRowAsPrice(row).enabled).tone)">{{ value }}</span>
@@ -1084,6 +1102,7 @@ onMounted(async () => {
           </div>
         </section>
       </div>
+      <BatchRepriceDialog v-if="batchRepriceRule" :rule="batchRepriceRule" @close="batchRepriceRule = null" @completed="finishBatchReprice" />
       <div v-if="pendingPriceToggle" class="aw-dialog-backdrop" role="presentation" @click.self="pendingPriceToggle = null">
         <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="price-toggle-confirm-title">
           <div>

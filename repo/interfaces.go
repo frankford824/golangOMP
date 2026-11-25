@@ -537,6 +537,7 @@ type AssetWorkbenchRepo interface {
 	UpdateDifficultyClass(ctx context.Context, tx Tx, item *domain.AssetWorkbenchDifficultyClass) (*domain.AssetWorkbenchDifficultyClass, error)
 
 	ListPriceMatrix(ctx context.Context, filter AssetWorkbenchPriceMatrixFilter) ([]*domain.AssetWorkbenchPriceMatrix, int64, error)
+	GetPriceMatrix(ctx context.Context, id int64) (*domain.AssetWorkbenchPriceMatrix, error)
 	GetPriceMatrixForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchPriceMatrix, error)
 	LockPriceMatrixDimension(ctx context.Context, tx Tx, workerType, jobGrade, difficultyClass string) ([]*domain.AssetWorkbenchPriceMatrix, error)
 	CreatePriceMatrix(ctx context.Context, tx Tx, item *domain.AssetWorkbenchPriceMatrix) (*domain.AssetWorkbenchPriceMatrix, error)
