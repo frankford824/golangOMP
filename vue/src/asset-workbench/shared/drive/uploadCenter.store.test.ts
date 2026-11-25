@@ -22,6 +22,10 @@ describe('asset workbench upload center store', () => {
     })
 
     expect(store.hasItems).toBe(true)
+    expect(store.panelOpen).toBe(false)
+    expect(store.hasActive).toBe(false)
+    expect(store.summaryText).toBe('待上传 1 个')
+    store.openPanel()
     expect(store.panelOpen).toBe(true)
     expect(store.uploadPageItems).toHaveLength(1)
     expect(item.displayName).toBe('A/cover.jpg')

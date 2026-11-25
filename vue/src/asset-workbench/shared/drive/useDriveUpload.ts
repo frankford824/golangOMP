@@ -27,6 +27,7 @@ export interface DriveUploadPieceworkSource {
   id?: string
   relativePath: string
   sessionId?: string
+  uploadBatchId?: string
 }
 
 export interface DriveUploadPieceworkGroup<T extends DriveUploadPieceworkSource> {
@@ -118,7 +119,7 @@ export function groupDriveUploadPieceworkItems<T extends DriveUploadPieceworkSou
     const slashIndex = normalized.indexOf('/')
     const isFolder = slashIndex > 0
     const key = isFolder
-      ? `folder:${normalized.slice(0, slashIndex).toLowerCase()}`
+      ? `folder:${item.uploadBatchId ? item.uploadBatchId + ':' : ''}${normalized.slice(0, slashIndex).toLowerCase()}`
       : `file:${item.sessionId || item.id || index}`
     let group = byKey.get(key)
     if (!group) {

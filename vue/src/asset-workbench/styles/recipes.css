@@ -2053,27 +2053,6 @@
   min-width: 0;
 }
 
-.aw-upload-header-actions {
-  display: grid;
-  justify-items: end;
-  gap: var(--aw-space-2);
-  min-width: 0;
-}
-
-.aw-upload-header-actions__buttons {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--aw-space-2);
-  width: 100%;
-}
-
-.aw-upload-header-actions > small {
-  color: var(--aw-ink-muted);
-  font-size: var(--aw-font-size-xs);
-  text-align: end;
-  text-wrap: pretty;
-}
-
 .aw-button-row {
   display: inline-flex;
   flex-wrap: wrap;
@@ -5071,6 +5050,42 @@ body.aw-submission-dialog-locked {
   font-weight: var(--aw-weight-strong);
 }
 
+.aw-upload-directory-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-queue-assign-directory {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin-top: var(--aw-space-3);
+  padding: var(--aw-space-3);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+}
+
+.aw-queue-assign-directory > .aw-inline-actions {
+  align-items: flex-end;
+}
+
+.aw-upload-row__file {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--aw-space-2);
+}
+
+.aw-upload-row__file input,
+.aw-simple-upload-item__main input[type="checkbox"] {
+  flex: 0 0 auto;
+  align-self: center;
+}
+
 .aw-upload-list {
   display: grid;
   gap: var(--aw-space-2);
@@ -5866,14 +5881,6 @@ body.aw-submission-dialog-locked {
   .aw-page-bar__actions,
   .aw-console-hero__actions {
     justify-content: flex-start;
-  }
-
-  .aw-upload-header-actions {
-    justify-items: start;
-  }
-
-  .aw-upload-header-actions > small {
-    text-align: start;
   }
 
   .aw-topbar {
@@ -11367,7 +11374,17 @@ a.aw-submission-tasks__row:hover {
 
 .aw-upload-page .aw-dropzone__actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 540px) {
+  .aw-upload-page .aw-dropzone__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .aw-upload-page .aw-dropzone__actions > .aw-primary-button {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 1240px) {
@@ -11440,10 +11457,6 @@ a.aw-submission-tasks__row:hover {
 
   .aw-settings-tabs__group-label {
     display: none;
-  }
-
-  .aw-upload-header-actions {
-    width: 100%;
   }
 
   .aw-inline-actions:not(.aw-inline-actions--compact),

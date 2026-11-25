@@ -18,6 +18,7 @@ export interface UploadCenterItem {
   finalized: boolean
   pageCount: number
   uploadDirectoryId?: number
+  uploadBatchId?: string
   uploadDirectoryName?: string
   difficultyClass?: string
   sessionId?: string
@@ -43,8 +44,9 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
   const panelOpen = ref(false)
   const compact = ref(true)
 
+  const queuedItems = computed(() => items.value.filter((item) => item.status === 'queued'))
   const activeItems = computed(() =>
-    items.value.filter((item) => item.status === 'queued' || item.status === 'uploading' || item.status === 'submitting'),
+    items.value.filter((item) => item.status === 'uploading' || item.status === 'submitting'),
   )
   const failedItems = computed(() => items.value.filter((item) => item.status === 'failed'))
   const pendingRecordItems = computed(() => items.value.filter((item) => item.status === 'uploaded'))
@@ -70,9 +72,10 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
   })
   const summaryText = computed(() => {
     if (!items.value.length) return '暂无上传任务'
-    if (hasActive.value) return `上传中 ${activeItems.value.length} 个 · 待生成记录 ${pendingRecordItems.value.length} 个 · 已完成 ${finishedItems.value.length} 个`
+    if (hasActive.value) return `处理中 ${activeItems.value.length} 个 · 待上传 ${queuedItems.value.length} 个 · 已完成 ${finishedItems.value.length} 个`
     if (failedItems.value.length) return `失败 ${failedItems.value.length} 个 · 待生成记录 ${pendingRecordItems.value.length} 个`
     if (pendingRecordItems.value.length) return `待生成记录 ${pendingRecordItems.value.length} 个`
+    if (queuedItems.value.length) return `待上传 ${queuedItems.value.length} 个`
     return `已完成 ${finishedItems.value.length} 个`
   })
 
@@ -88,6 +91,7 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
 
   function addItems(files: File[], options: AddUploadCenterItemsOptions): UploadCenterItem[] {
     const now = Date.now()
+    const uploadBatchId = options.source === 'upload-page' ? crypto.randomUUID?.() ?? `${now}-${Math.random()}` : undefined
     const next = files.map((file, index) => {
       const relativePath = driveUploadRelativePath(file)
       return {
@@ -102,6 +106,7 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
         finalized: options.finalized ?? true,
         pageCount: options.pageCount ?? 1,
         uploadDirectoryId: options.uploadDirectoryId,
+        uploadBatchId,
         uploadDirectoryName: options.uploadDirectoryName,
         difficultyClass: options.difficultyClass,
         createdAt: now,
@@ -113,7 +118,7 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
       if (index >= 0) items.value[index] = { ...items.value[index], ...item }
       else items.value.push(item)
     }
-    if (next.length) openPanel()
+    if (next.length && options.source === 'drive-dialog') openPanel()
     return next
   }
 
@@ -158,6 +163,7 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
     panelOpen,
     compact,
     activeItems,
+    queuedItems,
     failedItems,
     pendingRecordItems,
     finishedItems,
