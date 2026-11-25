@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   driveDirectories: vi.fn(),
   listUploadDirectories: vi.fn().mockResolvedValue([]),
   driveFiles: vi.fn(),
+  driveUploadDays: vi.fn().mockResolvedValue([]),
+  exportDriveFiles: vi.fn(),
   suggestPersonnel: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   batchMoveFiles: vi.fn(),
   listSettlementSupplements: vi.fn(),
@@ -56,6 +58,7 @@ describe('UploadOverviewPage operation source', () => {
     mocks.capabilities = ['asset.workbench.manage', 'asset.workbench.settlement']
     mocks.driveDirectories.mockResolvedValue([])
     mocks.listUploadDirectories.mockResolvedValue([])
+    mocks.exportDriveFiles.mockImplementation(async () => (await mocks.driveFiles()).items)
     mocks.listSettlementSupplements.mockResolvedValue({ items: [], total: 0, page: 1, size: 100 })
   })
 
@@ -170,6 +173,65 @@ describe('UploadOverviewPage operation source', () => {
     }
   })
 
+  it('uses the same date and personnel filters for the calendar, list and complete export', async () => {
+    const count = 22404
+    const files = Array.from({ length: count }, (_, index) => ({
+      id: index + 1, submission_item_id: index === 1 ? 1 : index + 1, owner_name: '测试兼职', owner_worker_type: 'parttime',
+      original_filename: `work-${index + 1}.png`, page_count: 1, gross_amount: 0.4, created_at: '2026-11-24T15:59:59Z',
+    }))
+    mocks.driveFiles.mockResolvedValue({ items: files.slice(0, 50), total: count })
+    mocks.exportDriveFiles.mockResolvedValue(files)
+    const wrapper = mount(UploadOverviewPage, { global: { stubs: { RouterLink: true } } })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const createURL = vi.fn((_blob: Blob) => 'blob:complete-export')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: createURL, revokeObjectURL: vi.fn() }))
+    try {
+      await flushPromises()
+      const typeFilter = wrapper.get('select[aria-label="人员类型筛选"]')
+      await typeFilter.setValue('parttime')
+      const exportButton = wrapper.findAll('button').find((button) => button.text().includes('导出全部结果'))!
+      expect(exportButton.attributes('disabled')).toBeDefined()
+      const dates = wrapper.findAllComponents(UploadLedgerDateField)
+      dates[0].vm.$emit('update:modelValue', '2026-11-01')
+      dates[1].vm.$emit('update:modelValue', '2026-11-24')
+      await wrapper.get('form').trigger('submit')
+      await flushPromises()
+      expect(mocks.driveFiles).toHaveBeenLastCalledWith(expect.objectContaining({
+        worker_type: 'parttime', created_from: '2026-11-01', created_to: '2026-11-24', page: 1, page_size: 50,
+      }), expect.any(AbortSignal))
+      await dates[0].props('loadDays')('2026-11', new AbortController().signal)
+      expect(mocks.driveUploadDays).toHaveBeenLastCalledWith(expect.objectContaining({
+        worker_type: 'parttime', month: '2026-11',
+      }), expect.any(AbortSignal))
+      expect(wrapper.get('[aria-label="已应用筛选"]').text()).toContain('人员类型：兼职')
+      expect(wrapper.get('tbody').text()).toContain('兼职')
+      const listCalls = mocks.driveFiles.mock.calls.length
+      await exportButton.trigger('click')
+      await flushPromises()
+      expect(mocks.exportDriveFiles).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        worker_type: 'parttime', created_from: '2026-11-01', created_to: '2026-11-24',
+      }), expect.any(AbortSignal))
+      expect(mocks.driveFiles.mock.calls.length).toBe(listCalls)
+      const csv = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = reject
+        reader.readAsText(createURL.mock.calls[0]![0] as Blob)
+      })
+      const lines = csv.split('\n')
+      expect(lines).toHaveLength(count + 1)
+      expect(lines[0]).toMatch(/创建人,人员类型,操作来源/)
+      expect(lines[1]).toContain('测试兼职,兼职')
+      expect(lines[2]).not.toContain('¥0.40')
+      expect(lines[count]).toContain('work-22404.png')
+      expect(wrapper.text()).toContain('已导出全部 22,404 条匹配文件记录')
+    } finally {
+      click.mockRestore()
+      vi.unstubAllGlobals()
+      wrapper.unmount()
+    }
+  })
+
   it('marks client supplement files in the admin upload ledger and detail panel', async () => {
     mocks.driveFiles.mockResolvedValue({
       items: [{
@@ -207,7 +269,7 @@ describe('UploadOverviewPage operation source', () => {
     await flushPromises()
 
     const headers = wrapper.findAll('thead th').map((header) => header.text().trim())
-    expect(headers.slice(2, 5)).toEqual(['创建人', '操作来源', '创建时间'])
+    expect(headers.slice(2, 6)).toEqual(['创建人', '人员类型', '操作来源', '创建时间'])
     expect(wrapper.get('.aw-upload-ledger__owner').text()).not.toContain('客户端补录')
     expect(wrapper.get('.aw-upload-ledger__source-cell').text()).toBe('客户端补录')
 

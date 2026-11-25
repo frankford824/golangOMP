@@ -11,6 +11,7 @@ import {
   type ArchiveVirtualFolder,
   type DriveDirectoryRow,
   type DriveFileRow,
+  type DriveWorkerType,
   type PersonnelSuggestion,
   type UploadDirectoryRow,
 } from '@aw/shared/api/assetWorkbenchApi'
@@ -54,7 +55,6 @@ const canViewSupplementLedger = computed(() => capabilities.value.has('asset.wor
 const supplementRecordPath = computed(() => capabilities.value.has('asset.workbench.settlement') ? '/supplements' : '/my-settlement')
 
 const pageSize = 50
-const exportLimit = 5000
 const skeletonRowCount = 8
 
 const directories = ref<DriveDirectoryRow[]>([])
@@ -81,6 +81,7 @@ const page = ref(1)
 const total = ref(0)
 const query = ref('')
 const owner = ref('')
+const workerType = ref<DriveWorkerType | ''>('')
 const ownerSelection = ref<PersonnelSuggestion | null>(null)
 
 function updateOwner(value: string) {
@@ -123,6 +124,7 @@ const archiveError = ref('')
 
 let requestSeq = 0
 let listAbortController: AbortController | null = null
+let exportAbortController: AbortController | null = null
 let selectionAbortController: AbortController | null = null
 let selectionRequestSeq = 0
 let archivePreviewObjectUrl = ''
@@ -145,6 +147,7 @@ function closePreviewDialog() {
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const allPageSelected = computed(() => files.value.length > 0 && files.value.every((file) => selectedIds.value.has(file.id)))
+const workerTypeLabels: Record<DriveWorkerType, string> = { fulltime: '全职', parttime: '兼职' }
 const sourceLabels: Record<Exclude<OperationSourceFilter, 'all'>, string> = {
   normal_upload: '正常上传', supplement: '补录（全部）', client_supplement: '客户端补录', admin_supplement: '管理员补录',
 }
@@ -154,6 +157,7 @@ const appliedFilterLabels = computed(() => {
   if (filters.q) labels.push({ key: 'q', label: `关键词：${filters.q}` })
   const ownerLabel = filters.ownerLabel || filters.owner
   if (ownerLabel && canViewAllUploads.value) labels.push({ key: 'owner', label: `创建人：${ownerLabel}` })
+  if (filters.worker_type) labels.push({ key: 'worker_type', label: `人员类型：${workerTypeLabels[filters.worker_type]}` })
   const directoryLabels = (filters.dir_ids ?? []).map(id =>
     directoryNames.value.get(id) || '分类 ' + id,
   )
@@ -195,6 +199,7 @@ const activeFilterCount = computed(() =>
   [
     query.value.trim(),
     owner.value.trim(),
+    workerType.value,
     createdFrom.value,
     createdTo.value,
     selectedDirectories.value.length,
@@ -427,8 +432,13 @@ function filePieceworkInlineNote(file: DriveFileRow) {
   return state.isPrimary ? `文件夹作品 · 本页 ${state.siblingCount} 个文件 · 只计 1 件` : '同一文件夹作品 · 金额已计入同作品'
 }
 
+function fileWorkerTypeLabel(file: DriveFileRow) {
+  return file.owner_worker_type ? workerTypeLabels[file.owner_worker_type] ?? '未设置' : '未设置'
+}
+
 function csvEscape(value: unknown) {
-  const text = String(value ?? '')
+  const raw = String(value ?? '')
+  const text = /^[=+@\-\t\r\n]/.test(raw.trimStart()) || /^[\t\r\n]/.test(raw) ? "'" + raw : raw
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`
   return text
 }
@@ -436,6 +446,7 @@ function csvEscape(value: unknown) {
 function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDisplayState>) {
   const row = [
     fileOwnerLabel(file),
+    fileWorkerTypeLabel(file),
     fileOperationLabel(file),
     formatDateTime(file.created_at),
     file.upload_directory_name || '未分类',
@@ -448,7 +459,7 @@ function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDispla
     formatSize(file.file_size),
     filePieceworkNote(file, lookup),
   ]
-  if (!canViewAmounts.value) row.splice(8, 1)
+  if (!canViewAmounts.value) row.splice(9, 1)
   return row
 }
 
@@ -501,6 +512,7 @@ const uploadDayFilters = computed(() => ({
   q: query.value.trim() || undefined,
   owner: canViewAllUploads.value && !ownerSelection.value ? owner.value.trim() || undefined : undefined,
   owner_user_id: canViewAllUploads.value ? ownerSelection.value?.user_id : undefined,
+  worker_type: canViewAllUploads.value ? workerType.value || undefined : undefined,
   operation_source: operationSource.value === 'all' ? undefined : operationSource.value,
 }))
 const uploadDayFilterKey = computed(() => JSON.stringify(uploadDayFilters.value))
@@ -570,6 +582,7 @@ async function applyFilters() {
 async function resetFilters() {
   query.value = ''
   updateOwner('')
+  workerType.value = ''
   createdFrom.value = personalLedger.value ? currentUploadDay() : ''
   createdTo.value = personalLedger.value ? currentUploadDay() : ''
   selectedDirectories.value = []
@@ -969,40 +982,37 @@ async function confirmDeleteSelectedFiles() {
 }
 
 async function exportCurrentFilter() {
+  if (filterChangesPending.value || loading.value || exporting.value) return
+  const controller = new AbortController()
+  exportAbortController = controller
   exporting.value = true
   error.value = ''
   notice.value = ''
   try {
-    const rows: DriveFileRow[] = []
-    let nextPage = 1
-    for (;;) {
-      const result = await assetWorkbenchApi.driveFiles({
-        ...appliedFilters.value,
-        page: nextPage,
-        page_size: 200,
-      })
-      rows.push(...result.items)
-      if (rows.length >= result.total || rows.length >= exportLimit || result.items.length === 0) break
-      nextPage += 1
+    const rows = await assetWorkbenchApi.exportDriveFiles(appliedFilters.value, controller.signal)
+    if (controller.signal.aborted) return
+    if (!rows.length) {
+      notice.value = '没有匹配的上传记录可导出。'
+      return
     }
-    await hydrateSupplementSources(rows)
-    const header = ['创建人', '操作来源', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小', '计价说明']
-    if (!canViewAmounts.value) header.splice(8, 1)
+    const header = ['创建人', '人员类型', '操作来源', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小', '计价说明']
+    if (!canViewAmounts.value) header.splice(9, 1)
     const exportPieceworkLookup = buildPieceworkDisplayByFileID(rows)
     const csv = [header, ...rows.map((file) => fileToExportRow(file, exportPieceworkLookup))].map((row) => row.map(csvEscape).join(',')).join('\n')
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `上传总览-${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `上传总览-${currentUploadDay()}.csv`
     document.body.appendChild(link)
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
-    notice.value = rows.length >= exportLimit && rows.length < total.value ? `已导出前 ${exportLimit} 条，请缩小筛选范围导出完整结果` : `已导出 ${rows.length} 条记录`
+    notice.value = `已导出全部 ${formatInt(rows.length)} 条匹配文件记录`
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '导出失败'
+    if (!controller.signal.aborted) error.value = err instanceof Error ? err.message : '导出失败'
   } finally {
+    exportAbortController = null
     exporting.value = false
   }
 }
@@ -1019,6 +1029,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   listAbortController?.abort()
   selectionAbortController?.abort()
+  exportAbortController?.abort()
   revokeArchivePreviewObjectUrl()
 })
 </script>
@@ -1048,6 +1059,14 @@ onBeforeUnmount(() => {
           @update:model-value="updateOwner"
           @selected="selectOwner"
         />
+        <label v-if="canViewAllUploads">
+          <span>人员类型</span>
+          <select v-model="workerType" aria-label="人员类型筛选">
+            <option value="">全部类型</option>
+            <option value="fulltime">全职</option>
+            <option value="parttime">兼职</option>
+          </select>
+        </label>
         <UploadLedgerCategoryFilter v-model="selectedDirectories" :options="categoryOptions" />
         <label>
           <span>操作来源</span>
@@ -1071,9 +1090,9 @@ onBeforeUnmount(() => {
               <RefreshCw :size="15" aria-hidden="true" />
               刷新
             </button>
-            <button class="aw-secondary-button" type="button" :disabled="exporting || loading" @click="exportCurrentFilter">
+            <button class="aw-secondary-button" type="button" :disabled="exporting || loading || filterChangesPending || !!listError" title="按已应用的筛选导出全部文件记录" @click="exportCurrentFilter">
               <FileDown :size="15" aria-hidden="true" />
-              {{ exporting ? '导出中…' : '导出结果' }}
+              {{ exporting ? '导出中…' : '导出全部结果' }}
             </button>
           </div>
         </div>
@@ -1152,6 +1171,7 @@ onBeforeUnmount(() => {
               <col class="aw-upload-ledger__col-check" />
               <col class="aw-upload-ledger__col-thumb" />
               <col class="aw-upload-ledger__col-owner" />
+              <col class="aw-upload-ledger__col-worker-type" />
               <col class="aw-upload-ledger__col-source" />
               <col class="aw-upload-ledger__col-date" />
               <col class="aw-upload-ledger__col-dir" />
@@ -1175,6 +1195,7 @@ onBeforeUnmount(() => {
                     <component :is="sortIcon('owner')" v-if="sortIcon('owner')" :size="13" />
                   </button>
                 </th>
+                <th>人员类型</th>
                 <th>操作来源</th>
                 <th :aria-sort="!prioritizeAttention && sortBy === 'created_at' ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined">
                   <button type="button" :disabled="loading" @click="setSort('created_at')">
@@ -1212,11 +1233,11 @@ onBeforeUnmount(() => {
                 <tr v-for="i in skeletonRowCount" :key="`skeleton-${i}`" class="aw-upload-ledger__row-skeleton" aria-hidden="true">
                   <td class="aw-upload-ledger__check"><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--dot" /></td>
                   <td><span class="aw-upload-ledger__skeleton aw-upload-ledger__skeleton--thumb" /></td>
-                  <td :colspan="canViewAmounts ? 11 : 10"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
+                  <td :colspan="canViewAmounts ? 12 : 11"><span class="aw-upload-ledger__skeleton" :style="{ width: `${92 - (i % 4) * 14}%` }" /></td>
                 </tr>
               </template>
               <tr v-else-if="listError">
-                <td :colspan="canViewAmounts ? 13 : 12">
+                <td :colspan="canViewAmounts ? 14 : 13">
                   <div class="aw-upload-ledger__empty" role="alert">
                     <strong>{{ listError }}</strong>
                     <button class="aw-secondary-button" type="button" @click="refreshResults">重试</button>
@@ -1224,11 +1245,11 @@ onBeforeUnmount(() => {
                 </td>
               </tr>
               <tr v-else-if="files.length === 0">
-                <td :colspan="canViewAmounts ? 13 : 12">
+                <td :colspan="canViewAmounts ? 14 : 13">
                   <div class="aw-upload-ledger__empty">
                     <Inbox :size="30" aria-hidden="true" />
                     <strong>没有匹配的上传记录</strong>
-                    <p>试试调整关键词、创建人、分类或日期范围。</p>
+                    <p>试试调整关键词、人员类型、分类或日期范围。</p>
                     <button v-if="activeFilterCount" class="aw-grid-button" type="button" @click="resetFilters">清除全部筛选</button>
                   </div>
                 </td>
@@ -1261,6 +1282,7 @@ onBeforeUnmount(() => {
                     <strong :title="fileOwnerLabel(file)">{{ fileOwnerLabel(file) }}</strong>
                     <small v-if="fileOwnerSecondary(file)" :title="fileOwnerSecondary(file)">{{ fileOwnerSecondary(file) }}</small>
                   </td>
+                  <td>{{ fileWorkerTypeLabel(file) }}</td>
                   <td class="aw-upload-ledger__source-cell">
                     <span class="aw-chip aw-upload-ledger__source" :class="fileOperationLabel(file) === '正常上传' ? 'aw-chip--neutral' : 'aw-chip--info'" :title="fileOperationLabel(file)">
                       {{ fileOperationLabel(file) }}
