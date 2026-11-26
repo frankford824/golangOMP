@@ -10,6 +10,9 @@ vi.mock('@aw/shared/api/assetWorkbenchApi', () => ({
       { id: 9, name: 'A类', oss_prefix: 'a', difficulty_class: 'A', allowed_file_types: ['jpg'], enabled: true, sort_order: 2 },
     ]),
     listDifficultyClasses: vi.fn().mockResolvedValue([{ id: 1, code: 'C', name: 'C', enabled: true, sort_order: 1 }]),
+    mySupplementMonths: vi.fn(),
+    createSettlementSupplement: vi.fn(),
+    mySettlement: vi.fn(),
     createSubmission: vi.fn().mockResolvedValue({ items: [] }),
   },
 }))
@@ -52,7 +55,7 @@ describe('UploadPage simple piecework copy', () => {
     expect(wrapper.get('.aw-dropzone > span').text()).toBe('本次添加到「C类」。目录允许：全部格式')
     expect(wrapper.get('.aw-dropzone__hint').text()).toBe('仔细核对作品数量后，点击上传 2个作品=计件数量')
     expect(wrapper.find('.aw-dropzone__piecework-confirmation').exists()).toBe(false)
-    expect(wrapper.get('.aw-page-bar__actions').text()).toBe('表格校对')
+    expect(wrapper.get('.aw-page-bar__actions').text()).toContain('表格校对')
     expect(wrapper.get('.aw-dropzone__actions').text()).toContain('提交上传')
 
     uploadCenter.clearIdle()
@@ -68,6 +71,34 @@ describe('UploadPage simple piecework copy', () => {
     await clearButton.trigger('click')
     expect(uploadCenter.uploadPageItems).toHaveLength(0)
     expect(wrapper.text()).toContain('等待文件')
+  })
+
+  it('lets an income-hidden employee upload to their open month without requesting income data', async () => {
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 22 }, is_admin: false, capabilities: ['asset.workbench.submit'], profile: { settlement_visible: false },
+    } as never)
+    vi.mocked(assetWorkbenchApi.mySupplementMonths).mockResolvedValue({ payee_user_id: 22, months: ['2026-10'] })
+    vi.mocked(uploadWorkbenchFile).mockResolvedValue({ sessionId: 'supplement-session', filename: 'sample.jpg' })
+    const wrapper = mount(UploadPage, { global: { plugins: [pinia], stubs: { RouterLink: true } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === '补交遗漏作品')!.trigger('click')
+    await flushPromises()
+    const panel = wrapper.get('.aw-self-supplement-upload')
+    expect(panel.text()).toContain('已开放 2026-10')
+    const input = panel.get('input[aria-label="选择补录文件"]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['ok'], 'sample.jpg')] })
+    await input.trigger('change')
+    vi.mocked(assetWorkbenchApi.mySupplementMonths).mockResolvedValue({ payee_user_id: 22, months: [] })
+    await panel.findAll('button').find(b => b.text() === '上传 1 个补录作品')!.trigger('click')
+    await flushPromises()
+    expect(assetWorkbenchApi.createSettlementSupplement).toHaveBeenCalledWith(expect.objectContaining({
+      payee_user_id: 22, business_month: '2026-10', upload_session_ids: ['supplement-session'],
+    }))
+    expect(panel.text()).toContain('1 个作品，共 1 个文件，归档到「C类」')
+    expect(panel.text()).toContain('当前没有可用的补录权限')
+    expect(wrapper.text()).not.toMatch(/¥|本月预计收入/)
+    expect(assetWorkbenchApi.mySettlement).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('uses the same annotated copy for admin uploads', async () => {

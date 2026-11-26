@@ -18943,6 +18943,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/asset-workbench/my/supplement-months": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my open supplement upload months
+         * @description Returns only the authenticated uploader's enabled, unlocked current or historical months, independently of income visibility.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accessible supplement upload months without income data */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data?: {
+                                /** Format: int64 */
+                                payee_user_id: number;
+                                months: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Unauthenticated */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/asset-workbench/settlement/supplement-permissions": {
         parameters: {
             query?: never;

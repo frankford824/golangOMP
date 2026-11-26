@@ -79,3 +79,24 @@ func TestEligibleSupplementMonthsExcludeLockedAndIncludeEmptyGaps(t *testing.T) 
 		t.Fatalf("months=%v err=%+v", months, err)
 	}
 }
+
+func TestMySupplementMonthsIndependentOfIncome(t *testing.T) {
+	s, r, actor := incomeFixture()
+	hidden := false
+	r.profile.SettlementVisible = &hidden
+	r.monthStates = map[string]bool{"2026-09": true}
+	r.permissions = []*domain.AssetWorkbenchSupplementPermission{
+		{PayeeUserID: actor.ID, BusinessMonth: "2026-08", Enabled: true},
+		{PayeeUserID: actor.ID, BusinessMonth: "2026-09", Enabled: true},
+		{PayeeUserID: actor.ID, BusinessMonth: "2026-11", Enabled: true},
+		{PayeeUserID: actor.ID, BusinessMonth: "2026-07", Enabled: false},
+		{PayeeUserID: actor.ID + 1, BusinessMonth: "2026-10", Enabled: true},
+	}
+	got, err := s.MySupplementMonths(context.Background(), actor)
+	if err != nil || got.PayeeUserID != actor.ID || len(got.Months) != 1 || got.Months[0] != "2026-08" || r.readCalls != 0 {
+		t.Fatalf("self-service months=%+v, income reads=%d, error=%v", got, r.readCalls, err)
+	}
+	if _, err := s.MySettlement(context.Background(), actor); err == nil || err.Code != domain.ErrCodePermissionDenied {
+		t.Fatal("hidden income must still be denied")
+	}
+}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SupplementUploadPanel from '@aw/features/supplement/SupplementUploadPanel.vue'
 import ArchiveBrowserDialog from '@aw/shared/drive/ArchiveBrowserDialog.vue'
 import { canOpenArchive } from '@aw/shared/drive/archiveFormat'
 import { FileArchive } from 'lucide-vue-next'
@@ -110,6 +111,18 @@ const previewDialog = ref<{
   metaRows: [],
 })
 const { bootstrap, refresh } = useAssetWorkbenchBootstrap()
+const supplementOpen = ref(false)
+const supplementBusy = ref(false)
+const supplementRequest = usePageRequest(signal => assetWorkbenchApi.mySupplementMonths(signal), null, '补录权限读取失败，请重试。')
+const ownSupplementPermissions = computed(() => {
+  const scope = supplementRequest.data.value
+  return scope?.months.map(business_month => ({ business_month, payee_user_id: scope.payee_user_id })) ?? []
+})
+function toggleSupplement() {
+  supplementOpen.value = !supplementOpen.value
+  if (supplementOpen.value) void supplementRequest.run()
+}
+
 const contextRequest = usePageRequest<UploadContext>(
   async () => {
     await refresh()
@@ -716,16 +729,24 @@ onActivated(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">{{ isSimpleUser ? '交作品' : '成品交付' }}</p>
         <h2>{{ isSimpleUser ? '上传成品' : '成品上传中心' }}</h2>
-        <p>{{ isSimpleUser ? '按目录加入文件，也可在队列批量改目录。准备好后一次提交。' : '批量拖拽文件，提交前校正难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
+        <p v-if="!supplementOpen">{{ isSimpleUser ? '按目录加入文件，也可在队列批量改目录。准备好后一次提交。' : '批量拖拽文件，提交前校正难度、页数和定稿状态，系统会在上传成功后自动生成记录。' }}</p>
       </div>
       <div class="aw-page-bar__actions">
-        <button class="aw-secondary-button" type="button" :aria-controls="uploadSpreadsheetOpen ? 'aw-upload-review' : undefined" :aria-expanded="uploadSpreadsheetOpen" @click="toggleUploadReview">
+        <button v-if="bootstrap?.capabilities.includes('asset.workbench.submit')" class="aw-secondary-button" type="button"
+          :disabled="uploading || submitting || supplementBusy" :aria-expanded="supplementOpen" @click="toggleSupplement">
+          {{ supplementOpen ? '返回日常上传' : '补交遗漏作品' }}
+        </button>
+        <button v-if="!supplementOpen" class="aw-secondary-button" type="button" :aria-controls="uploadSpreadsheetOpen ? 'aw-upload-review' : undefined" :aria-expanded="uploadSpreadsheetOpen" @click="toggleUploadReview">
           <Table2 :size="16" aria-hidden="true" />
           {{ uploadSpreadsheetOpen ? '收起校对' : '表格校对' }}
         </button>
       </div>
     </div>
 
+    <SupplementUploadPanel v-if="supplementOpen || supplementRequest.data.value" v-show="supplementOpen"
+      :permissions="ownSupplementPermissions" :directories="uploadDirectories" :ready="!!supplementRequest.data.value && !supplementRequest.loading.value && !supplementRequest.error.value && directoryContextReady"
+      :error="supplementRequest.error.value || contextError" @ordinary-upload="supplementOpen = false" @busy="supplementBusy = $event" @submitted="supplementRequest.run()" @refresh="loadContext(); supplementRequest.run()" />
+    <template v-if="!supplementOpen">
     <input ref="inputRef" class="aw-visually-hidden" type="file" multiple aria-label="选择作品文件" @change="handleInput" />
     <input
       ref="folderInputRef"
@@ -1025,5 +1046,6 @@ onActivated(() => {
       eyebrow="文件预览"
       @close="closeFilePreview"
     />
+    </template>
   </section>
 </template>

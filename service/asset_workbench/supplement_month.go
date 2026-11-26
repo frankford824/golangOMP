@@ -23,6 +23,29 @@ func (s *Service) ensureSupplementMonthOpen(ctx context.Context, month string) *
 	return nil
 }
 
+type MySupplementMonthsResult struct {
+	PayeeUserID int64    `json:"payee_user_id"`
+	Months      []string `json:"months"`
+}
+
+func (s *Service) MySupplementMonths(ctx context.Context, actor domain.RequestActor) (*MySupplementMonthsResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if actor.ID <= 0 || !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "没有补录上传权限。", nil)
+	}
+	rows, err := s.openSupplementPermissions(ctx, actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	result := &MySupplementMonthsResult{PayeeUserID: actor.ID, Months: make([]string, 0, len(rows))}
+	for _, row := range rows {
+		result.Months = append(result.Months, row.BusinessMonth)
+	}
+	return result, nil
+}
+
 func (s *Service) openSupplementPermissions(ctx context.Context, userID int64) ([]*domain.AssetWorkbenchSupplementPermission, *domain.AppError) {
 	enabled := true
 	permissions := []*domain.AssetWorkbenchSupplementPermission{}

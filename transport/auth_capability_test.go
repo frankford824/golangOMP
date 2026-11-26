@@ -329,6 +329,7 @@ func TestAssetWorkbenchMigratedRoleCapabilityParity(t *testing.T) {
 		{"settlement reads profiles", "asset_settlement", http.MethodGet, "/v1/asset-workbench/profiles", true},
 		{"settlement creates supplement upload session", "asset_settlement", http.MethodPost, "/v1/asset-workbench/upload-sessions", true},
 		{"submitter profiles denied", "asset_submitter", http.MethodGet, "/v1/asset-workbench/profiles", false},
+		{"submitter checks own supplement months", "asset_submitter", http.MethodGet, "/v1/asset-workbench/my/supplement-months", true},
 		{"submitter creates own supplement", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/supplements", true},
 		{"submitter deletes own supplement route", "asset_submitter", http.MethodDelete, "/v1/asset-workbench/settlement/supplements/3", true},
 		{"submitter batch deletes own supplements route", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/supplements/batch-delete", true},
