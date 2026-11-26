@@ -9,7 +9,8 @@
         ><input
           id="cost-keyword"
           v-model.trim="keyword"
-          placeholder="搜索编码 / 名称 / 款式"
+          @paste="pasteSkuSearch"
+          placeholder="搜索编码 / 名称 / 款式，多个编码用空格分隔"
         /><label class="sr-only" for="cost-review-state">确认状态</label>
         <select id="cost-review-state" v-model="reviewState" @change="search">
           <option value="pending">待确认</option>
@@ -500,6 +501,7 @@ import {
 } from "vue";
 import { Search, X, ChevronLeft, ChevronRight } from "lucide-vue-next";
 import { usePermission } from "@/composables/usePermission";
+import { batchSkuCodes, pasteSkuSearch } from "@/utils/sku-search";
 import CostInputFields from "./CostInputFields.vue";
 import { emptyCostInput } from "@/domain/cost-model";
 import {
@@ -726,7 +728,9 @@ async function load(background = false) {
   loading.value = true;
   error.value = "";
   try {
-    const params = { keyword: keyword.value, status: status.value, review_state: reviewState.value,
+    const query = keyword.value;
+    const codes = batchSkuCodes(query);
+    const params = { keyword: codes.length ? undefined : query, sku_codes: codes.length ? codes.join(",") : undefined, status: status.value, review_state: reviewState.value,
       before_id: cursors.value.at(-1), page_size: pageSize.value };
     const result = await retryCostRead(() => costMaintenanceApi.list(params, signal), signal);
     if (ticket !== epoch) return;
@@ -734,7 +738,7 @@ async function load(background = false) {
     nextID.value = result.next_before_id;
     refreshed.value = result.refreshed_at;
     if (selected.value && !editing.value) selected.value = rows.value.find(row => row.id === selected.value?.id) ?? null;
-    appliedVisit = { keyword: params.keyword, status: params.status, review: params.review_state,
+    appliedVisit = { keyword: query, status: params.status, review: params.review_state,
       pageSize: params.page_size, cursors: [...cursors.value] };
     if (pendingVisit) {
       const saved = pendingVisit;

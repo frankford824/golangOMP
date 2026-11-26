@@ -2067,6 +2067,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
 | `task_id` | query | integer | 否 | - |
+| `sku_codes` | query | array<string> | 否 | Match any listed SKU exactly before pagination. Other supplied filters also apply. |
 | `sku_code` | query | string | 否 | - |
 | `task_no` | query | string | 否 | - |
 | `creator_id` | query | integer | 否 | - |
@@ -4311,6 +4312,7 @@ curl -X PATCH https://api.example.com/v1/cost-rule-bindings/<id> \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
+| `sku_codes` | query | array<string> | 否 | Match any listed SKU exactly before pagination. Other supplied filters also apply. |
 | `keyword` | query | string | 否 | - |
 | `status` | query | string | 否 | - |
 | `review_state` | query | enum(pending/reviewed/all) | 否 | Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review. |

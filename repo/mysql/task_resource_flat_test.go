@@ -56,6 +56,7 @@ func TestListFlatResourceItemsFiltersCountsAndPagesFilesWithSameScope(t *testing
 		}
 		for _, token := range []string{
 			"WITH flat_resources AS",
+			resourceGroupSKUIdentitySQL + " IN (?, ?)",
 			"task_asset_group_revision_references rr",
 			"JOIN reference_file_refs f ON f.id = rr.reference_file_ref_id",
 			"JOIN task_asset_group_revisions rev",
@@ -111,6 +112,7 @@ func TestListFlatResourceItemsFiltersCountsAndPagesFilesWithSameScope(t *testing
 	}).AddRow(8, 3, 70, 88, 88, 0, "RW-008", "new_product_development", "SKU-008", "source", "source.psd",
 		"image/vnd.adobe.photoshop", 42, "设计师", time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC), "tasks/3/source.psd"))
 	items, total, err := repository.ListFlatResourceItems(context.Background(), domain.ResourceGroupListParams{
+		SKUCodes:            []string{"DZD000047", "DZD000043"},
 		ResourceRole:        domain.ResourceRoleFilterSource,
 		Query:               "source",
 		FormatCategory:      domain.AssetFormatCategoryDesign,

@@ -5664,6 +5664,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description Match any listed SKU exactly before pagination. Other supplied filters also apply. */
+                    sku_codes?: string[];
                     keyword?: string;
                     status?: string;
                     /** @description Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review. */
@@ -28323,6 +28325,8 @@ export interface operations {
         parameters: {
             query?: {
                 task_id?: number;
+                /** @description Match any listed SKU exactly before pagination. Other supplied filters also apply. */
+                sku_codes?: string[];
                 sku_code?: string;
                 task_no?: string;
                 creator_id?: number;

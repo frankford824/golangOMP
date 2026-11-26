@@ -257,6 +257,7 @@ type ResourceBundle struct {
 type ResourceGroupListParams struct {
 	TaskID              int64
 	SKUCode             string
+	SKUCodes            []string
 	TaskNo              string
 	CreatorID           *int64
 	ResourceRole        ResourceRoleFilter

@@ -253,6 +253,23 @@ describe('ResourceGroupsView', () => {
     expect(preview.attributes('data-asset-id')).toBeUndefined()
   })
 
+  it('searches every pasted SKU in groups and historical assets and keeps names as keywords', async () => {
+    const wrapper = mountView()
+    const input = wrapper.get('.search-field input')
+    const submit = async (query: string) => {
+      await input.setValue(query)
+      await wrapper.get('.search-row').trigger('submit')
+      await flushPromises()
+    }
+    const codes = ['DZD000047', 'DZD000043', 'DZD000018', 'DZD000045', 'DZD000046', 'DZD000044']
+    await submit(codes.join(' ') + '，dzd000047')
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ sku_codes: codes.join(','), q: undefined, page: 1 }))
+    expect(mocks.batchSearchAssets).toHaveBeenLastCalledWith(expect.objectContaining({ terms: codes }))
+    await submit('北欧 沙发')
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ q: '北欧 沙发', sku_codes: undefined }))
+    expect(mocks.batchSearchAssets).toHaveBeenCalledTimes(1)
+  })
+
   it('shows exact external SKU matches in the same asset center and opens their read-only detail', async () => {
     mocks.list.mockResolvedValueOnce({ items: [], view_mode: 'group', flat_items: [], page: 1, page_size: 24, total: 0 })
     mocks.batchSearchAssets.mockResolvedValueOnce({

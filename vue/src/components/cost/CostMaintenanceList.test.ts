@@ -85,6 +85,24 @@ describe("completed SKU maintenance", () => {
     expect(mocks.maintain).not.toHaveBeenCalled();
   });
 
+  it("keeps the multi-code filter on the next page and restores keyword search for a single code", async () => {
+    mocks.list.mockResolvedValue({ data: [row], next_before_id: 10, refreshed_at: row.updated_at });
+    const wrapper = mount(CostMaintenanceList);
+    await flushPromises();
+    await wrapper.get("#cost-keyword").setValue("DZD000047 DZD000043，dzd000047");
+    await wrapper.get(".maintenance-tools form").trigger("submit");
+    await flushPromises();
+    const filter = { sku_codes: "DZD000047,DZD000043", keyword: undefined, review_state: "pending" };
+    expect(mocks.list.mock.lastCall?.[0]).toMatchObject({ ...filter, before_id: 0 });
+    await wrapper.findAll("button").find(button => button.text() === "下一页")!.trigger("click");
+    await flushPromises();
+    expect(mocks.list.mock.lastCall?.[0]).toMatchObject({ ...filter, before_id: 10 });
+    await wrapper.get("#cost-keyword").setValue("DZD000047");
+    await wrapper.get(".maintenance-tools form").trigger("submit");
+    await flushPromises();
+    expect(mocks.list.mock.lastCall?.[0]).toMatchObject({ keyword: "DZD000047", sku_codes: undefined, before_id: 0 });
+  });
+
   it("defaults to pending and resets the cursor when switching to reviewed or all",async()=>{
     mocks.list.mockResolvedValue({data:[row],next_before_id:10,refreshed_at:row.updated_at});
     const w=mount(CostMaintenanceList);await flushPromises();

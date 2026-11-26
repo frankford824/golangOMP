@@ -191,6 +191,7 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		where = append(where, resourceGroupSKUIdentitySQL+" = ?")
 		args = append(args, value)
 	}
+	appendInClause(&where, &args, resourceGroupSKUIdentitySQL, params.SKUCodes)
 	if value := strings.TrimSpace(params.TaskNo); value != "" {
 		where = append(where, "t.task_no LIKE ?")
 		args = append(args, "%"+value+"%")
@@ -325,6 +326,7 @@ func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, param
 		baseWhere = append(baseWhere, resourceGroupSKUIdentitySQL+" = ?")
 		baseArgs = append(baseArgs, value)
 	}
+	appendInClause(&baseWhere, &baseArgs, resourceGroupSKUIdentitySQL, params.SKUCodes)
 	if value := strings.TrimSpace(params.TaskNo); value != "" {
 		baseWhere = append(baseWhere, "t.task_no LIKE ?")
 		baseArgs = append(baseArgs, "%"+value+"%")

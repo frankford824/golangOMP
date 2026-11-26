@@ -7,6 +7,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"workflow/domain"
+	"workflow/repo"
 )
 
 func TestMaintenanceProjectionUpdatesMatchingPrimaryKeys(t *testing.T) {
@@ -32,6 +33,26 @@ func TestMaintenanceProjectionUpdatesMatchingPrimaryKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCostMaintenanceFiltersByExactCodesBeforePaging(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("s.sku_code IN (?, ?) AND t.id*1000+s.sequence_no<? AND COALESCE(cs.status,'baseline')=? ORDER BY t.id DESC,s.sequence_no DESC LIMIT ?")).
+		WithArgs("DZD000047", "DZD000043", 90, "synced", 3).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	_, err = NewCostMaintenanceRepo(New(db)).List(context.Background(), repo.CostMaintenanceFilter{
+		SKUCodes: []string{"DZD000047", "DZD000043"}, Status: "synced", BeforeID: 90, PageSize: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }

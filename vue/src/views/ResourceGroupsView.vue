@@ -16,7 +16,7 @@
       <form class="search-row" @submit.prevent="search">
         <label class="search-field">
           <span class="search-icon" :class="{ 'material-symbols-outlined': oaEnabled }" aria-hidden="true">{{ oaEnabled ? 'search' : '⌕' }}</span>
-          <input v-model.trim="filters.q" aria-label="搜索资产" placeholder="搜索 SKU、产品名称或文件名" />
+          <input v-model.trim="filters.q" @paste="pasteSkuSearch" aria-label="搜索资产" placeholder="搜索 SKU、产品名称或文件名，多个编码用空格分隔" />
         </label>
         <button class="primary-button">搜索</button>
         <button type="button" class="filter-button" :class="{ active: filterDrawerOpen || activeFilters.length }" @click="openFilterDrawer()">
@@ -239,6 +239,7 @@
 </template>
 
 <script setup lang="ts">
+import { batchSkuCodes, pasteSkuSearch } from '@/utils/sku-search'
 import AssetViewTabs from '@/oa/components/AssetViewTabs.vue'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
@@ -455,12 +456,14 @@ async function load(restoreScroll = false) {
   loading.value = true
   error.value = ''
   try {
-    const exactSKUQuery = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(applied.q)
-    const externalSearch = exactSKUQuery
-      ? assetsApi.batchSearchAssets({ terms: [applied.q.toUpperCase()], format_filter: 'all', asset_kind: 'all' }).catch(() => null)
+    const codes = batchSkuCodes(applied.q)
+    const singleCode = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(applied.q) ? applied.q.toUpperCase() : undefined
+    const terms = singleCode ? [singleCode] : codes
+    const externalSearch = terms.length
+      ? assetsApi.batchSearchAssets({ terms, format_filter: 'all', asset_kind: 'all' }).catch(() => null)
       : Promise.resolve(null)
     const [next, externalResponse] = await Promise.all([
-      resourceGroupsApi.list({ q: exactSKUQuery ? undefined : applied.q || undefined, sku_code: exactSKUQuery ? applied.q.toUpperCase() : undefined, resource_role: applied.resource_role || undefined, file_format: applied.file_format || undefined, created_from: applied.created_from || undefined, created_to: applied.created_to || undefined, resource_owner_id: applied.resource_owner_id || undefined, page: requestedPage, page_size: result.page_size }),
+      resourceGroupsApi.list({ q: terms.length ? undefined : applied.q || undefined, sku_code: singleCode, sku_codes: codes.length ? codes.join(',') : undefined, resource_role: applied.resource_role || undefined, file_format: applied.file_format || undefined, created_from: applied.created_from || undefined, created_to: applied.created_to || undefined, resource_owner_id: applied.resource_owner_id || undefined, page: requestedPage, page_size: result.page_size }),
       externalSearch,
     ])
     if (requestVersion !== liveCostRequestVersion) return
@@ -470,7 +473,7 @@ async function load(restoreScroll = false) {
       ? externalBody.data as AssetBatchSearchManifest | undefined
       : externalBody as AssetBatchSearchManifest | undefined
     const externalResults = externalManifest?.results
-    if (exactSKUQuery && (!externalResults?.length || externalResults.some(row => row.status === 'error'))) {
+    if (terms.length && (!externalResults?.length || externalResults.some(row => row.status === 'error'))) {
       error.value = '历史素材查询失败，请重试。'
     }
     const seenExternal = new Set<string>()
@@ -484,7 +487,7 @@ async function load(restoreScroll = false) {
         return true
       })
     brokenImages.value = new Set(); brokenFlat.value = new Set()
-    if (exactSKUQuery && result.view_mode === 'group' && result.items.length <= 20) void refreshLiveCosts(result.items, requestVersion)
+    if (singleCode && result.view_mode === 'group' && result.items.length <= 20) void refreshLiveCosts(result.items, requestVersion)
   } catch (cause) {
     if (requestVersion !== liveCostRequestVersion) return
     externalItems.value = []

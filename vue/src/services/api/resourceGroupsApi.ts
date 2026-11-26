@@ -272,6 +272,7 @@ export const resourceGroupsApi = {
   async list(params: {
     task_id?: number
     sku_code?: string
+    sku_codes?: string
     task_no?: string
     creator_id?: number | string
     resource_role?: 'reference' | 'source' | 'final' | 'default_style' | ''

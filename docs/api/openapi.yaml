@@ -8408,6 +8408,12 @@ paths:
       x-api-readiness: ready_for_frontend
       parameters:
         - { name: task_id, in: query, schema: { type: integer, format: int64 } }
+        - name: sku_codes
+          in: query
+          description: Match any listed SKU exactly before pagination. Other supplied filters also apply.
+          style: form
+          explode: false
+          schema: { type: array, minItems: 1, maxItems: 200, items: { type: string, minLength: 1 } }
         - { name: sku_code, in: query, schema: { type: string } }
         - { name: task_no, in: query, schema: { type: string } }
         - { name: creator_id, in: query, schema: { type: integer, format: int64 } }
@@ -11072,6 +11078,12 @@ paths:
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.view]
       parameters:
+        - name: sku_codes
+          in: query
+          description: Match any listed SKU exactly before pagination. Other supplied filters also apply.
+          style: form
+          explode: false
+          schema: { type: array, minItems: 1, maxItems: 200, items: { type: string, minLength: 1 } }
         - { in: query, name: keyword, schema: { type: string } }
         - { in: query, name: status, schema: { type: string } }
         - in: query

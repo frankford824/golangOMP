@@ -31,6 +31,10 @@ func (r *costMaintenanceRepo) List(ctx context.Context, f repo.CostMaintenanceFi
 	defer cancel()
 	where := maintenanceFrom
 	args := []interface{}{}
+	if clause, values := buildInClause("s.sku_code", f.SKUCodes); clause != "" {
+		where += " AND " + clause
+		args = append(args, values...)
+	}
 	if f.BeforeID > 0 {
 		where += ` AND t.id*1000+s.sequence_no<?`
 		args = append(args, f.BeforeID)

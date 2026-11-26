@@ -18,8 +18,14 @@ func (h *TaskResourceWorkflowHandler) ListResourceGroups(c *gin.Context) {
 	taskID, _ := strconv.ParseInt(c.Query("task_id"), 10, 64)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	codes, appErr := skuCodesQuery(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
 	params := domain.ResourceGroupListParams{
-		TaskID: taskID, SKUCode: c.Query("sku_code"), TaskNo: c.Query("task_no"), Query: c.Query("q"),
+		SKUCodes: codes,
+		TaskID:   taskID, SKUCode: c.Query("sku_code"), TaskNo: c.Query("task_no"), Query: c.Query("q"),
 		ResourceRole:   domain.ResourceRoleFilter(c.Query("resource_role")),
 		FormatCategory: domain.AssetFormatCategoryFilter(c.Query("format_category")),
 		BusinessLane:   domain.TaskBusinessLane(c.Query("business_lane")),
@@ -51,7 +57,6 @@ func (h *TaskResourceWorkflowHandler) ListResourceGroups(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_format must be an extension such as jpg, psd, or tif", nil))
 		return
 	}
-	var appErr *domain.AppError
 	params.ResourceCreatedFrom, appErr = parseTaskCreatedDateBoundary(c.Query("created_from"), false)
 	if appErr != nil {
 		respondError(c, appErr)
