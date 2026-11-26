@@ -3955,6 +3955,16 @@ body.aw-submission-dialog-locked {
   margin-top: var(--aw-space-4);
 }
 
+.aw-upload-receipt-file {
+  min-width: 0;
+  margin: 0;
+}
+
+.aw-upload-receipt-file figcaption {
+  margin-top: var(--aw-space-2);
+  overflow-wrap: anywhere;
+}
+
 .aw-preview-tile {
   display: grid;
   place-items: center;
