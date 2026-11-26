@@ -1,10 +1,10 @@
-# V1 API 速查表(298 path · 一行一条)
+# V1 API 速查表(299 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 298 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 299 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -222,6 +222,7 @@
 | GET | `/v1/asset-workbench/settlement/preview` | Preview settlement and actual net pay | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/settlement/batches/{batch_id}` | Get settlement batch details and frozen payroll lines | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/settlement/batches/{batch_id}/reverse-confirmation` | Reverse one confirmed but unpaid settlement batch | POST:SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/my/supplement-months` | List my open supplement upload months | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PUT | `/v1/asset-workbench/settlement/supplement-permissions` | List asset workbench supplement permissions；Open or close supplement permission for one person | GET:AssetSettlement, SuperAdmin; PUT:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/settlement/supplement-eligible-months` | Get unlocked current and historical months eligible for supplement entry | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/settlement/report` | Get asset workbench settlement report | GET:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |

@@ -52,7 +52,7 @@ export function buildSelfSupplementPayload(
   file: NamedFile,
   sessionIds: string | string[],
   supplementDate: string,
-  permission: SupplementPermissionRow,
+  permission: Pick<SupplementPermissionRow, 'business_month' | 'payee_user_id'>,
   directory: UploadDirectoryRow,
 ): CreateSettlementSupplementPayload {
   return {

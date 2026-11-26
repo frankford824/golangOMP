@@ -1924,6 +1924,20 @@ func (h *AssetWorkbenchHandler) CreateSettlementAdjustment(c *gin.Context) {
 	respondCreated(c, result)
 }
 
+func (h *AssetWorkbenchHandler) MySupplementMonths(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var result *assetworkbench.MySupplementMonthsResult
+	result, err := h.svc.MySupplementMonths(c.Request.Context(), actor)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) ListSupplementPermissions(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

@@ -86,7 +86,7 @@ func v8AssetWorkbenchRoutePermissions(method, path string) ([]domain.PermissionC
 		return []domain.PermissionCode{domain.PermissionAssetWorkbenchQC}, true
 	case strings.HasPrefix(relative, "/files/") && method != http.MethodGet && !strings.HasPrefix(relative, "/files/batch-"):
 		return []domain.PermissionCode{domain.PermissionAssetWorkbenchQC}, true
-	case (relative == "/settlement/supplements" && method == http.MethodPost), relative == "/settlement/supplements/batch-delete", method == http.MethodDelete && strings.HasPrefix(relative, "/settlement/supplements/"):
+	case relative == "/my/supplement-months", (relative == "/settlement/supplements" && method == http.MethodPost), relative == "/settlement/supplements/batch-delete", method == http.MethodDelete && strings.HasPrefix(relative, "/settlement/supplements/"):
 		return []domain.PermissionCode{domain.PermissionAssetWorkbenchSubmit, domain.PermissionAssetWorkbenchSettlement}, true
 	case strings.HasPrefix(relative, "/settlement/") && relative != "/settlement/my":
 		return []domain.PermissionCode{domain.PermissionAssetWorkbenchSettlement}, true

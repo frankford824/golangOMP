@@ -1777,6 +1777,11 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async mySupplementMonths(signal?: AbortSignal): Promise<{ payee_user_id: number; months: string[] }> {
+    const res = await http.get<ApiEnvelope<{ payee_user_id: number; months: string[] }>>('/v1/asset-workbench/my/supplement-months', { signal })
+    return unwrap(res.data)
+  },
+
   async mySettlement(signal?: AbortSignal): Promise<MySettlementResult> {
     const res = await http.get<ApiEnvelope<MySettlementResult>>('/v1/asset-workbench/settlement/my', { signal })
     return unwrap(res.data)

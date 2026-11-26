@@ -39,7 +39,7 @@ describe('asset workbench self supplement upload', () => {
       { name: '海报.jpg' } as File,
       ['session-1', 'session-2'],
       '2026-06-15',
-      { id: 1, payee_user_id: 1001, business_month: '2026-07', enabled: true, reason: '', granted_by: 9, granted_at: '' },
+      { payee_user_id: 1001, business_month: '2026-07' },
       { id: 8, name: 'A类成品', oss_prefix: 'a', description: '', difficulty_class: 'A', allowed_file_types: ['jpg'], enabled: true, sort_order: 1, created_by: 9 },
     )).toEqual(expect.objectContaining({
       payee_user_id: 1001,
