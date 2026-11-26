@@ -70,6 +70,7 @@ export const costMaintenanceApi = {
   async list(
     params: {
       keyword?: string;
+      sku_codes?: string;
       status?: string;
       review_state?: "pending" | "reviewed" | "all";
       before_id?: number;

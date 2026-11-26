@@ -6,7 +6,8 @@
         ><input
           id="cost-keyword"
           v-model.trim="keyword"
-          placeholder="搜索编码 / 名称 / 款式"
+          @paste="pasteSkuSearch"
+          placeholder="搜索编码 / 名称 / 款式，多个编码用空格分隔"
         /><label class="sr-only" for="cost-review-state">确认状态</label>
         <select id="cost-review-state" v-model="reviewState" @change="search">
           <option value="pending">待确认</option>
@@ -438,6 +439,7 @@ import {
 } from "vue";
 import { Search, History, RefreshCw, X, ChevronLeft, ChevronRight } from "lucide-vue-next";
 import { usePermission } from "@/composables/usePermission";
+import { batchSkuCodes, pasteSkuSearch } from "@/utils/sku-search";
 import CostInputFields from "./CostInputFields.vue";
 import { emptyCostInput } from "@/domain/cost-model";
 import {
@@ -551,9 +553,12 @@ async function load(background = false) {
   loading.value = true;
   error.value = "";
   try {
+    const query = keyword.value;
+    const codes = batchSkuCodes(query);
     const result = await retryCostRead(() => costMaintenanceApi.list(
       {
-        keyword: keyword.value,
+        keyword: codes.length ? undefined : query,
+        sku_codes: codes.length ? codes.join(",") : undefined,
         status: status.value,
         review_state: reviewState.value,
         before_id: cursors.value.at(-1),
