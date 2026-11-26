@@ -18,6 +18,7 @@ vi.mock('@aw/features/upload/uploadFlow', () => ({ uploadWorkbenchFile: vi.fn() 
 
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
+import type { SubmissionDetail } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import { useUploadCenterStore } from '@aw/shared/drive/uploadCenter.store'
 import { withDriveUploadRelativePath } from '@aw/shared/drive/useDriveUpload'
@@ -145,6 +146,90 @@ describe('UploadPage simple piecework copy', () => {
     expect(vi.mocked(assetWorkbenchApi.createSubmission).mock.calls[1]).toEqual(
       vi.mocked(assetWorkbenchApi.createSubmission).mock.calls[0],
     )
+  })
+
+  it.each([false, true])('shows confirmed directory counts after the queue clears (admin=%s)', async (admin) => {
+    useAssetWorkbenchSessionStore().setBootstrap({
+      actor: { id: 22 }, is_admin: admin, capabilities: ['asset.workbench.submit'],
+    } as never)
+    const center = useUploadCenterStore()
+    const makeFile = (name: string) => new File(['sample'], name)
+    center.addItems([
+      withDriveUploadRelativePath(makeFile('front.jpg'), '海报/front.jpg'),
+      withDriveUploadRelativePath(makeFile('back.jpg'), '海报/back.jpg'),
+      makeFile('two.jpg'), makeFile('three.jpg'),
+    ], { source: 'upload-page' })
+    vi.mocked(uploadWorkbenchFile).mockImplementation(async (file) => ({ sessionId: file.name, filename: file.name }))
+    const confirmedFile = (id: number, original_filename: string, upload_directory_name: string) =>
+      ({ id, original_filename, upload_directory_name })
+    vi.mocked(assetWorkbenchApi.createSubmission).mockResolvedValueOnce({ items: [
+      { files: [confirmedFile(1, 'front.jpg', 'A类'), confirmedFile(2, 'back.jpg', 'A类')] },
+      { files: [confirmedFile(3, 'two.jpg', 'A类')] },
+      { files: [confirmedFile(4, 'three.jpg', 'C类')] },
+    ] } as SubmissionDetail)
+    const wrapper = mount(UploadPage, { global: { plugins: [pinia], stubs: { RouterLink: true, WorkbenchFilePreview: true } } })
+    await flushPromises()
+    await wrapper.get('.aw-dropzone__actions .aw-primary-button').trigger('click')
+    await flushPromises()
+    expect(center.uploadPageItems).toHaveLength(0)
+    expect(wrapper.get('.aw-inline-alert').text()).toContain('3 个作品，包含 4 个文件。A类 2 个作品、C类 1 个作品')
+    expect(wrapper.get('[aria-label="已提交作品目录汇总"]').text()).toBe('A类 2 个作品、C类 1 个作品')
+    expect(wrapper.findAll('figcaption').map((caption) => caption.text())).toEqual([
+      'A类 · front.jpg', 'A类 · back.jpg', 'A类 · two.jpg', 'C类 · three.jpg',
+    ])
+    wrapper.unmount()
+  })
+
+  it('keeps earlier receipts across failed retries and starts a fresh receipt for the next batch', async () => {
+    let rejectSecond = true
+    const upload = vi.mocked(uploadWorkbenchFile)
+    upload.mockImplementation(async (file) => {
+      if (file.name === 'c.jpg' && rejectSecond) throw new Error('network error')
+      return { sessionId: file.name, filename: file.name }
+    })
+    const submit = vi.mocked(assetWorkbenchApi.createSubmission)
+    submit.mockImplementation(async (payload) => ({
+      items: payload.items.map(({ upload_session_ids }) => ({
+        files: upload_session_ids.map((name) => ({
+          id: name === 'a.jpg' ? 1 : 2, original_filename: name,
+          upload_directory_name: name === 'a.jpg' ? 'A类' : 'C类',
+        })),
+      })),
+    } as SubmissionDetail))
+    const wrapper = mount(UploadPage, { global: { plugins: [pinia], stubs: { RouterLink: true, WorkbenchFilePreview: true } } })
+    await flushPromises()
+    const input = wrapper.get('input[aria-label="选择作品文件"]')
+    const add = async (name: string) => {
+      Object.defineProperty(input.element, 'files', { configurable: true, value: [new File(['data'], name)] })
+      await input.trigger('change')
+    }
+    await wrapper.get('.aw-upload-directory-picker select').setValue('9')
+    await add('a.jpg')
+    await wrapper.get('.aw-upload-directory-picker select').setValue('8')
+    await add('c.jpg')
+    const primary = wrapper.get('.aw-dropzone__actions .aw-primary-button')
+    const summary = () => wrapper.get('[aria-label="已提交作品目录汇总"]').text()
+    await primary.trigger('click')
+    await flushPromises()
+    expect(summary()).toBe('A类 1 个作品')
+    const retry = wrapper.get('.aw-upload-failure-callout__actions .aw-primary-button')
+    await retry.trigger('click')
+    await flushPromises()
+    expect(summary()).toBe('A类 1 个作品')
+    rejectSecond = false
+    await retry.trigger('click')
+    await flushPromises()
+    expect(summary()).toBe('A类 1 个作品、C类 1 个作品')
+    expect(wrapper.findAll('figcaption')).toHaveLength(2)
+    expect(submit).toHaveBeenCalledTimes(2)
+    await add('next.jpg')
+    expect(wrapper.find('[aria-label="已提交作品目录汇总"]').exists()).toBe(false)
+    await primary.trigger('click')
+    await flushPromises()
+    expect(summary()).toBe('C类 1 个作品')
+    expect(wrapper.get('figcaption').text()).toBe('C类 · next.jpg')
+    submit.mockReset().mockResolvedValue({ items: [] } as unknown as SubmissionDetail)
+    wrapper.unmount()
   })
 
   it('keeps categories when adding more works and sends different directory IDs in one submission', async () => {

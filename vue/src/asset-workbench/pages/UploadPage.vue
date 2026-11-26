@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onActivated, nextTick, onMounted, ref } from 'vue'
+import { computed, onActivated, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { RouterLink } from 'vue-router'
 import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, Table2, XCircle } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
-import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
+import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionDetail, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import {
   driveUploadRelativePath,
@@ -55,12 +55,25 @@ const uploading = ref(false)
 const submitting = ref(false)
 const error = ref('')
 const notice = ref('')
-const submittedFiles = ref<SubmissionFileRow[]>([])
+const confirmedWorks = shallowRef<SubmissionDetail['items']>([])
+const submittedFiles = computed(() => confirmedWorks.value.flatMap((work) => work.files))
+const receiptDirectorySummary = computed(() => {
+  const counts = new Map<string, number>()
+  for (const work of confirmedWorks.value) {
+    const directories = new Set(work.files.map(receiptDirectoryName))
+    const label = [...directories].sort().join(' / ') || '未记录目录'
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  return [...counts].map(([name, count]) => `${name} ${formatInt(count)} 个作品`).join('、')
+})
+
+function receiptDirectoryName(file: SubmissionFileRow) {
+  return file.upload_directory_name?.trim() || (file.upload_directory_id ? `目录 #${file.upload_directory_id}` : '未记录目录')
+}
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
 const difficultyRows = ref<DifficultyClassRow[]>([])
 const selectedUploadDirectoryId = ref(0)
 const lastUploadResult = ref<UploadBatchResult | null>(null)
-const lastSubmissionResult = ref<UploadBatchResult | null>(null)
 const expandedItemIds = ref<Set<string>>(new Set())
 const draggingFiles = ref(false)
 const uploadReviewRef = ref<HTMLElement | null>(null)
@@ -333,9 +346,8 @@ function enqueueFiles(files: FileList | File[] | null | undefined, directory = s
   if (unsupported) messages.push(`有 ${formatInt(unsupported)} 个文件的格式与当前目录不匹配，已保留在队列。请在提交前「批量改目录」。`)
   notice.value = messages.join(' ')
   error.value = ''
-  submittedFiles.value = []
   lastUploadResult.value = null
-  lastSubmissionResult.value = null
+  if (!queue.value.length) confirmedWorks.value = []
   uploadCenter.addItems(accepted, {
     source: 'upload-page',
     uploadDirectoryId: directory?.id,
@@ -472,11 +484,9 @@ async function createSubmission() {
         }
       }),
     })
-    submittedFiles.value = detail.items.flatMap((item) => item.files)
-    lastSubmissionResult.value = { total: pieceworkGroups.length, success: submittedFiles.value.length, failed: 0 }
-    notice.value = isSimpleUser.value
-      ? `作品已交上去：${formatInt(pieceworkGroups.length)} 个作品，包含 ${formatInt(submittedFiles.value.length)} 个文件，可在上传记录里查看。`
-      : `提交记录已生成：${formatInt(pieceworkGroups.length)} 个作品，包含 ${formatInt(submittedFiles.value.length)} 个文件，可在查改作品里查看。`
+    confirmedWorks.value = [...confirmedWorks.value, ...detail.items]
+    const action = isSimpleUser.value ? '作品已交上去' : '提交记录已生成'
+    notice.value = `${action}：${formatInt(confirmedWorks.value.length)} 个作品，包含 ${formatInt(submittedFiles.value.length)} 个文件。${receiptDirectorySummary.value}。`
     uploadCenter.updateItems(submittingIds, { status: 'submitted', progress: 100, error: '' })
   } catch (err) {
     uploadCenter.updateItems(submittingIds, { status: 'uploaded' })
@@ -599,7 +609,6 @@ function clearUploadQueue() {
   error.value = ''
   notice.value = ''
   lastUploadResult.value = null
-  lastSubmissionResult.value = null
 }
 
 async function handleUploadSpreadsheetAction(payload: WorkbenchSpreadsheetActionPayload) {
@@ -971,14 +980,15 @@ onActivated(() => {
       </div>
     </div>
 
-    <div v-if="lastUploadResult || lastSubmissionResult" class="aw-panel aw-panel--stage">
+    <div v-if="lastUploadResult || confirmedWorks.length" class="aw-panel aw-panel--stage">
       <h3>本次上传结论</h3>
       <p v-if="lastUploadResult" class="aw-copy">
-        上传：共 {{ formatInt(lastUploadResult.total) }} 个文件，成功 {{ formatInt(lastUploadResult.success) }} 个，失败 {{ formatInt(lastUploadResult.failed) }} 个。
+        最近一次上传：共 {{ formatInt(lastUploadResult.total) }} 个文件，成功 {{ formatInt(lastUploadResult.success) }} 个，失败 {{ formatInt(lastUploadResult.failed) }} 个。
       </p>
-      <p v-if="lastSubmissionResult" class="aw-copy">
-        提交：已生成 {{ formatInt(lastSubmissionResult.total) }} 个作品，包含 {{ formatInt(lastSubmissionResult.success) }} 个文件记录。
+      <p v-if="confirmedWorks.length" class="aw-copy">
+        本批累计提交 {{ formatInt(confirmedWorks.length) }} 个作品，包含 {{ formatInt(submittedFiles.length) }} 个文件记录。
       </p>
+      <p v-if="receiptDirectorySummary" class="aw-copy" aria-label="已提交作品目录汇总">{{ receiptDirectorySummary }}</p>
       <ul v-if="failedItems.length" class="aw-upload-result-list">
         <li v-for="item in failedItems" :key="item.id">
           <strong>{{ queueItemDisplayName(item) }}</strong>
@@ -991,13 +1001,10 @@ onActivated(() => {
       <h3>{{ isSimpleUser ? '已交上的文件' : '提交预览' }}</h3>
       <p class="aw-copy">{{ isSimpleUser ? '预览图生成需要一点时间。你可以继续交新的作品。' : '预览图生成需要一点时间。生成完成后，可以在维护专区继续查看和下载源文件。' }}</p>
       <div class="aw-preview-grid">
-        <WorkbenchFilePreview
-          v-for="file in submittedFiles"
-          :key="file.id"
-          :file-id="file.id"
-          :alt="file.original_filename"
-          @preview="openFilePreview"
-        />
+        <figure v-for="file in submittedFiles" :key="file.id" class="aw-upload-receipt-file">
+          <WorkbenchFilePreview :file-id="file.id" :alt="file.original_filename" @preview="openFilePreview" />
+          <figcaption class="aw-copy">{{ receiptDirectoryName(file) }} · {{ file.relative_path || file.display_name || file.original_filename }}</figcaption>
+        </figure>
       </div>
     </div>
 
