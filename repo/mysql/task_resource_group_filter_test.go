@@ -19,6 +19,7 @@ func TestListResourceGroupsUsesSameLaneFormatAndScopeForCountAndPage(t *testing.
 		}
 		for _, token := range []string{
 			"g.finalized_revision_id IS NOT NULL",
+			resourceGroupSKUIdentitySQL + " IN (?, ?)",
 			"t.business_lane = ?",
 			"task_asset_group_revisions gr",
 			"task_asset_group_revision_items ri",
@@ -45,6 +46,7 @@ func TestListResourceGroupsUsesSameLaneFormatAndScopeForCountAndPage(t *testing.
 		"migration_incomplete", "migration_issue", "created_at", "updated_at", "task_no", "sku_code", "business_lane",
 	}))
 	items, total, err := repository.ListResourceGroups(context.Background(), domain.ResourceGroupListParams{
+		SKUCodes:     []string{"DZD000047", "DZD000043"},
 		BusinessLane: domain.TaskBusinessLaneCustomization, FormatCategory: domain.AssetFormatCategoryDesign,
 		Page: 2, PageSize: 25, Access: domain.ResourceGroupAccessFilter{DepartmentIDs: []int64{101}},
 	})

@@ -24,7 +24,14 @@ func (h *ProductManagementHandler) ListMaintenance(c *gin.Context) {
 		respondError(c, domain.ErrNotFound)
 		return
 	}
-	out, err := h.maintenance.ListCostMaintenance(c.Request.Context(), maintenanceFilter(c))
+	codes, err := skuCodesQuery(c)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+	filter := maintenanceFilter(c)
+	filter.SKUCodes = codes
+	out, err := h.maintenance.ListCostMaintenance(c.Request.Context(), filter)
 	if err != nil {
 		respondError(c, err)
 		return
