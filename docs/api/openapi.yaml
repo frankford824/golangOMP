@@ -17575,7 +17575,7 @@ paths:
   /v1/asset-workbench/items/reprice-batch/preview:
     post:
       summary: Preview batch repricing for one asset workbench price rule
-      description: Read-only preview for one settlement month and enabled price rule. Uses original submission dates in Asia/Shanghai. Includes only mutable normal works whose ordinary pricing resolver selects the rule. Defaults to unpriced works and supports up to 1000 changes per batch.
+      description: Read-only preview for one settlement month and enabled price rule. Uses original submission dates in Asia/Shanghai. Includes only mutable normal works whose ordinary pricing resolver selects the rule. Unpriced works and previously pending-grade works with a resolvable grade are eligible. Already priced works require include_priced. Supports up to 1000 changes per batch.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -17592,6 +17592,11 @@ paths:
                 rule_id: { type: integer, format: int64, minimum: 1 }
                 business_month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
                 payee_user_id: { type: integer, format: int64, minimum: 1 }
+                payee_user_ids:
+                  description: Limit to these accounts. Mutually exclusive with payee_user_id. Omit both to include all applicable personnel.
+                  type: array
+                  minItems: 1
+                  items: { type: integer, format: int64, minimum: 1 }
                 submitted_from: { type: string, format: date }
                 submitted_to: { type: string, format: date }
                 include_priced: { type: boolean, default: false }

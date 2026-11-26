@@ -693,7 +693,6 @@ async function toggleRule(action: () => Promise<unknown>) {
 }
 
 function finishBatchReprice(result: BatchRepriceResult) {
-  batchRepriceRule.value = null
   error.value = ''
   notice.value = `已重算 ${result.updated} 件作品，毛额 ${formatMoney(result.old_gross)} → ${formatMoney(result.new_gross)}。`
 }

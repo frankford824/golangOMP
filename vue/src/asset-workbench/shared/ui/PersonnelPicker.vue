@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   hint?: string
   clearable?: boolean
   compact?: boolean
+  addToList?: boolean
 }>(), {
   hint: '按姓名、拼音或人员编号查找',
   clearable: false,
@@ -32,6 +33,7 @@ const results = ref<HTMLElement | null>(null)
 const listId = useId()
 
 const selectedLabel = computed(() => {
+  if (props.addToList) return props.label
   if (selectedPerson.value?.user_id === props.modelValue) {
     return `${selectedPerson.value.name} · 编号 ${selectedPerson.value.personnel_no || selectedPerson.value.user_id}`
   }
@@ -91,7 +93,7 @@ function clearSelection() {
       </span>
       <span class="aw-inline-actions aw-inline-actions--compact">
         <button v-if="clearable && modelValue > 0" class="aw-secondary-button" type="button" @click="clearSelection">清除</button>
-        <button class="aw-secondary-button" type="button" @click="openPicker">{{ modelValue > 0 ? '重新选择' : '选择人员' }}</button>
+        <button class="aw-secondary-button" type="button" @click="openPicker">{{ addToList ? '添加人员' : modelValue > 0 ? '重新选择' : '选择人员' }}</button>
       </span>
     </div>
 

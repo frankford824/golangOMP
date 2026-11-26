@@ -197,7 +197,7 @@ describe('CostCenterPage price rule actions', () => {
     await flushPromises()
 
     expect(previewBatchReprice).toHaveBeenLastCalledWith(expect.objectContaining({
-      rule_id: 41, business_month: '2026-11', submitted_from: '2026-11-01', include_priced: false,
+      rule_id: 41, business_month: '2026-11', submitted_from: '2026-11-01', include_priced: true,
     }), expect.any(AbortSignal))
     expect(dialog.text()).toContain('重算毛额')
     expect(dialog.text()).toContain('¥0.17')
@@ -213,7 +213,34 @@ describe('CostCenterPage price rule actions', () => {
     expect(confirmBatchReprice).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       rule_id: 41, submitted_from: '2026-11-01', submitted_to: '2026-11-23',
     }), 'second')
+    expect(dialog.get('[role="status"]').text()).toContain('已重算 1 件作品')
+    expect(dialog.text()).not.toContain('确认重算 1 件')
+    await textButton(wrapper, '完成').trigger('click')
     expect(wrapper.text()).toContain('已重算 1 件作品')
+    wrapper.unmount()
+  })
+
+  it('limits preview to the selected people and prevents an empty selection becoming everyone', async () => {
+    previewBatchReprice.mockResolvedValueOnce({ count: 0, items: [] })
+    const wrapper = mount(CostCenterPage, { global: { stubs: { WorkbenchDataGrid: WorkbenchDataGridStub, AsyncBoundary: true, PersonnelPicker: true } } })
+    await flushPromises()
+    await textButton(wrapper, '进入单价设置').trigger('click')
+    await textButton(wrapper, '批量重算').trigger('click')
+    const dialog = wrapper.get('[aria-labelledby="batch-reprice-title"]')
+    await dialog.get('select').setValue('selected')
+    expect(textButton(wrapper, '预览重算').attributes('disabled')).toBeDefined()
+    const picker = wrapper.getComponent({ name: 'PersonnelPicker' })
+    for (const id of [42, 43, 42]) picker.vm.$emit('selected', { user_id: id, name: '测试' + id, personnel_no: 'P' + id })
+    await flushPromises()
+    expect(dialog.get('[aria-label="已选人员"]').findAll('li')).toHaveLength(2)
+    await textButton(wrapper, '预览重算').trigger('click')
+    await flushPromises()
+    expect(previewBatchReprice).toHaveBeenLastCalledWith(expect.objectContaining({ payee_user_ids: [42,43] }), expect.any(AbortSignal))
+    expect(dialog.text()).toContain('0 件需要重算')
+    await dialog.get('[aria-label="移除测试42"]').trigger('click')
+    expect(dialog.text()).not.toContain('预览完成')
+    await dialog.get('[aria-label="移除测试43"]').trigger('click')
+    expect(textButton(wrapper, '预览重算').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 
