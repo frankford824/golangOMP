@@ -37,6 +37,7 @@
     </div>
     <div v-else-if="loading" class="results-refreshing" role="status"><span class="loading-spinner" aria-hidden="true" />正在更新结果，当前列表仍可查看</div>
 
+    <div v-if="historyLoading" class="results-refreshing" role="status">正在查询历史素材…</div>
     <template v-if="!loading || result.items.length || result.flat_items.length">
     <template v-if="isFlatMode">
       <div v-if="!result.flat_items.length && !error" class="empty">没有找到符合条件的资源。</div>
@@ -58,7 +59,7 @@
     </template>
 
     <template v-else>
-      <div v-if="!result.items.length && !externalItems.length && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
+      <div v-if="!result.items.length && !externalItems.length && !historyLoading && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
       <section v-else-if="result.items.length || externalItems.length" class="grid" aria-label="SKU 资源列表">
         <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" @click="openGroup(group.id)">
           <span class="cover">
@@ -167,7 +168,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { batchSkuCodes, pasteSkuSearch } from '@/utils/sku-search'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
@@ -190,6 +191,12 @@ const brokenImages = ref(new Set<number>())
 const brokenFlat = ref(new Set<number>())
 const liveCosts = ref(new Map<number, ProductCostReconciliation>())
 const externalItems = ref<BackendAsset[]>([])
+const historyLoading = ref(false)
+let historyRequest: AbortController | undefined
+onBeforeUnmount(() => {
+  liveCostRequestVersion++
+  historyRequest?.abort()
+})
 let liveCostRequestVersion = 0
 const filters = reactive({ q: '', resource_role: '' as '' | 'reference' | 'source' | 'final' | 'default_style', file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
 const initialPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? Math.max(80, Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE || 100)) : 24
@@ -251,6 +258,9 @@ function clearAllFilters() { (Object.keys(filterLabels) as FilterKey[]).forEach(
 function resetDrawer() { (Object.keys(filterLabels) as FilterKey[]).forEach((key) => { filters[key] = '' }) }
 function searchFromDrawer() { filterDrawerOpen.value = false; search() }
 async function load() {
+  historyRequest?.abort()
+  historyLoading.value = false
+  externalItems.value = []
   const requestVersion = ++liveCostRequestVersion
   liveCosts.value = new Map()
   loading.value = true
@@ -259,33 +269,13 @@ async function load() {
     const codes = batchSkuCodes(filters.q)
     const singleCode = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(filters.q) ? filters.q.toUpperCase() : undefined
     const terms = singleCode ? [singleCode] : codes
-    const externalSearch = terms.length
-      ? assetsApi.batchSearchAssets({ terms, format_filter: 'all', asset_kind: 'all' }).catch(() => null)
-      : Promise.resolve(null)
-    const [next, externalResponse] = await Promise.all([
-      resourceGroupsApi.list({ q: terms.length ? undefined : filters.q || undefined, sku_code: singleCode, sku_codes: codes.length ? codes.join(',') : undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, page: result.page, page_size: result.page_size }),
-      externalSearch,
-    ])
+    const next = await resourceGroupsApi.list({ q: terms.length ? undefined : filters.q || undefined, sku_code: singleCode, sku_codes: codes.length ? codes.join(',') : undefined, resource_role: filters.resource_role || undefined, file_format: filters.file_format || undefined, created_from: filters.created_from || undefined, created_to: filters.created_to || undefined, resource_owner_id: filters.resource_owner_id || undefined, page: result.page, page_size: result.page_size })
     if (requestVersion !== liveCostRequestVersion) return
     result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (isFlatMode.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
-    const externalBody = externalResponse?.data
-    const externalManifest = externalBody && typeof externalBody === 'object' && 'data' in externalBody
-      ? externalBody.data as AssetBatchSearchManifest | undefined
-      : externalBody as AssetBatchSearchManifest | undefined
-    const externalResults = externalManifest?.results
-    if (terms.length && (!externalResults?.length || externalResults.some(row => row.status === 'error'))) {
-      error.value = '历史素材查询失败，请重试。'
+    if (terms.length && result.view_mode === 'group') {
+      historyRequest = new AbortController()
+      void loadHistoricalAssets(terms, historyRequest.signal)
     }
-    const seenExternal = new Set<string>()
-    externalItems.value = (externalManifest?.results || [])
-      .flatMap((row) => row.assets || [])
-      .filter((asset) => asset.source_type === 'external' && externalResourceID(asset).startsWith('ext-'))
-      .filter((asset) => {
-        const id = externalResourceID(asset)
-        if (seenExternal.has(id)) return false
-        seenExternal.add(id)
-        return true
-      })
     brokenImages.value = new Set(); brokenFlat.value = new Set()
     if (singleCode && result.view_mode === 'group' && result.items.length <= 20) void refreshLiveCosts(result.items, requestVersion)
   } catch (cause) {
@@ -294,6 +284,33 @@ async function load() {
     error.value = cause instanceof Error ? cause.message : '资产中心加载失败。'
   } finally {
     if (requestVersion === liveCostRequestVersion) loading.value = false
+  }
+}
+async function loadHistoricalAssets(terms: string[], signal: AbortSignal) {
+  historyLoading.value = true
+  const seen = new Set<string>()
+  try {
+    // The endpoint processes terms serially. Give each SKU its own request deadline.
+    for (const term of terms) {
+      const response = await assetsApi.batchSearchAssets({ terms: [term], format_filter: 'all', asset_kind: 'all' }, signal).catch(() => null)
+      if (signal.aborted) return
+      const body = response?.data
+      const manifest = body && 'data' in body ? body.data : body as AssetBatchSearchManifest | undefined
+      const row = manifest?.results?.[0]
+      if (!row || row.status === 'error') {
+        error.value = '历史素材查询失败，请重试。'
+        continue
+      }
+      for (const asset of row.assets || []) {
+        const id = externalResourceID(asset)
+        if (asset.source_type === 'external' && id.startsWith('ext-') && !seen.has(id)) {
+          seen.add(id)
+          externalItems.value.push(asset)
+        }
+      }
+    }
+  } finally {
+    if (!signal.aborted) historyLoading.value = false
   }
 }
 async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number) {

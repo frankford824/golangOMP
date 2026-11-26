@@ -203,9 +203,30 @@ describe('ResourceGroupsView', () => {
     const codes = ['DZD000047', 'DZD000043', 'DZD000018', 'DZD000045', 'DZD000046', 'DZD000044']
     await submit(codes.join(' ') + '，dzd000047')
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ sku_codes: codes.join(','), q: undefined, page: 1 }))
-    expect(mocks.batchSearchAssets).toHaveBeenLastCalledWith(expect.objectContaining({ terms: codes }))
+    expect(mocks.batchSearchAssets.mock.calls.map(([payload]) => payload.terms)).toEqual(codes.map(code => [code]))
     await submit('北欧 沙发')
     expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ q: '北欧 沙发', sku_codes: undefined }))
+    expect(mocks.batchSearchAssets).toHaveBeenCalledTimes(codes.length)
+  })
+
+  it('shows SKU cards while history is pending and cancels stale history on a new search', async () => {
+    let finish!: (value: unknown) => void
+    mocks.batchSearchAssets.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('.search-field input').setValue('DZD000047 DZD000043')
+    await wrapper.get('.search-row').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain(group.sku_code)
+    expect(wrapper.text()).toContain('正在查询历史素材')
+    const signal = mocks.batchSearchAssets.mock.calls[0]![1] as AbortSignal
+    await wrapper.get('.search-field input').setValue('北欧')
+    await wrapper.get('.search-row').trigger('submit')
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    finish(null)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('历史素材查询失败')
     expect(mocks.batchSearchAssets).toHaveBeenCalledTimes(1)
   })
 
@@ -245,7 +266,7 @@ describe('ResourceGroupsView', () => {
       terms: ['HSC40222'],
       format_filter: 'all',
       asset_kind: 'all',
-    })
+    }, expect.any(AbortSignal))
     expect(wrapper.text()).toContain('外部资源匹配')
     expect(wrapper.text()).toContain('HSC40222-final.tif')
     await wrapper.get('.external-card img').trigger('click')
@@ -275,7 +296,7 @@ describe('ResourceGroupsView', () => {
     await wrapper.get('[role="alert"] button').trigger('click')
     await flushPromises()
 
-    expect(mocks.batchSearchAssets).toHaveBeenLastCalledWith(expect.objectContaining({ terms: ['HSC07106'] }))
+    expect(mocks.batchSearchAssets).toHaveBeenLastCalledWith(expect.objectContaining({ terms: ['HSC07106'] }), expect.any(AbortSignal))
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('没有找到符合条件')
   })
