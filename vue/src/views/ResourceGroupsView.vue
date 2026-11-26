@@ -38,6 +38,7 @@
     </div>
     <div v-else-if="loading" class="results-refreshing" role="status"><span class="loading-spinner" aria-hidden="true" />正在更新结果，当前列表仍可查看</div>
 
+    <div v-if="historyLoading" class="results-refreshing" role="status">正在查询历史素材…</div>
     <template v-if="!loading || result.items.length || result.flat_items.length">
     <template v-if="isFlatMode">
       <OAEmpty v-if="oaEnabled && !result.flat_items.length && !error" kind="files" title="没有找到符合条件的资源" description="可调整搜索词或筛选条件，再查看结果。" />
@@ -60,8 +61,8 @@
     </template>
 
     <template v-else>
-      <OAEmpty v-if="oaEnabled && !result.items.length && !externalItems.length && !error" kind="files" title="没有找到符合条件的 SKU 资源" description="可调整搜索词或筛选条件，再查看结果。" />
-      <div v-else-if="!result.items.length && !externalItems.length && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
+      <OAEmpty v-if="oaEnabled && !result.items.length && !externalItems.length && !historyLoading && !error" kind="files" title="没有找到符合条件的 SKU 资源" description="可调整搜索词或筛选条件，再查看结果。" />
+      <div v-else-if="!result.items.length && !externalItems.length && !historyLoading && !error" class="empty">没有找到符合条件的 SKU 资源。</div>
       <div v-else-if="oaEnabled && showLedger && result.items.length" class="asset-ledger-scroll" data-oa-return-scroll="asset-ledger" role="region" aria-label="SKU 规格台账" tabindex="0">
         <table class="asset-ledger">
           <thead>
@@ -243,7 +244,7 @@ import { batchSkuCodes, pasteSkuSearch } from '@/utils/sku-search'
 import AssetViewTabs from '@/oa/components/AssetViewTabs.vue'
 import DesktopSlot from '@/oa/components/DesktopSlot.vue'
 import OAEmpty from '@/oa/components/OAEmpty.vue'
-import { computed, nextTick, onActivated, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, nextTick, onActivated, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { ImageIcon } from 'lucide-vue-next'
 import { oaEnabled } from '@/oa/access'
@@ -273,6 +274,12 @@ const brokenImages = ref(new Set<number>())
 const brokenFlat = ref(new Set<number>())
 const liveCosts = ref(new Map<number, ProductCostReconciliation>())
 const externalItems = ref<BackendAsset[]>([])
+const historyLoading = ref(false)
+let historyRequest: AbortController | undefined
+onBeforeUnmount(() => {
+  liveCostRequestVersion++
+  historyRequest?.abort()
+})
 let liveCostRequestVersion = 0
 const filters = reactive({ q: '', resource_role: '' as ResourceRole, file_format: '', created_from: '', created_to: '', resource_owner_id: '' })
 const applied = reactive({ ...filters })
@@ -451,6 +458,9 @@ watch(() => route.name === 'AssetsIndex' ? route.query : null, (query, previous)
   void load(true)
 }, { immediate: true })
 async function load(restoreScroll = false) {
+  historyRequest?.abort()
+  historyLoading.value = false
+  externalItems.value = []
   const requestVersion = ++liveCostRequestVersion
   liveCosts.value = new Map()
   loading.value = true
@@ -459,33 +469,13 @@ async function load(restoreScroll = false) {
     const codes = batchSkuCodes(applied.q)
     const singleCode = /^(?=.*\d)[A-Z0-9_-]{5,}$/i.test(applied.q) ? applied.q.toUpperCase() : undefined
     const terms = singleCode ? [singleCode] : codes
-    const externalSearch = terms.length
-      ? assetsApi.batchSearchAssets({ terms, format_filter: 'all', asset_kind: 'all' }).catch(() => null)
-      : Promise.resolve(null)
-    const [next, externalResponse] = await Promise.all([
-      resourceGroupsApi.list({ q: terms.length ? undefined : applied.q || undefined, sku_code: singleCode, sku_codes: codes.length ? codes.join(',') : undefined, resource_role: applied.resource_role || undefined, file_format: applied.file_format || undefined, created_from: applied.created_from || undefined, created_to: applied.created_to || undefined, resource_owner_id: applied.resource_owner_id || undefined, page: requestedPage, page_size: result.page_size }),
-      externalSearch,
-    ])
+    const next = await resourceGroupsApi.list({ q: terms.length ? undefined : applied.q || undefined, sku_code: singleCode, sku_codes: codes.length ? codes.join(',') : undefined, resource_role: applied.resource_role || undefined, file_format: applied.file_format || undefined, created_from: applied.created_from || undefined, created_to: applied.created_to || undefined, resource_owner_id: applied.resource_owner_id || undefined, page: requestedPage, page_size: result.page_size })
     if (requestVersion !== liveCostRequestVersion) return
     result.items = next.items || []; result.flat_items = next.flat_items || []; result.view_mode = next.view_mode || (hasResourceFilters.value ? 'flat' : 'group'); result.page = next.page; result.page_size = next.page_size; result.total = next.total
-    const externalBody = externalResponse?.data
-    const externalManifest = externalBody && typeof externalBody === 'object' && 'data' in externalBody
-      ? externalBody.data as AssetBatchSearchManifest | undefined
-      : externalBody as AssetBatchSearchManifest | undefined
-    const externalResults = externalManifest?.results
-    if (terms.length && (!externalResults?.length || externalResults.some(row => row.status === 'error'))) {
-      error.value = '历史素材查询失败，请重试。'
+    if (terms.length && result.view_mode === 'group') {
+      historyRequest = new AbortController()
+      void loadHistoricalAssets(terms, historyRequest.signal)
     }
-    const seenExternal = new Set<string>()
-    externalItems.value = (externalManifest?.results || [])
-      .flatMap((row) => row.assets || [])
-      .filter((asset) => asset.source_type === 'external' && externalResourceID(asset).startsWith('ext-'))
-      .filter((asset) => {
-        const id = externalResourceID(asset)
-        if (seenExternal.has(id)) return false
-        seenExternal.add(id)
-        return true
-      })
     brokenImages.value = new Set(); brokenFlat.value = new Set()
     if (singleCode && result.view_mode === 'group' && result.items.length <= 20) void refreshLiveCosts(result.items, requestVersion)
   } catch (cause) {
@@ -497,6 +487,33 @@ async function load(restoreScroll = false) {
       loading.value = false
       if (restoreScroll) void nextTick(restoreListPosition)
     }
+  }
+}
+async function loadHistoricalAssets(terms: string[], signal: AbortSignal) {
+  historyLoading.value = true
+  const seen = new Set<string>()
+  try {
+    // The endpoint processes terms serially. Give each SKU its own request deadline.
+    for (const term of terms) {
+      const response = await assetsApi.batchSearchAssets({ terms: [term], format_filter: 'all', asset_kind: 'all' }, signal).catch(() => null)
+      if (signal.aborted) return
+      const body = response?.data
+      const manifest = body && 'data' in body ? body.data : body as AssetBatchSearchManifest | undefined
+      const row = manifest?.results?.[0]
+      if (!row || row.status === 'error') {
+        error.value = '历史素材查询失败，请重试。'
+        continue
+      }
+      for (const asset of row.assets || []) {
+        const id = externalResourceID(asset)
+        if (asset.source_type === 'external' && id.startsWith('ext-') && !seen.has(id)) {
+          seen.add(id)
+          externalItems.value.push(asset)
+        }
+      }
+    }
+  } finally {
+    if (!signal.aborted) historyLoading.value = false
   }
 }
 async function refreshLiveCosts(groups: ResourceGroup[], requestVersion: number) {
