@@ -78,6 +78,7 @@ type Service struct {
 	systemPreviews  SystemAssetPreviewer
 	nowFn           func() time.Time
 	loc             *time.Location
+	archiveSlots    chan struct{}
 	archiveCacheMu  sync.Mutex
 	archiveCache    map[string]*archiveTempCacheEntry
 }
@@ -166,9 +167,10 @@ func NewService(cfg Config, opts ...Option) *Service {
 		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
 	svc := &Service{
-		cfg:   cfg,
-		nowFn: time.Now,
-		loc:   loc,
+		archiveSlots: make(chan struct{}, 4),
+		cfg:          cfg,
+		nowFn:        time.Now,
+		loc:          loc,
 	}
 	for _, opt := range opts {
 		opt(svc)

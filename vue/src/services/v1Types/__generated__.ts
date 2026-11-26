@@ -17733,7 +17733,7 @@ export interface paths {
         };
         /**
          * Browse uploaded archive as a virtual folder
-         * @description Lists folders and files inside an uploaded archive without extracting it into the workbench drive. Supports ZIP and RAR virtual browsing.
+         * @description Lists folders and files inside an uploaded archive without extracting it into the workbench drive. Supports ZIP, RAR, TAR and 7z virtual browsing.
          */
         get: {
             parameters: {
@@ -17825,7 +17825,7 @@ export interface paths {
         };
         /**
          * Stream one virtual file from an uploaded archive
-         * @description Streams a single file entry from a ZIP or RAR archive for inline preview or download. This endpoint returns file bytes rather than the standard JSON envelope.
+         * @description Streams a single file entry from a ZIP, RAR, TAR or 7z archive for inline preview or download. This endpoint returns file bytes rather than the standard JSON envelope.
          */
         get: {
             parameters: {

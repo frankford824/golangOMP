@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { FileArchive, ImageOff } from 'lucide-vue-next'
 
 import type { ArchiveVirtualFile } from '@aw/shared/api/assetWorkbenchApi'
+import { loadArchiveThumbnail, maxAutoThumbnailBytes } from './archiveThumbnails'
 import { createArchiveEntryObjectUrl } from '@aw/shared/drive/archiveEntryBlob'
 
 const props = defineProps<{
@@ -16,9 +17,10 @@ const loading = ref(false)
 const failed = ref(false)
 let observer: IntersectionObserver | null = null
 let controller: AbortController | null = null
-let requested = false
+
 
 const canLoadImage = computed(() => {
+  if (!props.file.preview_url || props.file.file_size > maxAutoThumbnailBytes || props.file.file_size <= 0) return false
   const mime = (props.file.mime_type || '').toLowerCase()
   if (mime.startsWith('image/')) return true
   return /\.(jpe?g|png|gif|webp|bmp|svg)$/i.test(props.file.name || props.file.path || '')
@@ -31,32 +33,36 @@ function revokePreviewUrl() {
 }
 
 async function loadPreview() {
-  if (requested) return
-  requested = true
-  if (!canLoadImage.value) {
-    failed.value = true
-    return
-  }
+  if (controller || previewUrl.value || failed.value || !canLoadImage.value) return
   loading.value = true
-  controller = new AbortController()
+  const request = new AbortController()
+  controller = request
   try {
-    previewUrl.value = await createArchiveEntryObjectUrl(props.fileId, props.file, controller.signal)
-  } catch (err) {
-    if ((err as DOMException)?.name !== 'AbortError') failed.value = true
+    const url = await loadArchiveThumbnail(() => createArchiveEntryObjectUrl(props.fileId, props.file, request.signal), request.signal)
+    if (request.signal.aborted) URL.revokeObjectURL(url)
+    else previewUrl.value = url
+  } catch {
+    if (!request.signal.aborted) failed.value = true
   } finally {
-    loading.value = false
+    if (controller === request) {
+      loading.value = false
+      controller = null
+    }
   }
 }
 
 onMounted(() => {
-  if (!rootRef.value) return
+  if (!rootRef.value || !canLoadImage.value) return
   observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
         if (entry.isIntersecting) {
           void loadPreview()
-          observer?.disconnect()
-          break
+        } else {
+          controller?.abort()
+          controller = null
+          loading.value = false
+          revokePreviewUrl()
         }
       }
     },
