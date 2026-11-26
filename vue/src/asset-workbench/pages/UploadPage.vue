@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import ArchiveBrowserDialog from '@aw/shared/drive/ArchiveBrowserDialog.vue'
+import { canOpenArchive } from '@aw/shared/drive/archiveFormat'
+import { FileArchive } from 'lucide-vue-next'
 import { computed, onActivated, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { storeToRefs } from 'pinia'
 import { RouterLink } from 'vue-router'
@@ -55,6 +58,7 @@ const uploading = ref(false)
 const submitting = ref(false)
 const error = ref('')
 const notice = ref('')
+const receiptArchive = ref<SubmissionFileRow | null>(null)
 const confirmedWorks = shallowRef<SubmissionDetail['items']>([])
 const submittedFiles = computed(() => confirmedWorks.value.flatMap((work) => work.files))
 const receiptDirectorySummary = computed(() => {
@@ -1002,12 +1006,16 @@ onActivated(() => {
       <p class="aw-copy">{{ isSimpleUser ? '预览图生成需要一点时间。你可以继续交新的作品。' : '预览图生成需要一点时间。生成完成后，可以在维护专区继续查看和下载源文件。' }}</p>
       <div class="aw-preview-grid">
         <figure v-for="file in submittedFiles" :key="file.id" class="aw-upload-receipt-file">
-          <WorkbenchFilePreview :file-id="file.id" :alt="file.original_filename" @preview="openFilePreview" />
+          <button v-if="canOpenArchive(file)" type="button" class="aw-preview-tile aw-preview-tile--button" :aria-label="`查看压缩包内容：${file.original_filename}`" @click="receiptArchive = file">
+            <span><FileArchive :size="24" aria-hidden="true" /> 查看内容</span>
+          </button>
+          <WorkbenchFilePreview v-else :file-id="file.id" :alt="file.original_filename" @preview="openFilePreview" />
           <figcaption class="aw-copy">{{ receiptDirectoryName(file) }} · {{ file.relative_path || file.display_name || file.original_filename }}</figcaption>
         </figure>
       </div>
     </div>
 
+    <ArchiveBrowserDialog v-if="receiptArchive" :file="receiptArchive" @close="receiptArchive = null" />
     <WorkbenchPreviewDialog
       :open="previewDialog.open"
       :title="previewDialog.title"

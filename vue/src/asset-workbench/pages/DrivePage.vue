@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import ArchiveListingPage from '@aw/shared/drive/ArchiveListingPage.vue'
+import ArchiveBrowserDialog from '@aw/shared/drive/ArchiveBrowserDialog.vue'
+import { archiveFormatOf, canOpenArchive } from '@aw/shared/drive/archiveFormat'
 import { pricingStatusMeta } from '@aw/shared/format/status'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { loadWorkbenchFilePreview } from '@aw/shared/preview/loadWorkbenchFilePreview'
@@ -279,6 +282,8 @@ const archiveView = ref<{
   folders: ArchiveVirtualFolder[]
   files: ArchiveVirtualFile[]
 } | null>(null)
+const modalArchive = ref<DriveFileRow | null>(null)
+let archiveListing: AbortController | undefined
 const archiveLoading = ref(false)
 const archiveError = ref('')
 const notice = ref('')
@@ -2360,19 +2365,6 @@ async function confirmDeleteSelectedFiles() {
   }
 }
 
-function archiveFormatOf(file: DriveFileRow | null | undefined) {
-  if (!file) return ''
-  const name = (file.display_name || file.original_filename || '').toLowerCase()
-  const ext = name.split('.').pop() || ''
-  if (['zip', 'rar', '7z'].includes(ext)) return ext
-  if (file.file_type === 'archive') return ext || 'archive'
-  return ''
-}
-
-function canOpenArchive(file: DriveFileRow | null | undefined) {
-  return ['zip', 'rar'].includes(archiveFormatOf(file))
-}
-
 async function openArchiveFile(file: DriveFileRow | null | undefined, path = '') {
   if (!file) return
   if (!canOpenArchive(file)) {
@@ -2380,10 +2372,19 @@ async function openArchiveFile(file: DriveFileRow | null | undefined, path = '')
     return
   }
   closeContextMenu()
+  if (activeMode.value !== 'directories' || !selectedDir.value || searchActive.value) {
+    modalArchive.value = file
+    return
+  }
+  archiveListing?.abort()
+  const request = new AbortController()
+  archiveListing = request
+  archiveView.value = { source: file, path, format: archiveFormatOf(file), folders: [], files: [] }
   archiveLoading.value = true
   archiveError.value = ''
   try {
-    const result = await assetWorkbenchApi.browseArchiveFile(file.id, path)
+    const result = await assetWorkbenchApi.browseArchiveFile(file.id, path, request.signal)
+    if (request.signal.aborted) return
     archiveView.value = {
       source: file,
       path: result.path || '',
@@ -2393,13 +2394,15 @@ async function openArchiveFile(file: DriveFileRow | null | undefined, path = '')
     }
     selectedFile.value = file
   } catch (err) {
-    archiveError.value = err instanceof Error ? err.message : '压缩包打开失败'
+    if (!request.signal.aborted) archiveError.value = err instanceof Error ? err.message : '压缩包打开失败'
   } finally {
-    archiveLoading.value = false
+    if (!request.signal.aborted) archiveLoading.value = false
   }
 }
 
 function closeArchiveView() {
+  archiveListing?.abort()
+  modalArchive.value = null
   archiveView.value = null
   archiveError.value = ''
   archiveLoading.value = false
@@ -3263,6 +3266,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  archiveListing?.abort()
   selectionAbortController?.abort()
   abortDriveRequests()
   cancelSearchDebounce()
@@ -3878,29 +3882,31 @@ onBeforeUnmount(() => {
                     </div>
                     <button class="aw-grid-button" type="button" @click="closeArchiveView">返回所在目录</button>
                   </div>
-                  <div v-if="archiveView.folders.length" class="aw-drive-tiles aw-drive-tiles--folders">
-                    <button
-                      v-for="folder in archiveView.folders"
-                      :key="folder.path"
-                      class="aw-drive-tile aw-drive-tile--folder"
-                      type="button"
-                      @click="openArchiveFolder(folder.path)"
-                    >
-                      <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="starFilled" />
-                      <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
-                      <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
-                    </button>
-                  </div>
-                  <div v-if="archiveView.files.length" class="aw-drive-files aw-drive-files--roomy">
-                    <article v-for="file in archiveView.files" :key="file.path" class="aw-drive-file-card">
-                      <button class="aw-drive-file-card__button" type="button" @click="openArchiveVirtualFile(file)" @dblclick="openArchiveVirtualFile(file)">
-                        <span class="aw-drive-file-card__media">
-                          <ArchiveVirtualThumb :file-id="archiveView.source.id" :file="file" />
-                        </span>
-                        <span class="aw-drive-file-card__name">{{ file.name }}</span>
+                  <ArchiveListingPage :key="archiveView.source.id + archiveView.path" :folders="archiveView.folders" :files="archiveView.files" v-slot="{ folders: visibleFolders, files: visibleFiles }">
+                    <div v-if="visibleFolders.length" class="aw-drive-tiles aw-drive-tiles--folders">
+                      <button
+                        v-for="folder in visibleFolders"
+                        :key="folder.path"
+                        class="aw-drive-tile aw-drive-tile--folder"
+                        type="button"
+                        @click="openArchiveFolder(folder.path)"
+                      >
+                        <WorkbenchFolderIcon class="aw-drive-tile__icon" :size="46" variant="starFilled" />
+                        <strong class="aw-drive-tile__name" :title="folder.name">{{ folder.name }}</strong>
+                        <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
                       </button>
-                    </article>
-                  </div>
+                    </div>
+                    <div v-if="visibleFiles.length" class="aw-drive-files aw-drive-files--roomy">
+                      <article v-for="file in visibleFiles" :key="file.path" class="aw-drive-file-card">
+                        <button class="aw-drive-file-card__button" type="button" @click="openArchiveVirtualFile(file)" @dblclick="openArchiveVirtualFile(file)">
+                          <span class="aw-drive-file-card__media">
+                            <ArchiveVirtualThumb :file-id="archiveView.source.id" :file="file" />
+                          </span>
+                          <span class="aw-drive-file-card__name">{{ file.name }}</span>
+                        </button>
+                      </article>
+                    </div>
+                  </ArchiveListingPage>
                   <p v-if="archiveView.folders.length === 0 && archiveView.files.length === 0" class="aw-drive-empty">压缩包内没有可显示的文件</p>
                 </template>
               </template>
@@ -4405,6 +4411,7 @@ onBeforeUnmount(() => {
       </template>
     </div>
 
+    <ArchiveBrowserDialog v-if="modalArchive" :file="modalArchive" @close="modalArchive = null" />
     <DriveUploadDialog
       :key="uploadDialogKey"
       :open="uploadOpen"
