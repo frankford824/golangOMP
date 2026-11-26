@@ -16700,7 +16700,7 @@ export interface paths {
         put?: never;
         /**
          * Preview batch repricing for one asset workbench price rule
-         * @description Read-only preview for one settlement month and enabled price rule. Uses original submission dates in Asia/Shanghai. Includes only mutable normal works whose ordinary pricing resolver selects the rule. Defaults to unpriced works and supports up to 1000 changes per batch.
+         * @description Read-only preview for one settlement month and enabled price rule. Uses original submission dates in Asia/Shanghai. Includes only mutable normal works whose ordinary pricing resolver selects the rule. Unpriced works and previously pending-grade works with a resolvable grade are eligible. Already priced works require include_priced. Supports up to 1000 changes per batch.
          */
         post: {
             parameters: {
@@ -16717,6 +16717,8 @@ export interface paths {
                         business_month: string;
                         /** Format: int64 */
                         payee_user_id?: number;
+                        /** @description Limit to these accounts. Mutually exclusive with payee_user_id. Omit both to include all applicable personnel. */
+                        payee_user_ids?: number[];
                         /** Format: date */
                         submitted_from?: string;
                         /** Format: date */
@@ -16814,6 +16816,8 @@ export interface paths {
                         business_month: string;
                         /** Format: int64 */
                         payee_user_id?: number;
+                        /** @description Limit to these accounts. Mutually exclusive with payee_user_id. Omit both to include all applicable personnel. */
+                        payee_user_ids?: number[];
                         /** Format: date */
                         submitted_from?: string;
                         /** Format: date */

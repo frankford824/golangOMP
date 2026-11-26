@@ -12284,7 +12284,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/items/qc/excel \
 ### 简介
 支持方法: POST。
 
-- `POST`: Read-only preview for one settlement month and enabled price rule. Uses original submission dates in Asia/Shanghai. Includes only mutable normal works whose ordinary pricing resolver selects the rule. Defaults to unpriced works and supports up to 1000 changes per batch.
+- `POST`: Read-only preview for one settlement month and enabled price rule. Uses original submission dates in Asia/Shanghai. Includes only mutable normal works whose ordinary pricing resolver selects the rule. Unpriced works and previously pending-grade works with a resolvable grade are eligible. Already priced works require include_priced. Supports up to 1000 changes per batch.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -12303,6 +12303,7 @@ Content-Type: `application/json`
 | `rule_id` | integer | 是 | - |
 | `business_month` | string | 是 | - |
 | `payee_user_id` | integer | 否 | - |
+| `payee_user_ids` | array<integer> | 否 | Limit to these accounts. Mutually exclusive with payee_user_id. Omit both to include all applicable personnel. |
 | `submitted_from` | string | 否 | - |
 | `submitted_to` | string | 否 | - |
 | `include_priced` | boolean | 否 | - |

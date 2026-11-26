@@ -19,12 +19,13 @@ import (
 const maxBatchRepriceItems = 1000
 
 type BatchRepriceParams struct {
-	RuleID        int64  `json:"rule_id" binding:"required"`
-	BusinessMonth string `json:"business_month" binding:"required"`
-	PayeeUserID   int64  `json:"payee_user_id,omitempty"`
-	SubmittedFrom string `json:"submitted_from,omitempty"`
-	SubmittedTo   string `json:"submitted_to,omitempty"`
-	IncludePriced bool   `json:"include_priced,omitempty"`
+	RuleID        int64   `json:"rule_id" binding:"required"`
+	BusinessMonth string  `json:"business_month" binding:"required"`
+	PayeeUserID   int64   `json:"payee_user_id,omitempty"`
+	PayeeUserIDs  []int64 `json:"payee_user_ids,omitempty"`
+	SubmittedFrom string  `json:"submitted_from,omitempty"`
+	SubmittedTo   string  `json:"submitted_to,omitempty"`
+	IncludePriced bool    `json:"include_priced,omitempty"`
 }
 
 type ConfirmBatchRepriceParams struct {
@@ -150,6 +151,25 @@ func (s *Service) prepareBatchReprice(ctx context.Context, actor domain.RequestA
 	if _, err := time.Parse("2006-01", params.BusinessMonth); err != nil || params.RuleID <= 0 || params.PayeeUserID < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择有效的单价规则和结算月。", nil)
 	}
+	selected := make(map[int64]bool)
+	if params.PayeeUserIDs != nil {
+		if params.PayeeUserID != 0 || len(params.PayeeUserIDs) == 0 {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择有效的限定人员。", nil)
+		}
+		for _, id := range params.PayeeUserIDs {
+			if id <= 0 {
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "人员账号编号无效。", nil)
+			}
+			selected[id] = true
+		}
+		params.PayeeUserIDs = make([]int64, 0, len(selected))
+		for id := range selected {
+			params.PayeeUserIDs = append(params.PayeeUserIDs, id)
+		}
+		sort.Slice(params.PayeeUserIDs, func(i, j int) bool { return params.PayeeUserIDs[i] < params.PayeeUserIDs[j] })
+	} else if params.PayeeUserID > 0 {
+		selected[params.PayeeUserID] = true
+	}
 	for _, day := range []string{params.SubmittedFrom, params.SubmittedTo} {
 		if day != "" {
 			if parsed, err := time.Parse("2006-01-02", day); err != nil || parsed.Format("2006-01-02") != day {
@@ -182,7 +202,7 @@ func (s *Service) prepareBatchReprice(ctx context.Context, actor domain.RequestA
 		ruleEnd = rule.EffectiveTo.Format("2006-01-02")
 	}
 	for _, item := range items {
-		if !isBatchRepriceCandidate(item, rule, params) {
+		if !isBatchRepriceCandidate(item, rule, params, selected) {
 			continue
 		}
 		day := item.SubmittedAt.In(s.loc).Format("2006-01-02")
@@ -237,14 +257,14 @@ func (s *Service) prepareBatchReprice(ctx context.Context, actor domain.RequestA
 	return plan, nil
 }
 
-func isBatchRepriceCandidate(item *domain.AssetWorkbenchSubmissionItem, rule *domain.AssetWorkbenchPriceMatrix, params BatchRepriceParams) bool {
+func isBatchRepriceCandidate(item *domain.AssetWorkbenchSubmissionItem, rule *domain.AssetWorkbenchPriceMatrix, params BatchRepriceParams, selected map[int64]bool) bool {
 	if item == nil || item.BusinessMonth != params.BusinessMonth || item.EntryKind != domain.AssetWorkbenchSubmissionEntryKindNormal ||
 		item.DifficultyClass != rule.DifficultyClass || item.VoidedAt != nil || item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided ||
 		item.SettlementStatus != domain.AssetWorkbenchSettlementStatusUnsettled || item.CurrentSettlementBatchID != nil ||
-		(params.PayeeUserID > 0 && params.PayeeUserID != item.PayeeUserID) {
+		(len(selected) > 0 && !selected[item.PayeeUserID]) {
 		return false
 	}
-	if item.PricingStatus != domain.AssetWorkbenchPricingStatusUnpriced &&
+	if item.PricingStatus != domain.AssetWorkbenchPricingStatusUnpriced && item.PricingStatus != domain.AssetWorkbenchPricingStatusPendingGrade &&
 		!(params.IncludePriced && item.PricingStatus == domain.AssetWorkbenchPricingStatusPriced) {
 		return false
 	}

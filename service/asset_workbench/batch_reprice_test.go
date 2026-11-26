@@ -191,3 +191,51 @@ func TestBatchRepriceRejectsStalePreviewsAndSettlementRaces(t *testing.T) {
 		t.Fatalf("template-only actor reached repricing: %+v", err)
 	}
 }
+
+func TestBatchRepricePersonnelListAndConfirmation(t *testing.T) {
+	ctx := context.Background()
+	r, actor, scope := batchRepriceTestData()
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(r, assetWorkbenchTestTxRunner{}))
+	scope.PayeeUserIDs = []int64{52, 53}
+	if _, err := svc.PreviewBatchReprice(ctx, actor, scope); err == nil {
+		t.Fatal("mixed scopes accepted")
+	}
+	scope.PayeeUserID = 0
+	for _, invalid := range [][]int64{{}, {52, 0}} {
+		scope.PayeeUserIDs = invalid
+		if _, err := svc.PreviewBatchReprice(ctx, actor, scope); err == nil {
+			t.Fatal("invalid explicit selection accepted")
+		}
+	}
+	scope.PayeeUserIDs = []int64{53, 52, 52}
+	preview, err := svc.PreviewBatchReprice(ctx, actor, scope)
+	if err != nil || preview.Count != 3 {
+		t.Fatalf("preview=%+v error=%v", preview, err)
+	}
+	scope.PayeeUserIDs = []int64{52}
+	if _, err := svc.ConfirmBatchReprice(ctx, actor, ConfirmBatchRepriceParams{BatchRepriceParams: scope, PreviewToken: preview.PreviewToken}); err == nil {
+		t.Fatal("narrowed scope confirmed")
+	}
+	scope.PayeeUserIDs = []int64{52, 53}
+	result, err := svc.ConfirmBatchReprice(ctx, actor, ConfirmBatchRepriceParams{BatchRepriceParams: scope, PreviewToken: preview.PreviewToken})
+	if err != nil || result.Updated != 3 {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+}
+
+func (*batchRepriceRepo) GetProfileByUserID(_ context.Context, id int64) (*domain.AssetWorkbenchProfile, error) {
+	return &domain.AssetWorkbenchProfile{UserID: id, WorkerType: "fulltime", JobGrade: "P1", Status: domain.AssetWorkbenchProfileStatusActive}, nil
+}
+
+func TestBatchRepricePendingGradeAfterProfileCompleted(t *testing.T) {
+	r, actor, scope := batchRepriceTestData()
+	item := r.items[2]
+	item.PricingStatus = domain.AssetWorkbenchPricingStatusPendingGrade
+	item.JobGradeSnapshot = ""
+	r.items = []*domain.AssetWorkbenchSubmissionItem{item}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(r, assetWorkbenchTestTxRunner{}))
+	preview, err := svc.PreviewBatchReprice(context.Background(), actor, scope)
+	if err != nil || preview.Count != 1 || preview.NewGross != 0.17 || len(r.updates) != 0 {
+		t.Fatalf("preview=%+v err=%v", preview, err)
+	}
+}

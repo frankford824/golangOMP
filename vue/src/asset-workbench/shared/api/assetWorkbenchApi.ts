@@ -147,6 +147,7 @@ export interface BatchRepriceScope {
   rule_id: number
   business_month: string
   payee_user_id?: number
+  payee_user_ids?: number[]
   submitted_from?: string
   submitted_to?: string
   include_priced?: boolean
