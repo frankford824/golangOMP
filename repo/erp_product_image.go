@@ -37,6 +37,7 @@ type ERPProductImageRepo interface {
 	ClearReference(ctx context.Context, sku string, request ERPProductImageRequest) error
 	Schedule(ctx context.Context, sku string, at time.Time) error
 	NextSKU(ctx context.Context, now time.Time) (string, error)
+	ImageGapScanSKUs(ctx context.Context, after string, now time.Time, limit int) ([]string, error)
 	Acquire(ctx context.Context, sku, token string, now, until time.Time) (bool, error)
 	RecordReferences(ctx context.Context, sku, token string, refs []ERPProductImageReference, replace bool) error
 	Finish(ctx context.Context, sku, token string, next time.Time, issue string) error

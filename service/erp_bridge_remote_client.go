@@ -684,14 +684,18 @@ func (c *remoteERPBridgeClient) GetProductByID(ctx context.Context, id string) (
 	return nil, &erpBridgeRemoteProductNotFoundError{QueryID: id}
 }
 
-// A bounded read-only baseline pass avoids thousands of one-SKU API calls.
 func (c *remoteERPBridgeClient) BatchCostProducts(ctx context.Context, ids []string) ([]*domain.ERPProduct, error) {
+	return c.BatchProductsBySKU(ctx, ids)
+}
+
+// BatchProductsBySKU uses the official exact-SKU query for read-only inspection.
+func (c *remoteERPBridgeClient) BatchProductsBySKU(ctx context.Context, ids []string) ([]*domain.ERPProduct, error) {
 	if len(ids) == 0 || len(ids) > 50 {
-		return nil, fmt.Errorf("cost batch must contain 1-50 SKUs")
+		return nil, fmt.Errorf("ERP batch must contain 1-50 SKUs")
 	}
 	for _, id := range ids {
 		if strings.TrimSpace(id) == "" || strings.Contains(id, ",") {
-			return nil, fmt.Errorf("invalid SKU in cost batch")
+			return nil, fmt.Errorf("invalid SKU in ERP batch")
 		}
 	}
 	raw, _ := json.Marshal(map[string]string{"id": strings.Join(ids, ",")})
@@ -1320,12 +1324,17 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			return map[string]interface{}{"items": []map[string]interface{}{{"sku_id": skuID, "c_price": *payload.CostPrice, "cost_price": *payload.CostPrice}}}, nil
 		}
 		if payload.Operation == "product_management_image_sync" {
-			if skuID == "" || payload.Pic == "" || payload.PicBig == "" {
-				return nil, fmt.Errorf("image-only update requires SKU and both image fields")
+			if skuID == "" || (payload.Pic == "" && payload.PicBig == "") {
+				return nil, fmt.Errorf("image-only update requires a SKU and an image field")
 			}
-			return map[string]interface{}{"items": []map[string]interface{}{{
-				"sku_id": skuID, "pic": payload.Pic, "pic_big": payload.PicBig,
-			}}}, nil
+			item := map[string]interface{}{"sku_id": skuID}
+			if payload.Pic != "" {
+				item["pic"] = payload.Pic
+			}
+			if payload.PicBig != "" {
+				item["pic_big"] = payload.PicBig
+			}
+			return map[string]interface{}{"items": []map[string]interface{}{item}}, nil
 		}
 		item := map[string]interface{}{
 			"sku_id": skuID,

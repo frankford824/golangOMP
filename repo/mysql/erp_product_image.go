@@ -41,6 +41,33 @@ func (r *erpProductImageRepo) NextSKU(ctx context.Context, now time.Time) (strin
 	return sku, err
 }
 
+// ImageGapScanSKUs walks the same ERP-owned catalogue as the ordinary queue.
+// A gap already held for review remains on its existing retry schedule.
+func (r *erpProductImageRepo) ImageGapScanSKUs(ctx context.Context, after string, now time.Time, limit int) ([]string, error) {
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT DISTINCT p.sku_code FROM erp_product_sync_records p
+		LEFT JOIN erp_product_image_checks c ON c.sku_code = p.sku_code
+		WHERE p.sku_code > ? AND p.image_required = 1
+		  AND (p.base_sync_status = 'synced' OR p.erp_sync_status = 'synced'
+		       OR p.last_image_synced_at IS NOT NULL)
+		  AND (c.leased_until IS NULL OR c.leased_until <= ?)
+		  AND (c.sku_code IS NULL OR c.next_check_at <= ? OR c.last_error NOT LIKE 'ERP 单边缺图暂缓%')
+		ORDER BY p.sku_code LIMIT ?`, after, now, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []string
+	for rows.Next() {
+		var sku string
+		if err := rows.Scan(&sku); err != nil {
+			return nil, err
+		}
+		result = append(result, sku)
+	}
+	return result, rows.Err()
+}
+
 func (r *erpProductImageRepo) Acquire(ctx context.Context, sku, token string, now, until time.Time) (bool, error) {
 	_, err := r.db.db.ExecContext(ctx, `
 		INSERT INTO erp_product_image_checks (sku_code, next_check_at, lease_token, leased_until)
