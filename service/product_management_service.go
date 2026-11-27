@@ -2189,9 +2189,32 @@ func productManagementERPImageURLsMatch(expected, actual string) bool {
 	if expectedErr != nil || actualErr != nil || expectedURL.Host == "" || actualURL.Host == "" {
 		return expected == actual
 	}
-	return strings.EqualFold(expectedURL.Scheme, actualURL.Scheme) &&
-		strings.EqualFold(expectedURL.Host, actualURL.Host) &&
-		expectedURL.EscapedPath() == actualURL.EscapedPath()
+	if !strings.EqualFold(expectedURL.Scheme, actualURL.Scheme) ||
+		!strings.EqualFold(expectedURL.Host, actualURL.Host) ||
+		expectedURL.EscapedPath() != actualURL.EscapedPath() {
+		return false
+	}
+	if !strings.HasPrefix(expectedURL.Path, ERPImageProxyPathPrefix+"/") {
+		return true
+	}
+	// Renewing a proxy URL keeps its path. The old signature can still point
+	// at the right asset while returning 403, so confirm that ERP stored both
+	// signature parameters from this write before marking the image synced.
+	expectedQuery, err := url.ParseQuery(expectedURL.RawQuery)
+	if err != nil {
+		return false
+	}
+	actualQuery, err := url.ParseQuery(actualURL.RawQuery)
+	if err != nil {
+		return false
+	}
+	for _, param := range []string{"exp", "sig"} {
+		want, got := expectedQuery[param], actualQuery[param]
+		if len(want) != 1 || len(got) != 1 || want[0] == "" || want[0] != got[0] {
+			return false
+		}
+	}
+	return true
 }
 
 func appendNewestTaskAsset(items []*domain.TaskAsset, asset *domain.TaskAsset) []*domain.TaskAsset {

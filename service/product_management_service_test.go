@@ -811,6 +811,38 @@ func TestProductManagementVerifyERPImageReadbackRejectsDifferentAssetVersion(t *
 	}
 }
 
+func TestProductManagementVerifyERPImageReadbackRequiresRenewedProxySignature(t *testing.T) {
+	previousSleeper := productManagementERPImageReadbackSleep
+	productManagementERPImageReadbackSleep = func(time.Duration) {}
+	t.Cleanup(func() { productManagementERPImageReadbackSleep = previousSleeper })
+
+	const path = "https://yongbo.cloud/v1/public/erp-product-images/150104"
+	const expected = path + "?exp=1826085583&sig=renewed"
+	record := &domain.ProductManagementRecord{SKUCode: "CGP001643"}
+	for _, tc := range []struct {
+		name     string
+		readback string
+		wantOK   bool
+	}{
+		{name: "old signature on same version", readback: path + "?exp=1826085583&sig=old"},
+		{name: "old expiry on same version", readback: path + "?exp=1826085582&sig=renewed"},
+		{name: "signature removed", readback: path + "?exp=1826085583"},
+		{name: "ambiguous duplicated signature", readback: expected + "&sig=old"},
+		{name: "same renewed parameters reordered", readback: path + "?sig=renewed&exp=1826085583", wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &productManagementService{
+				erpBridge: &productManagementERPBridgeCapture{
+					readbackProduct: &domain.ERPProduct{SKUCode: record.SKUCode, ImageURL: tc.readback},
+				},
+			}
+			if err := svc.verifyERPImageReadback(context.Background(), record, expected); (err == nil) != tc.wantOK {
+				t.Fatalf("verifyERPImageReadback() error = %v, want success = %v", err, tc.wantOK)
+			}
+		})
+	}
+}
+
 func TestProductManagementBestAssetsBySourceRequiresExactSKU(t *testing.T) {
 	assetID := int64(10)
 	exactSKU := "CGD000061"
