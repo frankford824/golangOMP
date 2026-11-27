@@ -404,6 +404,7 @@ type AssetWorkbenchDriveFilter struct {
 	OrderNo            string
 	Keyword            string
 	OwnerKeyword       string
+	SupplementDate     string
 	WorkerType         string
 	OperationSource    string
 	CreatedFrom        *time.Time

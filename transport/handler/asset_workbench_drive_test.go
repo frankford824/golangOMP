@@ -10,13 +10,14 @@ import (
 
 func TestParseUploadLedgerDirectoryFilters(t *testing.T) {
 	tests := []struct {
-		query      string
-		legacyID   int64
-		ownerID    int64
-		workerType string
-		ids        []int64
-		unassigned bool
-		invalid    bool
+		query          string
+		legacyID       int64
+		ownerID        int64
+		workerType     string
+		supplementDate string
+		ids            []int64
+		unassigned     bool
+		invalid        bool
 	}{
 		{query: "dir_id=9", legacyID: 9},
 		{query: "dir_id=9&unassigned=true", unassigned: true},
@@ -31,6 +32,8 @@ func TestParseUploadLedgerDirectoryFilters(t *testing.T) {
 		{query: "worker_type=fulltime", workerType: "fulltime"},
 		{query: "worker_type=parttime", workerType: "parttime"},
 		{query: "worker_type=unknown", invalid: true},
+		{query: "supplement_date=2026-11-27", supplementDate: "2026-11-27"},
+		{query: "supplement_date=2026-02-30", invalid: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.query, func(t *testing.T) {
@@ -51,7 +54,7 @@ func TestParseUploadLedgerDirectoryFilters(t *testing.T) {
 			if filter.OwnerUserID != nil {
 				ownerID = *filter.OwnerUserID
 			}
-			if err != nil || filter.WorkerType != tt.workerType || legacyID != tt.legacyID || ownerID != tt.ownerID || !reflect.DeepEqual(filter.UploadDirectoryIDs, tt.ids) || filter.Unassigned != tt.unassigned {
+			if err != nil || filter.SupplementDate != tt.supplementDate || filter.WorkerType != tt.workerType || legacyID != tt.legacyID || ownerID != tt.ownerID || !reflect.DeepEqual(filter.UploadDirectoryIDs, tt.ids) || filter.Unassigned != tt.unassigned {
 				t.Fatalf("unexpected filter: %+v, error: %v", filter, err)
 			}
 		})

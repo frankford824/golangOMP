@@ -16927,6 +16927,10 @@ paths:
           description: Filter by the uploader's current asset workbench personnel type. Omit for all types.
           schema: { type: string, enum: [fulltime, parttime] }
         - in: query
+          name: supplement_date
+          description: Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date.
+          schema: { type: string, format: date }
+        - in: query
           name: operation_source
           description: Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements.
           schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }
@@ -16999,6 +17003,10 @@ paths:
                         page_count: { type: integer }
                         gross_amount: { type: number }
                         business_month: { type: string }
+                        supplement_date:
+                          type: string
+                          format: date
+                          description: Date entered on the linked supplement. Omitted for ordinary uploads and missing historical dates.
                         operation_source:
                           type: string
                           enum: [normal_upload, client_supplement, admin_supplement]
@@ -17062,6 +17070,10 @@ paths:
           name: worker_type
           description: Filter by the uploader's current asset workbench personnel type. Omit for all types.
           schema: { type: string, enum: [fulltime, parttime] }
+        - in: query
+          name: supplement_date
+          description: Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date.
+          schema: { type: string, format: date }
         - in: query
           name: operation_source
           description: Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements.
@@ -17138,6 +17150,10 @@ paths:
           name: worker_type
           description: Filter by the uploader's current asset workbench personnel type. Omit for all types.
           schema: { type: string, enum: [fulltime, parttime] }
+        - in: query
+          name: supplement_date
+          description: Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date.
+          schema: { type: string, format: date }
         - in: query
           name: operation_source
           schema: { type: string, enum: [normal_upload, supplement, client_supplement, admin_supplement] }

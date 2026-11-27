@@ -726,6 +726,7 @@ type AssetWorkbenchDriveFile struct {
 	GrossAmount         float64   `json:"gross_amount" db:"gross_amount"`
 	BusinessMonth       string    `json:"business_month" db:"business_month"`
 	OperationSource     string    `json:"operation_source" db:"operation_source"`
+	SupplementDate      string    `json:"supplement_date,omitempty" db:"supplement_date"`
 	CreatedAt           time.Time `json:"created_at" db:"created_at"`
 	LocatePage          int       `json:"locate_page,omitempty" db:"-"`
 	LocatePageSize      int       `json:"locate_page_size,omitempty" db:"-"`
