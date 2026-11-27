@@ -5659,7 +5659,7 @@ export interface paths {
         };
         /**
          * List completed system SKU costs for daily maintenance
-         * @description Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Keyset pagination avoids full-count scans. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
+         * @description Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Ordinary page requests use keyset pagination. counts_only returns totals across all cursors and review states for the same keyword, exact SKU and sync status filters. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
          */
         get: {
             parameters: {
@@ -5668,6 +5668,7 @@ export interface paths {
                     status?: string;
                     /** @description Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review. */
                     review_state?: "pending" | "reviewed" | "all";
+                    counts_only?: boolean;
                     before_id?: number;
                     page_size?: number;
                 };
@@ -5685,6 +5686,13 @@ export interface paths {
                     content: {
                         "application/json": {
                             data?: components["schemas"]["CostMaintenanceRow"][];
+                            /** @description Present on counts_only requests. Pending includes unresolved ERP conflicts and invalidated reviews. */
+                            counts?: {
+                                /** Format: int64 */
+                                total: number;
+                                /** Format: int64 */
+                                pending: number;
+                            };
                             /** Format: int64 */
                             next_before_id?: number;
                             /** Format: date-time */

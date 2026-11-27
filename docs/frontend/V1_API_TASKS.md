@@ -4299,7 +4299,7 @@ curl -X PATCH https://api.example.com/v1/cost-rule-bindings/<id> \
 ### 简介
 支持方法: GET。
 
-- `GET`: Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Keyset pagination avoids full-count scans. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
+- `GET`: Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Ordinary page requests use keyset pagination. counts_only returns totals across all cursors and review states for the same keyword, exact SKU and sync status filters. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -4314,6 +4314,7 @@ curl -X PATCH https://api.example.com/v1/cost-rule-bindings/<id> \
 | `keyword` | query | string | 否 | - |
 | `status` | query | string | 否 | - |
 | `review_state` | query | enum(pending/reviewed/all) | 否 | Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review. |
+| `counts_only` | query | boolean | 否 | - |
 | `before_id` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 
@@ -4334,6 +4335,10 @@ curl -X PATCH https://api.example.com/v1/cost-rule-bindings/<id> \
       "revision": "..."
     }
   ],
+  "counts": {
+    "total": 123,
+    "pending": 123
+  },
   "next_before_id": 123,
   "refreshed_at": "2026-04-25T10:30:41Z"
 }
@@ -4342,6 +4347,7 @@ curl -X PATCH https://api.example.com/v1/cost-rule-bindings/<id> \
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `data` | array<CostMaintenanceRow> | 否 | - |
+| `counts` | object | 否 | Present on counts_only requests. Pending includes unresolved ERP conflicts and invalidated reviews. |
 | `next_before_id` | integer | 否 | - |
 | `refreshed_at` | string | 否 | - |
 

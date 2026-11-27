@@ -27,16 +27,22 @@
       </form>
       <div>
         <button @click="openLogs"><History :size="16" :stroke-width="1.75" aria-hidden="true" />修改日志</button
-        ><button :disabled="loading" @click="load()">
+        ><button :disabled="loading" @click="load(false, true)">
           <RefreshCw :size="16" :stroke-width="1.75" aria-hidden="true" />{{ loading ? "刷新中…" : "刷新" }}
         </button>
       </div>
+    </div>
+    <div class="queue-summary" aria-live="polite">
+      <span v-if="counts">当前筛选共 {{ counts.total }} 条 · <strong>待确认 {{ counts.pending }} 条</strong></span>
+      <span v-else>{{ counting ? '正在统计数量…' : '数量暂不可用' }}</span>
+      <button v-if="reviewState !== 'pending'" type="button" @click="showPending">只看待确认</button>
+      <button v-else-if="cursors.length > 1" type="button" @click="search">回到待办首页</button>
     </div>
     <p v-if="error" role="alert" class="maintenance-error">
       {{ error }} <button @click="load()">重新读取</button>
     </p>
     <p v-if="notice" role="status" class="maintenance-notice">{{ notice }}</p>
-    <div class="maintenance-table" role="region" aria-label="编码成本列表" tabindex="0" :aria-busy="loading">
+    <div ref="resultRegion" class="maintenance-table" role="region" aria-label="编码成本列表" tabindex="0" :aria-busy="loading">
       <table>
         <thead>
           <tr>
@@ -49,7 +55,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.id">
+          <tr v-for="row in rows" :key="row.id" :data-cost-row="row.id">
             <td>
               <strong>{{ row.sku_code }}</strong
               ><span>{{ row.product_name || "名称待补充" }}</span>
@@ -127,10 +133,11 @@
             <option :value="20">20 条</option>
             <option :value="50">50 条</option>
             <option :value="100">100 条</option>
+            <option :value="200">200 条</option>
           </select></label
         ><button :disabled="cursors.length <= 1 || loading" @click="previous">
           <ChevronLeft :size="16" :stroke-width="1.75" aria-hidden="true" />上一页</button
-        ><span>第 {{ cursors.length }} 页</span
+        ><span v-if="pageCount !== 0">第 {{ cursors.length }} 页<template v-if="pageCount !== null"> / 共 {{ pageCount }} 页</template></span
         ><button :disabled="!nextID || loading" @click="next"><ChevronRight :size="16" :stroke-width="1.75" aria-hidden="true" />下一页</button>
       </div>
     </footer>
@@ -301,11 +308,12 @@
               取消</button
             ><button
               type="submit"
-              class="primary"
+              class="secondary"
               :disabled="saving || !changes.length || !reason || stale"
             >
               {{ saving ? "保存中…" : "保存并同步" }}
             </button>
+            <button type="submit" class="primary" data-next :disabled="saving || !changes.length || !reason || stale">保存并下一条</button>
           </footer>
         </form>
       </div>
@@ -449,17 +457,19 @@ import {
   type MaintenanceRow,
   type MaintenanceRequest,
   type MaintenanceLog,
+  type MaintenanceCounts,
 } from "@/services/api/costMaintenanceApi";
 import "./cost-maintenance.css";
 const permission = usePermission(),
   canEdit = computed(
     () => permission.can("catalog.manage") && permission.can("erp.manage"),
   );
+const resultRegion = ref<HTMLElement>();
 const rows = ref<MaintenanceRow[]>([]),
   keyword = ref(""),
   status = ref(""),
   reviewState = ref<"pending" | "reviewed" | "all">("pending"),
-  pageSize = ref(50),
+  pageSize = ref(100),
   cursors = ref([0]),
   nextID = ref(0),
   loading = ref(false),
@@ -537,7 +547,44 @@ const date = (value: string) =>
 const updatedLabel = computed(() =>
   refreshed.value ? `更新于 ${date(refreshed.value)}（北京时间）` : "",
 );
-async function load(background = false) {
+const counts = ref<MaintenanceCounts | null>(null);
+const counting = ref(false);
+const pageCount = computed(() => {
+  if (!counts.value) return null;
+  const { total, pending } = counts.value;
+  const visible = reviewState.value === "pending" ? pending : reviewState.value === "reviewed" ? total - pending : total;
+  return Math.ceil(visible / pageSize.value);
+});
+let countKey = "";
+let countedAt = 0;
+let countController: AbortController | undefined;
+async function updateCounts(filters: { keyword?: string; sku_codes?: string; status?: string }, force: boolean) {
+  const key = JSON.stringify(filters);
+  if (key === countKey && !force && (counting.value || Date.now() - countedAt < 60000)) return;
+  if (key !== countKey) counts.value = null;
+  countController?.abort();
+  countController = new AbortController();
+  const signal = countController.signal;
+  countKey = key;
+  counting.value = true;
+  try {
+    const value = await costMaintenanceApi.counts(filters, signal);
+    if (!signal.aborted) counts.value = value;
+  } catch {
+    if (!signal.aborted) counts.value = null;
+  } finally {
+    if (!signal.aborted) {
+      countedAt = Date.now();
+      counting.value = false;
+    }
+  }
+}
+function showPending() {
+  reviewState.value = "pending";
+  search();
+}
+async function load(background = false, forceCounts = false): Promise<void> {
+
   if (
     background &&
     (selected.value ||
@@ -555,18 +602,19 @@ async function load(background = false) {
   try {
     const query = keyword.value;
     const codes = batchSkuCodes(query);
-    const result = await retryCostRead(() => costMaintenanceApi.list(
-      {
-        keyword: codes.length ? undefined : query,
-        sku_codes: codes.length ? codes.join(",") : undefined,
-        status: status.value,
-        review_state: reviewState.value,
-        before_id: cursors.value.at(-1),
-        page_size: pageSize.value,
-      },
-      signal,
-    ), signal);
+    const filters = { keyword: codes.length ? undefined : query, sku_codes: codes.length ? codes.join(",") : undefined, status: status.value };
+    void updateCounts(filters, forceCounts);
+    const params = { ...filters, review_state: reviewState.value,
+      before_id: cursors.value.at(-1), page_size: pageSize.value };
+    const result = await retryCostRead(() => costMaintenanceApi.list(params, signal), signal);
     if (ticket !== epoch) return;
+    if (!result.data?.length && cursors.value.length > 1) {
+      // Reviews on other pages may have drained the tail of a keyset traversal.
+      cursors.value = [0];
+      if (resultRegion.value) resultRegion.value.scrollTop = 0;
+      await load(false, true);
+      return;
+    }
     rows.value = result.data || [];
     nextID.value = result.next_before_id;
     refreshed.value = result.refreshed_at;
@@ -580,16 +628,19 @@ async function load(background = false) {
 function search() {
   cursors.value = [0];
   notice.value = "";
-  load();
+  if (resultRegion.value) resultRegion.value.scrollTop = 0;
+  load(false, true);
 }
 function next() {
   if (nextID.value) {
     cursors.value.push(nextID.value);
+    if (resultRegion.value) resultRegion.value.scrollTop = 0;
     load();
   }
 }
 function previous() {
   cursors.value.pop();
+  if (resultRegion.value) resultRegion.value.scrollTop = 0;
   load();
 }
 async function confirm(row: MaintenanceRow) {
@@ -614,7 +665,19 @@ async function confirm(row: MaintenanceRow) {
 }
 function applyCommittedRow(updated: MaintenanceRow) {
   const reviewed = updated.reviewed && updated.status !== "conflict";
-  const matches = reviewState.value === "all" || (reviewState.value === "reviewed" ? reviewed : !reviewed);
+  const original = rows.value.find(row => row.id === updated.id);
+  // A count requested before this commit must not overwrite the new remaining count.
+  countController?.abort();
+  counting.value = false;
+  if (original && counts.value && !keyword.value && !status.value) {
+    const wasReviewed = original.reviewed && original.status !== "conflict";
+    counts.value = { ...counts.value, pending: Math.max(0, Math.min(counts.value.total, counts.value.pending + Number(wasReviewed) - Number(reviewed))) };
+  } else {
+    countedAt = 0;
+    counts.value = null;
+  }
+  const matches = (!status.value || status.value === updated.status) &&
+    (reviewState.value === "all" || (reviewState.value === "reviewed" ? reviewed : !reviewed));
   rows.value = rows.value.flatMap((current) => current.id === updated.id ? (matches ? [updated] : []) : [current]);
 }
 function edit(row: MaintenanceRow) {
@@ -738,8 +801,12 @@ const changes = computed(() => {
     });
   return list;
 });
-async function save() {
-  if (!selected.value || !changes.value.length) return;
+async function save(event?: SubmitEvent) {
+  if (!selected.value || !changes.value.length || !canEdit.value || saving.value || !reason.value || stale.value) return;
+  const advance = (event?.submitter as HTMLElement | null)?.hasAttribute("data-next");
+  const index = rows.value.findIndex(row => row.id === selected.value?.id);
+  const oldPage = new Set(rows.value.map(row => row.id));
+  const following = rows.value.slice(index + 1).map(row => row.id);
   saving.value = true;
   editError.value = "";
   try {
@@ -758,6 +825,21 @@ async function save() {
     saving.value = false;
     closeEditor();
     await load();
+    if (advance && !error.value) {
+      const actionable = () => following.map(id => rows.value.find(item => item.id === id)).find(item => item && item.revision >= 1 && (!item.reviewed || item.status === "conflict"));
+      let target = actionable() ?? rows.value.find(item =>
+        !oldPage.has(item.id) && item.revision >= 1 && (!item.reviewed || item.status === "conflict"),
+      );
+      if (!target && nextID.value) {
+        cursors.value.push(nextID.value);
+        await load();
+        if (!error.value) target = rows.value.find(item => item.revision >= 1 && (!item.reviewed || item.status === "conflict"));
+      }
+      if (target) {
+        edit(target);
+        void nextTick(() => resultRegion.value?.querySelector(`[data-cost-row="${target.id}"]`)?.scrollIntoView?.({ block: "nearest" }));
+      }
+    }
   } catch (e) {
     editError.value = e instanceof Error ? e.message : "保存失败";
     stale.value = (e as { status?: number })?.status === 409;
@@ -809,6 +891,7 @@ onMounted(() => {
   }, 15000);
 });
 onBeforeUnmount(() => {
+  countController?.abort();
   epoch++;
   controller?.abort();
   if (timer) clearInterval(timer);
@@ -816,3 +899,9 @@ onBeforeUnmount(() => {
     document.body.style.cssText = savedBodyStyle;
 });
 </script>
+
+<style scoped>
+.queue-summary { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin-bottom: .5rem; font-size: 13px; }
+.queue-summary strong { font-variant-numeric: tabular-nums; }
+.maintenance .queue-summary button { padding: .2rem .5rem; }
+</style>

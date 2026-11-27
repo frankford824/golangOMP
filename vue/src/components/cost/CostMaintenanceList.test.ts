@@ -4,6 +4,7 @@ import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 enableAutoUnmount(afterEach);
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
+  counts: vi.fn(),
   maintain: vi.fn(),
   logs: vi.fn(),
   can: vi.fn((_permission: string) => true),
@@ -39,6 +40,7 @@ beforeEach(() => {
   window.scrollTo = vi.fn();
   vi.clearAllMocks();
   mocks.can.mockReturnValue(true);
+  mocks.counts.mockReset().mockResolvedValue({ total: 230, pending: 205 });
   mocks.list.mockResolvedValue({
     data: [row],
     next_before_id: 0,
@@ -68,6 +70,47 @@ describe("completed SKU maintenance", () => {
     await wrapper.get(".maintenance-tools form").trigger("submit");
     await flushPromises();
     expect(mocks.list.mock.lastCall?.[0]).toMatchObject({ keyword: "DZD000047", sku_codes: undefined, before_id: 0 });
+  });
+
+  it("reports the filtered workload, removes a confirmed item and fills its place", async () => {
+    const replacement = { ...row, id: 11, sku_code: "CGK002" };
+    mocks.list.mockResolvedValueOnce({ data: [row], next_before_id: 10 })
+      .mockResolvedValueOnce({ data: [replacement], next_before_id: 9 });
+    const wrapper = mount(CostMaintenanceList);
+    await flushPromises();
+    expect(wrapper.get(".queue-summary").text()).toContain("待确认 205 条");
+    expect(wrapper.get(".maintenance-footer").text()).toContain("共 3 页");
+    await wrapper.findAll("button").find(button => button.text() === "确认")!.trigger("click");
+    await flushPromises();
+    expect(wrapper.get("tbody").text()).toContain("CGK002");
+    expect(wrapper.get("tbody").text()).not.toContain("CGK001");
+    expect(wrapper.get(".queue-summary").text()).toContain("待确认 204 条");
+    expect(mocks.counts).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns to the queue head if an older page has emptied", async () => {
+    mocks.list.mockResolvedValueOnce({ data: [row], next_before_id: 10 })
+      .mockResolvedValueOnce({ data: [], next_before_id: 0 })
+      .mockResolvedValueOnce({ data: [row], next_before_id: 0 });
+    const wrapper = mount(CostMaintenanceList);
+    await flushPromises();
+    await wrapper.findAll("button").find(button => button.text() === "下一页")!.trigger("click");
+    await flushPromises();
+    expect(mocks.list.mock.calls.map(call => call[0].before_id)).toEqual([0, 10, 0]);
+    expect(wrapper.get("tbody").text()).toContain("CGK001");
+    expect(wrapper.get(".maintenance-footer").text()).toContain("第 1 页");
+  });
+
+  it("can switch from all codes to pending and keeps the list usable if counts fail", async () => {
+    mocks.counts.mockRejectedValue(new Error("timeout"));
+    const wrapper = mount(CostMaintenanceList);
+    await flushPromises();
+    await wrapper.get("#cost-review-state").setValue("all");
+    await wrapper.get(".queue-summary button").trigger("click");
+    await flushPromises();
+    expect(mocks.list.mock.lastCall?.[0]).toMatchObject({ review_state: "pending", page_size: 100, before_id: 0 });
+    expect(wrapper.get(".queue-summary").text()).toContain("数量暂不可用");
+    expect(wrapper.get("tbody").text()).toContain("CGK001");
   });
 
   it("defaults to pending and resets the cursor when switching to reviewed or all",async()=>{
@@ -217,6 +260,22 @@ describe("completed SKU maintenance", () => {
     });
     expect(w.find('form[role="dialog"]').exists()).toBe(false);
   });
+  it("opens the replacement row when saving the last visible item and continuing", async () => {
+    const replacement = { ...row, id: 11, sku_code: "CGK002" };
+    mocks.list.mockResolvedValueOnce({ data: [row], next_before_id: 10 })
+      .mockResolvedValueOnce({ data: [replacement], next_before_id: 9 });
+    const wrapper = mount(CostMaintenanceList, { global: { stubs: { Teleport: true } } });
+    await flushPromises();
+    await wrapper.get("button.accent").trigger("click");
+    const form = wrapper.get('form[role="dialog"]');
+    await form.findAll('input[type="number"]')[3]!.setValue("4.4");
+    await form.get('input[value="cost_incorrect"]').setValue(true);
+    await form.trigger("submit", { submitter: form.get("button[data-next]").element });
+    await flushPromises();
+    expect(wrapper.get('form[role="dialog"]').text()).toContain("CGK002");
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a stale edit visible and does not retry or silently replace its baseline", async () => {
     mocks.maintain.mockRejectedValue(
       Object.assign(new Error("记录已更新"), { status: 409 }),
