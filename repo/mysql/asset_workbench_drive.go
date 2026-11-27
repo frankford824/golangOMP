@@ -177,6 +177,9 @@ func (r *assetWorkbenchRepo) hydrateDriveOrderItemIDs(ctx context.Context, filte
 	return rows.Err()
 }
 
+// submission_item_id is unique on supplements. Each file keeps exactly one ledger row.
+const driveSupplementJoin = " LEFT JOIN asset_workbench_settlement_supplements sup ON sup.submission_item_id = i.id AND i.entry_kind = 'supplement' "
+
 func driveFileColumns() string {
 	return `f.id, f.submission_id, f.submission_item_id, s.submission_no, f.owner_user_id,
 		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', f.owner_user_id)) AS owner_name,
@@ -195,7 +198,7 @@ func driveFileColumns() string {
 			WHEN i.entry_kind = 'supplement' THEN 'admin_supplement'
 			ELSE 'normal_upload'
 		END AS operation_source,
-		f.created_at`
+		COALESCE(DATE_FORMAT(sup.supplement_date, '%Y-%m-%d'), '') AS supplement_date, f.created_at`
 }
 
 func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchDriveFile, error) {
@@ -207,7 +210,7 @@ func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.Ass
 		&item.OriginalFilename, &item.DisplayName, &item.RelativePath, &item.UploadBatchID, &item.IsFolderUpload,
 		&item.FileType, &item.MimeType, &item.FileSize, &item.PreviewStatus,
 		&item.QCStatus, &item.PricingStatus, &item.SettlementStatus, &item.PageCount,
-		&item.GrossAmount, &item.BusinessMonth, &item.OperationSource, &item.CreatedAt,
+		&item.GrossAmount, &item.BusinessMonth, &item.OperationSource, &item.SupplementDate, &item.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -260,7 +263,7 @@ func buildDriveListBase(filter repo.AssetWorkbenchDriveFilter) (string, []interf
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
 	LEFT JOIN users u ON u.id = f.owner_user_id
-	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id` + driveSupplementJoin + `
 	WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + where
 
 	return base, args
@@ -428,7 +431,7 @@ func buildDriveSearchBase(filter repo.AssetWorkbenchDriveFilter, preferFullText 
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
 	LEFT JOIN users u ON u.id = f.owner_user_id
-	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id` + driveSupplementJoin + `
 	WHERE f.id IN (` + idQuery + `)`
 			return base, idArgs
 		} else {
@@ -442,7 +445,7 @@ func buildDriveSearchBase(filter repo.AssetWorkbenchDriveFilter, preferFullText 
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
 	LEFT JOIN users u ON u.id = f.owner_user_id
-	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id` + driveSupplementJoin + `
 	WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + keywordSQL
 	return base, args
 }
@@ -457,21 +460,21 @@ func buildDriveSearchFullTextIDQuery(filter repo.AssetWorkbenchDriveFilter, full
 		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 		JOIN asset_workbench_submissions s ON s.id = f.submission_id
 		LEFT JOIN users u ON u.id = f.owner_user_id
-		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id` + driveSupplementJoin + `
 		WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + ` AND ` + assetWorkbenchFileFullTextMatch,
 		`SELECT f.id
 		FROM asset_workbench_submission_items i
 		JOIN asset_workbench_submission_files f ON f.submission_item_id = i.id
 		JOIN asset_workbench_submissions s ON s.id = f.submission_id
 		LEFT JOIN users u ON u.id = f.owner_user_id
-		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id` + driveSupplementJoin + `
 		WHERE i.voided_at IS NULL AND f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + ` AND ` + assetWorkbenchItemFullTextMatch,
 		`SELECT f.id
 		FROM asset_workbench_submissions s
 		JOIN asset_workbench_submission_files f ON f.submission_id = s.id
 		JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 		LEFT JOIN users u ON u.id = f.owner_user_id
-		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id` + driveSupplementJoin + `
 		WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + extraSQL + ` AND ` + assetWorkbenchSubmissionFullTextMatch,
 	}
 	filterArgs := append([]interface{}{}, ownerArgs...)
@@ -493,6 +496,10 @@ func driveSearchExtraClauses(filter repo.AssetWorkbenchDriveFilter) (string, []i
 	if filter.WorkerType != "" {
 		clauses = append(clauses, "p.worker_type = ?")
 		args = append(args, filter.WorkerType)
+	}
+	if filter.SupplementDate != "" {
+		clauses = append(clauses, "sup.supplement_date = ?")
+		args = append(args, filter.SupplementDate)
 	}
 	if operationClause := strings.TrimPrefix(driveOperationSourceClause(filter.OperationSource), " AND "); operationClause != "" {
 		clauses = append(clauses, operationClause)
@@ -525,7 +532,7 @@ func (r *assetWorkbenchRepo) DriveLocateFile(ctx context.Context, filter repo.As
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
 	LEFT JOIN users u ON u.id = f.owner_user_id
-	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id` + driveSupplementJoin + `
 	WHERE f.deleted_at IS NULL` + ownerSQL + `
 	  AND f.id = ?
 	LIMIT 1`

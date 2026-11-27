@@ -6708,14 +6708,14 @@ a.aw-submission-tasks__row:hover {
 
 .aw-upload-ledger__filters {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) repeat(6, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.45fr) repeat(6, minmax(0, 1fr)) minmax(144px, 1fr);
   align-items: end;
   gap: var(--aw-space-3);
   min-width: 0;
 }
 
 .aw-upload-ledger--self .aw-upload-ledger__filters {
-  grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) minmax(144px, 1fr);
 }
 
 .aw-upload-ledger__filter-bar {
@@ -7319,7 +7319,7 @@ a.aw-submission-tasks__row:hover {
 
 .aw-upload-ledger__table {
   width: 100%;
-  min-width: 1080px;
+  min-width: 1178px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
@@ -7331,6 +7331,7 @@ a.aw-submission-tasks__row:hover {
 .aw-upload-ledger__col-worker-type { width: 70px; }
 .aw-upload-ledger__col-source { width: 88px; }
 .aw-upload-ledger__col-date { width: 128px; }
+.aw-upload-ledger__col-supplement-date { width: 98px; }
 .aw-upload-ledger__col-dir { width: 84px; }
 .aw-upload-ledger__col-name { width: auto; }
 .aw-upload-ledger__col-format { width: 62px; }
@@ -7348,6 +7349,16 @@ a.aw-submission-tasks__row:hover {
   vertical-align: middle;
   font-size: var(--aw-font-size-sm);
   overflow: hidden;
+}
+
+@media (max-width: 1500px) {
+  .aw-upload-ledger__table { min-width: 1116px; }
+  .aw-upload-ledger__col-owner { width: 84px; }
+  .aw-upload-ledger__col-worker-type { width: 64px; }
+  .aw-upload-ledger__col-source { width: 82px; }
+  .aw-upload-ledger__col-supplement-date { width: 92px; }
+  .aw-upload-ledger__col-dir { width: 76px; }
+  .aw-upload-ledger__table :is(th, td) { padding-inline: var(--aw-space-2); }
 }
 
 .aw-upload-ledger__table th.aw-upload-ledger__num,

@@ -36,6 +36,12 @@ func parseUploadLedgerFilters(c *gin.Context) (repo.AssetWorkbenchDriveFilter, *
 		WorkerType:        strings.TrimSpace(c.Query("worker_type")),
 		OperationSource:   strings.TrimSpace(c.Query("operation_source")),
 	}
+	if date := strings.TrimSpace(c.Query("supplement_date")); date != "" {
+		if _, err := time.Parse("2006-01-02", date); err != nil {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "补录日期格式应为 YYYY-MM-DD。", nil)
+		}
+		filter.SupplementDate = date
+	}
 	switch filter.WorkerType {
 	case "", domain.AssetWorkbenchWorkerTypeFulltime, domain.AssetWorkbenchWorkerTypeParttime:
 	default:

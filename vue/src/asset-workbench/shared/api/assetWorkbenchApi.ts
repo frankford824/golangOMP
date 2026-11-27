@@ -1106,6 +1106,7 @@ export interface DriveFileFilters {
   q?: string
   owner?: string
   owner_user_id?: number
+  supplement_date?: string
   worker_type?: DriveWorkerType
   operation_source?: 'normal_upload' | 'supplement' | 'client_supplement' | 'admin_supplement'
   created_from?: string
@@ -1117,7 +1118,7 @@ export interface DriveFileFilters {
 function driveFileQuery(params: DriveFileFilters) {
   const {
     dir_ids, dir_id, unassigned,
-    order_no, q, owner, owner_user_id, worker_type, operation_source,
+    order_no, q, owner, owner_user_id, worker_type, supplement_date, operation_source,
     created_from, created_to, sort_by, sort_dir,
   } = params
   return {
@@ -1125,7 +1126,7 @@ function driveFileQuery(params: DriveFileFilters) {
     dir_id: !unassigned && !dir_ids?.length ? dir_id : undefined,
     unassigned: unassigned ? 1 : undefined,
     order_no: order_no || undefined, q: q || undefined, owner: owner || undefined,
-    owner_user_id: owner_user_id || undefined, worker_type, operation_source,
+    owner_user_id: owner_user_id || undefined, worker_type, supplement_date, operation_source,
     created_from: created_from || undefined, created_to: created_to || undefined,
     sort_by: sort_by || undefined, sort_dir: sort_dir || undefined,
   }
@@ -1139,6 +1140,7 @@ export interface DriveFileRow {
   owner_user_id: number
   owner_name?: string
   owner_username?: string
+  supplement_date?: string
   owner_worker_type?: DriveWorkerType
   upload_directory_id?: number | null
   upload_directory_name: string
@@ -2151,7 +2153,7 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async driveUploadDays(params: { month: string; dir_id?: number; dir_ids?: number[]; unassigned?: boolean; q?: string; owner?: string; owner_user_id?: number; worker_type?: DriveWorkerType; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
+  async driveUploadDays(params: { month: string; dir_id?: number; dir_ids?: number[]; unassigned?: boolean; q?: string; owner?: string; owner_user_id?: number; worker_type?: DriveWorkerType; supplement_date?: string; operation_source?: string }, signal?: AbortSignal): Promise<string[]> {
     const res = await http.get<ApiEnvelope<string[]>>('/v1/asset-workbench/drive/upload-days', {
       params: { ...params, dir_ids: params.dir_ids?.length ? params.dir_ids.join(',') : undefined },
       signal,

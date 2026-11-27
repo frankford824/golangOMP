@@ -11536,6 +11536,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/orders \
 | `owner` | query | string | 否 | Uploader name/account filter. |
 | `owner_user_id` | query | integer | 否 | Exact uploader user ID. Non-manager users may only query their own ID. |
 | `worker_type` | query | enum(fulltime/parttime) | 否 | Filter by the uploader's current asset workbench personnel type. Omit for all types. |
+| `supplement_date` | query | string | 否 | Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date. |
 | `operation_source` | query | enum(normal_upload/supplement/client_supplement/admin_supplement) | 否 | Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. |
 | `created_from` | query | string | 否 | Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. |
 | `created_to` | query | string | 否 | Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD. |
@@ -11619,6 +11620,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/files \
 | `owner` | query | string | 否 | Uploader name/account filter. |
 | `owner_user_id` | query | integer | 否 | Exact uploader user ID. Non-manager users may only query their own ID. |
 | `worker_type` | query | enum(fulltime/parttime) | 否 | Filter by the uploader's current asset workbench personnel type. Omit for all types. |
+| `supplement_date` | query | string | 否 | Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date. |
 | `operation_source` | query | enum(normal_upload/supplement/client_supplement/admin_supplement) | 否 | Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. |
 | `created_from` | query | string | 否 | Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. |
 | `created_to` | query | string | 否 | Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD. |
@@ -11694,6 +11696,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/drive/files/export \
 | `owner` | query | string | 否 | - |
 | `owner_user_id` | query | integer | 否 | Exact uploader user ID. Non-manager users may only query their own ID. |
 | `worker_type` | query | enum(fulltime/parttime) | 否 | Filter by the uploader's current asset workbench personnel type. Omit for all types. |
+| `supplement_date` | query | string | 否 | Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date. |
 | `operation_source` | query | enum(normal_upload/supplement/client_supplement/admin_supplement) | 否 | - |
 
 请求体: 无请求体。

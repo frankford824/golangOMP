@@ -4440,6 +4440,80 @@ export interface paths {
         };
         trace?: never;
     };
+    "/v1/public/erp-product-images/oss/{object_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a signed ERP image for a previously published OSS object */
+        get: {
+            parameters: {
+                query: {
+                    exp: number;
+                    sig: string;
+                };
+                header?: never;
+                path: {
+                    object_id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Redirect to a short-lived URL for the stored image object. */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid object identifier. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid or expired image signature. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Image object identity not found. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The object identity could not be read. */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Image proxy is unavailable. */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/erp/products": {
         parameters: {
             query?: never;
@@ -15491,6 +15565,8 @@ export interface paths {
                     owner_user_id?: number;
                     /** @description Filter by the uploader's current asset workbench personnel type. Omit for all types. */
                     worker_type?: "fulltime" | "parttime";
+                    /** @description Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date. */
+                    supplement_date?: string;
                     /** @description Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. */
                     operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                     /** @description Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. */
@@ -15551,6 +15627,11 @@ export interface paths {
                                 page_count?: number;
                                 gross_amount?: number;
                                 business_month?: string;
+                                /**
+                                 * Format: date
+                                 * @description Date entered on the linked supplement. Omitted for ordinary uploads and missing historical dates.
+                                 */
+                                supplement_date?: string;
                                 /**
                                  * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
                                  * @enum {string}
@@ -15629,6 +15710,8 @@ export interface paths {
                     owner_user_id?: number;
                     /** @description Filter by the uploader's current asset workbench personnel type. Omit for all types. */
                     worker_type?: "fulltime" | "parttime";
+                    /** @description Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date. */
+                    supplement_date?: string;
                     /** @description Filter upload ledger rows by normal upload, all supplements, client supplements, or admin supplements. */
                     operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                     /** @description Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD. */
@@ -15687,6 +15770,11 @@ export interface paths {
                                 page_count?: number;
                                 gross_amount?: number;
                                 business_month?: string;
+                                /**
+                                 * Format: date
+                                 * @description Date entered on the linked supplement. Omitted for ordinary uploads and missing historical dates.
+                                 */
+                                supplement_date?: string;
                                 /**
                                  * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
                                  * @enum {string}
@@ -15758,6 +15846,8 @@ export interface paths {
                     owner_user_id?: number;
                     /** @description Filter by the uploader's current asset workbench personnel type. Omit for all types. */
                     worker_type?: "fulltime" | "parttime";
+                    /** @description Exact recorded supplement day, independent of file creation time. Excludes rows without a recorded supplement date. */
+                    supplement_date?: string;
                     operation_source?: "normal_upload" | "supplement" | "client_supplement" | "admin_supplement";
                 };
                 header?: never;
@@ -15887,6 +15977,11 @@ export interface paths {
                                     gross_amount?: number;
                                     business_month?: string;
                                     /**
+                                     * Format: date
+                                     * @description Date entered on the linked supplement. Omitted for ordinary uploads and missing historical dates.
+                                     */
+                                    supplement_date?: string;
+                                    /**
                                      * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
                                      * @enum {string}
                                      */
@@ -15996,6 +16091,11 @@ export interface paths {
                                 gross_amount?: number;
                                 business_month?: string;
                                 /**
+                                 * Format: date
+                                 * @description Date entered on the linked supplement. Omitted for ordinary uploads and missing historical dates.
+                                 */
+                                supplement_date?: string;
+                                /**
                                  * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
                                  * @enum {string}
                                  */
@@ -16102,6 +16202,11 @@ export interface paths {
                                 page_count?: number;
                                 gross_amount?: number;
                                 business_month?: string;
+                                /**
+                                 * Format: date
+                                 * @description Date entered on the linked supplement. Omitted for ordinary uploads and missing historical dates.
+                                 */
+                                supplement_date?: string;
                                 /**
                                  * @description Server-derived upload operation source. Supplement entries submitted by their payee are client_supplement; other supplement entries are admin_supplement.
                                  * @enum {string}
@@ -22596,6 +22701,11 @@ export interface components {
             category_name?: string;
             /** @description Optional upstream short name. Empty string means bridge did not expose one. */
             product_short_name?: string;
+            /** @description Exact upstream SKU image slots when available. Empty strings represent empty slots. */
+            image_fields?: {
+                pic: string;
+                pic_big: string;
+            };
             /** @description Display image URL. Empty string means no image was available and frontend should render its own placeholder. */
             image_url?: string;
             /** Format: double */
