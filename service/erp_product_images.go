@@ -235,6 +235,16 @@ func (s *ERPProductImages) Publish(ctx context.Context, sku, imageURL string) er
 }
 
 func (s *ERPProductImages) publish(ctx context.Context, sku, token string, current *domain.ERPProduct, desired domain.ERPProductImageFields) error {
+	return s.publishGuarded(ctx, sku, token, current, desired, nil)
+}
+
+func (s *ERPProductImages) publishGuarded(ctx context.Context, sku, token string, current *domain.ERPProduct, desired domain.ERPProductImageFields,
+	guard func(context.Context, func(context.Context)) error) error {
+	if guard == nil && !erpImagePairMatches(desired, current.ImageFields) {
+		if err := s.preventSingleERPSetImage(ctx, sku, *current.ImageFields, desired); err != nil {
+			return err
+		}
+	}
 	old, err := s.references(ctx, sku, *current.ImageFields, false)
 	if err != nil {
 		return err
@@ -270,7 +280,18 @@ func (s *ERPProductImages) publish(ctx context.Context, sku, token string, curre
 	if payload.Pic != "" || payload.PicBig != "" {
 		// A transport error can follow an accepted ERP write. Confirm the actual
 		// fields before deciding whether the worker should retry.
-		_, writeErr = s.bridge.UpsertProduct(ctx, payload)
+		dispatched := false
+		write := func(ctx context.Context) {
+			dispatched = true
+			_, writeErr = s.bridge.UpsertProduct(ctx, payload)
+		}
+		if guard == nil {
+			write(ctx)
+		} else if err := guard(ctx, write); err != nil && !dispatched {
+			return err
+		}
+		// A guarded transaction can time out after the external call started.
+		// In that case confirm the actual ERP result as for any ambiguous write.
 	}
 	for attempt := 0; attempt < 4; attempt++ {
 		if attempt > 0 {
@@ -284,6 +305,9 @@ func (s *ERPProductImages) publish(ctx context.Context, sku, token string, curre
 		}
 		readback, err := s.current(ctx, sku)
 		if err != nil || !erpImagePairMatches(desired, readback.ImageFields) {
+			continue
+		}
+		if guard != nil && strings.TrimSpace(firstNonEmptyString(readback.SKUID, readback.SKUCode)) != sku {
 			continue
 		}
 		payload.CostPrice = current.CostPrice

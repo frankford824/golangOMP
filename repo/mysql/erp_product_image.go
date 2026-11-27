@@ -326,3 +326,21 @@ func (r *erpProductImageRepo) ActiveObjectVersions(ctx context.Context, sku, key
 	}
 	return versions, rows.Err()
 }
+
+func (r *erpProductImageRepo) RequiresERPImageSet(ctx context.Context, sku string) (bool, error) {
+	var found bool
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM erp_product_sync_records p
+		  JOIN tasks t ON t.id = p.task_id
+		  JOIN task_asset_groups g ON g.task_id = p.task_id
+		  JOIN task_asset_group_revisions rev
+		    ON rev.id = COALESCE(g.finalized_revision_id, g.working_revision_id)
+		  LEFT JOIN task_sku_items si ON si.id = g.task_sku_item_id
+		  WHERE p.sku_code = ? AND BINARY p.sku_code = ?
+		    AND rev.mode = 'set'
+		    AND ((g.scope_kind = 'sku' AND (BINARY si.sku_code = ? OR g.task_sku_item_id = p.task_sku_item_id))
+		      OR (g.scope_kind = 'task' AND BINARY COALESCE(NULLIF(t.primary_sku_code, ''), t.sku_code) = ?))
+		)`, sku, sku, sku, sku).Scan(&found)
+	return found, err
+}

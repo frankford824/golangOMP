@@ -48,6 +48,8 @@ type productManagementService struct {
 	taskAssets                     repo.TaskAssetRepo
 	assetSearch                    repo.TaskAssetSearchRepo
 	finalizedResources             productManagementFinalizedResourceRepo
+	erpSetResources                productManagementERPSetResources
+	erpSetRenderSlot               chan struct{}
 	taskEvents                     repo.TaskEventRepo
 	skuCombos                      repo.SKUComboRepo
 	costRuns                       repo.CostRecalculationRunRepo
@@ -71,6 +73,7 @@ func NewProductManagementService(records repo.ProductManagementRepo, taskAssets 
 	s := &productManagementService{
 		records:                        records,
 		taskAssets:                     taskAssets,
+		erpSetRenderSlot:               make(chan struct{}, 1),
 		assetSearch:                    assetSearch,
 		txRunner:                       txRunner,
 		now:                            time.Now,
@@ -114,6 +117,7 @@ func WithProductManagementERPImagePublications(images *ERPProductImages) Product
 func WithProductManagementFinalizedResources(resources productManagementFinalizedResourceRepo) ProductManagementServiceOption {
 	return func(s *productManagementService) {
 		s.finalizedResources = resources
+		s.erpSetResources, _ = resources.(productManagementERPSetResources)
 	}
 }
 
@@ -635,51 +639,71 @@ func (s *productManagementService) AutoSyncImagesAfterTaskClosed(ctx context.Con
 		if record == nil || strings.TrimSpace(record.SKUCode) == "" {
 			continue
 		}
-		candidates, candidateErr := s.finalizedImageCandidatesForRecord(ctx, record, assetsByTaskID)
-		if candidateErr != nil {
-			return infraAppError("resolve finalized product image for closed task", candidateErr)
-		}
-		patch := imagePatchFromCandidate(firstProductManagementImageCandidate(candidates))
-		if patch.ImageSource == domain.ProductManagementImageSourceDelivery {
-			patch.ImageSource = domain.ProductManagementImageSourceAutoOnClose
-			patch.ImageSyncSource = domain.ProductManagementImageSourceAutoOnClose
-		}
-		if patch.ImageSource == domain.ProductManagementImageSourceMissing {
-			patch.ImageSyncStatus = domain.ProductManagementERPSyncStatusWaitingImage
+		var imageErr *domain.AppError
+		group, groupErr := s.erpImageSetForRecord(ctx, record)
+		switch {
+		case groupErr != nil:
+			imageErr = domain.NewAppError(domain.ErrCodeInvalidStateTransition, "套装图片未同步："+groupErr.Error(), nil)
+		case group != nil:
+			now := s.now()
 			if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-				if err := s.records.UpdateImage(ctx, tx, record.ID, patch); err != nil {
-					return err
-				}
-				return s.appendProductManagementTaskEvent(ctx, tx, record.TaskID, domain.TaskEventERPImageAwaitingUpload, actorID,
-					fmt.Sprintf("未找到最终成品图，SKU %s 待人工上传 ERP 商品图", strings.TrimSpace(record.SKUCode)),
-					record, patch.ImageMissingReason)
+				return s.records.UpdateImageSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
+					ImageStatus:       domain.ProductManagementERPSyncStatusSyncing,
+					LastERPCheckedAt:  &now,
+					SyncCooldownUntil: record.SyncCooldownUntil,
+				})
 			}); err != nil {
-				return infraAppError("mark product management image awaiting upload", err)
+				return infraAppError("prepare closed task ERP set image sync", err)
 			}
-			continue
+			imageErr = s.syncFinalizedERPImageSet(ctx, record, group)
+		default:
+			candidates, candidateErr := s.finalizedImageCandidatesForRecord(ctx, record, assetsByTaskID)
+			if candidateErr != nil {
+				return infraAppError("resolve finalized product image for closed task", candidateErr)
+			}
+			patch := imagePatchFromCandidate(firstProductManagementImageCandidate(candidates))
+			if patch.ImageSource == domain.ProductManagementImageSourceDelivery {
+				patch.ImageSource = domain.ProductManagementImageSourceAutoOnClose
+				patch.ImageSyncSource = domain.ProductManagementImageSourceAutoOnClose
+			}
+			if patch.ImageSource == domain.ProductManagementImageSourceMissing {
+				patch.ImageSyncStatus = domain.ProductManagementERPSyncStatusWaitingImage
+				if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+					if err := s.records.UpdateImage(ctx, tx, record.ID, patch); err != nil {
+						return err
+					}
+					return s.appendProductManagementTaskEvent(ctx, tx, record.TaskID, domain.TaskEventERPImageAwaitingUpload, actorID,
+						fmt.Sprintf("未找到最终成品图，SKU %s 待人工上传 ERP 商品图", strings.TrimSpace(record.SKUCode)),
+						record, patch.ImageMissingReason)
+				}); err != nil {
+					return infraAppError("mark product management image awaiting upload", err)
+				}
+				continue
+			}
+			patch.ImageSyncStatus = domain.ProductManagementERPSyncStatusSyncing
+			if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+				return s.records.UpdateImage(ctx, tx, record.ID, patch)
+			}); err != nil {
+				return infraAppError("prepare closed task erp image sync", err)
+			}
+			record.ImageSource = patch.ImageSource
+			record.ImageSelectionMode = patch.ImageSelectionMode
+			record.ImageAssetID = patch.ImageAssetID
+			record.ImageAssetVersionID = patch.ImageAssetVersionID
+			record.ImageFilename = patch.ImageFilename
+			record.ImageMimeType = patch.ImageMimeType
+			record.ImageMissingReason = patch.ImageMissingReason
+			record.ImageSyncSource = patch.ImageSyncSource
+			record.ImageSyncStatus = patch.ImageSyncStatus
+			if s.erpBridge == nil {
+				msg := "ERP 图片同步服务未配置，可稍后手动重试"
+				s.markProductManagementImageSyncFailed(ctx, record, msg)
+				_ = s.appendProductManagementTaskEventInTx(ctx, record, domain.TaskEventERPImageAutoSyncFailed, actorID, fmt.Sprintf("ERP 图片自动同步失败：SKU %s，%s", strings.TrimSpace(record.SKUCode), msg), msg)
+				continue
+			}
+			imageErr = s.syncImageRecordToERP(ctx, record)
 		}
-		patch.ImageSyncStatus = domain.ProductManagementERPSyncStatusSyncing
-		if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-			return s.records.UpdateImage(ctx, tx, record.ID, patch)
-		}); err != nil {
-			return infraAppError("prepare closed task erp image sync", err)
-		}
-		record.ImageSource = patch.ImageSource
-		record.ImageSelectionMode = patch.ImageSelectionMode
-		record.ImageAssetID = patch.ImageAssetID
-		record.ImageAssetVersionID = patch.ImageAssetVersionID
-		record.ImageFilename = patch.ImageFilename
-		record.ImageMimeType = patch.ImageMimeType
-		record.ImageMissingReason = patch.ImageMissingReason
-		record.ImageSyncSource = patch.ImageSyncSource
-		record.ImageSyncStatus = patch.ImageSyncStatus
-		if s.erpBridge == nil {
-			msg := "ERP 图片同步服务未配置，可稍后手动重试"
-			s.markProductManagementImageSyncFailed(ctx, record, msg)
-			_ = s.appendProductManagementTaskEventInTx(ctx, record, domain.TaskEventERPImageAutoSyncFailed, actorID, fmt.Sprintf("ERP 图片自动同步失败：SKU %s，%s", strings.TrimSpace(record.SKUCode), msg), msg)
-			continue
-		}
-		if appErr := s.syncImageRecordToERP(ctx, record); appErr != nil {
+		if appErr := imageErr; appErr != nil {
 			msg := truncateProductManagementSyncError(appErr.Message)
 			if isProductManagementERPImageSyncRetryable(appErr) {
 				s.markProductManagementImageSyncRetrying(ctx, record, msg)
@@ -858,6 +882,13 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	skuCode := strings.TrimSpace(record.SKUCode)
 	if skuCode == "" {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "SKU is required for ERP image sync", nil)
+	}
+	group, err := s.erpImageSetForRecord(ctx, record)
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "套装图片未同步："+err.Error(), nil)
+	}
+	if group != nil {
+		return s.syncFinalizedERPImageSet(ctx, record, group)
 	}
 	if productManagementImageSourceRequiresFinalized(record.ImageSource) {
 		candidates, err := s.finalizedImageCandidatesForRecord(ctx, record, nil)
@@ -2142,7 +2173,12 @@ func (s *productManagementService) finalizedImageCandidatesForRecord(ctx context
 		if item.TaskAssetID <= 0 || !strings.EqualFold(strings.TrimSpace(item.SKUCode), strings.TrimSpace(record.SKUCode)) {
 			continue
 		}
-		if asset := byID[item.TaskAssetID]; isProductManagementERPImageAsset(asset) {
+		asset := byID[item.TaskAssetID]
+		if asset == nil || asset.TaskID != record.TaskID || (asset.ScopeSKUCode != nil &&
+			strings.TrimSpace(*asset.ScopeSKUCode) != "" && strings.TrimSpace(*asset.ScopeSKUCode) != strings.TrimSpace(record.SKUCode)) {
+			return nil, fmt.Errorf("定稿图片 %d 与当前 SKU 或任务归属不一致", item.TaskAssetID)
+		}
+		if isProductManagementERPImageAsset(asset) {
 			candidate := candidateFromAsset(asset, record.TaskNo, domain.ProductManagementImageSourceDelivery)
 			if candidate == nil {
 				continue
@@ -2152,6 +2188,12 @@ func (s *productManagementService) finalizedImageCandidatesForRecord(ctx context
 			continue
 		}
 		previews := previewsBySource[item.TaskAssetID]
+		for _, preview := range previews {
+			if preview.TaskID != record.TaskID || (preview.ScopeSKUCode != nil &&
+				strings.TrimSpace(*preview.ScopeSKUCode) != "" && strings.TrimSpace(*preview.ScopeSKUCode) != strings.TrimSpace(record.SKUCode)) {
+				return nil, fmt.Errorf("定稿预览 %d 与当前 SKU 或任务归属不一致", preview.ID)
+			}
+		}
 		sortTaskAssetsNewestFirst(previews)
 		if len(previews) > 0 {
 			candidate := candidateFromAsset(previews[0], record.TaskNo, domain.ProductManagementImageSourceDerivedPreview)
