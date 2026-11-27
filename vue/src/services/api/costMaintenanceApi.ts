@@ -66,7 +66,16 @@ export interface MaintenanceLog {
     after: MaintenanceRow;
   };
 }
+export interface MaintenanceCounts { total: number; pending: number }
+type CountFilters = { keyword?: string; sku_codes?: string; status?: string };
 export const costMaintenanceApi = {
+  async counts(params: CountFilters, signal?: AbortSignal): Promise<MaintenanceCounts> {
+    const { data } = await http.get<{ counts?: MaintenanceCounts }>("/v1/cost-management/sku-costs", {
+      params: { ...params, counts_only: true }, signal,
+    });
+    if (!data.counts) throw new Error("数量暂不可用");
+    return data.counts;
+  },
   async list(
     params: {
       keyword?: string;

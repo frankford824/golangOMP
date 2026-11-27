@@ -31,6 +31,7 @@ func (h *ProductManagementHandler) ListMaintenance(c *gin.Context) {
 	}
 	filter := maintenanceFilter(c)
 	filter.SKUCodes = codes
+	filter.CountsOnly = c.Query("counts_only") == "true"
 	out, err := h.maintenance.ListCostMaintenance(c.Request.Context(), filter)
 	if err != nil {
 		respondError(c, err)

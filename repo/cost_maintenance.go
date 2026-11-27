@@ -9,12 +9,14 @@ type CostMaintenanceFilter struct {
 	Keyword, Status, Reason string
 	SKUCodes                []string
 	ReviewState             string
+	CountsOnly              bool
 	BeforeID                int64
 	Page, PageSize          int
 }
 
 type CostMaintenanceRepo interface {
 	List(context.Context, CostMaintenanceFilter) ([]*domain.CostMaintenanceRow, error)
+	CountReviews(context.Context, CostMaintenanceFilter, func(*domain.CostMaintenanceRow) bool) (*domain.CostMaintenanceCounts, error)
 	LockRow(context.Context, Tx, int64) (*domain.CostMaintenanceRow, error)
 	ListLogs(context.Context, CostMaintenanceFilter) ([]*domain.CostMaintenanceLog, int64, error)
 	Project(context.Context, Tx, *domain.TaskSKUItem) error

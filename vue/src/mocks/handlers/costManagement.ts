@@ -34,11 +34,24 @@ function loadAuditCostRules() {
 
 export const costManagementHandler: MockHandler = (request) => {
   if(request.method==='GET'&&request.path==='/v1/cost-management/sku-costs'){
-    const total=import.meta.env.VITE_LARGE_SURFACE_AUDIT==='true'?100:3
+    const total=import.meta.env.VITE_LARGE_SURFACE_AUDIT==='true'?230:3
     const all=Array.from({length:total},(_,i)=>({id:total-i,task_id:100,sku_code:`COST-MOCK-${String(i+1).padStart(3,'0')}`,product_name:`示例成本维护 ${i+1}`,style_code:'KT_BOARD',width_cm:50,height_cm:60,area_m2:.3,size_text:'50×60cm',cost_input:null,cost_price:24,erp_cost:24,revision:1,status:'baseline',token:`cost-mock-${i}`,updated_at:new Date().toISOString()}))
-    const size=Math.min(100,Number(request.query.page_size)||50),before=Number(request.query.before_id)||0
-    const remaining=all.filter(r=>!before||r.id<before),data=remaining.slice(0,size)
-    return {status:200,data:{data,next_before_id:remaining.length>size?data.at(-1)?.id||0:0,refreshed_at:new Date().toISOString()}}
+    const codes = String(request.query.sku_codes || '').split(',').filter(Boolean)
+    const keyword = String(request.query.keyword || '')
+    const matches = all.filter(row =>
+      (!codes.length || codes.includes(row.sku_code)) &&
+      (!request.query.status || row.status === request.query.status) &&
+      [row.sku_code, row.product_name, row.style_code].some(value => value.includes(keyword)),
+    )
+    const refreshed_at = new Date().toISOString()
+    if (String(request.query.counts_only) === 'true') {
+      return { status: 200, data: { data: [], next_before_id: 0, counts: { total: matches.length, pending: matches.length }, refreshed_at } }
+    }
+    const size = Math.min(200, Number(request.query.page_size) || 50)
+    const before = Number(request.query.before_id) || 0
+    const remaining = request.query.review_state === 'reviewed' ? [] : matches.filter(row => !before || row.id < before)
+    const data = remaining.slice(0, size)
+    return { status: 200, data: { data, next_before_id: remaining.length > size ? data.at(-1)!.id : 0, refreshed_at } }
   }
   if(request.method==='GET'&&request.path==='/v1/cost-management/maintenance-logs')return {status:200,data:{data:[],pagination:{total:0,page:1,page_size:50}}}
   if (request.method === 'GET' && request.path === '/v1/cost-rules') {

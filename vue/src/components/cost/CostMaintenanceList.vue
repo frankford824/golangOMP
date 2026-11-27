@@ -31,10 +31,16 @@
       <div>
         <RouterLink v-if="canPrice" class="pricing-link bulk-pricing-link" :to="pricingLink()">批量核价</RouterLink>
         <button @click="openLogs">修改日志</button
-        ><button :disabled="loading" @click="load()">
+        ><button :disabled="loading" @click="load(false, true)">
           {{ loading ? "刷新中…" : "刷新" }}
         </button>
       </div>
+    </div>
+    <div class="queue-summary" aria-live="polite">
+      <span v-if="counts">当前筛选共 {{ counts.total }} 条 · <strong>待确认 {{ counts.pending }} 条</strong></span>
+      <span v-else>{{ counting ? '正在统计数量…' : '数量暂不可用' }}</span>
+      <button v-if="reviewState !== 'pending'" type="button" @click="showPending">只看待确认</button>
+      <button v-else-if="cursors.length > 1" type="button" @click="search">回到待办首页</button>
     </div>
     <p v-if="error" role="alert" class="maintenance-error">
       {{ error }} <button @click="load()">重新读取</button>
@@ -159,10 +165,11 @@
             <option :value="20">20 条</option>
             <option :value="50">50 条</option>
             <option :value="100">100 条</option>
+            <option :value="200">200 条</option>
           </select></label
         ><button :disabled="cursors.length <= 1 || loading" @click="previous">
           <ChevronLeft :size="16" :stroke-width="1.75" aria-hidden="true" />上一页</button
-        ><span>第 {{ cursors.length }} 页</span
+        ><span v-if="pageCount !== 0">第 {{ cursors.length }} 页<template v-if="pageCount !== null"> / 共 {{ pageCount }} 页</template></span
         ><button :disabled="!nextID || loading" @click="next"><ChevronRight :size="16" :stroke-width="1.75" aria-hidden="true" />下一页</button>
       </div>
     </footer>
@@ -351,12 +358,12 @@
               取消</button
             ><button
               type="submit"
-              :class="oaEnabled ? 'secondary' : 'primary'"
+              class="secondary"
               :disabled="saving || !changes.length || !reason || stale"
             >
               {{ saving ? "保存中…" : "保存并同步" }}
             </button>
-            <button v-if="oaEnabled" ref="saveNextButton" type="submit" class="primary" data-next :disabled="saving || !changes.length || !reason || stale">保存并下一条</button>
+            <button ref="saveNextButton" type="submit" class="primary" data-next :disabled="saving || !changes.length || !reason || stale">保存并下一条</button>
           </footer>
         </form>
       </div>
@@ -511,6 +518,7 @@ import {
   type MaintenanceRow,
   type MaintenanceRequest,
   type MaintenanceLog,
+  type MaintenanceCounts,
 } from "@/services/api/costMaintenanceApi";
 import "./cost-maintenance.css";
 const permission = usePermission(),
@@ -544,7 +552,7 @@ const rows = ref<MaintenanceRow[]>([]),
   keyword = ref(pendingVisit?.keyword ?? props.initialSku ?? ""),
   status = ref(pendingVisit?.status ?? (props.focus === "cost-conflicts" ? "conflict" : "")),
   reviewState = ref<"pending" | "reviewed" | "all">(pendingVisit?.review ?? (props.initialSku && props.focus !== "cost-conflicts" ? "all" : "pending")),
-  pageSize = ref(pendingVisit?.pageSize ?? 50),
+  pageSize = ref(pendingVisit?.pageSize ?? 100),
   cursors = ref(pendingVisit ? [...pendingVisit.cursors] : [0]),
   nextID = ref(0),
   loading = ref(false),
@@ -712,7 +720,43 @@ const refreshTime = computed(() => refreshed.value ? `${new Date(refreshed.value
 const updatedLabel = computed(() =>
   refreshed.value ? `更新于 ${date(refreshed.value)}（北京时间）` : "",
 );
-async function load(background = false) {
+const counts = ref<MaintenanceCounts | null>(null);
+const counting = ref(false);
+const pageCount = computed(() => {
+  if (!counts.value) return null;
+  const { total, pending } = counts.value;
+  const visible = reviewState.value === "pending" ? pending : reviewState.value === "reviewed" ? total - pending : total;
+  return Math.ceil(visible / pageSize.value);
+});
+let countKey = "";
+let countedAt = 0;
+let countController: AbortController | undefined;
+async function updateCounts(filters: { keyword?: string; sku_codes?: string; status?: string }, force: boolean) {
+  const key = JSON.stringify(filters);
+  if (key === countKey && !force && (counting.value || Date.now() - countedAt < 60000)) return;
+  if (key !== countKey) counts.value = null;
+  countController?.abort();
+  countController = new AbortController();
+  const signal = countController.signal;
+  countKey = key;
+  counting.value = true;
+  try {
+    const value = await costMaintenanceApi.counts(filters, signal);
+    if (!signal.aborted) counts.value = value;
+  } catch {
+    if (!signal.aborted) counts.value = null;
+  } finally {
+    if (!signal.aborted) {
+      countedAt = Date.now();
+      counting.value = false;
+    }
+  }
+}
+function showPending() {
+  reviewState.value = "pending";
+  search();
+}
+async function load(background = false, forceCounts = false): Promise<void> {
   if (
     background &&
     ((selected.value && (!inlineInspector.value || editing.value)) ||
@@ -730,10 +774,20 @@ async function load(background = false) {
   try {
     const query = keyword.value;
     const codes = batchSkuCodes(query);
-    const params = { keyword: codes.length ? undefined : query, sku_codes: codes.length ? codes.join(",") : undefined, status: status.value, review_state: reviewState.value,
+    const filters = { keyword: codes.length ? undefined : query, sku_codes: codes.length ? codes.join(",") : undefined, status: status.value };
+    void updateCounts(filters, forceCounts);
+    const params = { ...filters, review_state: reviewState.value,
       before_id: cursors.value.at(-1), page_size: pageSize.value };
     const result = await retryCostRead(() => costMaintenanceApi.list(params, signal), signal);
     if (ticket !== epoch) return;
+    if (!result.data?.length && cursors.value.length > 1) {
+      // Reviews on other pages may have drained the tail of a keyset traversal.
+      cursors.value = [0];
+      pendingVisit = undefined;
+      if (resultRegion.value) resultRegion.value.scrollTop = 0;
+      await load(false, true);
+      return;
+    }
     rows.value = result.data || [];
     nextID.value = result.next_before_id;
     refreshed.value = result.refreshed_at;
@@ -759,7 +813,8 @@ async function load(background = false) {
 function search() {
   cursors.value = [0];
   notice.value = "";
-  load();
+  if (resultRegion.value) resultRegion.value.scrollTop = 0;
+  load(false, true);
 }
 watch([() => props.initialSku, () => props.focus, () => props.focusRevision], ([sku, focus], [previousSku, previousFocus]) => {
   if (!visitActive || (!sku && !previousSku && !focus && !previousFocus)) return;
@@ -793,11 +848,13 @@ watch([() => props.initialSku, () => props.focus, () => props.focusRevision], ([
 function next() {
   if (nextID.value) {
     cursors.value.push(nextID.value);
+    if (resultRegion.value) resultRegion.value.scrollTop = 0;
     load();
   }
 }
 function previous() {
   cursors.value.pop();
+  if (resultRegion.value) resultRegion.value.scrollTop = 0;
   load();
 }
 async function confirm(row: MaintenanceRow) {
@@ -823,7 +880,19 @@ async function confirm(row: MaintenanceRow) {
 }
 function applyCommittedRow(updated: MaintenanceRow) {
   const reviewed = updated.reviewed && updated.status !== "conflict";
-  const matches = reviewState.value === "all" || (reviewState.value === "reviewed" ? reviewed : !reviewed);
+  const original = rows.value.find(row => row.id === updated.id);
+  // A count requested before this commit must not overwrite the new remaining count.
+  countController?.abort();
+  counting.value = false;
+  if (original && counts.value && !keyword.value && !status.value) {
+    const wasReviewed = original.reviewed && original.status !== "conflict";
+    counts.value = { ...counts.value, pending: Math.max(0, Math.min(counts.value.total, counts.value.pending + Number(wasReviewed) - Number(reviewed))) };
+  } else {
+    countedAt = 0;
+    counts.value = null;
+  }
+  const matches = (!status.value || status.value === updated.status) &&
+    (reviewState.value === "all" || (reviewState.value === "reviewed" ? reviewed : !reviewed));
   rows.value = rows.value.flatMap((current) => current.id === updated.id ? (matches ? [updated] : []) : [current]);
 }
 function edit(row: MaintenanceRow) {
@@ -962,6 +1031,7 @@ async function save(event?: SubmitEvent) {
   if (!selected.value || !changes.value.length || !canEdit.value || saving.value || !reason.value || stale.value) return;
   const advance = (event?.submitter as HTMLElement | null)?.hasAttribute("data-next");
   const index = rows.value.findIndex(row => row.id === selected.value?.id);
+  const oldPage = new Set(rows.value.map(row => row.id));
   const following = rows.value.slice(index + 1).map(row => row.id);
   saving.value = true;
   editError.value = "";
@@ -983,7 +1053,9 @@ async function save(event?: SubmitEvent) {
     await load();
     if (advance && !error.value) {
       const actionable = () => following.map(id => rows.value.find(item => item.id === id)).find(item => item && item.revision >= 1 && (!item.reviewed || item.status === "conflict"));
-      let target = actionable();
+      let target = actionable() ?? rows.value.find(item =>
+        !oldPage.has(item.id) && item.revision >= 1 && (!item.reviewed || item.status === "conflict"),
+      );
       if (!target && nextID.value) {
         cursors.value.push(nextID.value);
         await load();
@@ -1074,6 +1146,9 @@ onActivated(() => {
 onDeactivated(() => {
   if (oaEnabled) {
     visitActive = false;
+    countController?.abort();
+    counting.value = false;
+    countedAt = 0;
     epoch++;
     controller?.abort();
   }
@@ -1083,6 +1158,7 @@ onDeactivated(() => {
   usedInspector = false;
 });
 onBeforeUnmount(() => {
+  countController?.abort();
   epoch++;
   controller?.abort();
   if (timer) clearInterval(timer);
@@ -1094,6 +1170,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.queue-summary { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin-bottom: .5rem; font-size: 13px; }
+.queue-summary strong { font-variant-numeric: tabular-nums; }
+.maintenance .queue-summary button { padding: .2rem .5rem; }
 html.oa-live-ui .maintenance .missing-dimensions { background: rgb(var(--yb-warning-soft)); color: rgb(var(--yb-warning-text)); }
 html.oa-live-ui .maintenance .blocked-confirm small { display: none; }
 html.oa-live-ui .maintenance .blocked-confirm:is(:hover, :focus-visible) small { display: block; }
@@ -1161,8 +1240,8 @@ html.oa-live-ui .maintenance tr.selected-row > td:first-child { box-shadow: inse
   outline: none;
 }
 .cost-inspector .maintenance-drawer button[data-next] {
-  background: var(--oa-accent);
-  border-color: var(--oa-accent);
+  background: var(--oa-accent, rgb(var(--yb-brand)));
+  border-color: var(--oa-accent, rgb(var(--yb-brand)));
 }
 .cost-inspector .maintenance-drawer button.secondary { border-color: rgb(var(--yb-border-strong)); }
 @media (min-width: 1280px) {

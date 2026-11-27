@@ -17,27 +17,27 @@ func NewCostMaintenanceRepo(db *DB) repo.CostMaintenanceRepo { return &costMaint
 const maintenanceColumns = `s.id,s.task_id,s.sku_code,s.product_name_snapshot,COALESCE(s.variant_json,JSON_OBJECT()),s.product_i_id,s.cost_price,s.updated_at,
  COALESCE(cs.revision,0),cs.erp_cost,COALESCE(cs.status,'baseline'),d.width,d.height,d.area,COALESCE(d.size_text,''),t.id*1000+s.sequence_no,s.erp_sync_required,COALESCE(s.filing_error_message,''),
  COALESCE((SELECT e.payload FROM cost_maintenance_logs e WHERE e.sku_code=s.sku_code AND e.sku_item_id=s.id ORDER BY e.id DESC LIMIT 1),JSON_OBJECT())`
-const maintenanceFrom = ` FROM task_sku_items s JOIN tasks t ON t.id=s.task_id
- LEFT JOIN task_details d ON d.task_id=s.task_id AND (t.batch_item_count=1 OR t.primary_sku_code=s.sku_code OR t.sku_code=s.sku_code) LEFT JOIN sku_cost_sync_states cs ON cs.sku_code=s.sku_code
- WHERE (t.task_status IN ('Completed','Archived') OR EXISTS(SELECT 1 FROM tasks history WHERE history.sku_code=s.sku_code AND history.task_status IN ('Completed','Archived'))) AND s.sku_code<>''`
+const maintenanceTasks = ` FROM task_sku_items s JOIN tasks t ON t.id=s.task_id`
+const maintenanceDetails = ` LEFT JOIN task_details d ON d.task_id=s.task_id AND (t.batch_item_count=1 OR t.primary_sku_code=s.sku_code OR t.sku_code=s.sku_code)`
+const maintenanceSync = ` LEFT JOIN sku_cost_sync_states cs ON cs.sku_code=s.sku_code`
+const maintenanceScope = ` WHERE (t.task_status IN ('Completed','Archived') OR EXISTS(SELECT 1 FROM tasks history WHERE history.sku_code=s.sku_code AND history.task_status IN ('Completed','Archived'))) AND s.sku_code<>''`
+const maintenanceFrom = maintenanceTasks + maintenanceDetails + maintenanceSync + maintenanceScope
 
 func scanMaintenanceRow(s interface{ Scan(...interface{}) error }) (*domain.CostMaintenanceRow, error) {
 	r := new(domain.CostMaintenanceRow)
 	err := s.Scan(&r.ID, &r.TaskID, &r.SKUCode, &r.ProductName, &r.VariantJSON, &r.ProductIID, &r.CostPrice, &r.UpdatedAt, &r.Revision, &r.ERPCost, &r.Status, &r.DetailWidth, &r.DetailHeight, &r.DetailArea, &r.DetailSize, &r.SortID, &r.BaseSyncRequired, &r.BaseSyncError, &r.ReviewJSON)
 	return r, err
 }
-func (r *costMaintenanceRepo) List(ctx context.Context, f repo.CostMaintenanceFilter) ([]*domain.CostMaintenanceRow, error) {
-	ctx, cancel := mysqlReadQueryContext(ctx)
-	defer cancel()
-	where := maintenanceFrom
+func maintenanceQueryFilter(f repo.CostMaintenanceFilter) (string, []interface{}) {
+	where := maintenanceScope
 	args := []interface{}{}
 	if clause, values := buildInClause("s.sku_code", f.SKUCodes); clause != "" {
 		where += " AND " + clause
 		args = append(args, values...)
 	}
 	if f.BeforeID > 0 {
-		where += ` AND t.id*1000+s.sequence_no<?`
-		args = append(args, f.BeforeID)
+		where += ` AND (s.task_id<? OR (s.task_id=? AND s.sequence_no<?))`
+		args = append(args, f.BeforeID/1000, f.BeforeID/1000, f.BeforeID%1000)
 	}
 	if f.Keyword != "" {
 		where += ` AND (s.sku_code LIKE ? OR s.product_name_snapshot LIKE ? OR s.variant_json->>'$.product_i_id' LIKE ? OR s.variant_json->>'$.erp_i_id' LIKE ?)`
@@ -53,8 +53,68 @@ func (r *costMaintenanceRepo) List(ctx context.Context, f repo.CostMaintenanceFi
 		// Human review requires audit evidence; the service verifies current values.
 		where += ` AND EXISTS(SELECT 1 FROM cost_maintenance_logs e WHERE e.sku_code=s.sku_code AND e.sku_item_id=s.id)`
 	}
+	return where, args
+}
+
+// Count eligible SKU rows without loading their specifications. Only items with audit
+// evidence can be reviewed; stream those through the same comparison used by List.
+func (r *costMaintenanceRepo) CountReviews(ctx context.Context, f repo.CostMaintenanceFilter, reviewed func(*domain.CostMaintenanceRow) bool) (*domain.CostMaintenanceCounts, error) {
+	tx, err := r.db.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	f.BeforeID = 0
+	f.ReviewState = "all"
+	where, args := maintenanceQueryFilter(f)
+	var counts domain.CostMaintenanceCounts
+	from := maintenanceTasks
+	if f.Status != "" {
+		from += maintenanceSync
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*)"+from+where, args...).Scan(&counts.Total); err != nil {
+		return nil, err
+	}
+	counts.Pending = counts.Total
+	if counts.Total > 0 && f.Status != "conflict" {
+		f.ReviewState = "reviewed"
+		where, args = maintenanceQueryFilter(f)
+		rows, err := tx.QueryContext(ctx, "SELECT "+maintenanceColumns+maintenanceTasks+maintenanceDetails+maintenanceSync+where+" AND s.cost_price IS NOT NULL AND COALESCE(cs.status,'baseline')<>'conflict'", args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			row, err := scanMaintenanceRow(rows)
+			if err != nil {
+				return nil, err
+			}
+			if reviewed(row) {
+				counts.Pending--
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return &counts, tx.Commit()
+}
+
+func (r *costMaintenanceRepo) List(ctx context.Context, f repo.CostMaintenanceFilter) ([]*domain.CostMaintenanceRow, error) {
+	ctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	where, args := maintenanceQueryFilter(f)
 	args = append(args, f.PageSize+1)
-	rows, err := r.db.db.QueryContext(ctx, `SELECT `+maintenanceColumns+where+` ORDER BY t.id DESC,s.sequence_no DESC LIMIT ?`, args...)
+	from := maintenanceTasks
+	if f.Status != "" {
+		from += maintenanceSync
+	}
+	// Materialize just the bounded keys first. Avoid sorting all matching JSON
+	// specifications and looking up their latest audit before applying LIMIT.
+	page := "SELECT s.id" + from + where + " ORDER BY s.task_id DESC,s.sequence_no DESC LIMIT ?"
+	rows, err := r.db.db.QueryContext(ctx, "SELECT "+maintenanceColumns+maintenanceTasks+
+		" JOIN ("+page+") page_keys ON page_keys.id=s.id"+maintenanceDetails+maintenanceSync+
+		" ORDER BY s.task_id DESC,s.sequence_no DESC", args...)
 	if err != nil {
 		return nil, err
 	}

@@ -100,9 +100,9 @@ func maintenanceReviewMatches(r *domain.CostMaintenanceRow) bool {
 	}
 	return bytes.Equal(values(r), values(log.After))
 }
-func normalizeMaintenanceFilter(f repo.CostMaintenanceFilter) repo.CostMaintenanceFilter {
+func normalizeMaintenanceFilter(f repo.CostMaintenanceFilter, maxSize int) repo.CostMaintenanceFilter {
 	f.Keyword = strings.TrimSpace(f.Keyword)
-	if f.PageSize < 1 || f.PageSize > 100 {
+	if f.PageSize < 1 || f.PageSize > maxSize {
 		f.PageSize = 50
 	}
 	if f.Page < 1 {
@@ -111,7 +111,7 @@ func normalizeMaintenanceFilter(f repo.CostMaintenanceFilter) repo.CostMaintenan
 	return f
 }
 func (s *taskService) ListCostMaintenance(ctx context.Context, f repo.CostMaintenanceFilter) (*domain.CostMaintenanceList, *domain.AppError) {
-	f = normalizeMaintenanceFilter(f)
+	f = normalizeMaintenanceFilter(f, 200)
 	if f.ReviewState == "" {
 		f.ReviewState = "pending"
 	}
@@ -123,9 +123,20 @@ func (s *taskService) ListCostMaintenance(ctx context.Context, f repo.CostMainte
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	result := &domain.CostMaintenanceList{Data: []*domain.CostMaintenanceRow{}, RefreshedAt: time.Now().UTC()}
+	if f.CountsOnly {
+		counts, err := s.costMaintenance.CountReviews(ctx, f, func(row *domain.CostMaintenanceRow) bool {
+			hydrateMaintenanceRow(row)
+			return row.Reviewed && row.Status != "conflict"
+		})
+		if err != nil {
+			return nil, infraError("count completed SKU reviews", err)
+		}
+		result.Counts = counts
+		return result, nil
+	}
 	batch := f
 	if f.ReviewState != "all" {
-		batch.PageSize = 100
+		batch.PageSize = max(100, f.PageSize)
 	}
 	for {
 		rows, err := s.costMaintenance.List(ctx, batch)
@@ -152,7 +163,7 @@ func (s *taskService) ListCostMaintenance(ctx context.Context, f repo.CostMainte
 	return result, nil
 }
 func (s *taskService) CostMaintenanceLogs(ctx context.Context, f repo.CostMaintenanceFilter) ([]*domain.CostMaintenanceLog, domain.PaginationMeta, *domain.AppError) {
-	f = normalizeMaintenanceFilter(f)
+	f = normalizeMaintenanceFilter(f, 100)
 	if f.Page > 200 {
 		return nil, domain.PaginationMeta{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "请缩小日志查询范围", nil)
 	}
