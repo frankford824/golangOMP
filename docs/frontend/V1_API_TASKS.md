@@ -13069,6 +13069,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/files/<file_id>/archive \
 | `file_id` | path | integer | 是 | - |
 | `path` | query | string | 是 | - |
 | `disposition` | query | enum(inline/attachment) | 否 | - |
+| `rendition` | query | enum(thumbnail) | 否 | With inline disposition, thumbnail requests a reduced JPEG or PNG for directory tiles. Returns original bytes for other formats or when resizing is unsuitable. Downloads always return the original. |
 
 请求体: 无请求体。
 

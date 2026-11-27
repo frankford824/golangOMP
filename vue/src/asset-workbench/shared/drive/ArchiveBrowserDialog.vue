@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ArchiveListingPage from './ArchiveListingPage.vue'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Download, FileArchive, FolderOpen, X } from 'lucide-vue-next'
 import { assetWorkbenchApi, type SubmissionFileRow, type ArchiveVirtualFile, type ArchiveVirtualFolder } from '@aw/shared/api/assetWorkbenchApi'
 import { formatFileSize } from '@aw/shared/format/number'
@@ -20,6 +20,7 @@ const archiveError = ref('')
 const entry = ref<ArchiveVirtualFile | null>(null)
 const previewUrl = ref('')
 const previewHint = ref('')
+let selectedTile: HTMLElement | null = null
 let listing: AbortController | undefined
 let preview: AbortController | undefined
 
@@ -65,7 +66,14 @@ function closeEntry() {
   entry.value = null
 }
 
-async function openArchiveVirtualFile(member: ArchiveVirtualFile) {
+async function dismissEntry() {
+  closeEntry()
+  await nextTick()
+  selectedTile?.focus({ preventScroll: true })
+}
+
+async function openArchiveVirtualFile(member: ArchiveVirtualFile, event: MouseEvent) {
+  selectedTile = event.currentTarget as HTMLElement
   closeEntry()
   entry.value = member
   previewHint.value = '该格式暂不能在线预览，可下载后查看'
@@ -74,6 +82,8 @@ async function openArchiveVirtualFile(member: ArchiveVirtualFile) {
   preview = controller
   previewHint.value = '正在加载预览…'
   try {
+    await nextTick()
+    if (controller.signal.aborted) return
     const url = await createArchiveEntryObjectUrl(props.file.id, member, controller.signal)
     if (controller.signal.aborted) URL.revokeObjectURL(url)
     else previewUrl.value = url
@@ -90,6 +100,7 @@ onBeforeUnmount(() => { listing?.abort(); closeEntry() })
   <section
     class="aw-token-scope aw-upload-ledger-archive"
     role="dialog"
+    :inert="Boolean(entry)"
     :aria-modal="entry ? 'false' : 'true'"
     aria-label="压缩包内容"
   >
@@ -151,11 +162,9 @@ onBeforeUnmount(() => { listing?.abort(); closeEntry() })
                 :key="member.path"
                 class="aw-upload-ledger-archive__file"
                 type="button"
-                @click="openArchiveVirtualFile(member)"
+                @click="openArchiveVirtualFile(member, $event)"
               >
-                <span>
-                  <ArchiveVirtualThumb :file-id="file.id" :file="member" />
-                </span>
+                <ArchiveVirtualThumb :file-id="file.id" :file="member" :paused="Boolean(entry)" />
                 <strong :title="member.name">{{ member.name }}</strong>
                 <small>{{ member.file_type }} · {{ formatFileSize(member.file_size) }}</small>
               </button>
@@ -169,5 +178,5 @@ onBeforeUnmount(() => { listing?.abort(); closeEntry() })
   <WorkbenchPreviewDialog v-if="entry" :key="entry.path" :open="true" eyebrow="压缩包内容" download-label="下载文件" :title="entry.name"
     :preview-url="previewUrl" :empty-label="previewHint" :mime-type="entry.mime_type"
     :meta-rows="[['内部路径', entry.path], ['文件大小', formatFileSize(entry.file_size)]]"
-    @close="closeEntry" @download="downloadArchiveEntryBlob(file.id, entry)" />
+    @close="dismissEntry" @download="downloadArchiveEntryBlob(file.id, entry)" />
 </template>

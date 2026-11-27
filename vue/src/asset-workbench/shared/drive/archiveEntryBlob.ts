@@ -1,7 +1,7 @@
 import { assetWorkbenchApi, type ArchiveVirtualFile } from '@aw/shared/api/assetWorkbenchApi'
 
-export async function createArchiveEntryObjectUrl(fileId: number, file: ArchiveVirtualFile, signal?: AbortSignal): Promise<string> {
-  const blob = await assetWorkbenchApi.getArchiveEntryBlob(fileId, file.path, 'inline', signal)
+export async function createArchiveEntryObjectUrl(fileId: number, file: ArchiveVirtualFile, signal?: AbortSignal, rendition?: 'thumbnail'): Promise<string> {
+  const blob = await assetWorkbenchApi.getArchiveEntryBlob(fileId, file.path, 'inline', signal, rendition)
   return URL.createObjectURL(blob)
 }
 

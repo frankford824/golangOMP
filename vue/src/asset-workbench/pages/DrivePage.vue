@@ -301,12 +301,13 @@ let materialRequestSeq = 0
 let directoryClickTimer: number | null = null
 let searchDebounceTimer: number | null = null
 let archivePreviewObjectUrl = ''
-let archivePreviewRequestSeq = 0
+const archiveEntryRequest = shallowRef<AbortController | null>(null)
 const searchPreviewLoadingKeys = new Set<string>()
 const materialPreviewFailedUrls = new Map<string, string>()
 
 function revokeArchivePreviewObjectUrl() {
-  archivePreviewRequestSeq += 1
+  archiveEntryRequest.value?.abort()
+  archiveEntryRequest.value = null
   if (!archivePreviewObjectUrl) return
   URL.revokeObjectURL(archivePreviewObjectUrl)
   archivePreviewObjectUrl = ''
@@ -2436,10 +2437,13 @@ async function openArchiveVirtualFile(file: ArchiveVirtualFile) {
     previewEmptyLabel.value = '压缩包来源已关闭，请重新打开'
     return
   }
+  const request = new AbortController()
+  archiveEntryRequest.value = request
   try {
-    const seq = ++archivePreviewRequestSeq
-    const objectUrl = await createArchiveEntryObjectUrl(source.id, file)
-    if (seq !== archivePreviewRequestSeq || !previewOpen.value) {
+    await nextTick()
+    if (request.signal.aborted) return
+    const objectUrl = await createArchiveEntryObjectUrl(source.id, file, request.signal)
+    if (request.signal.aborted) {
       URL.revokeObjectURL(objectUrl)
       return
     }
@@ -2447,7 +2451,9 @@ async function openArchiveVirtualFile(file: ArchiveVirtualFile) {
     previewUrl.value = objectUrl
     previewEmptyLabel.value = ''
   } catch (err) {
-    previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
+    if (!request.signal.aborted) previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
+  } finally {
+    if (archiveEntryRequest.value === request) archiveEntryRequest.value = null
   }
 }
 
@@ -3896,11 +3902,11 @@ onBeforeUnmount(() => {
                         <small class="aw-drive-tile__meta">{{ folder.file_count }} 个文件</small>
                       </button>
                     </div>
-                    <div v-if="visibleFiles.length" class="aw-drive-files aw-drive-files--roomy">
+                    <div v-if="visibleFiles.length" class="aw-drive-files aw-drive-files--archive">
                       <article v-for="file in visibleFiles" :key="file.path" class="aw-drive-file-card">
-                        <button class="aw-drive-file-card__button" type="button" @click="openArchiveVirtualFile(file)" @dblclick="openArchiveVirtualFile(file)">
+                        <button class="aw-drive-file-card__button" type="button" @click="openArchiveVirtualFile(file)">
                           <span class="aw-drive-file-card__media">
-                            <ArchiveVirtualThumb :file-id="archiveView.source.id" :file="file" />
+                            <ArchiveVirtualThumb :file-id="archiveView.source.id" :file="file" :paused="Boolean(archiveEntryRequest)" />
                           </span>
                           <span class="aw-drive-file-card__name">{{ file.name }}</span>
                         </button>
