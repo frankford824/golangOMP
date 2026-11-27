@@ -9,23 +9,30 @@ import (
 // It intentionally keeps external identifiers as strings because bridge payloads
 // may use numeric or string ids depending on the upstream ERP record.
 type ERPProduct struct {
-	ProductID        string   `json:"product_id"`
-	SKUID            string   `json:"sku_id"`
-	IID              string   `json:"i_id,omitempty"`
-	SKUCode          string   `json:"sku_code"`
-	Name             string   `json:"name,omitempty"`
-	ProductName      string   `json:"product_name"`
-	ShortName        string   `json:"short_name,omitempty"`
-	CategoryID       string   `json:"category_id"`
-	CategoryCode     string   `json:"category_code"`
-	CategoryName     string   `json:"category_name"`
-	ProductShortName string   `json:"product_short_name"`
-	ImageURL         string   `json:"image_url"`
-	Price            *float64 `json:"price,omitempty"`
-	SPrice           *float64 `json:"s_price,omitempty"`
-	CostPrice        *float64 `json:"cost_price,omitempty"`
-	WMSCoID          string   `json:"wms_co_id,omitempty"`
-	Currency         string   `json:"currency,omitempty"`
+	ProductID        string                 `json:"product_id"`
+	SKUID            string                 `json:"sku_id"`
+	IID              string                 `json:"i_id,omitempty"`
+	SKUCode          string                 `json:"sku_code"`
+	Name             string                 `json:"name,omitempty"`
+	ProductName      string                 `json:"product_name"`
+	ShortName        string                 `json:"short_name,omitempty"`
+	CategoryID       string                 `json:"category_id"`
+	CategoryCode     string                 `json:"category_code"`
+	CategoryName     string                 `json:"category_name"`
+	ProductShortName string                 `json:"product_short_name"`
+	ImageURL         string                 `json:"image_url"`
+	ImageFields      *ERPProductImageFields `json:"image_fields,omitempty"`
+	Price            *float64               `json:"price,omitempty"`
+	SPrice           *float64               `json:"s_price,omitempty"`
+	CostPrice        *float64               `json:"cost_price,omitempty"`
+	WMSCoID          string                 `json:"wms_co_id,omitempty"`
+	Currency         string                 `json:"currency,omitempty"`
+}
+
+// ERPProductImageFields preserves upstream values independently, including empty slots.
+type ERPProductImageFields struct {
+	Pic    string `json:"pic"`
+	PicBig string `json:"pic_big"`
 }
 
 // ERPProductSearchFilter is the normalized `/v1/erp/products` query contract.

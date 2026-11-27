@@ -86,7 +86,7 @@ func (r *taskAssetLifecycleRepo) ListSupersededEligibleForCleanup(ctx context.Co
 		                   FROM task_assets derived_ref
 		                  WHERE derived_ref.source_asset_version_id = ta.id
 		            )
-		   )
+		   )`+strings.ReplaceAll(unreferencedERPProductImageSQL, "asset.", "ta.")+`
 		 GROUP BY ta.asset_id, ta.id, ta.task_id, ta.source_task_module_id, ta.storage_key, ta.source_module_key, t.updated_at
 		 ORDER BY ta.cleanup_after_at ASC, ta.id ASC
 		 LIMIT ?`,
@@ -341,7 +341,8 @@ func cleanupObjectSetHasRevisionReferences(ctx context.Context, sqlTx *sql.Tx, t
 	if marks == "" {
 		return false, nil
 	}
-	queryArgs := make([]interface{}, 0, len(args)*4)
+	queryArgs := make([]interface{}, 0, len(args)*5)
+	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
 	queryArgs = append(queryArgs, args...)
@@ -361,7 +362,8 @@ func cleanupObjectSetHasRevisionReferences(ctx context.Context, sqlTx *sql.Tx, t
 		    SELECT 1 FROM task_asset_group_revision_references
 		     WHERE formal_task_asset_id IN (`+marks+`)
 		  )
-    OR EXISTS (SELECT 1 FROM task_default_style_revisions WHERE task_asset_id IN (`+marks+`))`, queryArgs...).Scan(&referenced)
+    OR EXISTS (SELECT 1 FROM task_default_style_revisions WHERE task_asset_id IN (`+marks+`))
+    OR EXISTS (SELECT 1 FROM erp_product_image_references WHERE asset_version_id IN (`+marks+`))`, queryArgs...).Scan(&referenced)
 	if err != nil {
 		return false, fmt.Errorf("check cleanup revision references: %w", err)
 	}
@@ -695,7 +697,7 @@ func (r *taskAssetLifecycleRepo) ListEligibleForCleanup(ctx context.Context, cut
 		   AND COALESCE(ta.uploaded_at, ta.created_at) < ?
 		   AND ta.id <> COALESCE((
 		        SELECT da.current_version_id FROM design_assets da WHERE da.id = ta.asset_id
-		   ), 0)
+		   ), 0)`+strings.ReplaceAll(unreferencedERPProductImageSQL, "asset.", "ta.")+`
 		 ORDER BY COALESCE(ta.uploaded_at, ta.created_at) ASC, ta.id ASC
 		 LIMIT ?`,
 		string(domain.TaskStatusCompleted), string(domain.TaskStatusCancelled), string(domain.TaskStatusArchived), cutoff, limit)

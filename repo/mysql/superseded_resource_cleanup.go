@@ -90,7 +90,7 @@ func PurgeSupersededResourceObjects(ctx context.Context, db *sql.DB, apply bool)
 		SET asset.access_revoked_at = UTC_TIMESTAMP(6),
 		    asset.access_revoked_reason = ?
 		WHERE asset.access_revoked_at IS NULL
-		  AND asset.object_deleted_at IS NULL`, supersededResourceCleanupReason)
+		  AND asset.object_deleted_at IS NULL`+unreferencedERPProductImageSQL, supersededResourceCleanupReason)
 	if err != nil {
 		return out, fmt.Errorf("revoke superseded resource objects: %w", err)
 	}
@@ -184,4 +184,4 @@ const supersededResourceSelectionSQL = `
 	  AND asset.cleaned_at IS NULL
 	  AND asset.object_deleted_at IS NULL
 	  AND asset.access_revoked_at IS NULL
-	  AND current_asset.task_asset_id IS NULL`
+	  AND current_asset.task_asset_id IS NULL` + unreferencedERPProductImageSQL

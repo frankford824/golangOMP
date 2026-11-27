@@ -27,17 +27,22 @@ type TaskERPOutboxProcessor interface {
 }
 
 type taskERPOutboxProcessor struct {
-	filing      TaskERPOutboxFilingService
-	images      TaskERPOutboxImageService
-	projections TaskERPOutboxProjectionService
-	erpBridge   ERPBridgeService
-	storageRefs repo.AssetStorageRefRepo
-	oss         *OSSDirectService
+	filing       TaskERPOutboxFilingService
+	images       TaskERPOutboxImageService
+	projections  TaskERPOutboxProjectionService
+	erpBridge    ERPBridgeService
+	storageRefs  repo.AssetStorageRefRepo
+	oss          *OSSDirectService
+	publications *ERPProductImages
 }
 
-func NewTaskERPOutboxProcessor(filing TaskERPOutboxFilingService, images TaskERPOutboxImageService, erpBridge ERPBridgeService, storageRefs repo.AssetStorageRefRepo, oss *OSSDirectService) TaskERPOutboxProcessor {
+func NewTaskERPOutboxProcessor(filing TaskERPOutboxFilingService, images TaskERPOutboxImageService, erpBridge ERPBridgeService, storageRefs repo.AssetStorageRefRepo, oss *OSSDirectService, managed ...*ERPProductImages) TaskERPOutboxProcessor {
 	projections, _ := images.(TaskERPOutboxProjectionService)
-	return &taskERPOutboxProcessor{filing: filing, images: images, projections: projections, erpBridge: erpBridge, storageRefs: storageRefs, oss: oss}
+	processor := &taskERPOutboxProcessor{filing: filing, images: images, projections: projections, erpBridge: erpBridge, storageRefs: storageRefs, oss: oss}
+	if len(managed) > 0 {
+		processor.publications = managed[0]
+	}
+	return processor
 }
 
 func (p *taskERPOutboxProcessor) ProcessTaskERPOutbox(ctx context.Context, item repo.TaskERPOutboxItem) error {
@@ -177,6 +182,9 @@ func (p *taskERPOutboxProcessor) processPlanningSKU(ctx context.Context, item re
 	}
 	if strings.TrimSpace(payload.ImageRefID) == "" {
 		return nil
+	}
+	if p.publications != nil {
+		return p.publications.RequestReference(ctx, payload.SKUCode, payload.TaskID, payload.ImageRefID)
 	}
 	imageURL, err := p.planningImageURL(ctx, payload.ImageRefID)
 	if err != nil {

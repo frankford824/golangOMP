@@ -56,6 +56,7 @@ type productManagementService struct {
 	ossDirect                      *OSSDirectService
 	uploadClient                   UploadServiceClient
 	imageProxy                     *ERPImageProxySigner
+	imagePublications              *ERPProductImages
 	notifications                  taskNotificationService
 	cache                          productManagementCache
 	now                            func() time.Time
@@ -101,6 +102,12 @@ func WithProductManagementAssetURLServices(ossDirect *OSSDirectService, uploadCl
 func WithProductManagementERPImageProxy(imageProxy *ERPImageProxySigner) ProductManagementServiceOption {
 	return func(s *productManagementService) {
 		s.imageProxy = imageProxy
+	}
+}
+
+func WithProductManagementERPImagePublications(images *ERPProductImages) ProductManagementServiceOption {
+	return func(s *productManagementService) {
+		s.imagePublications = images
 	}
 }
 
@@ -878,6 +885,16 @@ func (s *productManagementService) syncImageRecordToERP(ctx context.Context, rec
 	if appErr != nil {
 		return appErr
 	}
+	if s.imagePublications != nil {
+		if err := s.imagePublications.Publish(ctx, skuCode, imageURL); err != nil {
+			message := err.Error()
+			if errors.Is(err, errERPImageReadbackPending) {
+				message = "ERP 图片回读校验未通过：" + message
+			}
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, message, nil)
+		}
+		return nil
+	}
 	currentERPProduct, productIID, lookupErr := s.resolveProductManagementERPProduct(ctx, record)
 	if lookupErr != nil {
 		return lookupErr
@@ -1051,7 +1068,11 @@ func (s *productManagementService) verifyERPImageReadback(ctx context.Context, r
 			lastMessage = "ERP 未返回该 SKU 商品资料"
 		} else {
 			imageURL := strings.TrimSpace(product.ImageURL)
-			if isAbsoluteHTTPURL(imageURL) && productManagementERPImageURLsMatch(expectedImageURL, imageURL) {
+			matches := isAbsoluteHTTPURL(imageURL) && productManagementERPImageURLsMatch(expectedImageURL, imageURL)
+			if product.ImageFields != nil {
+				matches = erpImagePairMatches(domain.ERPProductImageFields{Pic: expectedImageURL, PicBig: expectedImageURL}, product.ImageFields)
+			}
+			if matches {
 				var mismatches []string
 				if len(preserved) > 0 {
 					mismatches = productManagementERPBaseReadbackMismatches(product, preserved[0])
@@ -1150,6 +1171,12 @@ func (s *productManagementService) resolveERPImageURL(ctx context.Context, recor
 	}
 	if storageKey == "" {
 		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "ERP 图片资产缺少 OSS 存储地址", nil)
+	}
+	if s.imagePublications != nil {
+		if proxyURL := s.imageProxy.BuildImageURL(asset); proxyURL != nil {
+			return *proxyURL, nil
+		}
+		return "", domain.NewAppError(domain.ErrCodeInvalidStateTransition, "商品图代理无法为本 SKU 的已选版本签名", nil)
 	}
 	if isAbsoluteHTTPURL(storageKey) {
 		return storageKey, nil

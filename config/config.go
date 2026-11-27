@@ -297,9 +297,11 @@ type ERPRemoteConfig struct {
 }
 
 type ERPImageProxyConfig struct {
-	PublicBaseURL string
-	SigningSecret string
-	TokenTTL      time.Duration
+	PreviousSigningSecret string
+	PreviousValidUntil    time.Time
+	PublicBaseURL         string
+	SigningSecret         string
+	TokenTTL              time.Duration
 }
 
 type UploadServiceConfig struct {
@@ -406,7 +408,9 @@ func Load() (*Config, error) {
 			FallbackToLocalOnError:   mustParseBool(getEnv("ERP_REMOTE_FALLBACK_LOCAL_ON_ERROR", "true")),
 		},
 		ERPImageProxy: ERPImageProxyConfig{
-			PublicBaseURL: getEnv("ERP_IMAGE_PROXY_PUBLIC_BASE_URL", "https://yongbo.cloud"),
+			PreviousSigningSecret: getEnv("ERP_IMAGE_PROXY_PREVIOUS_SIGNING_SECRET", ""),
+			PreviousValidUntil:    erpImagePreviousValidUntil(),
+			PublicBaseURL:         getEnv("ERP_IMAGE_PROXY_PUBLIC_BASE_URL", "https://yongbo.cloud"),
 			SigningSecret: firstNonEmptyEnv(
 				"ERP_IMAGE_PROXY_SIGNING_SECRET",
 				"PRODUCT_MANAGEMENT_IMAGE_PROXY_SIGNING_SECRET",
@@ -920,4 +924,9 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func erpImagePreviousValidUntil() time.Time {
+	value, _ := time.Parse(time.RFC3339, getEnv("ERP_IMAGE_PROXY_PREVIOUS_VALID_UNTIL", ""))
+	return value
 }

@@ -362,6 +362,11 @@ func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID,
 	if s.erpBridgeSvc == nil {
 		return nil, nil, "", domain.NewAppError(domain.ErrCodeInternalError, "erp bridge filing is not configured", nil)
 	}
+	if s.erpProductImages != nil {
+		// Product filing may be retried independently. It must never overwrite
+		// a published SKU image with a transient upload link or a task cover.
+		payload.Pic, payload.PicBig, payload.SKUPic = "", "", ""
+	}
 	requestPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, nil, "", infraError("marshal erp bridge filing payload", err)
@@ -390,6 +395,12 @@ func (s *taskService) performERPBridgeFilingPayload(ctx context.Context, taskID,
 		return nil, callLogID, "", infraError("update erp bridge filing call log", err)
 	}
 	s.traceERPProductUpsertBestEffort(ctx, taskID, skuItemID, payload, callLogID, result, domain.IntegrationCallStatusSucceeded, "")
+	if s.erpProductImages != nil {
+		sku := firstNonEmptyString(payload.SKUID, payload.SKUCode)
+		if err := s.erpProductImages.Schedule(ctx, sku); err != nil {
+			log.Printf("erp_product_image_schedule_failed sku=%s error=%v", sku, err)
+		}
+	}
 	return result, callLogID, "", nil
 }
 
