@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { FileArchive, ImageOff } from 'lucide-vue-next'
 
 import type { ArchiveVirtualFile } from '@aw/shared/api/assetWorkbenchApi'
@@ -8,6 +8,7 @@ import { createArchiveEntryObjectUrl } from '@aw/shared/drive/archiveEntryBlob'
 
 const props = defineProps<{
   fileId: number
+  paused?: boolean
   file: ArchiveVirtualFile
 }>()
 
@@ -16,6 +17,7 @@ const previewUrl = shallowRef('')
 const loading = ref(false)
 const failed = ref(false)
 let observer: IntersectionObserver | null = null
+let visible = false
 let controller: AbortController | null = null
 
 
@@ -33,12 +35,12 @@ function revokePreviewUrl() {
 }
 
 async function loadPreview() {
-  if (controller || previewUrl.value || failed.value || !canLoadImage.value) return
+  if (props.paused || !visible || controller || previewUrl.value || failed.value || !canLoadImage.value) return
   loading.value = true
   const request = new AbortController()
   controller = request
   try {
-    const url = await loadArchiveThumbnail(() => createArchiveEntryObjectUrl(props.fileId, props.file, request.signal), request.signal)
+    const url = await loadArchiveThumbnail(() => createArchiveEntryObjectUrl(props.fileId, props.file, request.signal, 'thumbnail'), request.signal)
     if (request.signal.aborted) URL.revokeObjectURL(url)
     else previewUrl.value = url
   } catch {
@@ -51,18 +53,28 @@ async function loadPreview() {
   }
 }
 
+function pauseRequest() {
+  controller?.abort()
+  controller = null
+  loading.value = false
+}
+
+watch(() => props.paused, (paused) => {
+  if (paused) pauseRequest()
+  else void loadPreview()
+})
+
 onMounted(() => {
   if (!rootRef.value || !canLoadImage.value) return
   observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
-        if (entry.isIntersecting) {
+        visible = entry.isIntersecting
+        if (visible) {
           void loadPreview()
         } else {
-          controller?.abort()
-          controller = null
-          loading.value = false
-          revokePreviewUrl()
+          pauseRequest()
+          if (!props.paused) revokePreviewUrl()
         }
       }
     },
@@ -80,7 +92,7 @@ onBeforeUnmount(() => {
 
 <template>
   <span ref="rootRef" class="aw-archive-virtual-thumb">
-    <img v-if="previewUrl" :src="previewUrl" :alt="file.name" loading="lazy" />
+    <img v-if="previewUrl" :src="previewUrl" :alt="file.name" decoding="async" />
     <span v-else-if="loading" class="aw-drive-thumb__ph" aria-hidden="true" />
     <ImageOff v-else-if="failed" :size="24" aria-hidden="true" />
     <FileArchive v-else :size="26" aria-hidden="true" />

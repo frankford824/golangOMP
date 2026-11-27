@@ -18235,6 +18235,11 @@ paths:
           name: disposition
           required: false
           schema: { type: string, enum: [inline, attachment] }
+        - in: query
+          name: rendition
+          required: false
+          description: With inline disposition, thumbnail requests a reduced JPEG or PNG for directory tiles. Returns original bytes for other formats or when resizing is unsuitable. Downloads always return the original.
+          schema: { type: string, enum: [thumbnail] }
       responses:
         '200':
           description: Archive entry bytes

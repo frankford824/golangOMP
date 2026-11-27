@@ -315,6 +315,12 @@ func (h *AssetWorkbenchHandler) ServeArchiveEntry(c *gin.Context) {
 	disposition := "attachment"
 	if strings.EqualFold(strings.TrimSpace(c.Query("disposition")), "inline") {
 		disposition = "inline"
+		if c.Query("rendition") == "thumbnail" {
+			if err := stream.PrepareThumbnail(); err != nil {
+				respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "无法读取压缩包内图片", err.Error()))
+				return
+			}
+		}
 	}
 	c.DataFromReader(http.StatusOK, stream.FileSize, stream.MimeType, stream.Body, map[string]string{
 		"Content-Disposition": fmt.Sprintf(`%s; filename="%s"`, disposition, strings.ReplaceAll(stream.Filename, `"`, "")),

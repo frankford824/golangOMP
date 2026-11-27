@@ -1968,9 +1968,9 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async getArchiveEntryBlob(fileId: number, path: string, disposition: 'inline' | 'attachment' = 'inline', signal?: AbortSignal): Promise<Blob> {
+  async getArchiveEntryBlob(fileId: number, path: string, disposition: 'inline' | 'attachment' = 'inline', signal?: AbortSignal, rendition?: 'thumbnail'): Promise<Blob> {
     const res = await http.get<Blob>(`/v1/asset-workbench/files/${fileId}/archive/entry`, {
-      params: { path, disposition },
+      params: { path, disposition, rendition },
       responseType: 'blob',
       signal,
     })
