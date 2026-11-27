@@ -247,6 +247,7 @@ func main() {
 	}
 	productManagementERPBridgeSvc := erpBridgeSvc
 	productManagementUsesOpenWeb := false
+	var productManagementImageReader service.ERPImageBatchReader
 	if cfg.Server.Port != "8081" &&
 		strings.TrimSpace(cfg.ERPRemote.BaseURL) != "" &&
 		strings.EqualFold(strings.TrimSpace(cfg.ERPRemote.AuthMode), "openweb") {
@@ -262,6 +263,7 @@ func main() {
 			)
 			productManagementERPBridgeSvc = service.NewERPBridgeService(productManagementClient, productRepo, mdb)
 			productManagementUsesOpenWeb = true
+			productManagementImageReader, _ = productManagementRemoteClient.(service.ERPImageBatchReader)
 			logger.Info("Product management ERP sync uses direct OpenWeb client for background jobs")
 		}
 	}
@@ -669,7 +671,7 @@ func main() {
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	if erpProductImages != nil {
-		go erpProductImages.Run(workerCtx, logger.Named("erp_product_images"))
+		go erpProductImages.Run(workerCtx, logger.Named("erp_product_images"), productManagementImageReader)
 	}
 	workers.NewGroup(workers.GroupDeps{
 		DB:                              db,

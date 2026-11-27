@@ -260,8 +260,14 @@ func (s *ERPProductImages) publish(ctx context.Context, sku, token string, curre
 		ShortName: current.ShortName, ProductShortName: current.ProductShortName,
 		Pic: desired.Pic, PicBig: desired.PicBig, Operation: "product_management_image_sync", Source: "product_management",
 	}
+	if erpImageSlotMatches(payload.Pic, current.ImageFields.Pic) {
+		payload.Pic = ""
+	}
+	if erpImageSlotMatches(payload.PicBig, current.ImageFields.PicBig) {
+		payload.PicBig = ""
+	}
 	var writeErr *domain.AppError
-	if !erpImagePairMatches(desired, current.ImageFields) {
+	if payload.Pic != "" || payload.PicBig != "" {
 		// A transport error can follow an accepted ERP write. Confirm the actual
 		// fields before deciding whether the worker should retry.
 		_, writeErr = s.bridge.UpsertProduct(ctx, payload)
@@ -519,7 +525,11 @@ func (s *ERPProductImages) CheckNext(ctx context.Context) (string, error) {
 	if err != nil || sku == "" {
 		return sku, err
 	}
-	err = s.withLease(ctx, sku, func(ctx context.Context, token string) error {
+	return sku, s.checkSKU(ctx, sku, false)
+}
+
+func (s *ERPProductImages) checkSKU(ctx context.Context, sku string, discoveredGap bool) error {
+	return s.withLease(ctx, sku, func(ctx context.Context, token string) error {
 		current, err := s.current(ctx, sku)
 		if err != nil {
 			return err
@@ -530,6 +540,14 @@ func (s *ERPProductImages) CheckNext(ctx context.Context) (string, error) {
 		}
 		if err := s.repo.RecordReferences(ctx, sku, token, refs, false); err != nil {
 			return err
+		}
+		if discoveredGap && !hasSingleImageGap(current.ImageFields) {
+			// The sweep is advisory; a concurrent write may have filled the gap.
+			// Verify the latest pair without changing either image on this pass.
+			if err := s.probe(ctx, current.ImageFields.Pic); err != nil {
+				return err
+			}
+			return s.probe(ctx, current.ImageFields.PicBig)
 		}
 		request, err := s.repo.PendingReference(ctx, sku)
 		if err != nil {
@@ -546,10 +564,17 @@ func (s *ERPProductImages) CheckNext(ctx context.Context) (string, error) {
 		if err != nil {
 			return err
 		}
+		if strings.TrimSpace(current.ImageFields.Pic) != "" && strings.TrimSpace(current.ImageFields.PicBig) == "" {
+			return s.fillBlankLargeImage(ctx, sku, token, current, target, own)
+		}
 		pic, picErr := s.replacement(ctx, sku, current.ImageFields.Pic, target, own)
 		big, bigErr := s.replacement(ctx, sku, current.ImageFields.PicBig, target, own)
 		if picErr != nil || bigErr != nil {
-			return errors.Join(picErr, bigErr)
+			issue := errors.Join(picErr, bigErr)
+			if hasSingleImageGap(current.ImageFields) {
+				return fmt.Errorf("ERP 单边缺图暂缓：%w", issue)
+			}
+			return issue
 		}
 		desired := domain.ERPProductImageFields{Pic: pic, PicBig: big}
 		if erpImagePairMatches(desired, current.ImageFields) {
@@ -557,18 +582,29 @@ func (s *ERPProductImages) CheckNext(ctx context.Context) (string, error) {
 		}
 		return s.publish(ctx, sku, token, current, desired)
 	})
-	return sku, err
 }
 
-func (s *ERPProductImages) Run(ctx context.Context, logger *zap.Logger) {
+func (s *ERPProductImages) Run(ctx context.Context, logger *zap.Logger, batch ERPImageBatchReader) {
 	ticker := time.NewTicker(15 * time.Second)
+	var sweep erpImageGapSweep
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sku, err := s.CheckNext(ctx)
+			if batch != nil && len(sweep.pending) == 0 {
+				if err := s.discoverImageGaps(ctx, batch, &sweep, logger); err != nil && ctx.Err() == nil {
+					logger.Warn("erp_product_image_gap_scan_failed", zap.Error(err))
+				}
+			}
+			sku, prioritized := sweep.takePriority()
+			var err error
+			if prioritized {
+				err = s.checkSKU(ctx, sku, true)
+			} else {
+				sku, err = s.CheckNext(ctx)
+			}
 			if err != nil && ctx.Err() == nil {
 				logger.Warn("erp_product_image_check_failed", zap.String("sku", sku), zap.Error(err))
 			}
