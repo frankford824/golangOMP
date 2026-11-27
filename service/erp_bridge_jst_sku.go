@@ -145,9 +145,10 @@ func jstMapsToERPProducts(rows []map[string]interface{}, keyword string) []*doma
 				firstString(m, "category", "category_name", "vc_name"),
 				"",
 			),
-			ImageURL:  firstNonEmptyString(firstString(m, "sku_pic", "skuPic", "pic_big", "picBig", "pic", "pic_url", "image_url", "image", "main_image", "cover_url", "cover", "thumbnail", "thumb", "imageUrl"), ""),
-			SPrice:    price,
-			CostPrice: costPrice,
+			ImageURL:    firstNonEmptyString(firstString(m, "sku_pic", "skuPic", "pic_big", "picBig", "pic", "pic_url", "image_url", "image", "main_image", "cover_url", "cover", "thumbnail", "thumb", "imageUrl"), ""),
+			ImageFields: &domain.ERPProductImageFields{Pic: firstString(m, "pic"), PicBig: firstString(m, "pic_big", "picBig")},
+			SPrice:      price,
+			CostPrice:   costPrice,
 		})
 	}
 	return out

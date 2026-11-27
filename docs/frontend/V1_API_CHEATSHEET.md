@@ -1,10 +1,10 @@
-# V1 API 速查表(299 path · 一行一条)
+# V1 API 速查表(300 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 299 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 300 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -283,6 +283,7 @@
 | GET, PATCH | `/v1/me/notifications/preferences` | Get my notification preferences；Update my notification preferences | GET:已登录 / scope-aware; PATCH:已登录 / scope-aware | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) |
 | GET | `/v1/tasks/batch-create/template.xlsx` | Download batch create Excel template | GET:已登录 / scope-aware | [V1_API_BATCH.md](V1_API_BATCH.md) |
 | POST | `/v1/tasks/batch-create/parse-excel` | Parse a batch create Excel file | POST:已登录 / scope-aware | [V1_API_BATCH.md](V1_API_BATCH.md) |
+| GET | `/v1/public/erp-product-images/oss/{object_id}` | Read a signed ERP image for a previously published OSS object | GET:公开 | [V1_API_ERP.md](V1_API_ERP.md) |
 | GET | `/v1/erp/products` | Search ERP Bridge products | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |
 | GET | `/v1/erp/iids` | List ERP product i_id options | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |
 | GET | `/v1/erp/products/{id}` | Get ERP Bridge product detail | GET:已登录 / scope-aware | [V1_API_ERP.md](V1_API_ERP.md) |

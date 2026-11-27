@@ -150,6 +150,7 @@ func NewRouter(
 
 	if assetFilesH != nil {
 		v1.GET("/public/erp-product-images/:version_id", assetFilesH.ServeERPProductImage)
+		v1.GET("/public/erp-product-images/oss/:object_id", assetFilesH.ServeLegacyERPProductImage)
 	}
 
 	registerV1AdminRoutes(v1, capabilityAccess, userAdminH, notificationH)

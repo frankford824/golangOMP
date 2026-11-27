@@ -280,6 +280,7 @@ type taskService struct {
 	taskReferenceAssetFormalizer   TaskReferenceAssetFormalizer
 	productCodeSeqRepo             repo.ProductCodeSequenceRepo
 	erpBridgeSvc                   ERPBridgeService
+	erpProductImages               *ERPProductImages
 	codeRuleSvc                    CodeRuleService
 	txRunner                       repo.TxRunner
 	userDisplayNameResolver        UserDisplayNameResolver
@@ -376,6 +377,12 @@ func WithTaskCreateRequestRepo(taskCreateRequestRepo repo.TaskCreateRequestRepo)
 func WithTaskCreateFilingAsync() TaskServiceOption {
 	return func(s *taskService) {
 		s.createFilingAsync = true
+	}
+}
+
+func WithTaskERPProductImages(images *ERPProductImages) TaskServiceOption {
+	return func(s *taskService) {
+		s.erpProductImages = images
 	}
 }
 

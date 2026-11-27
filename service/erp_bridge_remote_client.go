@@ -1319,6 +1319,14 @@ func buildERPRemoteOpenWebBiz(operation string, rawBody []byte) (map[string]inte
 			}
 			return map[string]interface{}{"items": []map[string]interface{}{{"sku_id": skuID, "c_price": *payload.CostPrice, "cost_price": *payload.CostPrice}}}, nil
 		}
+		if payload.Operation == "product_management_image_sync" {
+			if skuID == "" || payload.Pic == "" || payload.PicBig == "" {
+				return nil, fmt.Errorf("image-only update requires SKU and both image fields")
+			}
+			return map[string]interface{}{"items": []map[string]interface{}{{
+				"sku_id": skuID, "pic": payload.Pic, "pic_big": payload.PicBig,
+			}}}, nil
+		}
 		item := map[string]interface{}{
 			"sku_id": skuID,
 			"name":   firstNonEmptyString(payload.Name, payload.ProductName, payload.ProductShortName, payload.SKUCode),

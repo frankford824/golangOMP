@@ -966,13 +966,10 @@ func TestProductManagementSyncImageUsesProductUpsertWithImageFields(t *testing.T
 		t.Fatal(err)
 	}
 	item := biz["items"].([]map[string]interface{})[0]
-	if item["i_id"] != "定制亚克力" {
-		t.Fatalf("wire style = %v", item["i_id"])
+	if len(item) != 3 || item["sku_id"] != "NSAC000001" || item["pic"] != bridge.payload.Pic || item["pic_big"] != bridge.payload.PicBig {
+		t.Fatalf("ERP image write must contain the exact SKU and two image fields: %v", item)
 	}
-	if item["short_name"] != "ERP当前商品/厚5.5mm" {
-		t.Fatalf("wire short name = %v", item["short_name"])
-	}
-	for _, key := range []string{"cost_price", "c_price", "properties_value", "h", "w", "l"} {
+	for _, key := range []string{"i_id", "name", "short_name", "cost_price", "c_price", "properties_value", "h", "w", "l"} {
 		if _, ok := item[key]; ok {
 			t.Fatalf("image-only wire payload contains %s", key)
 		}

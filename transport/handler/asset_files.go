@@ -21,7 +21,12 @@ import (
 
 // AssetFilesHandler proxies GET /v1/assets/files/* to the OSS-backed upload service.
 // download_url in reference_file_refs and asset versions points here.
+type erpImageLegacyRepository interface {
+	LegacyObjectKey(context.Context, int64) (string, error)
+}
+
 type AssetFilesHandler struct {
+	erpImageLegacyRepo   erpImageLegacyRepository
 	uploadServiceBaseURL string
 	internalToken        string
 	storageProvider      string
@@ -377,6 +382,42 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 	)
 }
 
+func (h *AssetFilesHandler) SetERPImageLegacyRepo(r erpImageLegacyRepository) {
+	h.erpImageLegacyRepo = r
+}
+
+func (h *AssetFilesHandler) ServeLegacyERPProductImage(c *gin.Context) {
+	if h.erpImageLegacyRepo == nil || h.erpImageSigner == nil || h.ossPresigner == nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("object_id"), 10, 64)
+	if err != nil || id <= 0 {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	key, err := h.erpImageLegacyRepo.LegacyObjectKey(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.Status(http.StatusNotFound)
+		} else {
+			c.Status(http.StatusInternalServerError)
+		}
+		return
+	}
+	if !h.erpImageSigner.VerifyLegacyImage(id, key, c.Query("exp"), c.Query("sig")) {
+		c.Status(http.StatusForbidden)
+		return
+	}
+	signed := h.ossPresigner.PresignPreviewURL(key)
+	if signed == nil || strings.TrimSpace(signed.DownloadURL) == "" {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	c.Header("Cache-Control", "private, max-age=300")
+	c.Redirect(http.StatusFound, signed.DownloadURL)
+}
+
 func (h *AssetFilesHandler) ServeERPProductImage(c *gin.Context) {
 	if h == nil || h.erpImageAssetRepo == nil || h.erpImageSigner == nil || h.ossPresigner == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "erp image proxy is not configured"})
@@ -387,7 +428,13 @@ func (h *AssetFilesHandler) ServeERPProductImage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset version id"})
 		return
 	}
-	asset, err := h.erpImageAssetRepo.GetByID(c.Request.Context(), versionID)
+	getAsset := h.erpImageAssetRepo.GetByID
+	if reader, ok := h.erpImageAssetRepo.(interface {
+		GetERPProductImageAsset(context.Context, int64) (*domain.TaskAsset, error)
+	}); ok {
+		getAsset = reader.GetERPProductImageAsset
+	}
+	asset, err := getAsset(c.Request.Context(), versionID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "asset version not found"})

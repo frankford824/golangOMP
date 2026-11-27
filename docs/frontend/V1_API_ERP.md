@@ -12,7 +12,56 @@ ERP 商品、分类、仓库、同步、类目、成本规则与兼容商品目�
 - 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
 - `/v1/erp/iids` 是新品设计与策划 SKU 选择聚水潭 i_id 的 canonical 入口。
 - `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
-- 本文件覆盖 `23` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `24` 个 `/v1` path；同一路径多 method 合并在同一节。
+
+## GET /v1/public/erp-product-images/oss/{object_id}
+
+### 简介
+支持方法: GET。
+
+- `GET`: Read a signed ERP image for a previously published OSS object
+
+### 鉴权与 RBAC
+- 本节为公开资源接口，不需要 Bearer token。
+- `GET` 允许角色: 公开。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `object_id` | path | integer | 是 | - |
+| `exp` | query | integer | 是 | - |
+| `sig` | query | string | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `见 OpenAPI responses`
+
+无 JSON 响应体或响应体由文件流承载。
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid object identifier. |
+| 403 | 见 `error.code` | 见 `deny_code` | Invalid or expired image signature. |
+| 404 | 见 `error.code` | 见 `deny_code` | Image object identity not found. |
+| 500 | 见 `error.code` | 见 `deny_code` | The object identity could not be read. |
+| 503 | 见 `error.code` | 见 `deny_code` | Image proxy is unavailable. |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/public/erp-product-images/oss/<object_id>
+```
+
+### 前端最佳实践
+- 新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。
+- `/v1/erp/iids` 是新品设计与策划 SKU 选择聚水潭 i_id 的 canonical 入口。
+- `/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/erp/products
 

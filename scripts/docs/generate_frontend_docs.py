@@ -392,7 +392,7 @@ def family_for(path):
         return "ORG"
     if path.startswith("/v1/tasks"):
         return "TASKS"
-    if path.startswith("/v1/erp") or path.startswith("/v1/products") or path.startswith("/v1/categories") or path.startswith("/v1/category-mappings") or path.startswith("/v1/cost-rules"):
+    if path.startswith("/v1/erp") or path.startswith("/v1/public/erp-product-images/") or path.startswith("/v1/products") or path.startswith("/v1/categories") or path.startswith("/v1/category-mappings") or path.startswith("/v1/cost-rules"):
         return "ERP"
     return "TASKS"
 

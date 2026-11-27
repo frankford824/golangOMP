@@ -1049,6 +1049,11 @@ func adaptERPProduct(root interface{}) *domain.ERPProduct {
 		WMSCoID:          firstString(mapped, "wms_co_id", "warehouse_code"),
 		Currency:         firstString(mapped, "currency", "currency_code", "currencyCode"),
 	}
+	if fields, ok := mapped["image_fields"].(map[string]interface{}); ok {
+		product.ImageFields = &domain.ERPProductImageFields{
+			Pic: firstString(fields, "pic"), PicBig: firstString(fields, "pic_big"),
+		}
+	}
 	if product.ProductID == "" {
 		product.ProductID = firstNonEmptyString(product.SKUID, product.SKUCode, product.ProductName)
 	}

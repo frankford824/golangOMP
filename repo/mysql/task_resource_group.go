@@ -1637,7 +1637,7 @@ func revokeSupersededResourceGroupObjects(ctx context.Context, sqlTx *sql.Tx, gr
 		  AND asset.cleaned_at IS NULL
 		  AND asset.object_deleted_at IS NULL
 		  AND asset.access_revoked_at IS NULL
-		  AND reachable.task_asset_id IS NULL
+		  AND reachable.task_asset_id IS NULL`+unreferencedERPProductImageSQL+`
 		ORDER BY candidate.task_asset_id`, groupID, groupID, groupID)
 	if err != nil {
 		return fmt.Errorf("list superseded resource group objects: %w", err)
@@ -1666,13 +1666,17 @@ func revokeSupersededResourceGroupObjects(ctx context.Context, sqlTx *sql.Tx, gr
 	updateArgs := make([]interface{}, 0, len(args)+1)
 	updateArgs = append(updateArgs, revokedAt)
 	updateArgs = append(updateArgs, args...)
-	if _, err := sqlTx.ExecContext(ctx, `
-		UPDATE task_assets
+	result, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_assets asset
 		SET access_revoked_at = ?, access_revoked_reason = 'resource_revision_superseded'
 		WHERE id IN (`+marks+`)
 		  AND access_revoked_at IS NULL
-		  AND object_deleted_at IS NULL`, updateArgs...); err != nil {
+		  AND object_deleted_at IS NULL`+unreferencedERPProductImageSQL, updateArgs...)
+	if err != nil {
 		return fmt.Errorf("revoke superseded resource group objects: %w", err)
+	}
+	if revoked, err := result.RowsAffected(); err != nil || revoked != int64(len(taskAssetIDs)) {
+		return repo.ErrConflict
 	}
 	if err := enqueueTaskAssetObjectDeletions(ctx, sqlTx, taskAssetIDs); err != nil {
 		return err

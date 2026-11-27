@@ -246,6 +246,7 @@ func main() {
 		erpCostAPISvc = service.NewERPCostAPIService(erpCostReadRepo, historyProvider, os.Getenv("ERP_BRIDGE_COST_API_TOKEN"))
 	}
 	productManagementERPBridgeSvc := erpBridgeSvc
+	productManagementUsesOpenWeb := false
 	if cfg.Server.Port != "8081" &&
 		strings.TrimSpace(cfg.ERPRemote.BaseURL) != "" &&
 		strings.EqualFold(strings.TrimSpace(cfg.ERPRemote.AuthMode), "openweb") {
@@ -260,6 +261,7 @@ func main() {
 				logger.Named("product_management_erp"),
 			)
 			productManagementERPBridgeSvc = service.NewERPBridgeService(productManagementClient, productRepo, mdb)
+			productManagementUsesOpenWeb = true
 			logger.Info("Product management ERP sync uses direct OpenWeb client for background jobs")
 		}
 	}
@@ -319,11 +321,16 @@ func main() {
 		}
 	}
 	erpImageProxySigner := service.NewERPImageProxySigner(service.ERPImageProxyConfig{
-		PublicBaseURL: cfg.ERPImageProxy.PublicBaseURL,
-		SigningSecret: cfg.ERPImageProxy.SigningSecret,
-		TokenTTL:      cfg.ERPImageProxy.TokenTTL,
+		PublicBaseURL:         cfg.ERPImageProxy.PublicBaseURL,
+		SigningSecret:         cfg.ERPImageProxy.SigningSecret,
+		TokenTTL:              cfg.ERPImageProxy.TokenTTL,
+		PreviousSigningSecret: cfg.ERPImageProxy.PreviousSigningSecret,
+		PreviousValidUntil:    cfg.ERPImageProxy.PreviousValidUntil,
 	})
 	if erpImageProxySigner.Enabled() {
+		if strings.TrimSpace(os.Getenv("ERP_IMAGE_PROXY_SIGNING_SECRET")) == "" {
+			logger.Warn("ERP images still use the legacy signing key; configure the dedicated key with a previous-key grace window before rotation")
+		}
 		logger.Info("ERP product image short proxy enabled",
 			zap.String("public_base_url", cfg.ERPImageProxy.PublicBaseURL),
 			zap.Duration("token_ttl", cfg.ERPImageProxy.TokenTTL))
@@ -363,10 +370,15 @@ func main() {
 			RetryBase:   cfg.WebPush.RetryBaseDelay,
 			MaxAttempts: cfg.WebPush.MaxAttempts,
 		}))
+	var erpProductImages *service.ERPProductImages
+	if productManagementUsesOpenWeb && erpImageProxySigner.Enabled() {
+		erpProductImages = service.NewERPProductImages(mysqlrepo.NewERPProductImageRepo(mdb), taskRepo, erpImageProxySigner, productManagementERPBridgeSvc, ossDirectSvc)
+	}
 	productManagementSvc := service.NewProductManagementService(productManagementRepo, taskAssetRepo, taskAssetSearchRepo, mdb,
 		service.WithProductManagementERPBridge(productManagementERPBridgeSvc),
 		service.WithProductManagementAssetURLServices(ossDirectSvc, uploadClient),
 		service.WithProductManagementERPImageProxy(erpImageProxySigner),
+		service.WithProductManagementERPImagePublications(erpProductImages),
 		service.WithProductManagementFinalizedResources(taskResourceGroupRepo),
 		service.WithProductManagementTaskEventRepo(taskEventRepo),
 		service.WithProductManagementSKUComboRepo(skuComboRepo),
@@ -393,6 +405,7 @@ func main() {
 		service.WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
 		service.WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
 		service.WithTaskReferenceAssetFormalizer(taskReferenceAssetFormalizer),
+		service.WithTaskERPProductImages(erpProductImages),
 		service.WithTaskReferenceFileRefsOSSDirectService(ossDirectSvc),
 		service.WithTaskDesignAssetReadModel(designAssetRepo),
 		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
@@ -585,7 +598,7 @@ func main() {
 		service.WithPlanningSKUProductCodeSequences(productCodeSeqRepo),
 		service.WithPlanningSKUResourceGroups(taskResourceGroupRepo),
 	)
-	taskERPOutboxProcessor := service.NewTaskERPOutboxProcessor(taskSvc, productManagementSvc, erpBridgeSvc, assetStorageRefRepo, ossDirectSvc)
+	taskERPOutboxProcessor := service.NewTaskERPOutboxProcessor(taskSvc, productManagementSvc, erpBridgeSvc, assetStorageRefRepo, ossDirectSvc, erpProductImages)
 
 	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)
 	accessPolicyH := handler.NewAccessPolicyHandler(accessPolicySvc)
@@ -611,6 +624,7 @@ func main() {
 	taskCreateReferenceUploadH := handler.NewTaskCreateReferenceUploadHandler(taskCreateReferenceUploadSvc)
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
 	assetFilesH.SetERPImageProxy(taskAssetRepo, erpImageProxySigner)
+	assetFilesH.SetERPImageLegacyRepo(mysqlrepo.NewERPProductImageRepo(mdb))
 	assetFilesTaskAssetRepo, ok := taskAssetRepo.(handler.AssetFilesTaskAssetRepo)
 	if !ok {
 		logger.Fatal("task asset repo does not support asset file access checks")
@@ -654,6 +668,9 @@ func main() {
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
+	if erpProductImages != nil {
+		go erpProductImages.Run(workerCtx, logger.Named("erp_product_images"))
+	}
 	workers.NewGroup(workers.GroupDeps{
 		DB:                              db,
 		Logger:                          logger,

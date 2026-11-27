@@ -848,6 +848,13 @@ components:
         product_short_name:
           type: string
           description: Optional upstream short name. Empty string means bridge did not expose one.
+        image_fields:
+          type: object
+          description: Exact upstream SKU image slots when available. Empty strings represent empty slots.
+          required: [pic, pic_big]
+          properties:
+            pic: { type: string }
+            pic_big: { type: string }
         image_url:
           type: string
           description: Display image URL. Empty string means no image was available and frontend should render its own placeholder.
@@ -10233,6 +10240,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/public/erp-product-images/oss/{object_id}:
+    get:
+      summary: Read a signed ERP image for a previously published OSS object
+      tags: [ERP]
+      security: []
+      parameters:
+        - name: object_id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: exp
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: sig
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to a short-lived URL for the stored image object.
+        '400':
+          description: Invalid object identifier.
+        '403':
+          description: Invalid or expired image signature.
+        '404':
+          description: Image object identity not found.
+        '500':
+          description: The object identity could not be read.
+        '503':
+          description: Image proxy is unavailable.
   /v1/erp/products:
     get:
       summary: Search ERP Bridge products
