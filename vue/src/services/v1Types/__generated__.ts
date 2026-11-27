@@ -17949,6 +17949,8 @@ export interface paths {
                 query: {
                     path: string;
                     disposition?: "inline" | "attachment";
+                    /** @description With inline disposition, thumbnail requests a reduced JPEG or PNG for directory tiles. Returns original bytes for other formats or when resizing is unsuitable. Downloads always return the original. */
+                    rendition?: "thumbnail";
                 };
                 header?: never;
                 path: {
