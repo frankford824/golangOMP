@@ -63,8 +63,14 @@ type CostMaintenanceLog struct {
 	Payload      json.RawMessage `json:"payload"`
 }
 
+type CostMaintenanceCounts struct {
+	Total   int64 `json:"total"`
+	Pending int64 `json:"pending"`
+}
+
 type CostMaintenanceList struct {
-	Data         []*CostMaintenanceRow `json:"data"`
-	NextBeforeID int64                 `json:"next_before_id"`
-	RefreshedAt  time.Time             `json:"refreshed_at"`
+	Counts       *CostMaintenanceCounts `json:"counts,omitempty"`
+	Data         []*CostMaintenanceRow  `json:"data"`
+	NextBeforeID int64                  `json:"next_before_id"`
+	RefreshedAt  time.Time              `json:"refreshed_at"`
 }

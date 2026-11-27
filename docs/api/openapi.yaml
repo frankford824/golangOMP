@@ -11108,7 +11108,7 @@ paths:
   /v1/cost-management/sku-costs:
     get:
       summary: List completed system SKU costs for daily maintenance
-      description: Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Keyset pagination avoids full-count scans. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
+      description: Reads canonical task_sku_items from Completed or Archived tasks, including historical and newly completed SKUs, without importing unrelated ERP products. Ordinary page requests use keyset pagination. counts_only returns totals across all cursors and review states for the same keyword, exact SKU and sync status filters. ERP observations may lag; synced requires direct ERP readback. No writes or ERP calls occur while listing.
       tags: [CostRules, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.view]
@@ -11125,8 +11125,9 @@ paths:
           name: review_state
           description: Defaults to pending. Reviewed means the latest human audit matches current business values and there is no ERP conflict. Filtering precedes keyset page selection; automatic ERP convergence alone is not a human review.
           schema: { type: string, enum: [pending, reviewed, all], default: pending }
+        - { in: query, name: counts_only, schema: { type: boolean, default: false } }
         - { in: query, name: before_id, schema: { type: integer, format: int64 } }
-        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
       responses:
         '200':
           description: Bounded current page, next_before_id zero means end.
@@ -11136,6 +11137,13 @@ paths:
                 type: object
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/CostMaintenanceRow' } }
+                  counts:
+                    type: object
+                    description: Present on counts_only requests. Pending includes unresolved ERP conflicts and invalidated reviews.
+                    required: [total, pending]
+                    properties:
+                      total: { type: integer, format: int64 }
+                      pending: { type: integer, format: int64 }
                   next_before_id: { type: integer, format: int64 }
                   refreshed_at: { type: string, format: date-time }
   /v1/cost-management/sku-costs/{id}/maintain:

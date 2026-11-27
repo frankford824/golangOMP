@@ -43,8 +43,8 @@ func TestCostMaintenanceFiltersByExactCodesBeforePaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery(regexp.QuoteMeta("s.sku_code IN (?, ?) AND t.id*1000+s.sequence_no<? AND COALESCE(cs.status,'baseline')=? ORDER BY t.id DESC,s.sequence_no DESC LIMIT ?")).
-		WithArgs("DZD000047", "DZD000043", 90, "synced", 3).
+	mock.ExpectQuery(regexp.QuoteMeta("s.sku_code IN (?, ?) AND (s.task_id<? OR (s.task_id=? AND s.sequence_no<?)) AND COALESCE(cs.status,'baseline')=? ORDER BY s.task_id DESC,s.sequence_no DESC LIMIT ?")).
+		WithArgs("DZD000047", "DZD000043", 0, 0, 90, "synced", 3).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	_, err = NewCostMaintenanceRepo(New(db)).List(context.Background(), repo.CostMaintenanceFilter{
 		SKUCodes: []string{"DZD000047", "DZD000043"}, Status: "synced", BeforeID: 90, PageSize: 2,
